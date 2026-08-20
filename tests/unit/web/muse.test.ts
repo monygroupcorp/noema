@@ -55,6 +55,24 @@ import {
   MANUAL_CATEGORIES,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
+  confirmOutcomeNote,
+  dismissalOffer,
+  droppedNote,
+  instructionRemaining,
+  proposalPills,
+  recordDismissal,
+  recordFloorChange,
+  steerBlockReason,
+  steerFloor,
+  steerQuoteRequest,
+  writeLabel,
+  writesForConfirm,
+  DISMISSALS_BEFORE_OFFER,
+  MAX_FLOOR_FRAGMENTS,
+  MAX_INSTRUCTION_CHARS,
+  NO_DISMISSALS,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
   impetusTotal,
   launchBlockReason,
   launchLabel,
@@ -76,6 +94,7 @@ import type {
   MuseFloorEntry,
   MusePiece,
   MuseSessionView,
+  MuseSteerProposal,
 } from '../../../src/platforms/web/app/src/lib/api.js'
 
 // ---------------------------------------------------------------------------
@@ -1012,4 +1031,218 @@ test('the floor is rebuilt from the dataset the append returned, not from the pr
   // A dataset the list has never seen is added rather than dropped.
   assert.equal(replaceDataset([], returned).length, 1)
   assert.equal(replaceDataset(null, returned)[0]!.id, 'moodboard-1')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The steer keyboard and the consent sheet (noema-261)
+//
+// Six properties, each of them a ruling rather than a preference, and each held
+// by a pure function in `lib/muse.ts` rather than by the screen.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const fox = frag('subject', 'a fox')
+const harbor = frag('setting', 'a foggy harbor')
+const neon = frag('palette', 'neon pink')
+const dusk = frag('lighting', 'low dusk light')
+
+/** A proposal as the steer route returns it: eliminations naming fragments the floor
+ *  holds, additions naming fragments it does not, and the count of what was dropped. */
+function proposal(
+  eliminations: Fragment[],
+  additions: Fragment[],
+  dropped = 0,
+): MuseSteerProposal {
+  return {
+    eliminations: eliminations.map((f) => ({ category: f.category, text: f.text })),
+    additions,
+    dropped,
+  }
+}
+
+// ── Non-vacuity 1 — a vetoed pill produces no write ────────────────────────
+// The central property of the whole sheet: a veto that still wrote would be silent
+// destruction. The user said no and the floor moved anyway.
+
+test('a vetoed pill produces no write', () => {
+  const p = proposal([neon, harbor], [dusk])
+  const all = writesForConfirm(p, new Set(), 'confirmed')
+  assert.equal(all.length, 3, 'with nothing vetoed, every surviving pill is a write')
+
+  // Veto the elimination.
+  const vetoElimination = writesForConfirm(p, new Set([fragmentKey(neon)]), 'confirmed')
+  assert.equal(vetoElimination.length, 2)
+  assert.ok(
+    !vetoElimination.some((w) => w.fragment.text === neon.text),
+    'a vetoed elimination writes NOTHING — not a disable, not anything else',
+  )
+
+  // Veto the addition.
+  const vetoAddition = writesForConfirm(p, new Set([fragmentKey(dusk)]), 'confirmed')
+  assert.equal(vetoAddition.length, 2)
+  assert.ok(!vetoAddition.some((w) => w.fragment.text === dusk.text), 'and a vetoed addition writes nothing either')
+
+  // Veto everything: a sheet rejected pill by pill is a sheet that writes nothing at all,
+  // which must be indistinguishable at the floor from Cancel.
+  const vetoAll = writesForConfirm(p, new Set([neon, harbor, dusk].map((f) => fragmentKey(f))), 'confirmed')
+  assert.deepEqual(vetoAll, [], 'rejecting every pill reaches the floor exactly as Cancel does')
+})
+
+// ── Non-vacuity 2 — an elimination is one disable, and never an add ────────
+
+test('a confirmed elimination produces exactly one enabled:false write for that fragment identity, and no fragment-add write', () => {
+  const writes = writesForConfirm(proposal([neon], []), new Set(), 'confirmed')
+  assert.equal(writes.length, 1, 'one pill, one call')
+  assert.deepEqual(writes[0], {
+    kind: 'disable',
+    fragment: { category: 'palette', text: 'neon pink' },
+  })
+  assert.ok(!writes.some((w) => w.kind === 'add'), 'an elimination never puts the phrase ON the floor')
+
+  // And the identity is the whole of what the call names — a fragment is named in the
+  // BODY by `{category, text}`, never by a key and never in a path.
+  assert.deepEqual(Object.keys(writes[0]!.fragment).sort(), ['category', 'text'])
+
+  // The other side is the mirror of it: an addition is exactly one add and no disable.
+  const added = writesForConfirm(proposal([], [dusk]), new Set(), 'confirmed')
+  assert.deepEqual(added, [{ kind: 'add', fragment: { category: 'lighting', text: 'low dusk light' } }])
+
+  assert.equal(writeLabel(writes[0]!), 'off · palette: neon pink')
+})
+
+// ── Non-vacuity 3 — confirm is the cut line ────────────────────────────────
+// V2 stated as code. The stream is never paused to read a sheet; what makes that safe is
+// that the floor cannot move until the person reading it rules.
+
+test('no floor write is produced before confirm', () => {
+  const p = proposal([neon, harbor], [dusk])
+  assert.deepEqual(
+    writesForConfirm(p, new Set(), 'reviewing'),
+    [],
+    'a sheet under review writes nothing, however many pills survive its vetoes',
+  )
+  assert.equal(writesForConfirm(p, new Set(), 'confirmed').length, 3, 'and the same sheet, confirmed, writes them')
+
+  // No proposal is no writes in either phase — there is nothing to have consented to.
+  assert.deepEqual(writesForConfirm(null, new Set(), 'confirmed'), [])
+  assert.deepEqual(writesForConfirm(null, new Set(), 'reviewing'), [])
+
+  // The pills exist for review either way: rendering a proposal is not applying it.
+  assert.equal(proposalPills(p).length, 3)
+  assert.deepEqual(proposalPills(p).map((pill) => pill.kind), ['elimination', 'elimination', 'addition'])
+  assert.deepEqual(proposalPills(null), [])
+})
+
+// ── Non-vacuity 4 — the dropped count is said, never swallowed ─────────────
+
+test('the sheet reports how many suggestions the server dropped', () => {
+  assert.equal(droppedNote(0), null, 'nothing dropped is nothing said')
+  assert.equal(droppedNote(1), "1 suggestion didn't fit your floor and was dropped")
+  assert.match(droppedNote(3)!, /^3 suggestions didn't fit your floor and were dropped$/)
+
+  // The count travels with the proposal and is independent of how many pills survived:
+  // a user shown two pills out of five proposed changes must be told about the three.
+  const p = proposal([neon], [dusk], 3)
+  assert.equal(proposalPills(p).length, 2)
+  assert.equal(droppedNote(p.dropped), '3 suggestions didn\'t fit your floor and were dropped')
+})
+
+// ── Non-vacuity 5 — the offer is earned again after every floor change ─────
+
+test('the offer does not return until three more dismissals happen after a floor change', () => {
+  let state = NO_DISMISSALS
+  assert.equal(DISMISSALS_BEFORE_OFFER, 3)
+
+  for (let i = 1; i < DISMISSALS_BEFORE_OFFER; i++) {
+    state = recordDismissal(state)
+    assert.equal(dismissalOffer(state), null, `${i} dismissals is taste, not a pattern`)
+  }
+  state = recordDismissal(state)
+  assert.ok(dismissalOffer(state), 'three in a row with no floor change between them earns the offer')
+
+  // A floor change — an enable, a weight, an add, a confirmed sheet — resets the count.
+  state = recordFloorChange(state)
+  assert.equal(dismissalOffer(state), null, 'the floor moved, so the offer is spent')
+
+  // And it has to be earned from zero rather than from one more dismissal.
+  state = recordDismissal(state)
+  assert.equal(dismissalOffer(state), null)
+  state = recordDismissal(state)
+  assert.equal(dismissalOffer(state), null)
+  state = recordDismissal(state)
+  assert.ok(dismissalOffer(state), 'three MORE dismissals, after the floor change')
+
+  // A floor change with no dismissals behind it changes nothing.
+  assert.equal(recordFloorChange(NO_DISMISSALS).sinceFloorChange, 0)
+})
+
+// ── Non-vacuity 6 — the offer is an offer, and can reach no model ──────────
+// V3 forbids the automatic path by name: a metered call that fires as a side effect of
+// scrolling past three pieces is a spend nobody chose.
+
+test('the dismissal offer yields an OFFER, never a steer request', () => {
+  const offer = dismissalOffer({ sinceFloorChange: DISMISSALS_BEFORE_OFFER })!
+  assert.equal(offer.kind, 'offer')
+  assert.deepEqual(Object.keys(offer).sort(), ['instruction', 'kind', 'line'])
+  assert.ok(offer.line.length > 0, 'it renders as a line the user can ignore')
+  assert.ok(offer.instruction.length > 0, 'and it pre-fills the instruction box')
+
+  // Nothing on it can be dispatched: no flow, no aditus, no key, no run request. Compare
+  // `steerQuoteRequest` below, which is the metered path and carries a `modusId`.
+  for (const forbidden of ['modusId', 'verb', 'aditus', 'maxImpetus', 'pinnedModels']) {
+    assert.ok(!(forbidden in offer), `the offer carries no '${forbidden}' — it cannot be sent`)
+  }
+
+  // The metered path, for contrast: it is the thing that names a flow, and it is only
+  // ever built from an instruction the user wrote and pressed send on.
+  const quote = steerQuoteRequest('lose the neon', [{ category: 'palette', text: 'neon pink' }])
+  assert.equal(quote.modusId, 'modus.muse-steer')
+  assert.deepEqual(quote.aditus.floor, [{ category: 'palette', text: 'neon pink' }])
+  assert.equal(quote.aditus.instruction, 'lose the neon')
+})
+
+// ── The keyboard's mirrored bounds ─────────────────────────────────────────
+
+test('the keyboard mirrors the server bounds rather than becoming them', () => {
+  const s = session([fox, harbor, neon])
+
+  // The floor a steer reads is the floor IN THE DRAW — the same set the route resolves.
+  assert.equal(steerFloor(s).length, 3)
+  const darkened = session([fox, harbor, neon], {
+    floor: [entry(fox), entry(harbor), entry(neon, { enabled: false })],
+  })
+  assert.deepEqual(steerFloor(darkened).map((f) => f.text), ['a fox', 'a foggy harbor'])
+  assert.deepEqual(steerFloor(null), [])
+
+  // An empty box is refused on the form; so is an oversized one, at the server's bound.
+  assert.equal(steerBlockReason({ view: s, instruction: '   ', inFlight: false }), 'write what you want changed first')
+  assert.match(
+    steerBlockReason({ view: s, instruction: 'x'.repeat(MAX_INSTRUCTION_CHARS + 1), inFlight: false })!,
+    new RegExp(String(MAX_INSTRUCTION_CHARS)),
+  )
+  assert.equal(steerBlockReason({ view: s, instruction: 'lose the neon', inFlight: false }), null)
+  assert.equal(steerBlockReason({ view: s, instruction: 'lose the neon', inFlight: true }), 'a steer is already running')
+  assert.equal(steerBlockReason({ view: null, instruction: 'lose the neon', inFlight: false }), 'no session yet')
+
+  // A floor with nothing in the draw, and a floor above the per-steer cap, are both said
+  // on the keyboard rather than discovered as a 400 after a sentence was written.
+  const allOff = session([fox], { floor: [entry(fox, { enabled: false })] })
+  assert.equal(steerBlockReason({ view: allOff, instruction: 'lose the neon', inFlight: false }), 'nothing is in the draw to steer')
+  const huge = session(
+    Array.from({ length: MAX_FLOOR_FRAGMENTS + 1 }, (_, i) => frag('mood', `mood ${i}`)),
+  )
+  assert.match(steerBlockReason({ view: huge, instruction: 'lose the neon', inFlight: false })!, /above the 300/)
+
+  assert.equal(instructionRemaining(''), MAX_INSTRUCTION_CHARS)
+  assert.equal(instructionRemaining('  lose the neon  '), MAX_INSTRUCTION_CHARS - 'lose the neon'.length)
+  assert.ok(instructionRemaining('x'.repeat(MAX_INSTRUCTION_CHARS + 5)) < 0, 'over the bound reads as negative')
+})
+
+// ── A confirm that fails part-way keeps what landed and names the rest ─────
+
+test('a partly-applied sheet says which changes did not land', () => {
+  assert.equal(confirmOutcomeNote(3, []), '3 changes applied to the floor.')
+  assert.equal(confirmOutcomeNote(1, []), '1 change applied to the floor.')
+  const note = confirmOutcomeNote(2, ['off · palette: neon pink (network error)'])
+  assert.match(note, /^2 changes applied to the floor/, 'what landed stays landed and is counted')
+  assert.match(note, /neon pink/, 'and what did not is named rather than dropped silently')
 })
