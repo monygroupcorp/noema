@@ -43,6 +43,7 @@ import {
   recordedPiece,
   releasePending,
   rollCurated,
+  savedOf,
   streamColumns,
   streamPiece,
   t2iFlows,
@@ -109,6 +110,15 @@ import './muse.css';
 // The pull-up floor sheet (V1) is the full-fidelity view of that floor: every fragment,
 // grouped by category, live/total per category, and a DARKENED pill for every fragment a
 // steer turned off — visible and tappable back to live, never removed (S8).
+//
+// Save-back (noema-245) is the ↓ on the expanded rail, and it is what closes the loop: a
+// kept piece goes back into the set, so the moodboard improves as it is used. One call does
+// it, and the reason it can is that a generated piece does not need decomposing: it was
+// composed FROM fragments, so the lineage the ledger already holds is its
+// tagging and the save is a set insertion. Nothing is spent and no job runs. The media lands
+// in the SESSION's own dataset (created by the first save, appended to after that); the
+// mother is the starter and is never written (S7, S13). And a save reweights the floor
+// without widening it — a piece carries no phrase the floor did not already have.
 //
 // The manual add (noema-242) is the sheet's other half: pick a category, write a fragment,
 // and it lands on the floor in the draw. Everything else on this screen REWEIGHTS the
@@ -209,6 +219,7 @@ export function Muse() {
   const [floorOpen, setFloorOpen] = useState(false);
   const [floorBusy, setFloorBusy] = useState<string | null>(null);
   const [reacting, setReacting] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -250,6 +261,24 @@ export function Muse() {
       setSession((await api.updateMusePiece(session.id, runId, { dismissed: true })).session);
     } catch (e) {
       setSessionError(`that dismissal wasn't recorded: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // ↓ save — the piece goes back into the set. One call: the server puts the piece's media
+  // into the session's own dataset with its recorded lineage attached as that item's
+  // fragments, and flags the ledger entry. NOTHING IS SPENT and no job runs — the piece was
+  // composed from fragments, so its lineage is already its tagging (S11) and a
+  // save is a set insertion rather than a decompose. The floor is REWEIGHTED by working with
+  // the session, never widened by a save: no fragment is added here.
+  async function save(runId: string) {
+    if (!session || saving) return;
+    setSaving(runId);
+    try {
+      setSession((await api.saveMusePiece(session.id, runId)).session);
+    } catch (e) {
+      setSessionError(`that piece didn't go back into the set: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -701,9 +730,11 @@ export function Muse() {
             piece={expandedPiece}
             onClose={() => setExpanded(null)}
             reaction={session ? reactionOf(session, expandedPiece.runId) : undefined}
-            live={!!session && !!recordedPiece(session, expandedPiece.runId) && reacting !== expandedPiece.runId}
+            live={!!session && !!recordedPiece(session, expandedPiece.runId) && reacting !== expandedPiece.runId && saving !== expandedPiece.runId}
             onReact={react}
             onDismiss={dismiss}
+            saved={!!session && savedOf(session, expandedPiece.runId)}
+            onSave={save}
           />
         )}
 
@@ -755,8 +786,9 @@ function RunWatcher({ runId, onResult }: { runId: string; onResult: (runId: stri
 }
 
 /** What every rail — the tile's and the expanded view's — does with one gesture: the two
- *  steers and 😂 are reactions on the piece, ✕ is a dismissal, and save is still its own
- *  rung and stays inert. */
+ *  steers and 😂 are reactions on the piece, ✕ is a dismissal, and ↓ puts the piece back
+ *  into the set. Save is offered only where its rail carries it — the expanded view — so
+ *  the tile passes no handler and the gesture reads as unavailable rather than silent. */
 function railProps(
   key: string,
   runId: string,
@@ -764,6 +796,8 @@ function railProps(
   reaction: MuseReaction | undefined,
   onReact: (runId: string, reaction: MuseReaction) => void,
   onDismiss: (runId: string) => void,
+  saved = false,
+  onSave?: (runId: string) => void,
 ): { disabled: boolean; className: string; onClick?: () => void; title?: string } {
   const REACTIONS: Record<string, MuseReaction> = { up: 'up', down: 'down', laugh: 'note' };
   const asReaction = REACTIONS[key];
@@ -777,7 +811,15 @@ function railProps(
   if (key === 'dismiss') {
     return { disabled: !live, className: 'muse-gesture', onClick: () => onDismiss(runId) };
   }
-  return { disabled: true, className: 'muse-gesture', title: 'save — arrives with save-back' };
+  if (!onSave) return { disabled: true, className: 'muse-gesture' };
+  // A piece already in the set is shown as saved and is not offered again: the dataset is
+  // append-only, so a second save would put the same media in twice.
+  return {
+    disabled: !live || saved,
+    className: `muse-gesture${saved ? ' on' : ''}`,
+    onClick: () => onSave(runId),
+    title: saved ? 'saved — this piece is in the set' : 'save this piece back into the set',
+  };
 }
 
 /** One tile in the stream. Roughly 145px on a phone, which fits three targets legibly —
@@ -832,7 +874,7 @@ function PieceTile({
  *  produced it (V8). 😂 lives here rather than on the tile: it is recorded and it steers
  *  nothing (S4/V9), so it is not one of the three gestures made at speed. */
 function ExpandedPiece({
-  piece, onClose, reaction, live, onReact, onDismiss,
+  piece, onClose, reaction, live, onReact, onDismiss, saved, onSave,
 }: {
   piece: StreamPiece;
   onClose: () => void;
@@ -840,6 +882,8 @@ function ExpandedPiece({
   live: boolean;
   onReact: (runId: string, reaction: MuseReaction) => void;
   onDismiss: (runId: string) => void;
+  saved: boolean;
+  onSave: (runId: string) => void;
 }) {
   return (
     <div className="muse-expanded" role="dialog" aria-modal="true" onClick={onClose}>
@@ -858,7 +902,7 @@ function ExpandedPiece({
 
         <div className="muse-expanded-rail">
           {EXPANDED_GESTURES.map((g) => {
-            const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss);
+            const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss, saved, onSave);
             return (
               <button key={g.key} type="button" {...rail} title={title ?? g.label}>
                 {g.glyph}

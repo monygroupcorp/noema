@@ -35,14 +35,25 @@ import type { Fragment } from './muse/taxonomy.js'
 /** The persisted form of a session's pure value: the floor flattened to entries. */
 interface MuseSessionDoc {
   motherDatasetId: string
+  /** The session's own dataset. Absent until the session's first save mints it. */
+  sessionDatasetId?: string
   fragments: Fragment[]
   floor: FloorEntry[]
   pieces: Piece[]
 }
 
+/**
+ * THESE TWO FUNCTIONS ENUMERATE THE SESSION'S FIELDS. A field added to `MuseSession`
+ * and not added to both is dropped on every write and every read with nothing failing:
+ * the pure module keeps working on the value in memory, and the store quietly returns a
+ * session without it. `sessionDatasetId` is the case that shows: dropped on the way
+ * through, a session would mint a fresh dataset on every save instead of appending to
+ * the one it already has.
+ */
 function toDoc(session: MuseSession): MuseSessionDoc {
   return {
     motherDatasetId: session.motherDatasetId,
+    ...(session.sessionDatasetId ? { sessionDatasetId: session.sessionDatasetId } : {}),
     fragments: [...session.fragments],
     floor: floorToEntries(session.floor),
     pieces: [...session.pieces],
@@ -52,6 +63,7 @@ function toDoc(session: MuseSession): MuseSessionDoc {
 function fromDoc(doc: MuseSessionDoc): MuseSession {
   return {
     motherDatasetId: doc.motherDatasetId,
+    ...(doc.sessionDatasetId ? { sessionDatasetId: doc.sessionDatasetId } : {}),
     fragments: doc.fragments ?? [],
     floor: floorFromEntries(doc.floor ?? []),
     pieces: doc.pieces ?? [],

@@ -2821,6 +2821,10 @@ Break a Muse session off a dataset the caller owns. The session copies the datas
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -2935,7 +2939,8 @@ Break a Muse session off a dataset the caller owns. The session copies the datas
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -3009,6 +3014,10 @@ The caller's own Muse sessions off one dataset, most recently changed first. Thi
           "motherDatasetId": {
             "type": "string",
             "description": "FK -> Dataset, the dataset the session broke off from."
+          },
+          "sessionDatasetId": {
+            "type": "string",
+            "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
           },
           "fragments": {
             "type": "array",
@@ -3124,7 +3133,8 @@ The caller's own Muse sessions off one dataset, most recently changed first. Thi
                   "description": "What the user said about the piece, if anything."
                 },
                 "saved": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
                 },
                 "dismissed": {
                   "type": "boolean"
@@ -3194,6 +3204,10 @@ A Muse session the caller owns — its floor and its piece ledger. Owner-scoped 
         "motherDatasetId": {
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
+        },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
         },
         "fragments": {
           "type": "array",
@@ -3309,7 +3323,8 @@ A Muse session the caller owns — its floor and its piece ledger. Owner-scoped 
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -3405,6 +3420,10 @@ Turn one fragment off or back on in a session the caller owns. A disabled fragme
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -3519,7 +3538,8 @@ Turn one fragment off or back on in a session the caller owns. A disabled fragme
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -3616,6 +3636,10 @@ Weight one fragment against its pool-mates in a session the caller owns. The wei
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -3730,7 +3754,8 @@ Weight one fragment against its pool-mates in a session the caller owns. The wei
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -3822,6 +3847,10 @@ Put a fragment the caller wrote on the floor of a session they own, in the draw 
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -3936,7 +3965,8 @@ Put a fragment the caller wrote on the floor of a session they own, in the draw 
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -4062,6 +4092,10 @@ Append a piece to the ledger of a session the caller owns, with the fragments th
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -4176,7 +4210,8 @@ Append a piece to the ledger of a session the caller owns, with the fragments th
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"
@@ -4269,6 +4304,10 @@ Change what a session the caller owns says about a piece already in its ledger �
           "type": "string",
           "description": "FK -> Dataset, the dataset the session broke off from."
         },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
         "fragments": {
           "type": "array",
           "items": {
@@ -4383,7 +4422,196 @@ Change what a session the caller owns says about a piece already in its ledger �
                 "description": "What the user said about the piece, if anything."
               },
               "saved": {
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
+              },
+              "dismissed": {
                 "type": "boolean"
+              }
+            },
+            "required": [
+              "runId",
+              "rollIndex",
+              "fragments",
+              "saved",
+              "dismissed"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "motherDatasetId",
+        "fragments",
+        "floor",
+        "pieces",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "session"
+  ]
+}
+```
+
+### POST /v1/data/muse/sessions/:id/pieces/:runId/save
+
+Put a piece from a session the caller owns back into the set: its media joins the session's own dataset, carrying the lineage that produced it as that media item's fragments. The session's dataset is created by the first save and appended to by every save after it; the mother dataset is never written. No job runs and nothing is spent — a generated piece was composed from fragments, so its recorded lineage is already its tagging. The request body is empty: the media is resolved server-side from the run the piece names, which must be the caller's own completed run. A save reweights the floor rather than widening it — the session's fragment list is unchanged. A session the caller does not own is reported as not found, as is a run the session's ledger holds no piece for.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "description": "A Muse session: a break-off of a dataset with its own copies of that dataset's fragments, its own floor, and its own piece ledger. The mother dataset is the starter and is never written to by the session.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "motherDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the dataset the session broke off from."
+        },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A categorized, reusable prompt fragment lifted from a caption.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "Which slot the fragment fills (subject, style, lighting, …)."
+              },
+              "text": {
+                "type": "string",
+                "description": "The fragment itself — a short, prompt-ready phrase."
+              },
+              "source": {
+                "type": "string",
+                "description": "The moodboard entry it came from."
+              },
+              "trigger": {
+                "type": "string",
+                "description": "The model binding for that source (e.g. a LoRA trigger word)."
+              }
+            },
+            "required": [
+              "category",
+              "text",
+              "source",
+              "trigger"
+            ]
+          },
+          "description": "Every fragment on the floor, in display order."
+        },
+        "floor": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A fragment's state on the session floor. The floor is an ARRAY of entries rather than an object keyed by fragment: a fragment identity is `category:text`, which is free text and is not usable as a field name.",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "The fragment's stable identity: its category and its text."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "False takes the fragment out of the draw while leaving it on the floor."
+              },
+              "weight": {
+                "type": "number",
+                "description": "Draw weight against its pool-mates, clamped server-side to the sampler bounds."
+              }
+            },
+            "required": [
+              "key",
+              "enabled",
+              "weight"
+            ]
+          }
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A piece the session produced, with the fragments that produced it.",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "description": "The run that produced the piece."
+              },
+              "rollIndex": {
+                "type": "number",
+                "description": "Which roll of the session this was."
+              },
+              "fragments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A categorized, reusable prompt fragment lifted from a caption.",
+                  "properties": {
+                    "category": {
+                      "type": "string",
+                      "description": "Which slot the fragment fills (subject, style, lighting, …)."
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The fragment itself — a short, prompt-ready phrase."
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The moodboard entry it came from."
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "description": "The model binding for that source (e.g. a LoRA trigger word)."
+                    }
+                  },
+                  "required": [
+                    "category",
+                    "text",
+                    "source",
+                    "trigger"
+                  ]
+                },
+                "description": "The lineage — one fragment per category the roll filled."
+              },
+              "reaction": {
+                "type": "string",
+                "enum": [
+                  "up",
+                  "down",
+                  "note"
+                ],
+                "description": "What the user said about the piece, if anything."
+              },
+              "saved": {
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
               },
               "dismissed": {
                 "type": "boolean"

@@ -730,6 +730,15 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/pieces/${encodeURIComponent(runId)}`, {
       method: 'PATCH', headers: authHeaders(), body: JSON.stringify(patch),
     }).then(j<{ session: MuseSessionView }>),
+  // Put a piece back into the set. The media joins the session's OWN dataset — created by
+  // the first save, appended to by every save after it — carrying the piece's recorded
+  // lineage as that item's fragments; the mother is never written. Nothing is spent and no
+  // job runs: the piece was composed from fragments, so its lineage is already its tagging.
+  // The body is empty — the run is named in the path and its media is resolved server-side.
+  saveMusePiece: (id: string, runId: string) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/pieces/${encodeURIComponent(runId)}/save`, {
+      method: 'POST', headers: authHeaders(),
+    }).then(j<{ session: MuseSessionView }>),
 
   // For a cost estimate before dispatching, use `quote` above (`POST /v1/runs/quote`).
   // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
@@ -1153,6 +1162,8 @@ export interface MuseSessionView {
   id: string;
   owner: string;
   motherDatasetId: string;
+  /** The session's own dataset, where its saved pieces land. Absent until the first save. */
+  sessionDatasetId?: string;
   fragments: Fragment[];
   floor: MuseFloorEntry[];
   pieces: MusePiece[];
