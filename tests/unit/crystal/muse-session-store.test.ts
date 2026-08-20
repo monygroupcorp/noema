@@ -37,7 +37,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/Crys
 import { createApiRouter, type Identity } from '../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../src/allocutio/api/errors.js'
 import { fragmentKey, type Fragment } from '../../../src/crystal/muse/taxonomy.js'
-import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight } from '../../../src/crystal/muse/session.js'
+import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight, withSessionDataset } from '../../../src/crystal/muse/session.js'
 import type { Piece } from '../../../src/crystal/muse/session.js'
 import type { Dataset } from '../../../src/types/dataset.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
@@ -202,6 +202,35 @@ test('a session survives a store round-trip with its floor and ledger intact', a
     fragmentKey(FRAGMENTS[0]!),
     fragmentKey(FRAGMENTS[2]!),
   ])
+})
+
+test('a session carries the id of its own dataset through a store round-trip', async () => {
+  // `toDoc`/`fromDoc` ENUMERATE the session's fields, so a field they do not name is
+  // dropped on the way to Mongo and again on the way back — silently, with nothing
+  // failing. This is the round-trip that says the session's own dataset id is not one of
+  // them: dropped, a session would mint a fresh dataset on every save instead of
+  // appending to the one it already has.
+  const spawned = spawnSession('dataset-1', FRAGMENTS)
+  assert.equal(spawned.sessionDatasetId, undefined, 'a session names no dataset before its first save')
+
+  const created = await sessions.create({ owner: 'anima-1', session: spawned })
+  assert.equal((await sessions.find(created.id))?.session.sessionDatasetId, undefined,
+    'and none is invented for it on the way through the store')
+
+  const named = withSessionDataset(spawned, 'dataset-of-the-session')
+  const saved = await sessions.save(created.id, named)
+  assert.equal(saved?.session.sessionDatasetId, 'dataset-of-the-session')
+
+  const read = await sessions.find(created.id)
+  assert.equal(read?.session.sessionDatasetId, 'dataset-of-the-session', 'the id survived the write and the read')
+  assert.equal(read?.session.motherDatasetId, 'dataset-1', 'and the mother is still the mother')
+
+  // The document itself carries it — a value read back off the in-memory object rather
+  // than off Mongo would prove nothing about persistence.
+  const doc = await sessionsCol.findOne({ id: created.id }) as unknown as
+    { session: { sessionDatasetId?: string; motherDatasetId: string } } | null
+  assert.equal(doc?.session.sessionDatasetId, 'dataset-of-the-session')
+  assert.equal(doc?.session.motherDatasetId, 'dataset-1')
 })
 
 test('a save replaces the stored session and bumps mutatum; an unknown id is never created', async () => {

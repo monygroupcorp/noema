@@ -330,11 +330,12 @@ export const TILE_GESTURES: ReadonlyArray<{ key: string; glyph: string; label: s
 ];
 
 /** The rail the expanded view carries: the tile's three, plus the gestures that are
- *  considered rather than made at speed (V8a). Save is still inert — it is its own rung. */
+ *  considered rather than made at speed (V8a). Save is one of those: it puts the piece
+ *  back into the set, which is a decision about the work rather than a scroll-speed steer. */
 export const EXPANDED_GESTURES: ReadonlyArray<{ key: string; glyph: string; label: string }> = [
   ...TILE_GESTURES,
   { key: 'laugh', glyph: '\u{1F602}', label: 'noted — steers nothing' },
-  { key: 'save', glyph: '↓', label: 'save this piece' },
+  { key: 'save', glyph: '↓', label: 'save this piece back into the set' },
 ];
 
 // ── The session: the floor sheet and live reactions (noema-241) ──────────────
@@ -413,6 +414,20 @@ export function recordedPiece(view: MuseSessionView, runId: string) {
 /** What the session currently says about a piece, if anything. */
 export function reactionOf(view: MuseSessionView, runId: string): MuseReaction | undefined {
   return recordedPiece(view, runId)?.reaction;
+}
+
+/**
+ * Whether the session's ledger says this piece has been put back into the set.
+ *
+ * Read off the SESSION, never off the stream tile: the tile is a client-side record of
+ * this page's own firing and a reload does not carry it, while the ledger entry is the
+ * server's. A saved piece therefore still reads as saved after a reload.
+ *
+ * Non-vacuity: reading a tile-local flag instead must fail "a saved piece still reads as
+ * saved after the screen re-renders from the session".
+ */
+export function savedOf(view: MuseSessionView, runId: string): boolean {
+  return recordedPiece(view, runId)?.saved ?? false;
 }
 
 /** The factor one steer moves a fragment's weight by. The sampler's bounds are

@@ -23,6 +23,7 @@ import {
   setFragmentWeight,
   spawnSession,
   updatePiece,
+  withSessionDataset,
   pieceOf,
 } from '../../../src/crystal/muse/session.js'
 
@@ -554,4 +555,43 @@ test('adding a fragment already on the floor does not duplicate it', () => {
   assert.equal(readded, darkened)
   assert.equal(fragmentStateOf(readded, { category: 'props', text: 'a paper lantern' })?.enabled, false)
   assert.equal(readded.fragments.filter((f) => fragmentKey(f) === 'props:a paper lantern').length, 1)
+})
+
+// --- The session's own dataset (noema-245) ----------------------------------
+
+test('a session names no dataset of its own until one is minted for it', () => {
+  const session = spawnSession('mother-1', motherFragments())
+  assert.equal(session.sessionDatasetId, undefined,
+    'a session that has never saved must not claim a dataset — nothing has been created for it')
+
+  const named = withSessionDataset(session, 'ds-of-the-session')
+  assert.equal(named.sessionDatasetId, 'ds-of-the-session')
+  assert.equal(session.sessionDatasetId, undefined, 'the original value was mutated')
+  assert.equal(named.motherDatasetId, 'mother-1', 'naming a session dataset does not touch the mother')
+
+  // Fixed once set: a second naming cannot re-point the session and strand the pieces
+  // already in the first record.
+  const again = withSessionDataset(named, 'ds-somewhere-else')
+  assert.equal(again, named)
+  assert.equal(again.sessionDatasetId, 'ds-of-the-session')
+})
+
+test('a saved piece is flagged in the ledger without disturbing what else it says', () => {
+  const fragments = motherFragments()
+  const spawned = spawnSession('mother-1', fragments)
+  const recorded = recordPiece(spawned, { runId: 'run-1', rollIndex: 0, fragments: [fragments[0]] })
+  assert.equal(pieceOf(recorded, 'run-1')?.saved, false, 'a piece is not saved until it is saved')
+
+  const reacted = updatePiece(recorded, 'run-1', { reaction: 'up' })
+  const saved = updatePiece(reacted, 'run-1', { saved: true })
+  const piece = pieceOf(saved, 'run-1')!
+  assert.equal(piece.saved, true)
+  assert.equal(piece.reaction, 'up', 'the reaction survived the save')
+  assert.equal(piece.dismissed, false)
+  assert.deepEqual(piece.fragments, lineageOf(recorded, 'run-1'), 'the lineage is fixed at record time')
+
+  // And a later patch that says nothing about `saved` leaves it as it stands — the flag
+  // records that the media landed, so nothing may clear it as a side effect.
+  const laterNote = updatePiece(saved, 'run-1', { reaction: 'note' })
+  assert.equal(pieceOf(laterNote, 'run-1')?.saved, true)
 })

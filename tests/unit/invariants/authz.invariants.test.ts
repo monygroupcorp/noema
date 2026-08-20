@@ -568,13 +568,23 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
       call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 1, fragments: [held] }),
     },
     { name: 'updateMusePiece', call: (id) => api.updateMusePiece(B, id, 'run-of-a', { reaction: 'up' }) },
+    // A save puts a piece's media into the session's OWN dataset. B naming A's session must
+    // be refused at the session, before any dataset is minted in B's name off A's ledger.
+    { name: 'saveMusePiece', call: (id) => api.saveMusePiece(B, id, 'run-of-a') },
   ], () => snapshot(museSessions.store))
+
+  assert.deepEqual(
+    [...datasets.store.values()].map((d) => d.id), [mother.id],
+    'a rejected save minted a dataset — B\'s call reached the dataset store',
+  )
 
   const own = await api.getMuseSession(A, session.id)
   assert.deepEqual(own.floor, spawned.floor, 'A\'s floor is exactly as it was spawned')
   assert.equal(own.pieces.length, 1, 'no piece from B reached A\'s ledger')
   assert.equal(own.pieces[0].runId, 'run-of-a', 'the one entry is A\'s own')
   assert.equal(own.pieces[0].reaction, undefined, 'B\'s reaction did not land on A\'s piece')
+  assert.equal(own.pieces[0].saved, false, 'B\'s save did not flag A\'s piece')
+  assert.equal(own.sessionDatasetId, undefined, 'and A\'s session was never pointed at a dataset')
   assert.equal(own.motherDatasetId, mother.id, 'A still reads their own session')
 })
 

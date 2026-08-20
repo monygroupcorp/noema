@@ -165,6 +165,7 @@ export interface ApiFacade {
   addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<import('./CrystalApi.js').MuseSessionView>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -1080,6 +1081,19 @@ export function createApiRouter(deps: {
     const auctor = await auth(req)
     const session = await api.updateMusePiece(auctor, String(req.params.id), String(req.params.runId), req.body ?? {})
     res.json({ session })
+  }))
+
+  // POST /v1/data/muse/sessions/:id/pieces/:runId/save — put a piece back into the set. Its
+  // media joins the session's OWN dataset (minted on the first save, appended to after that)
+  // carrying the lineage that produced it as that item's fragments; the mother dataset is
+  // never written. NOTHING IS SPENT and no job runs: a generated piece was composed from
+  // fragments, so its recorded lineage is already its tagging and a save is a set insertion
+  // rather than a caption or decompose pass. The body is empty — the piece names its run, and
+  // the media url is resolved server-side from that run. Owner from `auth(req)`.
+  router.post('/data/muse/sessions/:id/pieces/:runId/save', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const session = await api.saveMusePiece(auctor, String(req.params.id), String(req.params.runId))
+    res.status(201).json({ session })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
