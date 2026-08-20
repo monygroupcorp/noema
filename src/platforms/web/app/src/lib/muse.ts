@@ -13,7 +13,7 @@ import {
   type GardenDrops,
 } from '../../../../../crystal/muse/garden.js';
 import { rollReport, formatRoll, type RolledPrompt, type RollReport } from '../../../../../crystal/muse/roll.js';
-import { CATEGORIES, fragmentKey, type Category, type Garden } from '../../../../../crystal/muse/taxonomy.js';
+import { CATEGORIES, fragmentKey, isCategory, type Category, type Garden } from '../../../../../crystal/muse/taxonomy.js';
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../../../crystal/muse/sampler.js';
 import { lineageOf as recordedLineage, type MuseSession } from '../../../../../crystal/muse/session.js';
 import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
@@ -555,6 +555,73 @@ export function mergedExclusions(...sets: ReadonlyArray<ReadonlySet<number>>): S
   const out = new Set<number>();
   for (const s of sets) for (const i of s) out.add(i);
   return out;
+}
+
+// ── Manual add: the free way to widen a floor (noema-242) ────────────────────
+// A piece is composed from fragments already on the floor, so working the session
+// reweights the floor and never widens it. Short of decomposing more source images,
+// a fragment the user writes is the only thing that puts a phrase on a narrow floor
+// that was not already there — which is what the readout's "add to the floor" offer
+// resolves to when it is taken without spending.
+//
+// Everything below is pure and free by construction: the whole of what the add sends
+// is a category and a text, and there is no second call behind it.
+
+/** The categories the form offers, in sampling order — the taxonomy and nothing else. */
+export const MANUAL_CATEGORIES = CATEGORIES;
+
+/**
+ * The whole of what a manual add sends: the fragment's category and its text.
+ *
+ * A MANUAL ADD IS FREE. No flow id, no aditus, no pinned model, no quote and no key
+ * ride this request, and no run is created behind it — compare `ignitionRequest`,
+ * which is the metered path and carries a `modusId`. That is the product rule (V3),
+ * not an implementation detail: the LLM-assisted add is a separate, metered surface.
+ * Non-vacuity: giving this path a flow, a model or any other field must fail "a
+ * manual add reaches no model and no key".
+ */
+export function manualAddRequest(category: FragmentCategory, text: string): MuseFragmentIdentity {
+  return { category, text: text.trim() };
+}
+
+/**
+ * Why the fragment on the form cannot be added yet, or `null` when it can.
+ *
+ * Three rules, and each is refused on the form rather than at the server:
+ *
+ *   THE CATEGORY MUST BE IN THE TAXONOMY. Prompts are composed by walking
+ *   `CATEGORIES`, so a fragment filed outside them would sit on the floor, count in
+ *   its totals, and never be drawn by any roll.
+ *
+ *   THE FRAGMENT NEEDS TEXT. An empty phrase has no identity to be keyed by.
+ *
+ *   A FRAGMENT ALREADY ON THE FLOOR IS NOT ADDED TWICE. `fragmentKey` is the
+ *   identity; a second entry under it would double that phrase's odds in every roll
+ *   and leave two entries for a later steer to land on. Said here so the form can
+ *   name the fragment as already present — including when a steer has darkened it,
+ *   which is the case a user is most likely to be retyping their way into.
+ *
+ * Non-vacuity: dropping the `isCategory` check must fail "a fragment cannot be added
+ * outside the taxonomy"; dropping the identity check must fail "adding a fragment
+ * already on the floor does not duplicate it".
+ */
+export function manualAddError(
+  view: MuseSessionView | null,
+  category: string,
+  text: string,
+): string | null {
+  if (!isCategory(category)) return 'pick a category';
+  const trimmed = text.trim();
+  if (!trimmed) return 'write the fragment first';
+  if (!view) return 'no session yet';
+  const key = fragmentKey({ category, text: trimmed });
+  const held = view.floor.find((e) => e.key === key);
+  if (held) {
+    return held.enabled
+      ? "that fragment is already on the floor"
+      : "that fragment is already on the floor — it's turned off, tap it to bring it back";
+  }
+  return null;
 }
 
 /**

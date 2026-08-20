@@ -70,8 +70,12 @@ import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } fr
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
 import {
   DuplicatePieceError,
+  EmptyFragmentTextError,
+  UnknownCategoryError,
   UnknownFragmentError,
   UnknownPieceError,
+  addFragment,
+  manualFragment,
   recordPiece,
   setFragmentEnabled,
   setFragmentWeight,
@@ -2105,6 +2109,41 @@ export class CrystalApi {
     return this._mutateMuseSession(auctor, id, (session) => {
       this._assertHeld(session, fragment)
       return setFragmentWeight(session, fragment, weight)
+    })
+  }
+
+  /**
+   * Put a fragment the user wrote on the floor of a session they own.
+   *
+   * This is the un-metered way to widen a floor. A saved piece reweights a floor but
+   * never widens it — a piece is assembled from fragments already on it — so short of
+   * decomposing more source images, a fragment the user types is the only way a
+   * narrow floor gets a phrase it did not already have.
+   *
+   * NOTHING IS SPENT HERE. There is no model call, no key, no quote and no run behind
+   * this method: `manualFragment` builds a value and `addFragment` returns a new
+   * session. That is the product decision this route implements, not an incidental
+   * property of the implementation.
+   *
+   * The category is constrained to the taxonomy twice over — `_fragmentIdentity`
+   * rejects anything else with a 400, and the pure module refuses to build the
+   * fragment at all — because the sampler iterates `CATEGORIES` and a fragment filed
+   * outside them would sit in a pool no roll ever reads.
+   *
+   * Adding a fragment the floor already holds is a no-op that returns the session as
+   * it stands, rather than a second copy of one identity: `fragmentKey` is the
+   * identity, and two entries under it would double that phrase's odds in every roll.
+   */
+  async addMuseFragment(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    const identity = this._fragmentIdentity(input)
+    return this._mutateMuseSession(auctor, id, (session) => {
+      try {
+        return addFragment(session, manualFragment(identity.category, identity.text))
+      } catch (err) {
+        if (err instanceof UnknownCategoryError) throw Errors.inputMalformed(err.message)
+        if (err instanceof EmptyFragmentTextError) throw Errors.inputMalformed(err.message)
+        throw err
+      }
     })
   }
 
