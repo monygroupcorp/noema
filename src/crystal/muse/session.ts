@@ -75,10 +75,18 @@ export type Piece = {
  * version of that dataset rather than a peer of it, and holding the mother's id
  * is what lets a session be placed under it — without fixing how that
  * relationship is presented or how long it lasts.
+ *
+ * `sessionDatasetId` is where the session's own kept work lands: a dataset record
+ * of its own, holding the pieces saved out of this session. It is ABSENT until the
+ * first save, because a session that never saves must not leave an empty dataset
+ * behind — the record is minted by the first save and named on the session from
+ * then on. The mother is never the target of a save (S7, S13).
  */
 export type MuseSession = {
   /** The dataset this session broke off from. Never written to by the session. */
   motherDatasetId: string
+  /** The session's own dataset, holding the pieces saved out of it. Absent until the first save. */
+  sessionDatasetId?: string
   /** Every fragment on the floor, in display order. Session-owned copies. */
   fragments: readonly Fragment[]
   /** Per-fragment floor state, keyed by `fragmentKey`. Read directly by the sampler. */
@@ -209,6 +217,24 @@ export function rebuildFragments(
 ): MuseSession {
   const owned = dedupeByIdentity(fragments)
   return { ...session, fragments: owned, floor: buildFloor(owned, session.floor) }
+}
+
+/**
+ * Name the session's own dataset — the record its saved pieces land in.
+ *
+ * Called once, by the first save: the dataset is minted lazily rather than at spawn,
+ * so a session that never saves leaves nothing behind. Once named, the id is fixed —
+ * a session already carrying one is returned unchanged, so a second save cannot
+ * re-point the session at a different record and strand the pieces already in the
+ * first one.
+ *
+ * THE MOTHER IS NOT REACHABLE FROM HERE. This sets a field on the session and nothing
+ * else; `motherDatasetId` is not touched, and no function in this module writes to any
+ * dataset at all.
+ */
+export function withSessionDataset(session: MuseSession, datasetId: string): MuseSession {
+  if (session.sessionDatasetId) return session
+  return { ...session, sessionDatasetId: datasetId }
 }
 
 // --- Widening the floor ------------------------------------------------------
@@ -452,6 +478,16 @@ export type PiecePatch = {
   reaction?: Reaction
   /** Whether the piece is discarded. */
   dismissed?: boolean
+  /**
+   * Whether the piece has been put back into the set.
+   *
+   * Set by the save path once the piece's media is in the session's own dataset, so
+   * the ledger entry says whether this piece went back in. It is deliberately NOT
+   * reachable from the piece-patch route: a flag claiming a piece was saved, written
+   * without the media landing anywhere, would be a ledger that disagrees with the
+   * dataset. The wire validation for that route reads `reaction` and `dismissed` only.
+   */
+  saved?: boolean
 }
 
 /**
@@ -476,6 +512,7 @@ export function updatePiece(session: MuseSession, runId: string, patch: PiecePat
   const updated: Piece = {
     ...current,
     dismissed: patch.dismissed ?? current.dismissed,
+    saved: patch.saved ?? current.saved,
     ...(patch.reaction !== undefined ? { reaction: patch.reaction } : {}),
   }
 

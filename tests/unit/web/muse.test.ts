@@ -43,6 +43,7 @@ import {
   pieceLineage,
   pieceRecord,
   reactionOf,
+  savedOf,
   sessionFromView,
   steerWeight,
   weightWrites,
@@ -634,3 +635,24 @@ test('manualAddError: adding a fragment already on the floor does not duplicate 
   assert.ok(darkened && /turned off|tap it/.test(darkened),
     'a darkened fragment was reported as absent rather than as turned off')
 })
+
+// ---------------------------------------------------------------------------
+// Save-back (noema-245) — what the screen reads to know a piece is in the set
+
+test('savedOf: a saved piece reads as saved off the session, not off the tile', () => {
+  const fox = frag('subject', 'a fox');
+  const before = session([fox], { pieces: [ledgerPiece('run-1', [fox])] });
+  assert.equal(savedOf(before, 'run-1'), false, 'a recorded piece is not saved until it is saved');
+
+  // The session the save returned is the whole session, and the screen re-renders from it —
+  // so the flag is the server's record and survives a reload, which a tile-local flag
+  // could not. A run the ledger holds no entry for reads as not saved rather than throwing.
+  const after = session([fox], { pieces: [ledgerPiece('run-1', [fox], { saved: true })] });
+  assert.equal(savedOf(after, 'run-1'), true);
+  assert.equal(savedOf(after, 'run-never-rolled'), false);
+
+  // A save says nothing about the floor: it reweights by re-entering the set, it does not
+  // widen. The sheet the screen renders is identical before and after.
+  assert.deepEqual(floorSheet(after), floorSheet(before), 'a save must not move the floor');
+  assert.deepEqual(after.fragments, before.fragments, 'and it adds no fragment');
+});

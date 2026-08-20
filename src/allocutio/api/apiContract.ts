@@ -1466,7 +1466,7 @@ const MusePieceSchema: JsonSchema = {
     rollIndex: { type: 'number', description: 'Which roll of the session this was.' },
     fragments: { type: 'array', items: MuseFragmentSchema, description: 'The lineage — one fragment per category the roll filled.' },
     reaction: { type: 'string', enum: ['up', 'down', 'note'], description: 'What the user said about the piece, if anything.' },
-    saved: { type: 'boolean' },
+    saved: { type: 'boolean', description: 'Whether the piece has been put back into the set — its media is in the session\'s own dataset.' },
     dismissed: { type: 'boolean' },
   },
   required: ['runId', 'rollIndex', 'fragments', 'saved', 'dismissed'],
@@ -1483,6 +1483,7 @@ const MuseSessionSchema: JsonSchema = {
     id: { type: 'string' },
     owner: { type: 'string', description: 'FK -> Anima, the owning identity.' },
     motherDatasetId: { type: 'string', description: 'FK -> Dataset, the dataset the session broke off from.' },
+    sessionDatasetId: { type: 'string', description: "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it." },
     fragments: { type: 'array', items: MuseFragmentSchema, description: 'Every fragment on the floor, in display order.' },
     floor: { type: 'array', items: MuseFloorEntrySchema },
     pieces: { type: 'array', items: MusePieceSchema },
@@ -1959,6 +1960,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Change what a session the caller owns says about a piece already in its ledger — its reaction, its dismissal, or both. A reaction is given after the piece exists, so this is the route that reaches a recorded piece; the piece's lineage, run and roll index are fixed when it is recorded. A run the ledger holds no entry for is reported as not found.",
       auth: true,
       request: UpdateMusePieceRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions/:id/pieces/:runId/save',
+      summary:
+        "Put a piece from a session the caller owns back into the set: its media joins the session's own dataset, carrying the lineage that produced it as that media item's fragments. The session's dataset is created by the first save and appended to by every save after it; the mother dataset is never written. No job runs and nothing is spent — a generated piece was composed from fragments, so its recorded lineage is already its tagging. The request body is empty: the media is resolved server-side from the run the piece names, which must be the caller's own completed run. A save reweights the floor rather than widening it — the session's fragment list is unchanged. A session the caller does not own is reported as not found, as is a run the session's ledger holds no piece for.",
+      auth: true,
       response: MuseSessionEnvelopeSchema,
     },
     {
