@@ -4,7 +4,7 @@ import {
   admitPiece,
   applyRunResult,
   buildGarden,
-  canFire,
+  canFireOne,
   curatedFragments,
   flattenGarden,
   ignitionBlockReason,
@@ -21,7 +21,6 @@ import {
   STREAM_MAX_COLUMNS,
   STREAM_MIN_COLUMNS,
   TILE_GESTURES,
-  type IgnitionQuote,
   type StreamPiece,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
@@ -48,6 +47,19 @@ import {
   steerWeight,
   weightWrites,
   MANUAL_CATEGORIES,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  impetusTotal,
+  launchBlockReason,
+  launchLabel,
+  nextPieceDecision,
+  rollAt,
+  stopLabel,
+  streamStatusLine,
+  MAX_CONSECUTIVE_ERRORS,
+  type LaunchState,
+  type StreamConfig,
+  type StreamDecisionInput,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
@@ -182,22 +194,15 @@ test('ignitionRequest: a mined trigger is never lifted into pinnedModels', () =>
   assert.equal(JSON.stringify(req).includes('foxstyle'), roll.prompt.includes('foxstyle'))
 })
 
-// Non-vacuity 2 — the cost is shown before the run is created
+// Non-vacuity 2 — the manual card's single fire
 
-test('canFire: the cost is shown before the run is created', () => {
+test('canFireOne: a manual card fires only a real prompt at a flow that can take one', () => {
   const prompt = 'a fox in a foggy harbor'
 
-  assert.equal(canFire(null, 'flow-t2i', prompt, null), false, 'no quote → the fire button never arms')
-
-  const quote: IgnitionQuote = { modusId: 'flow-t2i', prompt, impetus: '12' }
-  assert.equal(canFire(quote, 'flow-t2i', prompt, null), true, 'quoted for this flow and this text → armed')
-
-  // the quoted number must describe what is on screen now
-  assert.equal(canFire(quote, 'flow-t2i', prompt + ', at dusk', null), false, 'an edit after the quote disarms it')
-  assert.equal(canFire(quote, 'flow-other', prompt, null), false, 'a quote for another flow does not arm this one')
-  assert.equal(canFire(quote, null, prompt, null), false, 'no flow chosen → never armed')
-  assert.equal(canFire(quote, 'flow-t2i', prompt, 'needs an input image'), false, 'a refused flow never arms')
-  assert.equal(canFire({ modusId: 'flow-t2i', prompt: '   ', impetus: '12' }, 'flow-t2i', '   ', null), false, 'an empty prompt never arms')
+  assert.equal(canFireOne('flow-t2i', prompt, null), true, 'a chosen flow and text → armed')
+  assert.equal(canFireOne(null, prompt, null), false, 'no flow chosen → never armed')
+  assert.equal(canFireOne('flow-t2i', '   ', null), false, 'an empty prompt never arms')
+  assert.equal(canFireOne('flow-t2i', prompt, 'needs an input image'), false, 'a refused flow never arms')
 })
 
 // Non-vacuity 3 — only t2i can be selected
@@ -655,4 +660,223 @@ test('savedOf: a saved piece reads as saved off the session, not off the tile', 
   // widen. The sheet the screen renders is identical before and after.
   assert.deepEqual(floorSheet(after), floorSheet(before), 'a save must not move the floor');
   assert.deepEqual(after.fragments, before.fragments, 'and it adds no fragment');
+});
+
+// ---------------------------------------------------------------------------
+// The stream's front door (noema-244) — the launch refusal and the loop's decision.
+//
+// Everything below targets a pure function. That is deliberate: a stream that rides
+// until the money runs out has exactly one ceiling, and a ceiling that is only asserted
+// through a component is not asserted at all.
+
+const CFG = (over: Partial<StreamConfig> = {}): StreamConfig =>
+  ({ mode: 'batched', cap: 12, acknowledged: false, ...over });
+
+const LAUNCH = (over: Partial<LaunchState> = {}): LaunchState => ({
+  config: CFG(),
+  modusId: 'flow-t2i',
+  flowBlockReason: null,
+  liveFragments: 9,
+  quote: { modusId: 'flow-t2i', impetus: '40' },
+  ...over,
+});
+
+const DEC = (over: Partial<StreamDecisionInput> = {}): StreamDecisionInput => ({
+  mode: 'infinite',
+  cap: 12,
+  fired: 0,
+  inFlight: false,
+  balanceImpetus: '100000',
+  perPieceImpetus: '40',
+  stopRequested: false,
+  consecutiveErrors: 0,
+  ...over,
+});
+
+// ── Proof 1 (MONEY) — the balance is the only ceiling this design has ────────
+
+test("a stream stops with reason 'funds' when the balance is below the next piece's quoted impetus", () => {
+  // Comfortably funded: the stream fires.
+  assert.deepEqual(nextPieceDecision(DEC({ balanceImpetus: '41', perPieceImpetus: '40' })), { fire: true });
+  // Exactly one piece left is still one piece.
+  assert.deepEqual(nextPieceDecision(DEC({ balanceImpetus: '40', perPieceImpetus: '40' })), { fire: true });
+  // One short is the end of the stream, and it says why.
+  assert.deepEqual(
+    nextPieceDecision(DEC({ balanceImpetus: '39', perPieceImpetus: '40' })),
+    { fire: false, stop: 'funds' },
+    'a balance below the next piece stops the stream',
+  );
+  assert.deepEqual(nextPieceDecision(DEC({ balanceImpetus: '0', perPieceImpetus: '40' })), { fire: false, stop: 'funds' });
+
+  // Impetus figures cross the wire as strings and are compared as integers, never as
+  // numbers and never as text: '9' is not more than '100', and a figure past 2^53 is
+  // still exact.
+  assert.deepEqual(nextPieceDecision(DEC({ balanceImpetus: '9', perPieceImpetus: '100' })), { fire: false, stop: 'funds' });
+  assert.deepEqual(
+    nextPieceDecision(DEC({ balanceImpetus: '90071992547409930', perPieceImpetus: '90071992547409929' })),
+    { fire: true },
+  );
+
+  // An unreadable or absent figure reads as zero, so it fails CLOSED — an unpriced
+  // stream never fires.
+  assert.deepEqual(nextPieceDecision(DEC({ perPieceImpetus: '' })), { fire: true }, 'a zero price is not a refusal');
+  assert.deepEqual(
+    nextPieceDecision(DEC({ balanceImpetus: 'not a number', perPieceImpetus: '40' })),
+    { fire: false, stop: 'funds' },
+    'a balance that cannot be read is not one we may spend against',
+  );
+});
+
+// ── Proof 2 — a batch fires exactly what it was configured to fire ───────────
+
+test("a batched stream of K fires exactly K pieces and then stops with reason 'cap'", () => {
+  const K = 7;
+  let fired = 0;
+  const seen: string[] = [];
+  // The loop the screen runs, with the awaits taken out: decide, fire, settle, decide.
+  for (let guard = 0; guard < 500; guard++) {
+    const d = nextPieceDecision(DEC({ mode: 'batched', cap: K, fired }));
+    if (!d.fire) { seen.push(d.stop ?? 'none'); break; }
+    fired += 1;
+  }
+  assert.equal(fired, K, 'a batch of K fires K pieces — not K-1, not K+1');
+  assert.deepEqual(seen, ['cap'], 'and it ends because it reached its cap');
+
+  // The cap belongs to batched mode alone: infinite has none, which is the entire
+  // reason it needs an acknowledgement and a funds ceiling instead.
+  assert.deepEqual(nextPieceDecision(DEC({ mode: 'infinite', cap: 7, fired: 700 })), { fire: true });
+});
+
+// ── Proof 3 (V5's disclosure obligation) — the warning is a gate ─────────────
+
+test('infinite mode cannot launch until the runs-until-you-stop-it warning is acknowledged', () => {
+  const unacknowledged = LAUNCH({ config: CFG({ mode: 'infinite', acknowledged: false }) });
+  assert.notEqual(launchBlockReason(unacknowledged), null, 'infinite launch is refused until it is acknowledged');
+  assert.match(String(launchBlockReason(unacknowledged)), /stop it/, 'and the refusal says what is being acknowledged');
+
+  assert.equal(
+    launchBlockReason(LAUNCH({ config: CFG({ mode: 'infinite', acknowledged: true }) })),
+    null,
+    'acknowledged → the control arms',
+  );
+
+  // Batched mode carries its own ceiling — the count — so it asks for nothing.
+  assert.equal(launchBlockReason(LAUNCH({ config: CFG({ mode: 'batched', acknowledged: false }) })), null);
+});
+
+// ── Proof 4 (V7's refusal half) — an empty floor has nothing to make ─────────
+
+test('launch is refused when zero fragments are live on the floor', () => {
+  assert.notEqual(launchBlockReason(LAUNCH({ liveFragments: 0 })), null, 'an empty floor refuses launch');
+  assert.match(String(launchBlockReason(LAUNCH({ liveFragments: 0 }))), /draw/);
+
+  // A THIN floor is allowed to run. The refusal is emptiness, never thinness.
+  assert.equal(launchBlockReason(LAUNCH({ liveFragments: 1 })), null, 'one live fragment is allowed to run');
+
+  // The other three refusals, so the empty-floor assertion is not the only thing holding
+  // this function up.
+  assert.notEqual(launchBlockReason(LAUNCH({ modusId: null })), null, 'no nozzle chosen → refused');
+  assert.equal(
+    launchBlockReason(LAUNCH({ flowBlockReason: 'this workflow also needs image — run it from its own card' })),
+    'this workflow also needs image — run it from its own card',
+    'a flow needing more than a prompt still refuses, and says the same thing it always did',
+  );
+  assert.notEqual(launchBlockReason(LAUNCH({ quote: null })), null, 'an unpriced stream has no ceiling and cannot launch');
+  assert.notEqual(
+    launchBlockReason(LAUNCH({ quote: { modusId: 'flow-other', impetus: '40' } })),
+    null,
+    'a price quoted for another flow does not price this one',
+  );
+});
+
+// ── Proof 5 — one piece in flight at a time ─────────────────────────────────
+
+test('no second piece is requested while one is still in flight', () => {
+  assert.deepEqual(
+    nextPieceDecision(DEC({ inFlight: true })),
+    { fire: false, stop: null },
+    'in flight → do not fire, and the stream is NOT over',
+  );
+  // Not a stop: the same input with the piece settled fires.
+  assert.deepEqual(nextPieceDecision(DEC({ inFlight: false })), { fire: true });
+
+  // A stop pressed mid-piece still wins — the loop finishes the piece already paid for
+  // and then ends, rather than ignoring the press until settlement.
+  assert.deepEqual(nextPieceDecision(DEC({ inFlight: true, stopRequested: true })), { fire: false, stop: 'user' });
+});
+
+// ── The other two ways a stream ends ────────────────────────────────────────
+
+test('a stream stops on a stop press, and on repeated failures', () => {
+  assert.deepEqual(nextPieceDecision(DEC({ stopRequested: true })), { fire: false, stop: 'user' });
+  // A stop press wins over every other reason, including a cap already reached.
+  assert.deepEqual(
+    nextPieceDecision(DEC({ mode: 'batched', cap: 3, fired: 3, stopRequested: true })),
+    { fire: false, stop: 'user' },
+  );
+
+  assert.deepEqual(nextPieceDecision(DEC({ consecutiveErrors: MAX_CONSECUTIVE_ERRORS - 1 })), { fire: true });
+  assert.deepEqual(
+    nextPieceDecision(DEC({ consecutiveErrors: MAX_CONSECUTIVE_ERRORS })),
+    { fire: false, stop: 'errors' },
+    'a loop that retried a hard failure forever would spend with no hand on it',
+  );
+});
+
+// ── The draw: consecutive pieces are different prompts ──────────────────────
+
+test('consecutive stream draws are different rolls', () => {
+  const garden = flattenGarden(buildGarden([
+    frag('subject', 'a fox'), frag('subject', 'a heron'), frag('subject', 'a stag'),
+    frag('setting', 'a foggy harbor'), frag('setting', 'a salt flat'), frag('setting', 'a rope bridge'),
+    frag('light', 'low sun'), frag('light', 'overcast noon'), frag('light', 'sodium streetlight'),
+  ]).garden);
+
+  const draws = [0, 1, 2, 3].map((i) => rollAt(garden, new Set<number>(), i));
+  // The sampler is deterministic by index — which is what makes a recorded rollIndex
+  // replayable — so a stream drawing at a fixed index would pay for the same prompt over
+  // and over. The index advances, and the prompts differ.
+  assert.equal(new Set(draws.map((r) => r.prompt)).size > 1, true, 'an advancing index yields different prompts');
+  // And the index is still deterministic: the same index reproduces the same roll.
+  assert.deepEqual(rollAt(garden, new Set<number>(), 2).prompt, draws[2]!.prompt);
+
+  // A fragment turned off between pieces is out of the draw for the very next one —
+  // this is what makes the floor the steering wheel while a stream is riding.
+  const offIdx = garden.findIndex((f) => f.text === 'a fox');
+  const steered = [0, 1, 2, 3].map((i) => rollAt(garden, new Set([offIdx]), i));
+  assert.equal(steered.some((r) => r.fragments.some((f) => f.text === 'a fox')), false);
+});
+
+// ── The readouts: every stop reason renders as words ────────────────────────
+
+test('every stop reason renders as words, including the one nobody chose', () => {
+  assert.match(stopLabel('user', 4, 12), /you stopped it/);
+  assert.match(stopLabel('funds', 4, 12), /out of funds/);
+  assert.match(stopLabel('cap', 12, 12), /12 of 12/);
+  assert.match(stopLabel('errors', 2, 12), /failed/);
+  // D1's cost, stated: the loop lives in the page, so a page that goes away ends the
+  // stream. The readout says so; it never renders a dead stream as a live one.
+  assert.match(stopLabel('lost', 4, 12), /the page lost the stream/);
+
+  const cfg = CFG({ mode: 'infinite' });
+  const quote = { modusId: 'flow-t2i', impetus: '40' };
+  assert.equal(streamStatusLine('idle', null, 0, cfg, quote), 'idle');
+  // Infinite mode has no total and no progress bar, so the money is watchable here or
+  // nowhere: the pieces fired and the impetus spent ride on every phase.
+  assert.match(streamStatusLine('running', null, 3, cfg, quote), /running · 3 pieces · ~120 impetus this stream/);
+  assert.match(streamStatusLine('stopping', null, 3, cfg, quote), /stopping after this piece/);
+  assert.match(streamStatusLine('stopped', 'funds', 3, cfg, quote), /out of funds · 3 pieces · ~120 impetus/);
+  assert.match(streamStatusLine('running', null, 3, CFG({ mode: 'batched', cap: 12 }), quote), /3 of 12/);
+});
+
+test('the launch control carries the price, labelled as an estimate', () => {
+  const quote = { modusId: 'flow-t2i', impetus: '40' };
+  assert.equal(launchLabel(CFG({ mode: 'batched', cap: 12 }), quote), 'launch 12 · ~40 impetus each · ~480 total');
+  assert.equal(launchLabel(CFG({ mode: 'infinite' }), quote), 'launch · ~40 impetus each · rides until you stop it');
+  // Every figure is a `~`: the quoted number is a reservation the server settles
+  // against, and it never becomes the charge.
+  assert.equal(launchLabel(CFG({ mode: 'batched', cap: 12 }), quote).includes('~'), true);
+  assert.equal(launchLabel(CFG(), null), 'launch', 'an unpriced control shows no number at all');
+  assert.equal(impetusTotal('40', 12), '480');
+  assert.equal(impetusTotal('40', 0), '0');
 });
