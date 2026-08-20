@@ -456,6 +456,11 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
 
   await assertOwnerScoped('run', [
     { name: 'getRun', call: (id) => api.getRun(B, id) },
+    // `saveFlow` takes the run id in an options object rather than positionally, but it is
+    // the same axis: the id names the run the derived flow is sourced from, and ownership
+    // is resolved on it before anything else in the call is looked at. `name` is required
+    // by the signature and is inert here — the rejection lands before a slug is derived.
+    { name: 'saveFlow', call: (id) => api.saveFlow(B, { fromRun: id, name: 'flow saved by B' }) },
   ], () => snapshot(actorum['store'] as Map<string, unknown>))
 
   const own = await api.getRun(A, run.id)
@@ -941,10 +946,6 @@ const UNCOVERED_METHODS: Record<string, string> = {
   listMuseSessions:
     'a lookup scoped by the caller\'s own owner token, asserted above on the filter axis by ' +
     '"a Muse session lookup returns only the caller\'s own sessions" rather than as a by-id case.',
-  saveFlow:
-    'reachable with a foreign run id through `opts.fromRun`, which resolves through `_owns`. A ' +
-    'case for it belongs with the run family and is not written yet — that, and not a judgement ' +
-    'that it needs none, is the reason it is listed here.',
 }
 
 test('COVERAGE GUARD: every public CrystalApi method that resolves ownership has a two-identity case', () => {
