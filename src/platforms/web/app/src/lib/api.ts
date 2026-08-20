@@ -665,6 +665,17 @@ export const api = {
   createDataset: (body: CreateDatasetRequest) =>
     fetch('/v1/data/datasets', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ dataset: Dataset }>),
+  // Append media to a dataset the caller owns. Same discriminated ingestion body as
+  // `createDataset` and the same minting path server-side, so a set grows the way it was
+  // seeded. APPEND-ONLY: nothing here removes, replaces or reorders media. The response
+  // carries the WHOLE dataset back — a new version plus every captionset's recomputed
+  // coverage — which is what a caller re-renders from; a locally patched copy would be a
+  // version behind on both. A write, so it takes `authHeaders()` like its siblings: the
+  // owner is resolved from the caller server-side and never from a parameter.
+  addDatasetMedia: (id: string, body: AddDatasetMediaRequest) =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/media`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+    }).then(j<{ dataset: Dataset }>),
   // One dataset by id. There is no per-id detail route — listFull + find IS the detail read
   // (the pattern Datasets.tsx/Dataset.tsx already use); wrapped here so the caption/derive
   // screens can re-read a dataset after a job writes to it without repeating the find.
@@ -1190,6 +1201,11 @@ export interface Dataset {
   natum: string;
   mutatum: string;
 }
+// The body `POST /v1/data/datasets/:id/media` takes — the same discriminated ingestion
+// shape as creation, minus the fields that only make sense when minting a set.
+export type AddDatasetMediaRequest =
+  | { source: 'upload'; mediaUrls: string[] }
+  | { source: 'generation'; actumIds: string[] };
 export type CreateDatasetRequest =
   | { source: 'upload'; name: string; modality: DatasetModality; custody?: DatasetCustody; mediaUrls: string[] }
   | { source: 'generation'; name: string; modality: DatasetModality; custody?: DatasetCustody; actumIds: string[] };

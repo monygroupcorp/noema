@@ -30,6 +30,10 @@ import {
   decomposeRunRequest,
 } from '../../../src/platforms/web/app/src/lib/training.js'
 import {
+  appendFailureNote,
+  appendMediaRequest,
+  captionCoverageLine,
+  decomposeGateReason,
   dismissFromStream,
   floorCounts,
   floorDisabledIndices,
@@ -43,8 +47,10 @@ import {
   pieceRecord,
   reactionOf,
   savedOf,
+  replaceDataset,
   sessionFromView,
   steerWeight,
+  uncaptionedCount,
   weightWrites,
   MANUAL_CATEGORIES,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
@@ -880,3 +886,130 @@ test('the launch control carries the price, labelled as an estimate', () => {
   assert.equal(impetusTotal('40', 12), '480');
   assert.equal(impetusTotal('40', 0), '0');
 });
+
+// ---------------------------------------------------------------------------
+// Adding images to the moodboard (noema-260) — V7's second exit.
+//
+// The four proofs below are the money-facing half of that chain: what the user is
+// told a caption pass will cover BEFORE they spend, when a decompose is refused,
+// that an empty selection reaches no route, and that the screen rebuilds from the
+// dataset the append returned rather than from the copy it already had.
+//
+// Fixtures are invented throughout (`m-…`, `moodboard-…`).
+// ---------------------------------------------------------------------------
+
+/** A dataset as these readouts need it: media ids and the caption passes over them. */
+function set(mediaIds: string[], captionsets: Array<{ id: string; coverage?: string; captions?: Record<string, string> }> = []) {
+  return { media: mediaIds.map((id) => ({ id })), captionsets }
+}
+
+// ── Non-vacuity 1 — the count the user is shown before spending ─────────────
+
+test('a dataset with 2 media absent from the chosen captionset reports 2 uncaptioned', () => {
+  const d = set(['m-1', 'm-2', 'm-3', 'm-4'], [
+    { id: 'cs-1', coverage: '2/4', captions: { 'm-1': 'a fox on a rope bridge', 'm-2': 'a heron in fog' } },
+  ])
+
+  assert.equal(uncaptionedCount(d, 'cs-1'), 2, 'the two media absent from the pass are the two uncaptioned')
+  // The count is over the pass' caption MAP, not over a stored coverage string and not
+  // over the media count — a pass whose coverage string disagrees does not move it.
+  assert.equal(uncaptionedCount(set(['m-1', 'm-2'], [{ id: 'cs-1', coverage: '9/9', captions: { 'm-1': 'a fox' } }]), 'cs-1'), 1)
+  // An empty caption is no caption: it produces no fragment when decomposed.
+  assert.equal(uncaptionedCount(set(['m-1'], [{ id: 'cs-1', captions: { 'm-1': '   ' } }]), 'cs-1'), 1)
+  // With no pass selected there is nothing to be covered by.
+  assert.equal(uncaptionedCount(d, null), 4)
+
+  // And it is rendered as words, with both figures in it, because this is the line the
+  // spend is judged against.
+  assert.match(captionCoverageLine(d, 'cs-1'), /2 of 4 images have no caption in this pass/)
+  assert.match(captionCoverageLine(set(['m-1'], [{ id: 'cs-1', captions: { 'm-1': 'a fox' } }]), 'cs-1'), /all 1 image is captioned/)
+})
+
+// ── Non-vacuity 2 — the gate under the readout ─────────────────────────────
+
+test('the decompose control is refused while any appended image is still uncaptioned', () => {
+  // Two images appended to a set whose only pass was written before they existed.
+  const appended = set(['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'], [
+    {
+      id: 'cs-1',
+      coverage: '7/9',
+      captions: Object.fromEntries(['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7'].map((id) => [id, `a caption for ${id}`])),
+    },
+  ])
+
+  const reason = decomposeGateReason(appended, 'cs-1')
+  assert.ok(reason, 'a pass that does not cover the appended images refuses the decompose')
+  assert.match(reason!, /2 of 9/)
+  // The refusal is what the screen arms the button on: a decompose over this pass would
+  // mine the older images only, spend a chat call per caption doing it, and return green.
+  const armed = canFireDecompose({ captionsetId: 'cs-1', inFlight: false }) && !decomposeGateReason(appended, 'cs-1')
+  assert.equal(armed, false)
+
+  // A pass that covers everything is not refused.
+  const covered = set(['m-1', 'm-2'], [{ id: 'cs-1', captions: { 'm-1': 'a fox', 'm-2': 'a heron' } }])
+  assert.equal(decomposeGateReason(covered, 'cs-1'), null)
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }) && !decomposeGateReason(covered, 'cs-1'), true)
+
+  // A pass that does not carry its caption map is not refused either: its coverage is
+  // not knowable from here, and refusing on an unknown takes a path away rather than
+  // preventing a spend.
+  assert.equal(decomposeGateReason(set(['m-1', 'm-2'], [{ id: 'cs-1', coverage: '2/2' }]), 'cs-1'), null)
+})
+
+// ── Non-vacuity 3 — an empty selection reaches no route ────────────────────
+
+test('appending with no files chosen fires no request', () => {
+  assert.equal(appendMediaRequest([]), null, 'no files chosen is no request at all')
+  // Whitespace is not a URL: a blank entry must not become an append either. An append
+  // of nothing still mints a dataset version and recomputes every pass' coverage
+  // denominator over an unchanged set.
+  assert.equal(appendMediaRequest(['', '   ']), null)
+
+  assert.deepEqual(
+    appendMediaRequest(['https://r2.example/moodboard-8.png', 'https://r2.example/moodboard-9.png']),
+    { source: 'upload', mediaUrls: ['https://r2.example/moodboard-8.png', 'https://r2.example/moodboard-9.png'] },
+  )
+  // A partial batch appends what landed and names what did not.
+  assert.deepEqual(appendMediaRequest(['https://r2.example/moodboard-8.png', '']), {
+    source: 'upload', mediaUrls: ['https://r2.example/moodboard-8.png'],
+  })
+  assert.equal(appendFailureNote([]), null)
+  assert.match(appendFailureNote(['moodboard-9.png'])!, /moodboard-9\.png/)
+})
+
+// ── Non-vacuity 4 — the screen rebuilds from what the append returned ──────
+
+test('the floor is rebuilt from the dataset the append returned, not from the pre-append copy', () => {
+  const before = {
+    id: 'moodboard-1',
+    media: [item('m-1', [frag('subject', 'a fox', 'm-1')])],
+    captionsets: [{ id: 'cs-1', coverage: '1/1', captions: { 'm-1': 'a fox' } }],
+  }
+  const other: typeof before = { id: 'moodboard-2', media: [], captionsets: [] }
+  // What the append returned: one version newer, the appended media in it, and the
+  // pass' coverage denominator recomputed over the larger set.
+  const returned = {
+    id: 'moodboard-1',
+    media: [...before.media, item('m-2', [frag('setting', 'a foggy harbor', 'm-2')])],
+    captionsets: [{ id: 'cs-1', coverage: '1/2', captions: { 'm-1': 'a fox' } }],
+  }
+
+  const next = replaceDataset([other, before], returned)
+  const entry = next.find((d) => d.id === 'moodboard-1')!
+  assert.equal(next.length, 2, 'the other sets in the list are untouched')
+
+  // The garden — and so the floor pooled from it — is built from the RETURNED media.
+  const { kept } = buildGarden(poolDatasetFragments(entry.media))
+  assert.equal(kept, 2, 'the appended item is in the pooled garden')
+  assert.deepEqual(flattenGarden(buildGarden(poolDatasetFragments(entry.media)).garden).map((f) => f.source).sort(), ['m-1', 'm-2'])
+
+  // And the recomputed coverage came back with it — the readout the next decompose is
+  // judged against is the server's, not a patched copy of what was on screen.
+  assert.equal(uncaptionedCount(entry, 'cs-1'), 1)
+  assert.match(captionCoverageLine(entry, 'cs-1'), /1 of 2 images have no caption/)
+  assert.ok(decomposeGateReason(entry, 'cs-1'), 'the appended image gates the next decompose')
+
+  // A dataset the list has never seen is added rather than dropped.
+  assert.equal(replaceDataset([], returned).length, 1)
+  assert.equal(replaceDataset(null, returned)[0]!.id, 'moodboard-1')
+})

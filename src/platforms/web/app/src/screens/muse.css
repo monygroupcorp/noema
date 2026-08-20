@@ -183,3 +183,39 @@
 .muse-manual { margin-top: 14px; border-top: 1px solid var(--hair-soft); padding-top: 10px; }
 .muse-manual-summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .muse-manual-summary:hover { color: var(--accent-soft); }
+
+/* ── Add images to the moodboard (noema-260) ──────────────────────────────────
+   A panel rather than a control, so it sits below the sticky launcher instead of
+   inside it: it grows a row per chosen file while a batch uploads, and a sticky
+   element that grows pushes the stream out from under the reader's thumb. Closed by
+   default — the floor's own exits are what open it. */
+.muse-add-images {
+  margin: 0 0 16px; padding: 10px 12px;
+  border: 1px solid var(--hair-soft); border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+.muse-add-images-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.muse-add-images-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* One row per chosen file, each carrying its own state: a batch where one file failed
+   has to say WHICH one, because the rest were still added. */
+.muse-add-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.muse-add-file-row {
+  display: flex; gap: 10px; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; color: var(--muted);
+}
+.muse-add-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muse-add-file-state { flex: 0 0 auto; }
+.muse-add-file-row.added .muse-add-file-state { color: var(--accent-soft); }
+.muse-add-file-row.failed .muse-add-file-state { color: var(--bad, #e0668f); }
+
+/* What an appended image still needs: the coverage readout, then the two metered
+   steps under it. The readout gets the emphasis — it is the figure the spend is
+   judged against, and it is read before either button is pressed. */
+.muse-add-next {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--hair-soft);
+}
+.muse-add-readout { font-size: 12.5px; color: var(--ink, inherit); }
+.muse-add-step { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.muse-add-step .gt-sub { flex: 1 1 240px; min-width: 0; }

@@ -20,6 +20,7 @@ import { lineageOf as recordedLineage, type MuseSession } from '../../../../../c
 import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
 import { mediaFromOutput, type Media } from './media';
 import type {
+  AddDatasetMediaRequest,
   Fragment,
   FragmentCategory,
   DatasetMediaItem,
@@ -907,4 +908,137 @@ export function manualAddError(
 export function dismissFromStream(state: StreamState, runId: string): StreamState {
   const drop = (p: StreamPiece) => p.runId !== runId;
   return { pieces: state.pieces.filter(drop), pending: state.pending.filter(drop) };
+}
+
+// ── Adding images to the moodboard (noema-260) ───────────────────────────────
+// The second exit off a thin floor, beside the manual add above. Where a written
+// fragment widens the floor directly and for free, an image widens it through the
+// chain the rest of the product already has: the upload joins the set (free), a
+// caption pass reads the set, and a decompose turns those captions into fragments.
+//
+// Everything below is pure. The screen does the uploading and the requesting; what
+// is decided here is what the user is told BEFORE either metered step is pressed,
+// and when the second one is refused.
+
+/** The least a dataset has to be for the readouts below to hold: media ids and the
+ *  caption passes over them. Structural on purpose — `Dataset` satisfies it, and so
+ *  does a fixture, so nothing here needs the whole record. */
+export interface CaptionedSet {
+  media: ReadonlyArray<{ id: string }>;
+  captionsets: ReadonlyArray<{ id: string; coverage?: string; captions?: Record<string, string> }>;
+}
+
+/**
+ * How many of the set's media items carry no caption in the chosen pass.
+ *
+ * This is the figure a user is shown before spending, so it counts what the pass
+ * actually holds rather than trusting a stored coverage string: a media item is
+ * uncaptioned when the pass' caption map has no non-empty text under its id. A pass
+ * that lists no captions at all (an older one, written before the map was carried)
+ * reads as covering nothing — the map is what the count is over.
+ *
+ * With no pass selected every media item is uncaptioned, because there is no pass to
+ * be covered by.
+ *
+ * Non-vacuity: deriving this from anything but the caption map — a stored coverage
+ * string, the media count alone — must fail "a dataset with 2 media absent from the
+ * chosen captionset reports 2 uncaptioned".
+ */
+export function uncaptionedCount(dataset: CaptionedSet, captionsetId: string | null): number {
+  const set = captionsetId ? dataset.captionsets.find((c) => c.id === captionsetId) : undefined;
+  const captions = set?.captions;
+  if (!captions) return dataset.media.length;
+  return dataset.media.filter((m) => {
+    const text = captions[m.id];
+    return typeof text !== 'string' || text.trim() === '';
+  }).length;
+}
+
+/** The coverage of the chosen pass as words, for the line above the two metered
+ *  actions. A pass whose caption map is not carried says so rather than reporting a
+ *  gap it cannot see. */
+export function captionCoverageLine(dataset: CaptionedSet, captionsetId: string | null): string {
+  const total = dataset.media.length;
+  const set = captionsetId ? dataset.captionsets.find((c) => c.id === captionsetId) : undefined;
+  if (!set) return `no caption pass is selected — all ${total} ${total === 1 ? 'image' : 'images'} would be uncaptioned`;
+  if (!set.captions) {
+    return set.coverage
+      ? `this pass reports ${set.coverage}; which images it covers is not listed here`
+      : 'which images this pass covers is not listed here';
+  }
+  const missing = uncaptionedCount(dataset, captionsetId);
+  if (missing === 0) return `all ${total} ${total === 1 ? 'image is' : 'images are'} captioned in this pass`;
+  return `${missing} of ${total} ${total === 1 ? 'image has' : 'images have'} no caption in this pass`;
+}
+
+/**
+ * Why a decompose over the chosen pass is refused, or `null` when it may run.
+ *
+ * A decompose reads ONE caption pass and mines fragments from the captions in it. Run
+ * over a pass that does not cover the images just added, it mines the older images
+ * only, spends a chat call per caption doing it, and returns success — nothing on
+ * screen would say the new images contributed nothing. So the gap is a refusal, not a
+ * note, and it is named with the number the user can act on.
+ *
+ * A pass that does not carry its caption map is NOT refused: coverage is not knowable
+ * from here, and a refusal on an unknown is a path taken away rather than a spend
+ * prevented.
+ *
+ * Non-vacuity: dropping the refusal must fail "the decompose control is refused while
+ * any appended image is still uncaptioned".
+ */
+export function decomposeGateReason(dataset: CaptionedSet, captionsetId: string | null): string | null {
+  if (!captionsetId) return null;
+  const set = dataset.captionsets.find((c) => c.id === captionsetId);
+  if (!set || !set.captions) return null;
+  const missing = uncaptionedCount(dataset, captionsetId);
+  if (missing === 0) return null;
+  const total = dataset.media.length;
+  return `${missing} of ${total} images have no caption in this pass — caption the set first, or a decompose reads the captioned images only.`;
+}
+
+/**
+ * The append request for a set of uploaded media URLs, or `null` when there is
+ * nothing to append.
+ *
+ * The null is the point: an empty selection must fire NO request. A `POST` with an
+ * empty `mediaUrls` would still mint a new dataset version and recompute every pass'
+ * coverage denominator over an unchanged set — a version that records nothing having
+ * happened.
+ *
+ * Non-vacuity: returning a request for an empty list must fail "appending with no
+ * files chosen fires no request".
+ */
+export function appendMediaRequest(
+  mediaUrls: readonly string[],
+): Extract<AddDatasetMediaRequest, { source: 'upload' }> | null {
+  const urls = mediaUrls.filter((u) => typeof u === 'string' && u.trim() !== '');
+  if (urls.length === 0) return null;
+  return { source: 'upload', mediaUrls: urls.slice() };
+}
+
+/**
+ * Put the dataset an append returned back into the list the screen renders from.
+ *
+ * The response carries the new version and every pass' recomputed coverage, so it —
+ * not a locally patched copy of what was on screen — is what everything downstream
+ * reads: the garden is pooled from `media`, and the version is what a later reader
+ * trusts.
+ *
+ * Non-vacuity: keeping the pre-append copy must fail "the floor is rebuilt from the
+ * dataset the append returned, not from the pre-append copy".
+ */
+export function replaceDataset<T extends { id: string }>(list: readonly T[] | null | undefined, updated: T): T[] {
+  const current = list ?? [];
+  return current.some((d) => d.id === updated.id)
+    ? current.map((d) => (d.id === updated.id ? updated : d))
+    : [...current, updated];
+}
+
+/** The files that did not upload, named, or `null` when every one landed. A partial
+ *  batch is reported and the rest is still appended: dropping the whole batch because
+ *  one file failed loses the user's other files for no reason. */
+export function appendFailureNote(failed: readonly string[]): string | null {
+  if (failed.length === 0) return null;
+  return `${failed.length} did not upload and ${failed.length === 1 ? 'was' : 'were'} not added: ${failed.join(', ')}`;
 }
