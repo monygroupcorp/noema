@@ -129,3 +129,57 @@
 /* the phrase itself gets the room: it is the part the user is actually writing */
 .muse-add-text { flex: 1 1 200px; min-width: 0; }
 .muse-add-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+/* ── The launcher (noema-244) ─────────────────────────────────────────────────
+   The front door: configure, then one control that carries the price and fires a
+   stream. It sits above the grid and it STICKS, because the stop button has to stay
+   reachable however long the grid below it grows — a stream nobody can stop without
+   scrolling is the failure mode of a surface that keeps adding tiles to itself. */
+.muse-launcher {
+  position: sticky; top: 0; z-index: 4;
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0 0 16px; padding: 12px;
+  border: 1px solid var(--hair); border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+.muse-launcher-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.muse-launcher-floor { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+.muse-mode {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  border: 1px solid var(--hair-soft); border-radius: 10px; padding: 6px 10px; margin: 0;
+}
+.muse-mode legend { padding: 0 4px; }
+.muse-mode-opt { display: inline-flex; gap: 5px; align-items: center; font-size: 12.5px; }
+.muse-cap { width: 5.5em; }
+.muse-mode:disabled { opacity: 0.55; }
+
+/* The infinite warning is a gate, not a caption: it is the control's own precondition,
+   so it reads as part of the control rather than as small print beside it. */
+.muse-ack {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 9px 11px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--hair));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 12.5px; line-height: 1.45;
+}
+.muse-ack input { margin-top: 2px; flex: 0 0 auto; }
+
+.muse-launch, .muse-stop { flex: 0 0 auto; }
+/* Infinite mode has no progress bar and no total, so this line is the only place the
+   money is watchable while a stream rides. It gets room and it does not truncate. */
+.muse-state { flex: 1 1 220px; min-width: 0; color: var(--muted); font-size: 11.5px; }
+
+.muse-empty-floor { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.linkish {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--accent-soft); font: inherit; text-decoration: underline;
+}
+.linkish:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+
+/* The manual path (D3): still here, closed by default, and labelled as the manual one. */
+.muse-manual { margin-top: 14px; border-top: 1px solid var(--hair-soft); padding-top: 10px; }
+.muse-manual-summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.muse-manual-summary:hover { color: var(--accent-soft); }
