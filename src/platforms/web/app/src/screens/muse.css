@@ -83,13 +83,30 @@
 .muse-expanded-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 
 /* the dock: the floor in one line, and the handle that pulls the sheet up (noema-241) */
-.muse-dock {
+/* The dock and the steer keyboard travel together: one sticky block at the bottom of the
+   viewport, phone first. It sits BELOW the grid — the newest tile lands at the top, so
+   nothing here can cover it — and the whole block stays reachable while a stream runs. */
+.muse-steerdock {
   position: sticky; bottom: 0; z-index: 40;
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 6px;
   margin-top: 14px; padding: 8px 10px;
   border: 1px solid var(--hair); border-radius: 12px;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(6px);
+}
+.muse-dock {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+/* one line, and it is the line: a steer is a short push, not a prompt */
+.muse-steer { display: flex; gap: 8px; align-items: center; }
+.muse-steer-input { flex: 1 1 auto; min-width: 0; }
+.muse-steer-send { flex: 0 0 auto; }
+.muse-steer-note { font-size: 11px; color: var(--muted); }
+/* S12's offer: a line, not a control that spends. It reads as a suggestion and it
+   pre-fills the box — the send is still the user's. */
+.muse-steer-offer {
+  border: 0; background: none; padding: 0; text-align: left; cursor: pointer;
+  color: var(--accent-soft); font: inherit; font-size: 11.5px; text-decoration: underline;
 }
 .muse-dock-count { font-size: 11.5px; color: var(--muted); }
 .muse-dock .btn { margin-left: auto; }
@@ -219,3 +236,18 @@
 .muse-add-readout { font-size: 12.5px; color: var(--ink, inherit); }
 .muse-add-step { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .muse-add-step .gt-sub { flex: 1 1 240px; min-width: 0; }
+
+/* ── The consent sheet (noema-261) ────────────────────────────────────────────
+   A proposal awaiting a ruling, and deliberately a different surface from the cutting
+   floor it is about: same pull-up chrome so it is recognised, its own pills so it is not
+   mistaken for the standing state. A rejected pill is struck through and STAYS — "what
+   did I say no to" has to be answerable without closing the sheet. */
+.muse-consent-pills { margin-top: 6px; }
+.muse-consent-pill { text-align: left; }
+.muse-consent-verb { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.muse-consent-pill.elimination { border-color: color-mix(in srgb, var(--bad, #e0668f) 55%, transparent); }
+.muse-consent-pill.addition { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.muse-consent-pill.vetoed { opacity: 0.42; text-decoration: line-through; }
+.muse-consent-dropped { margin-top: 10px; }
+.muse-consent-outcome { margin-top: 10px; }
+.muse-consent-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
