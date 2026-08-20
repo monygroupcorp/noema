@@ -1400,6 +1400,24 @@ const CreateDatasetRequestSchema: JsonSchema = {
   required: ['source', 'name', 'modality'],
 }
 
+/** The request body for `POST /v1/data/datasets/:id/media` — the same discriminated ingestion
+ *  shape as creation, minus the fields that describe the dataset itself. */
+const AddDatasetMediaRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    "Append media to an existing dataset. Same two ingestion paths as creation: `source: " +
+    "'upload'` takes media already dropped via `POST /storage/uploads/sign` (mediaUrls), " +
+    "`source: 'generation'` resolves media from the caller's own completed Acta (actumIds). " +
+    'Append-only — the supplied items are added after the media already present, and nothing ' +
+    'existing is replaced, reordered or removed.',
+  properties: {
+    source: { type: 'string', enum: ['upload', 'generation'] },
+    mediaUrls: { type: 'array', items: { type: 'string' }, description: "Required when source === 'upload'." },
+    actumIds: { type: 'array', items: { type: 'string' }, description: "Required when source === 'generation'." },
+  },
+  required: ['source'],
+}
+
 /** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
 const DatasetEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -1846,6 +1864,15 @@ export const API_CONTRACT: ApiContract = {
       summary: "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
       auth: true,
       request: CreateDatasetRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/media',
+      summary:
+        "Append media to a dataset the caller owns, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: AddDatasetMediaRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {

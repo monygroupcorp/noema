@@ -1,12 +1,13 @@
 import { Collection, Filter, Document } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import { captionCoverage } from '../types/dataset.js'
+import { captionCoverage, nextDatasetVersion } from '../types/dataset.js'
 import type { Fragment } from './muse/taxonomy.js'
 import type {
   Captionset,
   Dataset,
   DatasetListOpts,
   DatasetListPage,
+  DatasetMediaItem,
   DatasetSummary,
   DatasetSummaryListPage,
   Datasets,
@@ -100,6 +101,46 @@ export class MongoDataset implements Datasets {
 
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
     return this._page(opts)
+  }
+
+  /**
+   * Append media to the dataset.
+   *
+   * `$push`/`$each`, never `$set` on `media`: the array is append-only by contract, and every
+   * captionset's caption map plus every media item's fragments are keyed on
+   * `DatasetMediaItem.id`. A whole-array write would carry the same risk positionally that
+   * `setFragments` documents, and would do it invisibly.
+   *
+   * Three derived facts move with the append, in the same update:
+   *   • `mutatum` — the pagination sort key (`_page` sorts `{mutatum:-1, id:-1}`).
+   *   • a new `DatasetVersion` whose `count` is the media count AFTER the append; the string
+   *     comes from `nextDatasetVersion`, which is shared so no double can derive it differently.
+   *   • every existing captionset's `coverage`, recomputed through the same `captionCoverage`
+   *     helper `addCaptionset`/`setCaption` use. Coverage is `captions present / media.length`,
+   *     so an append moves the denominator: a pass reading `7/7` reads `7/9` once two items
+   *     land. Leaving it would let a caption pass keep claiming a completeness it no longer has.
+   */
+  async addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+
+    const media = [...current.media, ...items]
+    const captionsets = current.captionsets.map((c) => ({
+      ...c,
+      coverage: captionCoverage(c.captions, media.length),
+    }))
+    const mutatum = new Date()
+    const version = { v: nextDatasetVersion(current.versions), count: media.length, when: mutatum }
+    const versions = [...current.versions, version]
+
+    await this.col.updateOne(
+      { id: datasetId },
+      {
+        $push: { media: { $each: items }, versions: version },
+        $set: { captionsets, mutatum },
+      } as Document,
+    )
+    return { ...current, media, captionsets, versions, mutatum }
   }
 
   /** Attach a captionset, replacing one already carrying the same id rather than
