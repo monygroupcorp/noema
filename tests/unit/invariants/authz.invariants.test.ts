@@ -979,6 +979,13 @@ test('COVERAGE GUARD: every public CrystalApi method that resolves ownership has
       `'${method}' is listed in UNCOVERED_METHODS but no longer reads as a public CrystalApi ` +
         'method that resolves ownership — remove the entry',
     )
+    assert.ok(
+      !SMOKED_METHODS.has(method),
+      `'${method}' is listed in UNCOVERED_METHODS and also has a two-identity case driving it. ` +
+        'A method that has a case is covered by the case: delete the allowlist entry. While both ' +
+        'are present the coverage this guard reports can be supplied by either one, so deleting ' +
+        'the case would not surface here.',
+    )
   }
 })
 
