@@ -64,7 +64,9 @@ export interface ListRunsOpts {
 }
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import { captionCoverage } from '../../types/dataset.js'
-import type { Captionset, CreateDatasetInput, Dataset, DatasetSummary, Datasets } from '../../types/dataset.js'
+import type {
+  Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets, IngestMediaInput,
+} from '../../types/dataset.js'
 import { floorToEntries } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
@@ -1860,28 +1862,7 @@ export class CrystalApi {
       throw Errors.inputMalformed("modality must be one of 'image' | 'video' | 'audio' | '3d'")
     }
 
-    let media: Dataset['media']
-    if (input.source === 'upload') {
-      if (!Array.isArray(input.mediaUrls) || input.mediaUrls.length === 0) {
-        throw Errors.inputMalformed('mediaUrls is required and must be non-empty for an upload dataset')
-      }
-      media = input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now }))
-    } else {
-      if (!Array.isArray(input.actumIds) || input.actumIds.length === 0) {
-        throw Errors.inputMalformed('actumIds is required and must be non-empty for a generation-seeded dataset')
-      }
-      const acta = await Promise.all(input.actumIds.map((id) => this.deps.actorum.findById(id)))
-      media = []
-      for (let i = 0; i < acta.length; i++) {
-        const actum = acta[i]
-        const actumId = input.actumIds[i]
-        if (!actum || !(await this._owns(auctor, actum))) throw Errors.notFoundRun(actumId)
-        if (actum.status !== 'completus') throw Errors.inputMalformed(`Actum '${actumId}' has not completed`)
-        const urls = this._urlsFromExitus(actum.exitus)
-        for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now })
-      }
-      if (media.length === 0) throw Errors.inputMalformed('none of the referenced Acta produced usable media')
-    }
+    const media = await this._mintMedia(auctor, input, now)
 
     return store.create({
       owner,
@@ -1892,6 +1873,67 @@ export class CrystalApi {
       captionsets: [],
       versions: [{ v: '1.0.0', count: media.length, when: now }],
     })
+  }
+
+  /** Mint `DatasetMediaItem`s from either v1 ingestion shape. The ONE minting path: dataset
+   *  creation and a later media append both come through here, so the two cannot diverge on
+   *  what a valid body is, on how an id is assigned, or on what a `generation` source is
+   *  allowed to reach. A named Actum must be the caller's own and `completus` — resolved from
+   *  the authenticated caller, never from anything else in the body. */
+  private async _mintMedia(auctor: AuctorKey, input: IngestMediaInput, now: Date): Promise<DatasetMediaItem[]> {
+    if (input.source === 'upload') {
+      if (!Array.isArray(input.mediaUrls) || input.mediaUrls.length === 0) {
+        throw Errors.inputMalformed('mediaUrls is required and must be non-empty for an upload source')
+      }
+      return input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now }))
+    }
+
+    if (!Array.isArray(input.actumIds) || input.actumIds.length === 0) {
+      throw Errors.inputMalformed('actumIds is required and must be non-empty for a generation source')
+    }
+    const acta = await Promise.all(input.actumIds.map((id) => this.deps.actorum.findById(id)))
+    const media: DatasetMediaItem[] = []
+    for (let i = 0; i < acta.length; i++) {
+      const actum = acta[i]
+      const actumId = input.actumIds[i]
+      if (!actum || !(await this._owns(auctor, actum))) throw Errors.notFoundRun(actumId)
+      if (actum.status !== 'completus') throw Errors.inputMalformed(`Actum '${actumId}' has not completed`)
+      const urls = this._urlsFromExitus(actum.exitus)
+      for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now })
+    }
+    if (media.length === 0) throw Errors.inputMalformed('none of the referenced Acta produced usable media')
+    return media
+  }
+
+  /**
+   * Append media to a Dataset the caller owns.
+   *
+   * A dataset's media set grows: `DatasetVersion` is documented as a snapshot that grows as
+   * media is added, and `Captionset.captions` is keyed by media id precisely so an append does
+   * not re-bind captions. This is the writer under that contract.
+   *
+   * APPEND-ONLY, deliberately. Nothing here removes, replaces or reorders media — removal has
+   * consequences for caption maps, for fragments already decomposed off an item, and for the
+   * provenance of a model trained from the dataset, and it is a separate decision.
+   *
+   * Ownership resolves through `getDataset` — the same seam `addCaptionset` uses — so the owner
+   * comes from the authenticated caller and never from a request parameter; a dataset the caller
+   * does not own reports as not found, exactly as an id that never existed does. The body is the
+   * same discriminated ingestion shape `POST /v1/data/datasets` takes, minted through the same
+   * path; a body matching neither shape is a 400.
+   */
+  async addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+
+    const body = (input ?? {}) as Partial<IngestMediaInput>
+    if (body.source !== 'upload' && body.source !== 'generation') {
+      throw Errors.inputMalformed("source must be 'upload' or 'generation'")
+    }
+
+    const items = await this._mintMedia(auctor, body as IngestMediaInput, new Date())
+    const updated = await this._datasetsStore().addMedia(d.id, items)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
   }
 
   /** Attach (or replace) a captionset on a Dataset the caller owns. The captionset id

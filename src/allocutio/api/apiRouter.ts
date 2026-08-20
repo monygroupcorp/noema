@@ -153,6 +153,7 @@ export interface ApiFacade {
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
   getDataset(auctor: AuctorKey, id: string): Promise<import('../../types/dataset.js').Dataset>
   createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
+  addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
   // --- Muse sessions (a dataset break-off with its own floor and piece ledger) ---
@@ -958,6 +959,17 @@ export function createApiRouter(deps: {
   router.post('/data/datasets', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ dataset: await api.createDataset(auctor, req.body ?? {}) })
+  }))
+
+  // POST /v1/data/datasets/:id/media — append media to a dataset the caller owns. Same
+  // discriminated ingestion body as `POST /v1/data/datasets` and the same minting path, so a
+  // dataset grows the way it was seeded. Append-only: nothing here removes, replaces or
+  // reorders media, and the response carries the new `DatasetVersion` plus every captionset's
+  // recomputed coverage. The owner comes from `auth(req)` and nowhere else; a stranger's
+  // dataset id 404s.
+  router.post('/data/datasets/:id/media', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.status(201).json({ dataset: await api.addDatasetMedia(auctor, String(req.params.id), req.body ?? {}) })
   }))
 
   // POST /v1/data/datasets/:id/captionsets — attach a captionset (its caption text keyed by
