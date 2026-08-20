@@ -6,8 +6,13 @@ import { buildGarden } from '../../../src/crystal/muse/garden.js'
 import {
   DEFAULT_FRAGMENT_STATE,
   DuplicatePieceError,
+  EmptyFragmentTextError,
+  MANUAL_SOURCE,
+  UnknownCategoryError,
   UnknownFragmentError,
   UnknownPieceError,
+  addFragment,
+  manualFragment,
   enabledFragments,
   fragmentStateOf,
   holdsFragment,
@@ -428,4 +433,125 @@ test('an update naming a run the ledger does not hold is rejected rather than re
     },
   )
   assert.equal(ledger.pieces.length, 1, 'an update created a ledger entry')
+})
+
+// ---------------------------------------------------------------------------
+// The manual add (noema-242) — the free way to widen a floor
+//
+// Every other mutator here reweights a floor. This one WIDENS it, and it does so
+// for nothing: the four tests below are the four properties that make it the free
+// half of the add — no model behind it, inside the taxonomy, never reaching the
+// mother, and never a second copy of one identity.
+// ---------------------------------------------------------------------------
+
+test('a manual add reaches no model and no key', () => {
+  const session = spawnSession('mother-dataset', motherFragments())
+
+  // Synchronous by construction. A path that called a model would have to be
+  // awaited, so a thenable here is the shape of a manual add that stopped being
+  // free — this assertion is what a fetch on the add path breaks.
+  const fragment = manualFragment('mood', 'a wet street at dawn')
+  const widened = addFragment(session, fragment)
+  assert.ok(!(widened instanceof Promise), 'the add path returned a promise')
+  assert.equal(typeof (widened as { then?: unknown }).then, 'undefined', 'the add path is awaitable')
+  assert.equal(typeof (fragment as { then?: unknown }).then, 'undefined', 'building the fragment is awaitable')
+
+  // The fragment carries exactly the four fields a fragment has: no flow, no model,
+  // no key, no quote came back with it.
+  assert.deepEqual(
+    Object.keys(widened.fragments.at(-1)!).sort(),
+    ['category', 'source', 'text', 'trigger'],
+    'a manually added fragment carries a field a fragment does not have',
+  )
+
+  // Attribution is stated rather than inferred: the source says the user wrote it,
+  // and the trigger is empty because there is no model binding behind it.
+  assert.equal(widened.fragments.at(-1)!.source, MANUAL_SOURCE)
+  assert.equal(widened.fragments.at(-1)!.trigger, '')
+
+  // It lands in the draw at even odds, like every other fragment on the floor.
+  assert.deepEqual(fragmentStateOf(widened, fragment), { ...DEFAULT_FRAGMENT_STATE })
+})
+
+test('a fragment cannot be added outside the taxonomy', () => {
+  assert.throws(
+    () => manualFragment('vibe', 'something ineffable'),
+    (error: unknown) => {
+      assert.ok(error instanceof UnknownCategoryError)
+      assert.equal(error.category, 'vibe')
+      return true
+    },
+  )
+
+  // A fragment needs text of its own — an empty phrase has no identity to key it by.
+  assert.throws(() => manualFragment('mood', '   '), EmptyFragmentTextError)
+
+  // And the reason the constraint matters: a fragment inside the taxonomy lands in a
+  // pool the sampler actually reads, so it can be drawn. One filed anywhere else
+  // would sit on the floor and never appear in a roll.
+  const widened = addFragment(
+    spawnSession('mother-dataset', motherFragments()),
+    manualFragment('outfit', 'a borrowed overcoat'),
+  )
+  const garden = buildGarden(enabledFragments(widened)).garden
+  assert.ok(
+    (garden.outfit ?? []).some((f) => f.text === 'a borrowed overcoat'),
+    'a manually added fragment did not reach a pool the sampler reads',
+  )
+  // The only outfit fragment on this floor, so every roll must draw it.
+  assert.equal((garden.outfit ?? []).length, 1)
+  const drawn = rollFragments(garden, 0, widened.floor)
+  assert.ok(
+    drawn.some((f) => f.text === 'a borrowed overcoat'),
+    'a manually added fragment was never drawable',
+  )
+})
+
+test('a manual add never writes the mother dataset', () => {
+  const mother = motherFragments()
+  const motherBefore = mother.map((f) => ({ ...f }))
+  const session = spawnSession('mother-dataset', mother)
+
+  const widened = addFragment(session, manualFragment('style', 'hand-tinted photograph'))
+
+  // The mother's own fragment list is the array the session was spawned from. A manual
+  // add appends to a new list; it must not reach that one, by reference or by write.
+  assert.deepEqual(mother, motherBefore, 'the mother dataset\'s fragments were mutated')
+  assert.equal(mother.length, motherBefore.length, 'a fragment was pushed onto the mother')
+  assert.ok(
+    !mother.some((f) => f.text === 'hand-tinted photograph'),
+    'a manually added fragment reached the mother dataset',
+  )
+
+  // The session it was called on is unchanged too — same immutable convention as
+  // every other mutator in this module.
+  assert.equal(session.fragments.length, motherBefore.length)
+  assert.equal(widened.fragments.length, motherBefore.length + 1)
+  assert.equal(widened.motherDatasetId, 'mother-dataset')
+})
+
+test('adding a fragment already on the floor does not duplicate it', () => {
+  const session = spawnSession('mother-dataset', motherFragments())
+  const once = addFragment(session, manualFragment('props', 'a paper lantern'))
+  const twice = addFragment(once, manualFragment('props', 'a paper lantern'))
+
+  assert.equal(twice, once, 'a second add of one identity produced a new session')
+  assert.equal(
+    twice.fragments.filter((f) => f.text === 'a paper lantern').length, 1,
+    'one fragment landed on the floor twice, doubling its odds',
+  )
+  assert.equal(twice.floor.size, twice.fragments.length)
+
+  // The identity is `fragmentKey`, which trims and folds case — so a retype that
+  // differs only in spacing or case is the same fragment, not a second one.
+  const retyped = addFragment(twice, manualFragment('props', '  A Paper Lantern  '))
+  assert.equal(retyped, twice, 'a retyped identity was added as a second fragment')
+
+  // A fragment a steer has darkened is still one the floor holds: adding it again
+  // does not quietly re-enable it or add a live copy beside the dark one.
+  const darkened = setFragmentEnabled(twice, { category: 'props', text: 'a paper lantern' }, false)
+  const readded = addFragment(darkened, manualFragment('props', 'a paper lantern'))
+  assert.equal(readded, darkened)
+  assert.equal(fragmentStateOf(readded, { category: 'props', text: 'a paper lantern' })?.enabled, false)
+  assert.equal(readded.fragments.filter((f) => fragmentKey(f) === 'props:a paper lantern').length, 1)
 })
