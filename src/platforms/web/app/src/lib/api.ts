@@ -729,6 +729,16 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/fragments`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify(fragment),
     }).then(j<{ session: MuseSessionView }>),
+  // POST …/steer — a short instruction against the session's floor in, a PROPOSAL out.
+  // NOTHING IS APPLIED by this call: the response is what the consent sheet is rendered
+  // from, every pill in it is vetoable, and the floor moves only through the two floor
+  // calls above, made when the user confirms. The floor is resolved server-side from the
+  // session the caller owns — it is not a parameter — so the body carries the instruction
+  // and nothing else. METERED: one model call, priced by `quote` above before it is sent.
+  steerMuseSession: (id: string, instruction: string) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/steer`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ instruction }),
+    }).then(j<{ proposal: MuseSteerProposal }>),
   // Append-only, one entry per run: a piece is recorded once, at fire time, with the
   // lineage that produced it. A second record for the same run is rejected.
   recordMusePiece: (id: string, piece: MusePieceRecord) =>
@@ -1183,6 +1193,22 @@ export interface MuseSessionView {
 }
 /** A fragment as a request body names it: by its identity, never by position. */
 export interface MuseFragmentIdentity { category: FragmentCategory; text: string }
+/**
+ * What a steer PROPOSES — and only proposes. Mirrors `src/crystal/muse/steer.ts#SteerProposal`
+ * the same way the shapes above mirror the session schemas.
+ *
+ * Nothing in it has been applied. `eliminations` name fragments the floor holds and the
+ * instruction would take out of the draw; `additions` are fragments that are not on the
+ * floor and would join it; `dropped` is how many of the model's proposed changes did not
+ * survive server-side validation, reported rather than swallowed so a shorter list is not
+ * mistaken for the whole answer. The proposal is not stored anywhere — it lives for as
+ * long as the sheet rendering it is open.
+ */
+export interface MuseSteerProposal {
+  eliminations: MuseFragmentIdentity[];
+  additions: Fragment[];
+  dropped: number;
+}
 /** What is recorded at fire time. A reaction is attached afterwards — see `updateMusePiece`. */
 export interface MusePieceRecord {
   runId: string;

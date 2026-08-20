@@ -9,6 +9,7 @@ import {
   type FragmentCategory,
   type MuseReaction,
   type MuseSessionView,
+  type MuseSteerProposal,
 } from '../lib/api';
 import { useRunStream } from '../lib/runStream';
 import {
@@ -21,6 +22,9 @@ import {
 import {
   admitPiece,
   appendFailureNote,
+  confirmOutcomeNote,
+  dismissalOffer,
+  droppedNote,
   appendMediaRequest,
   applyRunResult,
   buildGarden,
@@ -36,6 +40,7 @@ import {
   gardenCounts,
   ignitionBlockReason,
   ignitionRequest,
+  instructionRemaining,
   latestSession,
   launchBlockReason,
   launchLabel,
@@ -47,23 +52,37 @@ import {
   pieceRecord,
   decomposeGateReason,
   poolDatasetFragments,
+  proposalPills,
   reactionOf,
+  recordDismissal,
+  recordFloorChange,
   recordedPiece,
   releasePending,
   replaceDataset,
   rollAt,
   rollCurated,
   savedOf,
+  steerBlockReason,
+  steerFloor,
+  steerQuoteRequest,
   streamColumns,
   streamPiece,
   streamStatusLine,
   t2iFlows,
   weightWrites,
+  writeLabel,
+  writesForConfirm,
   EMPTY_STREAM,
   EXPANDED_GESTURES,
   MANUAL_CATEGORIES,
+  MAX_FLOOR_FRAGMENTS,
+  MAX_INSTRUCTION_CHARS,
+  NO_DISMISSALS,
   TILE_GESTURES,
+  type DismissalState,
   type FloorPill,
+  type SheetPhase,
+  type SteerPill,
   type RollReport,
   type RunResult,
   type StopCause,
@@ -313,6 +332,24 @@ export function Muse() {
   const [reacting, setReacting] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
+  // ── The steer keyboard and the consent sheet (noema-261) ──────────────────
+  // The instruction, its price, the proposal it came back with, and the vetoes on that
+  // proposal. THE PROPOSAL IS NOT PERSISTED — it lives for the length of the sheet, by
+  // ruling: it is a reading of a floor at a moment, and the floor is the durable object.
+  const [steerText, setSteerText] = useState('');
+  const [steerQuote, setSteerQuote] = useState<string | null>(null);
+  const [steerQuoteError, setSteerQuoteError] = useState<string | null>(null);
+  const [steering, setSteering] = useState(false);
+  const [steerError, setSteerError] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<
+    { proposal: MuseSteerProposal; vetoed: Set<string>; phase: SheetPhase; outcome: string | null } | null
+  >(null);
+  const [applying, setApplying] = useState(false);
+  // Dismissals since the floor last moved (S12). The offer is derived from this and from
+  // nothing else, and every floor write below resets it.
+  const [dismissals, setDismissals] = useState<DismissalState>(NO_DISMISSALS);
+  const steerInput = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     if (!id) return;
     let live = true;
@@ -333,10 +370,14 @@ export function Muse() {
     setReacting(runId);
     try {
       let next = (await api.updateMusePiece(session.id, runId, { reaction })).session;
-      for (const write of weightWrites(next, runId, reaction)) {
+      const writes = weightWrites(next, runId, reaction);
+      for (const write of writes) {
         next = (await api.setMuseFragmentWeight(session.id, write.fragment, write.weight)).session;
       }
       setSession(next);
+      // A weight write is a floor change, so the dismissal count starts again (S12). 😂
+      // produces no writes and is not one — it is recorded and steers nothing.
+      if (writes.length > 0) setDismissals(recordFloorChange);
     } catch (e) {
       setSessionError(`that reaction didn't land: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -349,6 +390,9 @@ export function Muse() {
     if (!session) return;
     setExpanded((cur) => (cur === runId ? null : cur));
     setStream((s) => dismissFromStream(s, runId));
+    // Counted, and counted is all: ✕ moves no floor by itself. Three in a row with no
+    // floor change between them earn an OFFER to steer — never a steer.
+    setDismissals(recordDismissal);
     try {
       setSession((await api.updateMusePiece(session.id, runId, { dismissed: true })).session);
     } catch (e) {
@@ -381,6 +425,7 @@ export function Muse() {
     setFloorBusy(`${pill.category}:${pill.text}`);
     try {
       setSession((await api.setMuseFragmentEnabled(session.id, fragment, enabled)).session);
+      setDismissals(recordFloorChange);
     } catch (e) {
       setSessionError(`that fragment didn't move: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -397,6 +442,7 @@ export function Muse() {
     setAdding(true);
     try {
       setSession((await api.addMuseFragment(session.id, manualAddRequest(category, text))).session);
+      setDismissals(recordFloorChange);
       return true;
     } catch (e) {
       setSessionError(`that fragment didn't land: ${e instanceof Error ? e.message : String(e)}`);
@@ -404,6 +450,96 @@ export function Muse() {
     } finally {
       setAdding(false);
     }
+  }
+
+  // ── The steer (noema-261) ─────────────────────────────────────────────────
+  // What one steer will read: the fragments in the draw, mirroring what the route
+  // resolves server-side. It is what the price is quoted against and what the per-steer
+  // floor cap is judged against, so it is derived from the session rather than from this
+  // screen's own curation.
+  const steerIds = useMemo(() => steerFloor(session), [session]);
+  const steerBlock = steerBlockReason({ view: session, instruction: steerText, inFlight: steering });
+  const offer = dismissalOffer(dismissals);
+
+  // THE PRICE IS SHOWN BEFORE THE SEND, ONCE — the pattern the launch control already
+  // uses. The reservation is a base plus a per-floor-fragment term and does not read the
+  // instruction's content, so this re-quotes when the FLOOR SIZE changes and never on a
+  // keystroke. It is an estimate and is rendered with `~`: the server prices and charges
+  // the run when it settles.
+  useEffect(() => {
+    if (steerIds.length === 0 || steerIds.length > MAX_FLOOR_FRAGMENTS) { setSteerQuote(null); return; }
+    let live = true;
+    setSteerQuoteError(null);
+    api.quote(steerQuoteRequest('', steerIds))
+      .then((r) => { if (live) setSteerQuote(r.impetus); })
+      .catch((e) => {
+        if (!live) return;
+        setSteerQuote(null);
+        setSteerQuoteError(`couldn't price a steer: ${errText(e)}`);
+      });
+    return () => { live = false; };
+    // The instruction does not enter the price; the floor size does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steerIds.length]);
+
+  // Send the instruction. ONE metered call, and it applies nothing: what comes back is a
+  // proposal, and the sheet it opens is where it is ruled on. THE STREAM IS NOT PAUSED —
+  // pieces already in flight are paid for, the loop re-reads the floor before every draw,
+  // and the confirm is the cut line.
+  async function doSteer() {
+    if (!session || steerBlock) return;
+    setSteering(true);
+    setSteerError(null);
+    try {
+      const { proposal } = await api.steerMuseSession(session.id, steerText.trim());
+      setSheet({ proposal, vetoed: new Set(), phase: 'reviewing', outcome: null });
+    } catch (e) {
+      setSteerError(`that steer didn't run: ${errText(e)}`);
+    } finally {
+      setSteering(false);
+    }
+  }
+
+  /** Tap a pill to veto it, tap it again to put it back. A veto is recorded against the
+   *  fragment's identity, which is what `writesForConfirm` filters on. */
+  function toggleVeto(key: string) {
+    setSheet((cur) => {
+      if (!cur || cur.phase === 'confirmed') return cur;
+      const vetoed = new Set(cur.vetoed);
+      if (vetoed.has(key)) vetoed.delete(key); else vetoed.add(key);
+      return { ...cur, vetoed };
+    });
+  }
+
+  // Confirm — the cut line, and the only place a steer reaches the floor. The writes are
+  // decided by `writesForConfirm` and applied SEQUENTIALLY, each stepping from the session
+  // the previous call returned, exactly as the reaction writes do. A call that fails does
+  // not take the rest with it: what landed stays landed and the sheet names what did not.
+  async function confirmSheet() {
+    if (!session || !sheet || applying) return;
+    const writes = writesForConfirm(sheet.proposal, sheet.vetoed, 'confirmed');
+    if (writes.length === 0) { setSheet(null); return; }
+    setApplying(true);
+    let next = session;
+    let landed = 0;
+    const failed: string[] = [];
+    for (const write of writes) {
+      try {
+        next = write.kind === 'disable'
+          ? (await api.setMuseFragmentEnabled(next.id, write.fragment, false)).session
+          : (await api.addMuseFragment(next.id, write.fragment)).session;
+        landed += 1;
+      } catch (e) {
+        failed.push(`${writeLabel(write)} (${errText(e)})`);
+      }
+    }
+    setSession(next);
+    // A confirmed sheet is a floor change like any other, so the dismissal count that may
+    // have prompted it starts again from zero.
+    if (landed > 0) setDismissals(recordFloorChange);
+    setSheet((cur) => (cur ? { ...cur, phase: 'confirmed', outcome: confirmOutcomeNote(landed, failed) } : cur));
+    setApplying(false);
+    if (failed.length === 0) setSteerText('');
   }
 
   const expandedPiece = expanded
@@ -1210,9 +1346,53 @@ export function Muse() {
           />
         )}
 
-        {/* The dock: the floor in one line, and the handle that pulls the sheet up (V1).
-            The counts come off the session, so they say what the floor holds rather than
-            what this screen last did to it. */}
+        {/* The dock (V1) and the steer keyboard (S3, S14), in one sticky block at the
+            bottom of the viewport. It is reachable while the stream runs, and it sits
+            BELOW the grid rather than over it — the newest tile lands at the top, so
+            nothing here covers it. */}
+        <div className="muse-steerdock">
+          {/* S12's offer, and it is an offer: tapping it PRE-FILLS the instruction and
+              does nothing else. No steer is sent, nothing is spent, and the box is left
+              for the user to edit or ignore. */}
+          {offer && !sheet && (
+            <button
+              type="button"
+              className="muse-steer-offer"
+              onClick={() => { setSteerText(offer.instruction); steerInput.current?.focus(); }}
+            >
+              {offer.line}
+            </button>
+          )}
+
+          <form
+            className="muse-steer"
+            onSubmit={(e) => { e.preventDefault(); void doSteer(); }}
+          >
+            <input
+              ref={steerInput}
+              className="inp muse-steer-input"
+              type="text"
+              aria-label="steer the floor"
+              placeholder="say what to change — e.g. lose the neon, try dusk light"
+              value={steerText}
+              maxLength={MAX_INSTRUCTION_CHARS}
+              onChange={(e) => setSteerText(e.target.value)}
+            />
+            {/* Send is the ONLY thing that fires a steer: not blur, not a stray enter in
+                the scroll, not the offer above. */}
+            <button type="submit" className="btn accent sm muse-steer-send" disabled={!!steerBlock}>
+              {steering ? 'reading…' : (steerQuote ? `Steer → ~${steerQuote}` : 'Steer →')}
+            </button>
+          </form>
+
+          <div className="muse-steer-note mono">
+            {steerBlock && steerText.trim() !== ''
+              ? steerBlock
+              : (steerQuoteError
+                ?? `${instructionRemaining(steerText)} characters left · ~ is an estimate: the server prices this run when it settles`)}
+          </div>
+          {steerError && <div className="muse-steer-note mono">{steerError}</div>}
+
         <div className="muse-dock">
           <span className="mono muse-dock-count">
             {session
@@ -1229,6 +1409,22 @@ export function Muse() {
           </button>
         </div>
         {sessionError && <div className="muse-dock-note mono">{sessionError}</div>}
+        </div>
+
+        {/* The consent sheet (S9) — a proposal awaiting a ruling, and a DIFFERENT surface
+            from the cutting floor above, which is the standing state. */}
+        {sheet && (
+          <ConsentSheet
+            proposal={sheet.proposal}
+            vetoed={sheet.vetoed}
+            phase={sheet.phase}
+            outcome={sheet.outcome}
+            applying={applying}
+            onVeto={toggleVeto}
+            onConfirm={() => void confirmSheet()}
+            onClose={() => setSheet(null)}
+          />
+        )}
 
         {floorOpen && session && (
           <FloorSheet
@@ -1645,5 +1841,128 @@ function FloorSheet({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The consent sheet (S9) — what a steer proposed, awaiting a ruling.
+ *
+ * A DIFFERENT SURFACE FROM THE CUTTING FLOOR. The floor sheet is the standing state of the
+ * session; this is a proposal about it, and nothing in it has been applied. Every pill is
+ * vetoable by tapping, Cancel writes nothing at all, and Confirm is the only thing on this
+ * screen that turns a steer into floor writes.
+ *
+ * Three things it says out loud, each because leaving it unsaid misleads:
+ *
+ *   HOW MANY SUGGESTIONS WERE DROPPED. The route counts them precisely; swallowing the
+ *   count is how a user comes to believe they vetoed something never proposed to them.
+ *
+ *   THAT THE STREAM IS STILL RUNNING. Pieces already in flight are paid for and the loop
+ *   is not held — a piece that lands from the old floor while this is open is correct, and
+ *   the next draw after a confirmed write picks the new floor up on its own.
+ *
+ *   WHAT DID NOT LAND. A confirm that fails part-way keeps what landed and names the rest.
+ *
+ * It renders no provenance for an addition: a confirmed addition is stored through the
+ * floor-fragments route, which files it as a manual fragment, so a "proposed by a steer"
+ * label here would claim something the floor does not carry.
+ */
+function ConsentSheet({
+  proposal, vetoed, phase, outcome, applying, onVeto, onConfirm, onClose,
+}: {
+  proposal: MuseSteerProposal;
+  vetoed: ReadonlySet<string>;
+  phase: SheetPhase;
+  outcome: string | null;
+  applying: boolean;
+  onVeto: (key: string) => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const pills = proposalPills(proposal);
+  const dropped = droppedNote(proposal.dropped);
+  const surviving = writesForConfirm(proposal, vetoed, 'confirmed').length;
+  return (
+    <div className="muse-sheet muse-consent" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="muse-sheet-card" onClick={(e) => e.stopPropagation()}>
+        <div className="muse-sheet-head">
+          <span className="gc-l">proposed changes</span>
+          <span className="gt-sub mono">
+            {phase === 'confirmed'
+              ? 'applied'
+              : 'tap a pill to reject it · nothing moves until you confirm'}
+          </span>
+          <button type="button" className="btn ghost sm muse-sheet-close" onClick={onClose}>Close</button>
+        </div>
+
+        {pills.length === 0 ? (
+          <div className="gt-sub mono">this steer proposed no changes to your floor.</div>
+        ) : (
+          <div className="pref-chips muse-consent-pills">
+            {pills.map((pill) => (
+              <ConsentPill
+                key={`${pill.kind}:${pill.key}`}
+                pill={pill}
+                vetoed={vetoed.has(pill.key)}
+                disabled={phase === 'confirmed' || applying}
+                onVeto={onVeto}
+              />
+            ))}
+          </div>
+        )}
+
+        {dropped && <div className="gt-sub mono muse-consent-dropped">{dropped}</div>}
+
+        {phase === 'confirmed' ? (
+          <div className="gt-sub mono muse-consent-outcome">{outcome}</div>
+        ) : (
+          <>
+            <div className="muse-consent-foot">
+              <button type="button" className="btn ghost sm" disabled={applying} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="btn accent sm" disabled={applying} onClick={onConfirm}>
+                {applying ? 'applying…' : `Confirm ${surviving} ${surviving === 1 ? 'change' : 'changes'}`}
+              </button>
+            </div>
+            <div className="gt-sub mono">
+              Cancel writes nothing. An elimination turns a fragment off and leaves it on the cutting
+              floor, where tapping it brings it back. The stream keeps running while this is open —
+              pieces already on their way were drawn from the floor as it stands.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One proposed change. A vetoed pill is struck through and stays visible: "what did I say
+ *  no to" has to be answerable without closing the sheet, and a veto is reversible until
+ *  the confirm. */
+function ConsentPill({
+  pill, vetoed, disabled, onVeto,
+}: {
+  pill: SteerPill;
+  vetoed: boolean;
+  disabled: boolean;
+  onVeto: (key: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`fchip muse-consent-pill ${pill.kind}${vetoed ? ' vetoed' : ''}`}
+      disabled={disabled}
+      title={vetoed
+        ? 'rejected — tap to put it back in'
+        : (pill.kind === 'elimination'
+          ? 'turns this fragment off — tap to reject the change'
+          : 'puts this fragment on the floor — tap to reject the change')}
+      onClick={() => onVeto(pill.key)}
+    >
+      <span style={{ background: categoryColor(pill.category), width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
+      <span className="muse-consent-verb">{pill.kind === 'elimination' ? 'off' : 'add'}</span>
+      {' '}{pill.text}
+    </button>
   );
 }
