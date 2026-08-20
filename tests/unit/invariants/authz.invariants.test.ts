@@ -312,11 +312,19 @@ async function rejection(label: string, id: string, call: () => Promise<unknown>
 type Case = { name: string; call: (id: string) => Promise<unknown> }
 
 /**
+ * Every method name a `Case` actually drove, registered as the sweeps run rather than
+ * restated in a second list. The per-method coverage guard at the bottom of this file
+ * reads it, so writing a case is the only act needed and the two cannot drift apart.
+ */
+const SMOKED_METHODS = new Set<string>()
+
+/**
  * The core assertion. For every listed public method: B calls it with A's id and with an
  * id that never existed; both must reject identically. The caller supplies `snapshotNow`
  * so the resource's persisted state can be compared before and after the whole sweep.
  */
 async function assertOwnerScoped(family: string, cases: Case[], snapshotNow: () => string) {
+  for (const { name } of cases) SMOKED_METHODS.add(name)
   const before = snapshotNow()
   for (const { name, call } of cases) {
     const foreign = await rejection(`${family}.${name} (foreign id)`, FOREIGN_ID.value, () => call(FOREIGN_ID.value))
@@ -519,6 +527,12 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
     { name: 'getMuseSession', call: (id) => api.getMuseSession(B, id) },
     { name: 'setMuseFragmentEnabled', call: (id) => api.setMuseFragmentEnabled(B, id, held, false) },
     { name: 'setMuseFragmentWeight', call: (id) => api.setMuseFragmentWeight(B, id, held, 4) },
+    {
+      // `mood` is a real category off the taxonomy, so the add is rejected on ownership
+      // rather than bouncing off input validation before it reaches the check.
+      name: 'addMuseFragment',
+      call: (id) => api.addMuseFragment(B, id, { category: 'mood', text: 'b-was-here' }),
+    },
     {
       name: 'recordMusePiece',
       call: (id) => api.recordMusePiece(B, id, { runId: 'run-of-b', rollIndex: 1, fragments: [held] }),
@@ -832,5 +846,167 @@ test('COVERAGE GUARD self-check: a new, unlisted resource is reported', () => {
   assert.deepEqual(
     unlistedResources("    private async _whateverIWantToCallIt() { throw new ApiError('not_found.dataset', '', 404) }", codes),
     [],
+  )
+})
+
+// ── Coverage guard, per METHOD ───────────────────────────────────────────────
+//
+// The guard above keys on the RESOURCE: every `not_found.<resource>` the facade can
+// report must be smoked or allowlisted. That is one level coarser than what this suite
+// actually asserts. `assertOwnerScoped` takes a `Case[]` and drives one PUBLIC METHOD per
+// case, so the resource-level guard proves "this resource has at least one method with a
+// case" while every case in the file proves "this method is owner-scoped". A method hung
+// off an already-listed resource therefore adds no new token to the resource scan and is
+// required to bring nothing with it.
+//
+// This guard closes that gap by keying on the method. It derives, from `CrystalApi.ts`,
+// every public method whose body reaches one of the members `COVERED_RESOURCES` already
+// names as enforcing ownership — that list is the maintained registry of what does the
+// scoping, so it is reused here rather than duplicated — and requires each derived method
+// to either carry a `Case` above or be listed in `UNCOVERED_METHODS` with a reason.
+
+/** The members COVERED_RESOURCES names as enforcing ownership, deduped. */
+const OWNERSHIP_MEMBERS: string[] = [...new Set(Object.values(COVERED_RESOURCES).flat())]
+
+/**
+ * Member declarations sit at exactly two spaces of indentation; a method body never does.
+ * That is what makes a body sliceable from one declaration to the next without a parser,
+ * and the `derived set is non-empty` assertion below is what catches the day it stops
+ * being true.
+ */
+const MEMBER_DECL =
+  /^ {2}(?:public |private |protected )?(?:readonly )?(?:async )?([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^\n]*?>)?\(/gm
+
+/** The body of `class CrystalApi`, from its opening brace to the closing brace in column 0. */
+function crystalApiClassBody(source: string): string {
+  const start = source.indexOf('export class CrystalApi {')
+  assert.ok(start >= 0, 'the CrystalApi class declaration was not found — the scan has drifted')
+  const rest = source.slice(start)
+  const end = rest.search(/\n\}\n/)
+  assert.ok(end > 0, 'the end of the CrystalApi class body was not found — the scan has drifted')
+  return rest.slice(0, end)
+}
+
+/**
+ * Every public method that resolves ownership: one whose body calls a member listed in
+ * `COVERED_RESOURCES`. Underscore-prefixed helpers and the constructor are skipped — the
+ * suite drives the public surface, and a helper is what the public method reaches THROUGH.
+ * A method calling itself does not count as reaching its own check.
+ */
+function ownershipScopedMethods(source: string): string[] {
+  const body = crystalApiClassBody(source)
+  const decls = [...body.matchAll(MEMBER_DECL)]
+  const found = new Set<string>()
+  for (let i = 0; i < decls.length; i++) {
+    const name = decls[i][1]
+    if (name === 'constructor' || name.startsWith('_')) continue
+    const from = decls[i].index as number
+    const to = i + 1 < decls.length ? (decls[i + 1].index as number) : body.length
+    const methodBody = body.slice(from, to)
+    const reaches = OWNERSHIP_MEMBERS.some(
+      (member) => member !== name && new RegExp(`\\bthis\\.${member}\\s*\\(`).test(methodBody),
+    )
+    if (reaches) found.add(name)
+  }
+  return [...found].sort()
+}
+
+/**
+ * Deliberate exclusions, keyed method name -> reason. Same convention as
+ * `UNCOVERED_ALLOWLIST`: a reason, not a TODO. Most of these are creation or list paths,
+ * where the caller's own scope is derived rather than an id being accepted — the `Case`
+ * shape (B passing A's id positionally) has nothing to pass.
+ */
+const UNCOVERED_METHODS: Record<string, string> = {
+  collect:
+    'a creation path. It reaches `_memberTeam` only to validate an optional teamId supplied by ' +
+    'the caller; there is no foreign resource id in its signature for the by-id sweep to pass.',
+  publish:
+    'a creation path. Team membership and artifact ownership are resolved from the caller\'s own ' +
+    'input on the way in, not from an id the sweep can pass. Author scoping of the resulting ' +
+    'edition is covered behaviourally in tests/unit/crystal/publish.test.ts.',
+  createProject:
+    'a creation path with an optional teamId. That check IS asserted above, in the team family: ' +
+    'B creating a project on A\'s team rejects with not_found.team — it is simply not shaped as a ' +
+    '`Case`, because the id is not the subject of the call.',
+  createDataset:
+    'a creation path. It derives the caller\'s own owner token, and reaches `_owns` only for a ' +
+    'source run the caller names; no foreign resource id is accepted positionally.',
+  listDatasets:
+    'a list scoped by the caller\'s own owner token — no id to pass. The scope clamp is asserted ' +
+    'above in the dataset family (B\'s list stays empty, A\'s still returns A\'s row).',
+  listDatasetSummaries:
+    'the summary projection of listDatasets, scoped by the same owner token and with no id to ' +
+    'pass. Not separately smoked.',
+  listMuseSessions:
+    'a lookup scoped by the caller\'s own owner token, asserted above on the filter axis by ' +
+    '"a Muse session lookup returns only the caller\'s own sessions" rather than as a by-id case.',
+  saveFlow:
+    'reachable with a foreign run id through `opts.fromRun`, which resolves through `_owns`. A ' +
+    'case for it belongs with the run family and is not written yet — that, and not a judgement ' +
+    'that it needs none, is the reason it is listed here.',
+}
+
+test('COVERAGE GUARD: every public CrystalApi method that resolves ownership has a two-identity case', () => {
+  const derived = ownershipScopedMethods(readFileSync(API_SOURCE, 'utf8'))
+  assert.ok(
+    derived.length > 0,
+    'the method scan matched nothing — the declaration or call pattern has drifted, and a guard ' +
+      'that derives an empty set asserts nothing',
+  )
+  assert.ok(
+    SMOKED_METHODS.size > 0,
+    'no case registered a method name — this guard reads the cases as they run, so it is only ' +
+      'meaningful when the whole file runs (a name filter that excludes the sweeps above will ' +
+      'trip this)',
+  )
+
+  const unlisted = derived.filter((m) => !SMOKED_METHODS.has(m) && !(m in UNCOVERED_METHODS))
+  assert.deepEqual(
+    unlisted, [],
+    'A public CrystalApi method resolves ownership through a member this suite already tracks, ' +
+      'but no two-identity case drives it. Add a `Case` to the family that owns it (identity B ' +
+      'passing identity A\'s id, asserting an identical not_found to an absent id and no ' +
+      'mutation), or add the method to UNCOVERED_METHODS in this file with a reason. Sharing a ' +
+      'resource with a method that already has a case does not carry over — the assertion is per ' +
+      'method.',
+  )
+
+  for (const method of Object.keys(UNCOVERED_METHODS)) {
+    assert.ok(
+      derived.includes(method),
+      `'${method}' is listed in UNCOVERED_METHODS but no longer reads as a public CrystalApi ` +
+        'method that resolves ownership — remove the entry',
+    )
+  }
+})
+
+test('COVERAGE GUARD self-check: a new, uncased owner-scoped method is reported', () => {
+  // Prove the derivation against fabricated source rather than trusting the real file to
+  // stay incomplete: it must fire on a method that does not exist yet, not only on a
+  // known gap. `_museSession` is one of the members COVERED_RESOURCES names.
+  const fabricated = [
+    'export class CrystalApi {',
+    '  constructor(private readonly deps: CrystalApiDeps) {}',
+    '',
+    '  async newlyAdded(auctor: AuctorKey, id: string): Promise<unknown> {',
+    '    return this._museSession(auctor, id)',
+    '  }',
+    '',
+    '  async unrelated(): Promise<number> {',
+    '    return 1',
+    '  }',
+    '',
+    '  private async _museSession(auctor: AuctorKey, id: string): Promise<unknown> {',
+    '    return null',
+    '  }',
+    '}',
+    '',
+  ].join('\n')
+
+  assert.deepEqual(
+    ownershipScopedMethods(fabricated), ['newlyAdded'],
+    'a public method reaching an ownership member must be derived; one that reaches none, and ' +
+      'the private helper itself, must not be',
   )
 })
