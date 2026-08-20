@@ -5,7 +5,9 @@
 // Real `CrystalApi` + real `createApiRouter`, backed by an in-memory `Datasets`
 // fake (no live Mongo — hermetic). Covers: owner-scoping on both list routes +
 // get, and both v1 ingestion paths (Q2) from `POST /v1/data/datasets` — a
-// happy-path each plus the invalid-discriminant 400 case.
+// happy-path each plus the invalid-discriminant 400 case. Also the captionset
+// write/edit seam and the media-append seam (`POST /v1/data/datasets/:id/media`),
+// which shares the same ingestion shape and the same minting path as creation.
 // =============================================================================
 
 import { test } from 'node:test'
@@ -16,8 +18,8 @@ import express from 'express'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
-import { captionCoverage } from '../../../../src/types/dataset.js'
-import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
+import { captionCoverage, nextDatasetVersion } from '../../../../src/types/dataset.js'
+import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
 import type { Actum, Actorum } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
@@ -65,14 +67,22 @@ class MemoryDatasets implements Datasets {
     this.store.set(datasetId, updated)
     return updated
   }
-  // Test-only: append a media item straight into the store. There is no media-append route
-  // yet, and the caption↔image binding test needs the media set to grow under a captionset.
-  appendMedia(datasetId: string, url: string): string {
+  // Same semantics as MongoDataset.addMedia: append-only, a new version entry counting the
+  // media AFTER the append, and every existing captionset's coverage recounted against the
+  // new media length.
+  async addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null> {
     const d = this.store.get(datasetId)
-    if (!d) throw new Error('unknown dataset')
-    const id = `m-${++this.seq}`
-    this.store.set(datasetId, { ...d, media: [...d.media, { id, url, source: 'upload', addedAt: new Date() }] })
-    return id
+    if (!d) return null
+    const media = [...d.media, ...items]
+    const updated: Dataset = {
+      ...d,
+      media,
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: captionCoverage(c.captions, media.length) })),
+      versions: [...d.versions, { v: nextDatasetVersion(d.versions), count: media.length, when: new Date() }],
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, updated)
+    return updated
   }
 }
 
@@ -284,7 +294,13 @@ test('a caption stays bound to its image after new media is appended', async () 
     assert.equal(attached.body.dataset.captionsets[0].captions[first.id], 'a knight in frost')
 
     // Media is append-only; a positionally-keyed caption would re-bind here.
-    const appendedId = datasets.appendMedia(ds.id, 'https://r2.example/c.png')
+    const appended = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST',
+      headers,
+      body: { source: 'upload', mediaUrls: ['https://r2.example/c.png'] },
+    })
+    assert.equal(appended.status, 201)
+    const appendedId = (appended.body.dataset.media as DatasetMediaItem[])[2].id
 
     const after = await request(`${url}/v1/data/datasets/full`, { headers })
     const set = after.body.datasets[0].captionsets[0]
@@ -441,6 +457,164 @@ test('re-attaching a captionset with the same id replaces it rather than duplica
     assert.equal(second.status, 201)
     assert.equal(second.body.dataset.captionsets.length, 1)
     assert.equal(second.body.dataset.captionsets[0].coverage, '2/2')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── Media append seam ────────────────────────────────────────────────────────
+//
+// One test per claim the route makes: the media set grows without disturbing what was
+// already on it, a version entry records the new count, every captionset's coverage
+// re-reads against the new denominator, both ingestion shapes are accepted and a third is
+// not, and a stranger reaches none of it.
+
+test('appending media leaves the media already on the dataset exactly where it was', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png'])
+    const before = ds.media
+
+    const appended = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST',
+      headers,
+      body: { source: 'upload', mediaUrls: ['https://r2.example/c.png', 'https://r2.example/d.png'] },
+    })
+    assert.equal(appended.status, 201)
+
+    const media = appended.body.dataset.media as DatasetMediaItem[]
+    assert.equal(media.length, 4, 'the two new items are added to the two already present')
+    // Identity AND order: a replace would mint new ids for the originals, and a reorder would
+    // move the ids the caption maps and fragments are keyed on.
+    assert.deepEqual(media.slice(0, 2).map((m) => m.id), before.map((m) => m.id))
+    assert.deepEqual(media.slice(0, 2).map((m) => m.url), before.map((m) => m.url))
+    assert.deepEqual(media.slice(2).map((m) => m.url), ['https://r2.example/c.png', 'https://r2.example/d.png'])
+    assert.equal(new Set(media.map((m) => m.id)).size, 4, 'every media id is distinct')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an append records a new DatasetVersion counting the media after it', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png'])
+    assert.deepEqual(ds.versions.map((v) => [v.v, v.count]), [['1.0.0', 1]])
+
+    const first = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: ['https://r2.example/b.png', 'https://r2.example/c.png'] },
+    })
+    assert.equal(first.status, 201)
+    assert.deepEqual(
+      first.body.dataset.versions.map((v: { v: string; count: number }) => [v.v, v.count]),
+      [['1.0.0', 1], ['1.1.0', 3]],
+      'the creation snapshot is kept and a new one is appended at the post-append count',
+    )
+
+    const second = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: ['https://r2.example/d.png'] },
+    })
+    assert.deepEqual(
+      second.body.dataset.versions.map((v: { v: string; count: number }) => [v.v, v.count]),
+      [['1.0.0', 1], ['1.1.0', 3], ['1.2.0', 4]],
+    )
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an existing captionset\'s coverage re-reads against the media count after an append', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const urls = Array.from({ length: 7 }, (_, i) => `https://r2.example/${i}.png`)
+    const ds = await seedDataset(url, headers, urls)
+
+    const captions = Object.fromEntries(ds.media.map((m, i) => [m.id, `caption ${i}`]))
+    const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST', headers, body: { id: 'pass-1', name: 'nl', method: 'manual', captions },
+    })
+    assert.equal(attached.body.dataset.captionsets[0].coverage, '7/7', 'a complete pass before the append')
+
+    // A pass that covered everything no longer does: the captions did not change, the
+    // denominator did. Leaving coverage alone would keep it claiming completeness.
+    const appended = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: ['https://r2.example/7.png', 'https://r2.example/8.png'] },
+    })
+    assert.equal(appended.status, 201)
+    assert.equal(appended.body.dataset.captionsets[0].coverage, '7/9')
+    assert.equal(Object.keys(appended.body.dataset.captionsets[0].captions).length, 7, 'no caption was added or dropped')
+
+    // And it is persisted, not just projected into the response.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.equal(after.body.datasets[0].captionsets[0].coverage, '7/9')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a media append accepts the generation ingestion shape and rejects a third shape with 400', async () => {
+  const actum: Actum = {
+    id: 'actum-1',
+    modusId: 'flux-schnell',
+    modusVersiono: '1.0.0',
+    impetus: 10n,
+    signaConsumed: [],
+    status: 'completus',
+    exitus: { images: ['https://cdn.example/out1.png'] },
+  } as unknown as Actum
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([actum]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png'])
+
+    const seeded = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'generation', actumIds: ['actum-1'] },
+    })
+    assert.equal(seeded.status, 201)
+    const media = seeded.body.dataset.media as DatasetMediaItem[]
+    assert.equal(media.length, 2)
+    assert.equal(media[1].source, 'generation')
+    assert.equal(media[1].actumId, 'actum-1')
+
+    const bogus = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'telepathy', mediaUrls: ['https://r2.example/z.png'] },
+    })
+    assert.equal(bogus.status, 400)
+    assert.equal(bogus.body.error.code, 'input.malformed')
+
+    const empty = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: [] },
+    })
+    assert.equal(empty.status, 400)
+
+    // Neither rejection reached the dataset.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.equal(after.body.datasets[0].media.length, 2)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a stranger cannot append media to another owner\'s dataset', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const owner = { 'x-api-key': 'owner-1' }
+    const stranger = { 'x-api-key': 'stranger-1' }
+    const ds = await seedDataset(url, owner, ['https://r2.example/a.png'])
+
+    const attempt = await request(`${url}/v1/data/datasets/${ds.id}/media`, {
+      method: 'POST', headers: stranger, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] },
+    })
+    assert.equal(attempt.status, 404, 'a dataset the caller does not own reads as absent, not forbidden')
+
+    // A 404 can be returned AFTER a write — assert the dataset itself is untouched.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: owner })
+    assert.equal(after.body.datasets[0].media.length, 1)
+    assert.equal(after.body.datasets[0].media[0].url, 'https://r2.example/a.png')
+    assert.equal(after.body.datasets[0].versions.length, 1)
   } finally {
     await closeServer(server)
   }

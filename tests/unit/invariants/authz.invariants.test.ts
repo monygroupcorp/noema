@@ -46,7 +46,7 @@ import type { Tabula, Tabulae, Tabularum } from '../../../src/types/tabula.js'
 import type { Collectio, Collectiones, Collectionum, CollectioStatus } from '../../../src/types/collectio.js'
 import type { Vestigium } from '../../../src/types/vestigium.js'
 import type {
-  Captionset, Dataset, DatasetListOpts, DatasetListPage, Datasets,
+  Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, Datasets,
   DatasetSummaryListPage,
 } from '../../../src/types/dataset.js'
 import type {
@@ -54,7 +54,7 @@ import type {
 } from '../../../src/types/museSession.js'
 import { recordPiece, spawnSession, type MuseSession } from '../../../src/crystal/muse/session.js'
 import type { Fragment } from '../../../src/crystal/muse/taxonomy.js'
-import { captionCoverage } from '../../../src/types/dataset.js'
+import { captionCoverage, nextDatasetVersion } from '../../../src/types/dataset.js'
 import { API_CONTRACT } from '../../../src/allocutio/api/apiContract.js'
 
 // The two identities. A owns everything seeded; B owns nothing and may reach nothing.
@@ -197,6 +197,20 @@ class MemDatasets implements Datasets {
     const next: Dataset = {
       ...d,
       captionsets: d.captionsets.map((c) => (c.id === captionsetId ? updated : c)),
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, next)
+    return next
+  }
+  async addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const media = [...d.media, ...items]
+    const next: Dataset = {
+      ...d,
+      media,
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: captionCoverage(c.captions, media.length) })),
+      versions: [...d.versions, { v: nextDatasetVersion(d.versions), count: media.length, when: new Date() }],
       mutatum: new Date(),
     }
     this.store.set(datasetId, next)
@@ -500,6 +514,12 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
     { name: 'getDataset', call: (id) => api.getDataset(B, id) },
     { name: 'addCaptionset', call: (id) => api.addCaptionset(B, id, { id: 'pass-b', name: 'B pass', method: 'manual' }) },
     { name: 'setCaption', call: (id) => api.setCaption(B, id, 'pass-1', mediaId, 'rewritten by B') },
+    // A media append is a write to the media set every caption map and every fragment set on
+    // the dataset is keyed against, so a stranger reaching it would reach all three.
+    {
+      name: 'addDatasetMedia',
+      call: (id) => api.addDatasetMedia(B, id, { source: 'upload', mediaUrls: ['https://example.invalid/media/b.png'] }),
+    },
     // The spawn reaches the dataset through the same resolution, so a stranger cannot
     // break a session off someone else's mother either.
     { name: 'spawnMuseSession', call: (id) => api.spawnMuseSession(B, id) },
@@ -508,6 +528,11 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
   const stillThere = await api.getDataset(A, mine.id)
   assert.equal(stillThere.captionsets.length, 1, 'B\'s captionset attempt left no trace')
   assert.equal(stillThere.captionsets[0].captions?.[mediaId], 'a caption', 'A\'s caption text is unchanged')
+  assert.deepEqual(
+    stillThere.media.map((m) => m.url), [MEDIA_URL],
+    'B\'s media append left A\'s media set exactly as it was',
+  )
+  assert.equal(stillThere.captionsets[0].coverage, '1/1', 'and therefore left the coverage it derives alone')
   assert.equal((await api.listDatasets(B)).datasets.length, 0, 'B\'s own list stays empty')
   assert.equal((await api.listDatasets(A)).datasets.length, 1, 'A still sees their own dataset')
 })

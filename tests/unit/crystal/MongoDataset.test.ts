@@ -96,6 +96,10 @@ const twoMedia = {
     { id: 'm2', url: 'https://r2.example/m2.png', source: 'upload' as const, addedAt: new Date() },
   ],
   captionsets: [],
+  // Overridden alongside `media`: `base` carries a single 1.0.0 entry counting ONE item, and a
+  // fixture whose version history disagrees with its own media set makes every count assertion
+  // below read against a lie.
+  versions: [{ v: '1.0.0', count: 2, when: new Date() }],
 }
 
 test('addCaptionset attaches a captionset, derives coverage, and bumps mutatum', async () => {
@@ -160,4 +164,71 @@ test('setCaption returns null for an unknown dataset or an unknown captionset', 
   const d = await store.create(twoMedia)
   assert.equal(await store.setCaption('nope', 'c1', 'm1', 'x'), null)
   assert.equal(await store.setCaption(d.id, 'no-such-set', 'm1', 'x'), null)
+})
+
+// ── Media append seam ────────────────────────────────────────────────────────
+//
+// The store-level half of `POST /v1/data/datasets/:id/media`. Also NOT hermetic (see the
+// note above); the hermetic proof of the same behaviour lives in
+// tests/unit/allocutio/api/datasetsRoutes.test.ts.
+
+const appended = [
+  { id: 'm3', url: 'https://r2.example/m3.png', source: 'upload' as const, addedAt: new Date() },
+  { id: 'm4', url: 'https://r2.example/m4.png', source: 'upload' as const, addedAt: new Date() },
+]
+
+test('addMedia appends rather than replacing, and persists', async () => {
+  const d = await store.create(twoMedia)
+  const updated = await store.addMedia(d.id, appended)
+  assert.deepEqual(updated?.media.map((m) => m.id), ['m1', 'm2', 'm3', 'm4'])
+
+  const reread = await store.find(d.id)
+  assert.deepEqual(reread?.media.map((m) => m.id), ['m1', 'm2', 'm3', 'm4'])
+  assert.equal(reread?.media[0].url, 'https://r2.example/m1.png')
+})
+
+test('addMedia records a version at the media count after the append, and bumps mutatum', async () => {
+  const d = await store.create(twoMedia)
+  await new Promise((r) => setTimeout(r, 5))
+
+  const first = await store.addMedia(d.id, appended)
+  assert.deepEqual(first?.versions.map((v) => [v.v, v.count]), [['1.0.0', 2], ['1.1.0', 4]])
+  assert.ok(new Date(first!.mutatum).getTime() > new Date(d.mutatum).getTime())
+
+  const second = await store.addMedia(d.id, [
+    { id: 'm5', url: 'https://r2.example/m5.png', source: 'upload' as const, addedAt: new Date() },
+  ])
+  assert.deepEqual(second?.versions.map((v) => [v.v, v.count]), [['1.0.0', 2], ['1.1.0', 4], ['1.2.0', 5]])
+
+  const reread = await store.find(d.id)
+  assert.equal(reread?.versions.length, 3)
+})
+
+test('addMedia recomputes every existing captionset\'s coverage against the new media count', async () => {
+  const d = await store.create(twoMedia)
+  await store.addCaptionset(d.id, { id: 'c1', name: 'nl', method: 'manual', coverage: '', captions: { m1: 'one', m2: 'two' } })
+  await store.addCaptionset(d.id, { id: 'c2', name: 'tags', method: 'manual', coverage: '', captions: { m1: 'tag' } })
+
+  const updated = await store.addMedia(d.id, appended)
+  const byId = Object.fromEntries((updated?.captionsets ?? []).map((c) => [c.id, c]))
+  assert.equal(byId.c1.coverage, '2/4', 'a pass that read 2/2 no longer claims completeness')
+  assert.equal(byId.c2.coverage, '1/4')
+  // The captions themselves are untouched — only the denominator moved.
+  assert.deepEqual(byId.c1.captions, { m1: 'one', m2: 'two' })
+
+  const reread = await store.find(d.id)
+  assert.equal(reread?.captionsets.find((c) => c.id === 'c1')?.coverage, '2/4')
+})
+
+test('addMedia leaves an already-decomposed media item\'s fragments on that item', async () => {
+  const d = await store.create(twoMedia)
+  await store.setFragments(d.id, 'm2', [{ category: 'subject', text: 'a lantern-keeper' }] as never)
+  const updated = await store.addMedia(d.id, appended)
+  const m2 = updated?.media.find((m) => m.id === 'm2')
+  assert.equal(m2?.fragments?.length, 1)
+  assert.equal(updated?.media.find((m) => m.id === 'm3')?.fragments, undefined)
+})
+
+test('addMedia returns null for an unknown dataset', async () => {
+  assert.equal(await store.addMedia('nope', appended), null)
 })
