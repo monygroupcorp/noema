@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { api, type Dataset as DatasetT, type FlowSummary, type Fragment } from '../lib/api';
+import {
+  api,
+  type Dataset as DatasetT,
+  type FlowSummary,
+  type Fragment,
+  type MuseReaction,
+  type MuseSessionView,
+} from '../lib/api';
 import { useRunStream } from '../lib/runStream';
 import {
   canFireDecompose,
@@ -15,20 +22,32 @@ import {
   buildGarden,
   canFire,
   categoryColor,
+  dismissFromStream,
   flattenGarden,
+  floorCounts,
+  floorDisabledIndices,
+  floorSheet,
+  floorToggle,
   gardenCounts,
   ignitionBlockReason,
   ignitionRequest,
+  latestSession,
   lineageOf,
+  mergedExclusions,
+  pieceRecord,
   poolDatasetFragments,
+  reactionOf,
+  recordedPiece,
   releasePending,
   rollCurated,
   streamColumns,
   streamPiece,
   t2iFlows,
+  weightWrites,
   EMPTY_STREAM,
   EXPANDED_GESTURES,
   TILE_GESTURES,
+  type FloorPill,
   type IgnitionQuote,
   type RollReport,
   type RunResult,
@@ -69,9 +88,23 @@ import './muse.css';
 // over the shared SSE hook (`lib/runStream.ts`), the same subscription `Run.tsx` and
 // `Card.tsx` use, so there is one result path in the app rather than a second one here.
 //
-// The three tile gestures are rendered DISABLED: a reaction writes to the session, which
-// is a later rung, and a control that silently does nothing is worse than one that says
-// it is not ready yet.
+// The session (noema-241) is what the gestures write to. The screen resumes into the
+// caller's most recent session off this dataset and spawns one only when there is none,
+// so the floor is the same floor after a reload — it lives on the server, not here. Two
+// things follow from that and are worth reading for:
+//
+//   The floor is never held locally. Every mutator returns the whole updated session and
+//   the screen re-renders from that response, so what is on screen is what is stored.
+//
+//   A heart writes twice: the reaction lands on the piece, and one weight write lands on
+//   the floor per fragment of that piece's RECORDED lineage (the session's own record —
+//   `weightWrites` in `lib/muse.ts` — not the stream tile's client-side copy). 😂 records
+//   a note and moves no weight (S4/V9); ✕ is recorded and writes nothing to the floor,
+//   and proposes nothing (S12).
+//
+// The pull-up floor sheet (V1) is the full-fidelity view of that floor: every fragment,
+// grouped by category, live/total per category, and a DARKENED pill for every fragment a
+// steer turned off — visible and tappable back to live, never removed (S8).
 
 export function Muse() {
   const { id } = useParams();
@@ -154,6 +187,74 @@ export function Muse() {
     setStream((s) => applyRunResult(s, runId, result));
   }, []);
 
+  // ── The session (noema-241) ───────────────────────────────────────────────
+  // Resume, don't respawn: the app route carries no session segment and the dataset
+  // holds no session pointer, so the screen looks its sessions up by dataset and takes
+  // the most recent. A session is spawned only when the lookup comes back empty —
+  // spawning on every mount would leave the floor behind on every reload.
+  const [session, setSession] = useState<MuseSessionView | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [floorOpen, setFloorOpen] = useState(false);
+  const [floorBusy, setFloorBusy] = useState<string | null>(null);
+  const [reacting, setReacting] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    setSessionError(null);
+    api.listMuseSessions(id)
+      .then(({ sessions }) => latestSession(sessions) ?? api.spawnMuseSession(id).then((r) => r.session))
+      .then((s) => { if (live) setSession(s); })
+      .catch((e) => { if (live) setSessionError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [id]);
+
+  // A reaction is two records: the reaction on the piece, and — for a steer, never for a
+  // note — one weight write per fragment of the piece's recorded lineage. The floor
+  // writes are read off the session the PATCH returned, so each one steps from the weight
+  // the floor actually holds.
+  async function react(runId: string, reaction: MuseReaction) {
+    if (!session || reacting) return;
+    setReacting(runId);
+    try {
+      let next = (await api.updateMusePiece(session.id, runId, { reaction })).session;
+      for (const write of weightWrites(next, runId, reaction)) {
+        next = (await api.setMuseFragmentWeight(session.id, write.fragment, write.weight)).session;
+      }
+      setSession(next);
+    } catch (e) {
+      setSessionError(`that reaction didn't land: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setReacting(null);
+    }
+  }
+
+  // ✕ — declutter. Recorded on the piece, off the scroll, and nothing on the floor moves.
+  async function dismiss(runId: string) {
+    if (!session) return;
+    setExpanded((cur) => (cur === runId ? null : cur));
+    setStream((s) => dismissFromStream(s, runId));
+    try {
+      setSession((await api.updateMusePiece(session.id, runId, { dismissed: true })).session);
+    } catch (e) {
+      setSessionError(`that dismissal wasn't recorded: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // A dark pill is tappable back to live, and it is the same call in both directions (S8).
+  async function toggleFloorPill(pill: FloorPill) {
+    if (!session || floorBusy) return;
+    const { fragment, enabled } = floorToggle(pill);
+    setFloorBusy(`${pill.category}:${pill.text}`);
+    try {
+      setSession((await api.setMuseFragmentEnabled(session.id, fragment, enabled)).session);
+    } catch (e) {
+      setSessionError(`that fragment didn't move: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setFloorBusy(null);
+    }
+  }
+
   const expandedPiece = expanded
     ? stream.pieces.find((p) => p.runId === expanded) ?? stream.pending.find((p) => p.runId === expanded) ?? null
     : null;
@@ -221,6 +322,16 @@ export function Muse() {
       // expanded view still has to name them.
       setStream((s) => admitPiece(s, streamPiece(run.id, prompt, lineage), frozenRef.current));
       setFired((prev) => ({ ...prev, [index]: {} }));
+      // The piece is recorded NOW, with the lineage that produced it: the floor moves and
+      // the fragment list is rebuilt, so it is not recoverable later. The ledger holds one
+      // entry per run and a reaction is attached to that entry afterwards.
+      if (session) {
+        try {
+          setSession((await api.recordMusePiece(session.id, pieceRecord(run.id, index, lineage))).session);
+        } catch (e) {
+          setSessionError(`this piece isn't in the session ledger, so it can't be reacted to: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
     } catch (e) {
       setFired((prev) => ({ ...prev, [index]: { error: e instanceof Error ? e.message : String(e) } }));
     } finally {
@@ -260,9 +371,14 @@ export function Muse() {
   const counts = useMemo(() => (build ? gardenCounts(build.garden) : []), [build]);
   const flat = useMemo(() => (build ? flattenGarden(build.garden) : []), [build]);
 
+  // What a roll may not draw: the chips unchecked on this screen, plus every fragment the
+  // session floor has darkened. A darkened fragment is out of the draw, not gone (S8).
+  const offTheFloor = useMemo(() => floorDisabledIndices(flat, session), [flat, session]);
+  const outOfPlay = useMemo(() => mergedExclusions(excluded, offTheFloor), [excluded, offTheFloor]);
+
   function roll() {
     if (flat.length === 0) return;
-    setReport(rollCurated(flat, excluded, count));
+    setReport(rollCurated(flat, outOfPlay, count));
     setEdits({});
     // A new roll's prompts have never been quoted; carrying a stale quote across would
     // arm the fire button against a number that priced a different prompt.
@@ -351,7 +467,7 @@ export function Muse() {
         <div className="garden-head">
           <div><h1>{d.name} — muse</h1></div>
           <div className="garden-nudge">
-            <span className="gn-count mono">{flat.length} fragments · {flat.length - excluded.size} in play across {counts.filter((c) => c.count > 0).length} categories</span>
+            <span className="gn-count mono">{flat.length} fragments · {flat.length - outOfPlay.size} in play across {counts.filter((c) => c.count > 0).length} categories</span>
           </div>
         </div>
 
@@ -377,7 +493,16 @@ export function Muse() {
               style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
             >
               {stream.pieces.map((p) => (
-                <PieceTile key={p.runId} piece={p} onExpand={setExpanded} onResult={onPieceResult} />
+                <PieceTile
+                  key={p.runId}
+                  piece={p}
+                  onExpand={setExpanded}
+                  onResult={onPieceResult}
+                  reaction={session ? reactionOf(session, p.runId) : undefined}
+                  live={!!session && !!recordedPiece(session, p.runId) && reacting !== p.runId}
+                  onReact={react}
+                  onDismiss={dismiss}
+                />
               ))}
             </div>
             {/* A held piece is still generating on a pod that is already paid for, so it
@@ -435,7 +560,7 @@ export function Muse() {
               <label className="cc-field cc-narrow"><span>Rolls</span>
                 <input className="cer-input" type="number" min={1} max={50} value={count}
                   onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))} /></label>
-              <button className="btn accent" disabled={flat.length - excluded.size === 0} onClick={roll}>
+              <button className="btn accent" disabled={flat.length - outOfPlay.size === 0} onClick={roll}>
                 Roll →
               </button>
             </div>
@@ -542,7 +667,43 @@ export function Muse() {
         </div>
 
         {expandedPiece && (
-          <ExpandedPiece piece={expandedPiece} onClose={() => setExpanded(null)} />
+          <ExpandedPiece
+            piece={expandedPiece}
+            onClose={() => setExpanded(null)}
+            reaction={session ? reactionOf(session, expandedPiece.runId) : undefined}
+            live={!!session && !!recordedPiece(session, expandedPiece.runId) && reacting !== expandedPiece.runId}
+            onReact={react}
+            onDismiss={dismiss}
+          />
+        )}
+
+        {/* The dock: the floor in one line, and the handle that pulls the sheet up (V1).
+            The counts come off the session, so they say what the floor holds rather than
+            what this screen last did to it. */}
+        <div className="muse-dock">
+          <span className="mono muse-dock-count">
+            {session
+              ? `floor ${floorCounts(session).live}/${floorCounts(session).total} in the draw`
+              : (sessionError ? 'no session — reactions are off' : 'opening a session…')}
+          </span>
+          <button
+            type="button"
+            className="btn ghost sm"
+            disabled={!session}
+            onClick={() => setFloorOpen(true)}
+          >
+            floor ↑
+          </button>
+        </div>
+        {sessionError && <div className="muse-dock-note mono">{sessionError}</div>}
+
+        {floorOpen && session && (
+          <FloorSheet
+            session={session}
+            busyKey={floorBusy}
+            onToggle={toggleFloorPill}
+            onClose={() => setFloorOpen(false)}
+          />
         )}
       </div></div>
     </AppShell>
@@ -561,15 +722,46 @@ function RunWatcher({ runId, onResult }: { runId: string; onResult: (runId: stri
   return null;
 }
 
+/** What every rail — the tile's and the expanded view's — does with one gesture: the two
+ *  steers and 😂 are reactions on the piece, ✕ is a dismissal, and save is still its own
+ *  rung and stays inert. */
+function railProps(
+  key: string,
+  runId: string,
+  live: boolean,
+  reaction: MuseReaction | undefined,
+  onReact: (runId: string, reaction: MuseReaction) => void,
+  onDismiss: (runId: string) => void,
+): { disabled: boolean; className: string; onClick?: () => void; title?: string } {
+  const REACTIONS: Record<string, MuseReaction> = { up: 'up', down: 'down', laugh: 'note' };
+  const asReaction = REACTIONS[key];
+  if (asReaction) {
+    return {
+      disabled: !live,
+      className: `muse-gesture${reaction === asReaction ? ' on' : ''}`,
+      onClick: () => onReact(runId, asReaction),
+    };
+  }
+  if (key === 'dismiss') {
+    return { disabled: !live, className: 'muse-gesture', onClick: () => onDismiss(runId) };
+  }
+  return { disabled: true, className: 'muse-gesture', title: 'save — arrives with save-back' };
+}
+
 /** One tile in the stream. Roughly 145px on a phone, which fits three targets legibly —
- *  the two steers and declutter (V8a). They are disabled here: a reaction writes to the
- *  session, which is a later rung. The rest of the rail lives in the expanded view. */
+ *  the two steers and declutter (V8a). They write to the session; a piece the session
+ *  ledger does not hold cannot be reacted to and its rail is disabled rather than silent.
+ *  The rest of the rail lives in the expanded view. */
 function PieceTile({
-  piece, onExpand, onResult,
+  piece, onExpand, onResult, reaction, live, onReact, onDismiss,
 }: {
   piece: StreamPiece;
   onExpand: (runId: string) => void;
   onResult: (runId: string, r: RunResult) => void;
+  reaction: MuseReaction | undefined;
+  live: boolean;
+  onReact: (runId: string, reaction: MuseReaction) => void;
+  onDismiss: (runId: string) => void;
 }) {
   return (
     <div className={`muse-tile ${piece.status}`}>
@@ -591,19 +783,32 @@ function PieceTile({
         )}
       </button>
       <div className="muse-tile-rail">
-        {TILE_GESTURES.map((g) => (
-          <button key={g.key} type="button" className="muse-gesture" disabled title={`${g.label} — arrives with session steering`}>
-            {g.glyph}
-          </button>
-        ))}
+        {TILE_GESTURES.map((g) => {
+          const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss);
+          return (
+            <button key={g.key} type="button" {...rail} title={title ?? g.label}>
+              {g.glyph}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 /** The expanded piece: the full action rail and the lineage — the fragments that
- *  produced it (V8). The rail is inert for the same reason the tile's is. */
-function ExpandedPiece({ piece, onClose }: { piece: StreamPiece; onClose: () => void }) {
+ *  produced it (V8). 😂 lives here rather than on the tile: it is recorded and it steers
+ *  nothing (S4/V9), so it is not one of the three gestures made at speed. */
+function ExpandedPiece({
+  piece, onClose, reaction, live, onReact, onDismiss,
+}: {
+  piece: StreamPiece;
+  onClose: () => void;
+  reaction: MuseReaction | undefined;
+  live: boolean;
+  onReact: (runId: string, reaction: MuseReaction) => void;
+  onDismiss: (runId: string) => void;
+}) {
   return (
     <div className="muse-expanded" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="muse-expanded-card" onClick={(e) => e.stopPropagation()}>
@@ -620,11 +825,14 @@ function ExpandedPiece({ piece, onClose }: { piece: StreamPiece; onClose: () => 
         </div>
 
         <div className="muse-expanded-rail">
-          {EXPANDED_GESTURES.map((g) => (
-            <button key={g.key} type="button" className="muse-gesture" disabled title={`${g.label} — arrives with session steering`}>
-              {g.glyph}
-            </button>
-          ))}
+          {EXPANDED_GESTURES.map((g) => {
+            const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss);
+            return (
+              <button key={g.key} type="button" {...rail} title={title ?? g.label}>
+                {g.glyph}
+              </button>
+            );
+          })}
           <button type="button" className="btn ghost sm muse-expanded-close" onClick={onClose}>Close</button>
         </div>
 
@@ -642,6 +850,70 @@ function ExpandedPiece({ piece, onClose }: { piece: StreamPiece; onClose: () => 
         <div className="muse-expanded-foot">
           <Link className="mono" to={`/run?id=${piece.runId}`}>open run view →</Link>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The floor sheet (V1) — pulled up from the dock, the full-fidelity cutting floor.
+ *
+ * Every fragment the session holds, grouped by category in sampling order, with a
+ * live/total count per category. A fragment a steer turned off is DARK AND STILL HERE,
+ * and tapping it brings it back: "what did my steer turn off" is the question this sheet
+ * exists to answer, and reversibility is why the pull-up sheet won over the cheaper
+ * options. Weighted fragments carry their weight.
+ *
+ * The sheet renders from the session it is handed — the one the server returned — so it
+ * shows the same floor after a reload as before it.
+ */
+function FloorSheet({
+  session, busyKey, onToggle, onClose,
+}: {
+  session: MuseSessionView;
+  busyKey: string | null;
+  onToggle: (pill: FloorPill) => void;
+  onClose: () => void;
+}) {
+  const rows = floorSheet(session);
+  const { live, total } = floorCounts(session);
+  return (
+    <div className="muse-sheet" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="muse-sheet-card" onClick={(e) => e.stopPropagation()}>
+        <div className="muse-sheet-head">
+          <span className="gc-l">cutting floor</span>
+          <span className="gt-sub mono">{live}/{total} in the draw · tap a fragment to turn it off or back on</span>
+          <button type="button" className="btn ghost sm muse-sheet-close" onClick={onClose}>Close</button>
+        </div>
+        {rows.length === 0 ? (
+          <div className="gt-sub mono">this session's floor is empty.</div>
+        ) : rows.map((row) => (
+          <div key={row.category} className="muse-sheet-cat">
+            <div className="muse-cat-row">
+              <span className="gc-dot" style={{ background: categoryColor(row.category) }} /> {row.category}
+              <span className="gc-n mono">{row.live}/{row.total}</span>
+            </div>
+            <div className="pref-chips muse-sheet-pills">
+              {row.fragments.map((pill) => {
+                const key = `${pill.category}:${pill.text}`;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`fchip muse-floor-pill${pill.enabled ? ' on' : ' off'}`}
+                    disabled={busyKey === key}
+                    title={pill.enabled ? 'in the draw — tap to turn it off' : 'turned off — tap to bring it back'}
+                    onClick={() => onToggle(pill)}
+                  >
+                    <span style={{ background: categoryColor(pill.category), width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
+                    {pill.text}
+                    {pill.weight !== 1 && <span className="muse-floor-weight mono"> ×{pill.weight}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

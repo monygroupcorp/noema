@@ -680,6 +680,49 @@ export const api = {
       `/v1/data/datasets/${encodeURIComponent(datasetId)}/captionsets/${encodeURIComponent(captionsetId)}/captions/${encodeURIComponent(mediaId)}`,
       { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ caption }) },
     ).then(j<{ dataset: Dataset }>),
+
+  // ── Muse sessions ────────────────────────────────────────────────────────
+  // The session is the only place a Muse floor or piece ledger is written. Every
+  // mutator returns the WHOLE updated session, so a caller re-renders from the
+  // response rather than patching a local copy — there is one mutation path and one
+  // source of truth for what the floor says.
+  //
+  // Ownership is scoped server-side from the resolved caller: a session belonging to
+  // someone else answers exactly as an id that never existed does. No scoping check
+  // belongs on this side of the wire.
+  //
+  // A fragment is named by `{category, text}` in the BODY of the floor calls. Its
+  // identity is `category:text`, which is free text and is unsafe as a path segment.
+  listMuseSessions: (datasetId: string) =>
+    fetch(`/v1/data/muse/sessions?datasetId=${encodeURIComponent(datasetId)}`, { headers: readHeaders() })
+      .then(j<{ sessions: MuseSessionView[] }>),
+  spawnMuseSession: (datasetId: string) =>
+    fetch('/v1/data/muse/sessions', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ datasetId }) })
+      .then(j<{ session: MuseSessionView }>),
+  getMuseSession: (id: string) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}`, { headers: readHeaders() })
+      .then(j<{ session: MuseSessionView }>),
+  setMuseFragmentEnabled: (id: string, fragment: MuseFragmentIdentity, enabled: boolean) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/enabled`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ ...fragment, enabled }),
+    }).then(j<{ session: MuseSessionView }>),
+  setMuseFragmentWeight: (id: string, fragment: MuseFragmentIdentity, weight: number) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/weight`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ ...fragment, weight }),
+    }).then(j<{ session: MuseSessionView }>),
+  // Append-only, one entry per run: a piece is recorded once, at fire time, with the
+  // lineage that produced it. A second record for the same run is rejected.
+  recordMusePiece: (id: string, piece: MusePieceRecord) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/pieces`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(piece),
+    }).then(j<{ session: MuseSessionView }>),
+  // A reaction and a dismissal are both given after the piece exists, so this is the
+  // route that reaches a recorded piece. A field left out is left as it was.
+  updateMusePiece: (id: string, runId: string, patch: { reaction?: MuseReaction; dismissed?: boolean }) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/pieces/${encodeURIComponent(runId)}`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify(patch),
+    }).then(j<{ session: MuseSessionView }>),
+
   // For a cost estimate before dispatching, use `quote` above (`POST /v1/runs/quote`).
   // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
   signUpload: (body: { filename: string; contentType: string; bucketName?: string }) =>
@@ -1075,6 +1118,47 @@ export interface DatasetMediaItem {
   fragments?: Fragment[];
 }
 export interface DatasetVersionView { v: string; count: number; when: string }
+
+// ── Muse sessions ──────────────────────────────────────────────────────────
+// A session is a break-off of a dataset with its own fragments, its own floor and
+// its own piece ledger; the mother dataset is never written to by it. These types
+// mirror the surface's `MuseSessionView` (the Muse schemas in `apiContract.ts`) —
+// `natum`/`mutatum` arrive as ISO strings on the wire, exactly as `Dataset`'s do.
+//
+// `floor` is an ENTRY ARRAY, not an object keyed by fragment: a fragment's identity
+// is `category:text`, which is free text and is not usable as a field name. A
+// fragment is likewise named by `{category, text}` in every request BODY rather than
+// in a path segment, for the same reason.
+export type MuseReaction = 'up' | 'down' | 'note';
+/** One fragment's state on the session floor. `enabled: false` is out of the draw, not gone. */
+export interface MuseFloorEntry { key: string; enabled: boolean; weight: number }
+/** One recorded piece and the lineage that produced it. */
+export interface MusePiece {
+  runId: string;
+  rollIndex: number;
+  fragments: Fragment[];
+  reaction?: MuseReaction;
+  saved: boolean;
+  dismissed: boolean;
+}
+export interface MuseSessionView {
+  id: string;
+  owner: string;
+  motherDatasetId: string;
+  fragments: Fragment[];
+  floor: MuseFloorEntry[];
+  pieces: MusePiece[];
+  natum: string;
+  mutatum: string;
+}
+/** A fragment as a request body names it: by its identity, never by position. */
+export interface MuseFragmentIdentity { category: FragmentCategory; text: string }
+/** What is recorded at fire time. A reaction is attached afterwards — see `updateMusePiece`. */
+export interface MusePieceRecord {
+  runId: string;
+  rollIndex: number;
+  fragments: MuseFragmentIdentity[];
+}
 export interface Dataset {
   id: string;
   owner: string;

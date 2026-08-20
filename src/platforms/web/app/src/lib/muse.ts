@@ -13,7 +13,10 @@ import {
   type GardenDrops,
 } from '../../../../../crystal/muse/garden.js';
 import { rollReport, formatRoll, type RolledPrompt, type RollReport } from '../../../../../crystal/muse/roll.js';
-import { CATEGORIES, type Category, type Garden } from '../../../../../crystal/muse/taxonomy.js';
+import { CATEGORIES, fragmentKey, type Category, type Garden } from '../../../../../crystal/muse/taxonomy.js';
+import { WEIGHT_MAX, WEIGHT_MIN } from '../../../../../crystal/muse/sampler.js';
+import { lineageOf as recordedLineage, type MuseSession } from '../../../../../crystal/muse/session.js';
+import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
 import { mediaFromOutput, type Media } from './media';
 import type {
   Fragment,
@@ -21,6 +24,10 @@ import type {
   DatasetMediaItem,
   FlowSummary,
   FlowDescription,
+  MuseFragmentIdentity,
+  MusePieceRecord,
+  MuseReaction,
+  MuseSessionView,
   RunRequest,
 } from './api';
 
@@ -312,9 +319,10 @@ export function lineageOf(piece: Pick<StreamPiece, 'lineage'>): LineageEntry[] {
   return out;
 }
 
-/** The three gestures a tile carries (V8a): the two steers plus declutter. They are
- *  rendered inert here — a reaction writes to the session, which is a later rung —
- *  and inert is shown as disabled rather than as a control that silently does nothing. */
+/** The three gestures a tile carries (V8a): the two steers plus declutter — the gestures
+ *  made while scrolling. They write to the session (see the session section below); a tile
+ *  whose piece is not in the session ledger renders them disabled rather than as controls
+ *  that silently do nothing. */
 export const TILE_GESTURES: ReadonlyArray<{ key: string; glyph: string; label: string }> = [
   { key: 'up', glyph: '♡', label: 'more like this' },
   { key: 'down', glyph: '\u{1F622}', label: 'less like this' },
@@ -322,9 +330,239 @@ export const TILE_GESTURES: ReadonlyArray<{ key: string; glyph: string; label: s
 ];
 
 /** The rail the expanded view carries: the tile's three, plus the gestures that are
- *  considered rather than made at speed (V8a). Inert for the same reason. */
+ *  considered rather than made at speed (V8a). Save is still inert — it is its own rung. */
 export const EXPANDED_GESTURES: ReadonlyArray<{ key: string; glyph: string; label: string }> = [
   ...TILE_GESTURES,
   { key: 'laugh', glyph: '\u{1F602}', label: 'noted — steers nothing' },
   { key: 'save', glyph: '↓', label: 'save this piece' },
 ];
+
+// ── The session: the floor sheet and live reactions (noema-241) ──────────────
+// A session is a break-off of a dataset with its own fragments, its own floor and
+// its own piece ledger (`src/crystal/muse/session.ts`, persisted through the routes
+// in `./api.ts`). The mother dataset is never written to by it (S7).
+//
+// The screen holds NO copy of the floor. Every mutator returns the whole updated
+// session and the screen re-renders from that response, so what is on screen is what
+// the server stored — and the floor is still there after a reload, which a
+// client-local copy could not be.
+//
+// Two records, both required, for one heart: the reaction lands on the PIECE
+// (`PATCH …/pieces/:runId`) and the weights land on the FLOOR (`PATCH …/floor/weight`,
+// one call per fragment of that piece's recorded lineage). The lineage read is the
+// CRYSTAL `lineageOf(session, runId)` — the session's own record of what produced the
+// piece — reached through the session read. It is a different function from
+// `lineageOf` above, which reads a `StreamPiece` the screen is holding, and the two
+// are not interchangeable: only the session's record survives a reload.
+//
+// Nothing here edits the floor from an inference. A ♡ or 😢 is the user's own tap on a
+// named piece, which is what makes writing it without a consent sheet correct; the
+// inferred edits the consent sheet governs (S9/S12) are a later rung, and dismissal
+// deliberately proposes nothing (S12).
+
+/**
+ * The session as the pure crystal module wants it, rebuilt from the wire view.
+ *
+ * The floor travels as an entry array and is read back into the `SteerState` map the
+ * sampler and `session.ts` both take. This mirrors `floorFromEntries` in
+ * `src/types/museSession.ts` rather than importing it: the app's docker build stage
+ * copies `src/crystal/muse/` and nothing else of the backend tree, so an import from
+ * `src/types` resolves everywhere except the image build. The identity itself is NOT
+ * rebuilt here — the keys are the entries' own, written by `fragmentKey`.
+ */
+export function sessionFromView(view: MuseSessionView): MuseSession {
+  const floor = new Map<string, FragmentState>();
+  for (const e of view.floor) floor.set(e.key, { enabled: e.enabled, weight: e.weight });
+  return {
+    motherDatasetId: view.motherDatasetId,
+    fragments: view.fragments,
+    floor,
+    pieces: view.pieces,
+  };
+}
+
+/**
+ * The session the screen resumes into: the caller's most recently changed session off
+ * this dataset, or `null` when there is none to resume and one must be spawned.
+ *
+ * The app route (`/datasets/:id/muse`) carries no session segment and the dataset holds
+ * no session pointer, so this lookup is how the screen finds its floor again after a
+ * reload. Non-vacuity: taking a client-local copy instead must fail "the floor sheet
+ * survives a reload".
+ */
+export function latestSession(sessions: readonly MuseSessionView[]): MuseSessionView | null {
+  let latest: MuseSessionView | null = null;
+  for (const s of sessions) {
+    if (!latest || s.mutatum > latest.mutatum) latest = s;
+  }
+  return latest;
+}
+
+/** The floor's own record of what produced a piece, or `[]` when the ledger holds no
+ *  entry for that run. This is the lineage a reaction weights — never the stream
+ *  piece's client-side copy, which a reload does not carry. */
+export function pieceLineage(view: MuseSessionView, runId: string): readonly Fragment[] {
+  return recordedLineage(sessionFromView(view), runId) ?? [];
+}
+
+/** One recorded piece, or `undefined` when the ledger holds no entry for that run. */
+export function recordedPiece(view: MuseSessionView, runId: string) {
+  return view.pieces.find((p) => p.runId === runId);
+}
+
+/** What the session currently says about a piece, if anything. */
+export function reactionOf(view: MuseSessionView, runId: string): MuseReaction | undefined {
+  return recordedPiece(view, runId)?.reaction;
+}
+
+/** The factor one steer moves a fragment's weight by. The sampler's bounds are
+ *  0.125–8 — a 64:1 span — so a doubling per tap reaches either end in three steps
+ *  and every step stays inside a range the sampler still draws from. */
+export const STEER_FACTOR = 2;
+
+/** One steer's effect on one fragment's weight, clamped to the sampler's bounds. The
+ *  server clamps too; clamping here keeps the number the screen shows equal to the
+ *  number the floor will hold. */
+export function steerWeight(current: number, direction: 'up' | 'down'): number {
+  const base = Number.isFinite(current) && current > 0 ? current : 1;
+  const next = direction === 'up' ? base * STEER_FACTOR : base / STEER_FACTOR;
+  return Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, next));
+}
+
+/** One floor write: the fragment named by its identity, and the weight to store. */
+export interface WeightWrite { fragment: MuseFragmentIdentity; weight: number }
+
+/**
+ * The floor writes one reaction produces: every fragment in the piece's RECORDED
+ * lineage, moved one step in the direction of the reaction.
+ *
+ * 😂 (`note`) produces none — it is recorded on the piece and steers nothing (S4, V9).
+ * A run the ledger holds no entry for produces none either: there is no lineage to
+ * weight, so nothing is written rather than something guessed.
+ *
+ * Non-vacuity: reverting this to `[]` for `up` must fail "hearting a piece weights
+ * every fragment in its lineage up"; returning writes for `note` must fail "😂 records
+ * a note and changes no weight".
+ */
+export function weightWrites(
+  view: MuseSessionView,
+  runId: string,
+  reaction: MuseReaction,
+): WeightWrite[] {
+  if (reaction === 'note') return [];
+  const floor = new Map(view.floor.map((e) => [e.key, e]));
+  return pieceLineage(view, runId).map((f) => ({
+    fragment: { category: f.category, text: f.text },
+    weight: steerWeight(floor.get(fragmentKey(f))?.weight ?? 1, reaction === 'up' ? 'up' : 'down'),
+  }));
+}
+
+/** What is recorded at FIRE time: the run, which roll it was, and the lineage. The
+ *  reaction is not carried here — the ledger is append-only and a reaction arrives
+ *  after the piece exists, so it is attached by a later update. */
+export function pieceRecord(
+  runId: string,
+  rollIndex: number,
+  lineage: readonly Fragment[],
+): MusePieceRecord {
+  return { runId, rollIndex, fragments: lineage.map((f) => ({ category: f.category, text: f.text })) };
+}
+
+/** One fragment as the floor sheet renders it. A disabled fragment is a pill like any
+ *  other — dark, still listed, still tappable (S8). */
+export interface FloorPill {
+  category: FragmentCategory;
+  text: string;
+  enabled: boolean;
+  weight: number;
+}
+
+/** One category's row in the floor sheet: its pills, and how many of them are in the draw. */
+export interface FloorSheetCategory {
+  category: FragmentCategory;
+  live: number;
+  total: number;
+  fragments: FloorPill[];
+}
+
+/**
+ * The floor as the pull-up sheet shows it (V1): every fragment the session holds,
+ * grouped by category in sampling order, with a live/total count per category.
+ *
+ * A DISABLED FRAGMENT IS INCLUDED, marked not-enabled. That is the whole point of the
+ * sheet — "what did my steer turn off" is the question it exists to answer, and a
+ * sheet that dropped what a steer turned off could not answer it.
+ * Non-vacuity: filtering disabled fragments out must fail "a disabled fragment is
+ * still shown, dark, and can be tapped back to live".
+ */
+export function floorSheet(view: MuseSessionView): FloorSheetCategory[] {
+  const state = new Map(view.floor.map((e) => [e.key, e]));
+  const rows: FloorSheetCategory[] = [];
+  for (const category of CATEGORIES) {
+    const fragments: FloorPill[] = [];
+    let live = 0;
+    for (const f of view.fragments) {
+      if (f.category !== category) continue;
+      const entry = state.get(fragmentKey(f));
+      const enabled = entry?.enabled ?? true;
+      if (enabled) live += 1;
+      fragments.push({ category: f.category, text: f.text, enabled, weight: entry?.weight ?? 1 });
+    }
+    if (fragments.length > 0) rows.push({ category, live, total: fragments.length, fragments });
+  }
+  return rows;
+}
+
+/** The session floor in one line: how many fragments are in the draw, out of how many
+ *  the session holds. This is what the dock shows without the sheet being open. */
+export function floorCounts(view: MuseSessionView): { live: number; total: number } {
+  const state = new Map(view.floor.map((e) => [e.key, e]));
+  let live = 0;
+  for (const f of view.fragments) if ((state.get(fragmentKey(f))?.enabled ?? true) !== false) live += 1;
+  return { live, total: view.fragments.length };
+}
+
+/** What tapping a floor pill writes: the same fragment, with its enabled flag flipped.
+ *  Disable is reversible (S8) — the tap that darkens a pill is the tap that brings it
+ *  back, and it is the same call in both directions. */
+export function floorToggle(pill: FloorPill): { fragment: MuseFragmentIdentity; enabled: boolean } {
+  return { fragment: { category: pill.category, text: pill.text }, enabled: !pill.enabled };
+}
+
+/**
+ * Which flattened-garden indices the session floor has taken out of the draw.
+ *
+ * A darkened fragment stays on the floor and stays in the sheet; it is simply not
+ * drawn. Merged with the screen's own curation set, this is what keeps a roll from
+ * drawing a fragment a steer just turned off.
+ */
+export function floorDisabledIndices(
+  fragments: readonly Fragment[],
+  view: MuseSessionView | null,
+): Set<number> {
+  const out = new Set<number>();
+  if (!view) return out;
+  const state = new Map(view.floor.map((e) => [e.key, e]));
+  fragments.forEach((f, i) => {
+    if (state.get(fragmentKey(f))?.enabled === false) out.add(i);
+  });
+  return out;
+}
+
+/** Two exclusion sets as one — the screen's local curation and the session floor's
+ *  disabled fragments both keep a fragment out of the next roll. */
+export function mergedExclusions(...sets: ReadonlyArray<ReadonlySet<number>>): Set<number> {
+  const out = new Set<number>();
+  for (const s of sets) for (const i of s) out.add(i);
+  return out;
+}
+
+/**
+ * Take a dismissed piece off the scroll. ✕ is declutter: it is recorded on the piece
+ * and it writes NOTHING to the floor, and it proposes nothing — the count-to-proposal
+ * behaviour rides the consent sheet, which is a later rung (S12).
+ */
+export function dismissFromStream(state: StreamState, runId: string): StreamState {
+  const drop = (p: StreamPiece) => p.runId !== runId;
+  return { pieces: state.pieces.filter(drop), pending: state.pending.filter(drop) };
+}
