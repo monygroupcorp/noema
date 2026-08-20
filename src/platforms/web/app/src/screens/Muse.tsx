@@ -21,7 +21,7 @@ import {
   admitPiece,
   applyRunResult,
   buildGarden,
-  canFire,
+  canFireOne,
   categoryColor,
   dismissFromStream,
   flattenGarden,
@@ -33,19 +33,24 @@ import {
   ignitionBlockReason,
   ignitionRequest,
   latestSession,
+  launchBlockReason,
+  launchLabel,
   lineageOf,
   manualAddError,
   manualAddRequest,
   mergedExclusions,
+  nextPieceDecision,
   pieceRecord,
   poolDatasetFragments,
   reactionOf,
   recordedPiece,
   releasePending,
+  rollAt,
   rollCurated,
   savedOf,
   streamColumns,
   streamPiece,
+  streamStatusLine,
   t2iFlows,
   weightWrites,
   EMPTY_STREAM,
@@ -53,10 +58,14 @@ import {
   MANUAL_CATEGORIES,
   TILE_GESTURES,
   type FloorPill,
-  type IgnitionQuote,
   type RollReport,
   type RunResult,
+  type StopCause,
+  type StreamConfig,
+  type StreamMode,
+  type StreamPhase,
   type StreamPiece,
+  type StreamQuote,
 } from '../lib/muse';
 import './muse.css';
 
@@ -120,6 +129,32 @@ import './muse.css';
 // mother is the starter and is never written (S7, S13). And a save reweights the floor
 // without widening it — a piece carries no phrase the floor did not already have.
 //
+// The stream's front door (noema-244) is what everything above hangs from, and it is
+// the surface this screen leads with: configure a run, press launch once, and pieces
+// keep arriving until the stream is stopped. Three properties are worth reading for,
+// because each one is a ruling rather than a preference:
+//
+//   THE LOOP IS IN THE BROWSER. No stream id, no server-side state, no new route — a
+//   `POST /v1/runs` per piece, requested only when the previous piece settles. So a
+//   closed tab ends the stream, and there is no state in which an unattended page keeps
+//   spending. The cost of that choice is shown rather than hidden: a page that goes
+//   away comes back STOPPED, and the readout says the page lost the stream instead of
+//   rendering a dead stream as a live one. Resuming is pressing launch again.
+//
+//   THE PRICE IS ON THE LAUNCH CONTROL. One quote at configuration time, carried by the
+//   button and by the state readout, instead of a quote-then-fire pair per piece. The
+//   spend is seen once and earlier, not less: the figure is an estimate and is labelled
+//   `~`, and every fire still goes through the server, which prices and charges.
+//
+//   THE BALANCE IS THE CEILING. Infinite mode has no count. `nextPieceDecision` in
+//   `lib/muse.ts` compares a freshly-read balance against the quoted per-piece figure
+//   before each fire, and the loop asks it what to do next; the loop decides nothing on
+//   its own. It is re-read every piece, because a stale balance is a stream that keeps
+//   firing into a refusal.
+//
+// The discrete roll cards survive behind a closed disclosure below the stream, as the
+// manual path: roll N prompts, edit one, fire that one down the same route.
+//
 // The manual add (noema-242) is the sheet's other half: pick a category, write a fragment,
 // and it lands on the floor in the draw. Everything else on this screen REWEIGHTS the
 // floor — a piece is composed from fragments already on it — so short of decomposing more
@@ -127,6 +162,11 @@ import './muse.css';
 // carrying a category and a text, no flow, no model, no quote. The LLM-assisted add is a
 // separate, metered surface. The rules the form follows (`manualAddError`,
 // `manualAddRequest`) are pure functions in `lib/muse.ts` and are gated there.
+
+/** One error, as short prose. */
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 export function Muse() {
   const { id } = useParams();
@@ -169,10 +209,22 @@ export function Muse() {
   // refused here rather than at the server's expense.
   const [blockReason, setBlockReason] = useState<string | null>(null);
   const [flowLoading, setFlowLoading] = useState(false);
-  // Per-roll quote / fire state, keyed by roll index within the current report.
-  const [quotes, setQuotes] = useState<Record<number, IgnitionQuote>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [fired, setFired] = useState<Record<number, { error?: string }>>({});
+
+  // ── The stream's front door (noema-244) ───────────────────────────────────
+  // Configuration, one launch control, one loop. Nothing here decides anything: the
+  // refusal is `launchBlockReason` and the loop's every judgement is
+  // `nextPieceDecision`, both pure and both in `lib/muse.ts`.
+  const [config, setConfig] = useState<StreamConfig>({ mode: 'batched', cap: 12, acknowledged: false });
+  const [quote, setQuote] = useState<StreamQuote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<StreamPhase>('idle');
+  const [stopCause, setStopCause] = useState<StopCause | null>(null);
+  const [firedCount, setFiredCount] = useState(0);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  // The manual path (D3): the roll cards, closed by default. The stream is the front door.
+  const [manualOpen, setManualOpen] = useState(false);
 
   // ── The stream (noema-238) ────────────────────────────────────────────────
   // Fired pieces, newest first, plus the ones held back while the grid is frozen.
@@ -205,8 +257,17 @@ export function Muse() {
     };
   }, [stream.pieces.length]);
 
+  // A piece's run reaching terminal is also what releases the stream loop: the next
+  // piece is requested on SETTLEMENT, never on a timer, so the loop parks on a promise
+  // that this resolves. One waiter per run, removed as it is resolved.
+  const settlers = useRef(new Map<string, (r: RunResult) => void>());
   const onPieceResult = useCallback((runId: string, result: RunResult) => {
     setStream((s) => applyRunResult(s, runId, result));
+    const waiting = settlers.current.get(runId);
+    if (waiting) {
+      settlers.current.delete(runId);
+      waiting(result);
+    }
   }, []);
 
   // ── The session (noema-241) ───────────────────────────────────────────────
@@ -340,7 +401,8 @@ export function Muse() {
     const id_ = next || null;
     setModusId(id_);
     setBlockReason(null);
-    setQuotes({});
+    setQuote(null);
+    setQuoteError(null);
     setFired({});
     if (!id_) return;
     setFlowLoading(true);
@@ -351,28 +413,15 @@ export function Muse() {
   }
 
   // The prompt that fires is the prompt on screen — the edited text when there is one,
-  // never the pre-edit roll, and never a fresh roll (rolling again at fire time would
-  // generate a different prompt than the one that was quoted and approved).
+  // never the pre-edit roll, and never a fresh roll.
   const promptOf = (index: number, rolled: string) => edits[index] ?? rolled;
 
-  async function doQuote(index: number, prompt: string) {
-    if (!modusId) return;
-    setBusy(index);
-    setFired((prev) => ({ ...prev, [index]: {} }));
-    try {
-      const r = await api.quote(ignitionRequest(modusId, prompt));
-      setQuotes((prev) => ({ ...prev, [index]: { modusId, prompt, impetus: r.impetus } }));
-    } catch (e) {
-      setQuotes((prev) => { const next = { ...prev }; delete next[index]; return next; });
-      setFired((prev) => ({ ...prev, [index]: { error: `quote failed: ${e instanceof Error ? e.message : String(e)}` } }));
-    } finally {
-      setBusy(null);
-    }
-  }
-
+  // The manual path's single fire (D3): one card, one prompt, down the same route a
+  // stream piece takes. Its price is the one on the launch control above — the flow's
+  // reservation does not vary with the prompt, so there is nothing per-card to price.
   async function doFire(index: number, prompt: string, lineage: readonly Fragment[]) {
     if (!modusId) return;
-    if (!canFire(quotes[index] ?? null, modusId, prompt, blockReason)) return;
+    if (!canFireOne(modusId, prompt, blockReason)) return;
     setBusy(index);
     try {
       const { run } = await api.createRun(ignitionRequest(modusId, prompt));
@@ -439,10 +488,191 @@ export function Muse() {
     if (flat.length === 0) return;
     setReport(rollCurated(flat, outOfPlay, count));
     setEdits({});
-    // A new roll's prompts have never been quoted; carrying a stale quote across would
-    // arm the fire button against a number that priced a different prompt.
-    setQuotes({});
     setFired({});
+  }
+
+  // How many fragments a launch actually has to draw from: the pooled garden minus this
+  // screen's curation and minus everything the floor has turned off. The same number the
+  // manual `Roll →` is armed on, so the stream refuses exactly where a roll would come
+  // back empty.
+  const liveFragments = flat.length - outOfPlay.size;
+
+  // ── The stream loop ───────────────────────────────────────────────────────
+  // Live reads for the loop. It runs across many awaits and must see the floor, the
+  // session and the configuration as they are NOW, not as they were at launch: a
+  // fragment turned off mid-stream is out of the draw for the very next piece, which is
+  // the whole reason the floor is the steering wheel.
+  const flatRef = useRef(flat);
+  const outOfPlayRef = useRef(outOfPlay);
+  const sessionRef = useRef(session);
+  const modusRef = useRef(modusId);
+  const configRef = useRef(config);
+  const quoteRef = useRef(quote);
+  useEffect(() => { flatRef.current = flat; }, [flat]);
+  useEffect(() => { outOfPlayRef.current = outOfPlay; }, [outOfPlay]);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => { modusRef.current = modusId; }, [modusId]);
+  useEffect(() => { configRef.current = config; }, [config]);
+  useEffect(() => { quoteRef.current = quote; }, [quote]);
+
+  const stopRef = useRef(false);
+  const runningRef = useRef(false);
+  // One token per launch. A loop parked on a settlement that never arrives — a closed
+  // page, an unmount — must not wake up later and fire into a stream someone else
+  // started, so every await is followed by a generation check.
+  const generationRef = useRef(0);
+  useEffect(() => () => { generationRef.current += 1; runningRef.current = false; }, []);
+
+  // The configuration-time quote (D2). One quote prices the run: a t2i reservation is
+  // evaluated against the run's NUMERIC inputs, and Muse sends only a prompt, so the
+  // figure is the same for every piece whatever it was rolled from. It is still an
+  // estimate — the reservation is an upper bound the server settles against — so it is
+  // rendered with a `~` everywhere and never becomes the charge.
+  useEffect(() => {
+    if (!modusId || blockReason) { setQuote(null); return; }
+    let live = true;
+    setQuoteError(null);
+    api.quote(ignitionRequest(modusId, rollAt(flat, outOfPlay, 0).prompt))
+      .then((r) => { if (live) setQuote({ modusId, impetus: r.impetus }); })
+      .catch((e) => {
+        if (!live) return;
+        setQuote(null);
+        setQuoteError(`couldn't price this workflow: ${errText(e)}`);
+      });
+    return () => { live = false; };
+    // The prompt does not enter the price, so a re-roll must not re-quote; the flow does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modusId, blockReason]);
+
+  const blockLaunch = launchBlockReason({
+    config,
+    modusId,
+    flowBlockReason: blockReason,
+    liveFragments,
+    quote,
+  });
+
+  // D1's honest readout. The loop lives here and nowhere else, so a page that goes away
+  // takes the stream with it. On a bfcache restore the page comes back with its state but
+  // without its subscriptions, and it must say the stream ended rather than render as
+  // though it were still riding.
+  useEffect(() => {
+    const lost = () => {
+      if (!runningRef.current) return;
+      generationRef.current += 1;
+      runningRef.current = false;
+      stopRef.current = true;
+      setPhase('stopped');
+      setStopCause('lost');
+    };
+    window.addEventListener('pagehide', lost);
+    return () => window.removeEventListener('pagehide', lost);
+  }, []);
+
+  /** Park until this run reaches terminal. The next piece is requested on settlement —
+   *  a loop that fired on a timer would spend at a rate nobody chose. */
+  function settlementOf(runId: string): Promise<RunResult> {
+    return new Promise<RunResult>((resolve) => { settlers.current.set(runId, resolve); });
+  }
+
+  function requestStop() {
+    stopRef.current = true;
+    if (runningRef.current) setPhase('stopping');
+  }
+
+  async function launch() {
+    if (runningRef.current || blockLaunch) return;
+    const gen = ++generationRef.current;
+    runningRef.current = true;
+    stopRef.current = false;
+    setStopCause(null);
+    setStreamError(null);
+    setFiredCount(0);
+    setPhase('running');
+
+    let fired = 0;
+    let consecutiveErrors = 0;
+    let end: StopCause = 'user';
+
+    try {
+      for (;;) {
+        // Re-read before EVERY piece. A balance read once at launch is not a ceiling.
+        let balanceImpetus: string;
+        try {
+          balanceImpetus = (await api.meStatus()).balanceImpetus;
+        } catch (e) {
+          // A balance that cannot be read is not one we may spend against.
+          setStreamError(`couldn't read your balance, so the stream stopped: ${errText(e)}`);
+          end = 'funds';
+          break;
+        }
+        if (generationRef.current !== gen) return;
+
+        const cfg = configRef.current;
+        const decision = nextPieceDecision({
+          mode: cfg.mode,
+          cap: cfg.cap,
+          fired,
+          // The loop parks on settlement, so nothing of ours is in flight at this point.
+          inFlight: false,
+          balanceImpetus,
+          perPieceImpetus: quoteRef.current?.impetus ?? '0',
+          stopRequested: stopRef.current,
+          consecutiveErrors,
+        });
+        if (!decision.fire) { end = decision.stop ?? 'user'; break; }
+
+        const modus = modusRef.current;
+        if (!modus) { end = 'user'; break; }
+
+        // A fresh draw at an advancing index: the sampler is deterministic by design, so
+        // a fixed index would fire one prompt over and over. The floor is re-read here,
+        // which is what lets a steer mid-stream reach the very next piece.
+        const draw = rollAt(flatRef.current, outOfPlayRef.current, fired);
+
+        let runId: string;
+        try {
+          const { run } = await api.createRun(ignitionRequest(modus, draw.prompt));
+          runId = run.id;
+        } catch (e) {
+          if (generationRef.current !== gen) return;
+          consecutiveErrors += 1;
+          setStreamError(`that piece didn't fire: ${errText(e)}`);
+          continue;
+        }
+        if (generationRef.current !== gen) return;
+
+        fired += 1;
+        setFiredCount(fired);
+        setStreamError(null);
+        setStream((s) => admitPiece(s, streamPiece(runId, draw.prompt, draw.fragments), frozenRef.current));
+
+        // Recorded at FIRE time with the lineage that produced it: the floor moves and the
+        // fragment list is rebuilt, so it is not recoverable later. One entry per run — a
+        // piece is never re-recorded, and the ledger rejects a duplicate anyway.
+        const open = sessionRef.current;
+        if (open) {
+          try {
+            setSession((await api.recordMusePiece(open.id, pieceRecord(runId, draw.index, draw.fragments))).session);
+          } catch (e) {
+            setSessionError(`this piece isn't in the session ledger, so it can't be reacted to: ${errText(e)}`);
+          }
+          if (generationRef.current !== gen) return;
+        }
+
+        const result = await settlementOf(runId);
+        if (generationRef.current !== gen) return;
+        // A run that fails after dispatch counts the same as a fire that never landed:
+        // either way the loop is repeating something that is not working.
+        consecutiveErrors = result.terminal === 'failed' ? consecutiveErrors + 1 : 0;
+      }
+    } finally {
+      if (generationRef.current === gen) {
+        runningRef.current = false;
+        setPhase('stopped');
+        setStopCause(end);
+      }
+    }
   }
 
   const crumb = (
@@ -526,9 +756,120 @@ export function Muse() {
         <div className="garden-head">
           <div><h1>{d.name} — muse</h1></div>
           <div className="garden-nudge">
-            <span className="gn-count mono">{flat.length} fragments · {flat.length - outOfPlay.size} in play across {counts.filter((c) => c.count > 0).length} categories</span>
+            <span className="gn-count mono">{flat.length} fragments · {liveFragments} in play across {counts.filter((c) => c.count > 0).length} categories</span>
           </div>
         </div>
+
+        {/* ── The launcher (V6) ───────────────────────────────────────────────
+            Configuration, then one launch control that carries the price. The stop
+            button sits beside it for the whole time a stream is riding, so it is
+            reachable without scrolling however long the grid below has grown. */}
+        <section className="muse-launcher">
+          <div className="muse-launcher-row">
+            <label className="cc-field"><span>Nozzle</span>
+              <select className="cer-input" value={modusId ?? ''} disabled={phase === 'running' || phase === 'stopping'}
+                onChange={(e) => selectFlow(e.target.value)}>
+                <option value="">choose a workflow…</option>
+                {(flows ?? []).map((f) => (
+                  <option key={f.id} value={f.id}>{f.nomen ?? f.id}{f.versio ? ` · ${f.versio}` : ''}</option>
+                ))}
+              </select>
+            </label>
+
+            <fieldset className="muse-mode" disabled={phase === 'running' || phase === 'stopping'}>
+              <legend className="gc-l">run</legend>
+              <label className="muse-mode-opt">
+                <input type="radio" name="muse-mode" checked={config.mode === 'batched'}
+                  onChange={() => setConfig((c) => ({ ...c, mode: 'batched' as StreamMode }))} />
+                batched
+              </label>
+              <input
+                className="cer-input muse-cap" type="number" min={1} max={200}
+                aria-label="how many pieces"
+                disabled={config.mode !== 'batched'}
+                value={config.cap}
+                onChange={(e) => setConfig((c) => ({ ...c, cap: Math.max(1, Number(e.target.value) || 1) }))}
+              />
+              <label className="muse-mode-opt">
+                <input type="radio" name="muse-mode" checked={config.mode === 'infinite'}
+                  onChange={() => setConfig((c) => ({ ...c, mode: 'infinite' as StreamMode }))} />
+                infinite
+              </label>
+            </fieldset>
+          </div>
+
+          {/* The warning is a GATE, not a caption (V5). An infinite stream carries no
+              count, so the balance is the only thing that ends it on its own; the
+              acknowledgement is what stands in for the count that is not there. */}
+          {config.mode === 'infinite' && (
+            <label className="muse-ack">
+              <input
+                type="checkbox"
+                checked={config.acknowledged}
+                disabled={phase === 'running' || phase === 'stopping'}
+                onChange={(e) => setConfig((c) => ({ ...c, acknowledged: e.target.checked }))}
+              />
+              <span>
+                This rides until <b>you stop it</b> or your funds run out. Nothing else ends it — there is no
+                cap, and closing this page stops the stream rather than leaving it running.
+              </span>
+            </label>
+          )}
+
+          {/* What is fuelling the launch, in one line. The floor sheet is where it gets
+              edited; this is a readout. */}
+          <div className="muse-launcher-floor gt-sub mono">
+            {liveFragments} of {flat.length} fragments in the draw
+            {session ? ` · floor ${floorCounts(session).live}/${floorCounts(session).total}` : ''}
+            {' · '}
+            <button type="button" className="linkish" disabled={!session} onClick={() => setFloorOpen(true)}>
+              open the floor
+            </button>
+          </div>
+
+          <div className="muse-launcher-row">
+            {phase === 'running' || phase === 'stopping' ? (
+              <button type="button" className="btn accent muse-stop" disabled={phase === 'stopping'} onClick={requestStop}>
+                {phase === 'stopping' ? 'stopping after this piece…' : 'stop'}
+              </button>
+            ) : (
+              <button type="button" className="btn accent muse-launch" disabled={!!blockLaunch} onClick={() => void launch()}>
+                {launchLabel(config, quote)}
+              </button>
+            )}
+            <span className="muse-state mono">{streamStatusLine(phase, stopCause, firedCount, config, quote)}</span>
+          </div>
+
+          {flowLoading && <div className="gt-sub mono">reading inputs…</div>}
+          {blockLaunch && phase !== 'running' && phase !== 'stopping' && (
+            <div className="gt-sub mono">{blockLaunch}</div>
+          )}
+          {quoteError && <div className="gt-sub mono">{quoteError}</div>}
+          {streamError && <div className="gt-sub mono">{streamError}</div>}
+          {quote && (
+            <div className="gt-sub mono">
+              ~ is an estimate: the figure is the run's reservation, and the server prices and charges
+              every piece when it settles.
+            </div>
+          )}
+          {flows !== null && flows.length === 0 && (
+            <div className="gt-sub mono">no text-to-image workflow is available.</div>
+          )}
+
+          {/* V7's refusal half: an empty floor has nothing to make, and the exits are
+              offered side by side rather than as an error. A thin floor is allowed to run. */}
+          {liveFragments <= 0 && (
+            <div className="muse-empty-floor">
+              <span className="gt-sub mono">nothing is in the draw.</span>
+              <button type="button" className="btn ghost sm" disabled={!session} onClick={() => setFloorOpen(true)}>
+                add a fragment yourself — free
+              </button>
+              <button type="button" className="btn ghost sm" disabled title="not yet available on this screen">
+                add images to the moodboard
+              </button>
+            </div>
+          )}
+        </section>
 
         {/* The stream: what this screen has made, on this screen. Newest first, held
             back while the user is scrolled away from the head of the grid. */}
@@ -615,30 +956,24 @@ export function Muse() {
               </div>
             )}
 
+            {/* The manual path (D3), closed by default: roll a batch of prompts, edit
+                one, fire that one. Same nozzle, same route, same stream — it is the
+                stream's front door that has changed, not what a piece is. */}
+            <details className="muse-manual" open={manualOpen} onToggle={(e) => setManualOpen((e.target as HTMLDetailsElement).open)}>
+            <summary className="muse-manual-summary">roll prompts by hand</summary>
+
             <div className="muse-roll-controls">
               <label className="cc-field cc-narrow"><span>Rolls</span>
                 <input className="cer-input" type="number" min={1} max={50} value={count}
                   onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))} /></label>
-              <button className="btn accent" disabled={flat.length - outOfPlay.size === 0} onClick={roll}>
+              <button className="btn accent" disabled={liveFragments === 0} onClick={roll}>
                 Roll →
               </button>
-            </div>
-
-            {/* ignition target: every t2i workflow the catalog offers, in a dropdown */}
-            <div className="muse-roll-controls">
-              <label className="cc-field"><span>Fire at</span>
-                <select className="cer-input" value={modusId ?? ''} onChange={(e) => selectFlow(e.target.value)}>
-                  <option value="">choose a workflow…</option>
-                  {(flows ?? []).map((f) => (
-                    <option key={f.id} value={f.id}>{f.nomen ?? f.id}{f.versio ? ` · ${f.versio}` : ''}</option>
-                  ))}
-                </select>
-              </label>
-              {flows !== null && flows.length === 0 && (
-                <span className="gt-sub mono">no text-to-image workflow is available.</span>
-              )}
-              {flowLoading && <span className="gt-sub mono">reading inputs…</span>}
-              {blockReason && <span className="gt-sub mono">{blockReason}</span>}
+              <span className="gt-sub mono">
+                {modusId
+                  ? (blockReason ?? (quote ? `fires at ~${quote.impetus} impetus each` : 'pricing…'))
+                  : 'choose a nozzle above to fire one'}
+              </span>
             </div>
 
             {report && (
@@ -666,36 +1001,21 @@ export function Muse() {
                       <button className="btn ghost sm" onClick={() => setKept((prev) => [...prev, { prompt: promptOf(r.index, r.prompt), paid: r.paid }])}>
                         Keep
                       </button>
-                      {/* Quote first, always: the cost is on screen before a run exists.
-                          Editing the prompt invalidates the quote (canFire compares the
-                          quoted text to the text on screen), so the button re-arms only
-                          after the edited prompt has been priced. */}
-                      <button
-                        className="btn ghost sm"
-                        disabled={!modusId || !!blockReason || busy === r.index || promptOf(r.index, r.prompt).trim() === ''}
-                        onClick={() => doQuote(r.index, promptOf(r.index, r.prompt))}
-                      >
-                        {busy === r.index ? 'working…' : 'Quote'}
-                      </button>
+                      {/* One control, and it fires this one prompt. The price sits on the
+                          launch control above: a t2i reservation is evaluated against the
+                          run's numeric inputs, and Muse sends only a prompt, so editing the
+                          text here does not change what this costs. */}
                       {(() => {
                         const prompt = promptOf(r.index, r.prompt);
-                        const q = quotes[r.index] ?? null;
-                        const armed = canFire(q, modusId, prompt, blockReason);
+                        const armed = canFireOne(modusId, prompt, blockReason);
                         return (
-                          <>
-                            {q && (
-                              <span className="gt-sub mono">
-                                {armed ? `${q.impetus} credits` : 'edited — quote again'}
-                              </span>
-                            )}
-                            <button
-                              className="btn accent sm"
-                              disabled={!armed || busy === r.index}
-                              onClick={() => doFire(r.index, prompt, r.fragments)}
-                            >
-                              Generate →
-                            </button>
-                          </>
+                          <button
+                            className="btn accent sm"
+                            disabled={!armed || busy === r.index}
+                            onClick={() => doFire(r.index, prompt, r.fragments)}
+                          >
+                            {busy === r.index ? 'firing…' : 'Fire this one →'}
+                          </button>
                         );
                       })()}
                       {fired[r.index]?.error && (
@@ -718,6 +1038,7 @@ export function Muse() {
                 ))}
               </div>
             )}
+            </details>
           </div>
         </div>
 

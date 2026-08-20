@@ -14,7 +14,8 @@ import {
 } from '../../../../../crystal/muse/garden.js';
 import { rollReport, formatRoll, type RolledPrompt, type RollReport } from '../../../../../crystal/muse/roll.js';
 import { CATEGORIES, fragmentKey, isCategory, type Category, type Garden } from '../../../../../crystal/muse/taxonomy.js';
-import { WEIGHT_MAX, WEIGHT_MIN } from '../../../../../crystal/muse/sampler.js';
+import { WEIGHT_MAX, WEIGHT_MIN, rollFragments } from '../../../../../crystal/muse/sampler.js';
+import { composeTemplate, detectConflicts } from '../../../../../crystal/muse/weaver.js';
 import { lineageOf as recordedLineage, type MuseSession } from '../../../../../crystal/muse/session.js';
 import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
 import { mediaFromOutput, type Media } from './media';
@@ -169,28 +170,287 @@ export function ignitionRequest(modusId: string, prompt: string): RunRequest {
   return { modusId, aditus: { [PROMPT_KEY]: prompt } };
 }
 
-/** An ignition's state on one roll: what was quoted, and for which prompt text. */
-export type IgnitionQuote = { modusId: string; prompt: string; impetus: string };
-
 /**
- * Whether the fire button may be armed. The cost is shown first and firing is the second
- * action, so a run is never created from a screen with no number on it: there must be a
- * quote, and it must be a quote for exactly the flow and the prompt text now on screen.
- * The prompt is editable (noema-229), so a quote goes stale the moment it is edited —
- * an armed button after an edit would charge for one prompt and generate another.
- * Non-vacuity: dropping the quote requirement must fail "the cost is shown before the
- * run is created".
+ * Whether the single manual card may be fired. The manual path keeps its editable
+ * prompt and fires that one prompt down the same route a stream piece takes, so its
+ * only requirements are a chosen flow the prompt alone can drive, and text to send.
+ * The price for that route is shown on the launch control above it (`launchLabel`),
+ * quoted once for the flow rather than per prompt — see the note on `streamQuote`.
  */
-export function canFire(
-  quote: IgnitionQuote | null,
+export function canFireOne(
   modusId: string | null,
   prompt: string,
   blockReason: string | null,
 ): boolean {
   if (!modusId || blockReason) return false;
-  if (prompt.trim() === '') return false;
-  if (!quote) return false;
-  return quote.modusId === modusId && quote.prompt === prompt;
+  return prompt.trim() !== '';
+}
+
+// ── The stream's front door (noema-244) ──────────────────────────────────────
+// Configuration, one launch control, and a loop that rides until it is stopped.
+//
+// WHERE THE LOOP LIVES, and why it matters for spend: in the browser. There is no
+// server-side stream — no stream id, no heartbeat, no reaper — so a piece is
+// requested only when the previous one settles, and closing the tab ends the
+// stream because nothing is left to fire it. The property that buys: there is no
+// state in which an unattended page keeps spending. The cost, which the screen
+// must show rather than hide: a page that goes away comes back stopped, and the
+// state readout has to say so instead of rendering as though it were still riding.
+//
+// Everything the loop decides is `nextPieceDecision` below — pure, and the money
+// ceiling of the whole design is one comparison inside it.
+
+/** How a stream is run: a fixed number of pieces, or until it is stopped. */
+export type StreamMode = 'batched' | 'infinite';
+
+/** The price the launch control carries: one quote for the chosen flow.
+ *
+ *  ONE quote prices every piece, and that is a statement about the server, not a
+ *  convenience: a t2i reservation is evaluated from the flow's own cost curve against
+ *  the run's NUMERIC inputs (`steps`, `width`, `height` — see `reservationImpetus` in
+ *  `src/ledger/rates.ts`), falling back to the flow's schema defaults. Muse sends
+ *  `aditus` = `{prompt}` and nothing else, so every piece in a stream quotes the same
+ *  figure whatever prompt it was rolled from.
+ *
+ *  It is still an ESTIMATE and is labelled `~` everywhere it is rendered: a
+ *  reservation is an upper bound that settlement charges measured pod time against
+ *  and refunds the remainder of. The client figure never becomes the charge —
+ *  every piece goes through `POST /v1/runs`, which prices and charges server-side. */
+export interface StreamQuote { modusId: string; impetus: string }
+
+/** A stream as it is configured before launch. */
+export interface StreamConfig {
+  mode: StreamMode;
+  /** Batched only: how many pieces to fire. */
+  cap: number;
+  /** Infinite only: the runs-until-you-stop-it warning has been acknowledged. */
+  acknowledged: boolean;
+}
+
+/** Everything the launch control is refused on, in one object. */
+export interface LaunchState {
+  config: StreamConfig;
+  /** The chosen t2i flow, or null when none is chosen. */
+  modusId: string | null;
+  /** `ignitionBlockReason` for the chosen flow: a flow needing more than a prompt. */
+  flowBlockReason: string | null;
+  /** How many fragments are in the draw right now. */
+  liveFragments: number;
+  /** The configuration-time quote, or null while it is still being fetched. */
+  quote: StreamQuote | null;
+}
+
+/**
+ * The single reason launch is refused, or `null` when it may proceed.
+ *
+ * Four refusals, and each is load-bearing:
+ *
+ *  - no flow chosen, and a flow that needs more than a prompt — the two refusals the
+ *    per-card arming used to perform. They did not vanish with it; they moved here.
+ *  - an EMPTY FLOOR. A stream draws every piece from the floor, so a floor with
+ *    nothing in the draw has nothing to make. A thin floor is allowed to run — the
+ *    refusal is emptiness, not thinness.
+ *  - INFINITE MODE THAT HAS NOT BEEN ACKNOWLEDGED. An infinite stream has no count to
+ *    stop it; the balance is its only ceiling. The acknowledgement is the disclosure
+ *    that stands in for the count, so it is a gate on the control and not a caption
+ *    beside it.
+ *
+ * A stream also cannot launch before it is priced: `perPieceImpetus` is what the funds
+ * check compares the balance against, so an unpriced stream is one with no ceiling.
+ *
+ * Non-vacuity: reverting the acknowledgement gate must fail "infinite mode cannot
+ * launch until the runs-until-you-stop-it warning is acknowledged"; reverting the
+ * empty-floor refusal must fail "launch is refused when zero fragments are live on
+ * the floor".
+ */
+export function launchBlockReason(state: LaunchState): string | null {
+  if (!state.modusId) return 'choose a workflow to fire at';
+  if (state.flowBlockReason) return state.flowBlockReason;
+  if (state.liveFragments <= 0) {
+    return 'nothing is in the draw — add a fragment to the floor before launching';
+  }
+  if (state.config.mode === 'infinite' && !state.config.acknowledged) {
+    return 'infinite runs until you stop it or your funds run out — acknowledge that first';
+  }
+  if (!state.quote || state.quote.modusId !== state.modusId) {
+    return 'pricing this run…';
+  }
+  return null;
+}
+
+/** Why a stream stopped. `lost` is D1's honest readout: the page went away and took
+ *  the loop with it, so the stream ended without anyone deciding to end it. */
+export type StopReason = 'user' | 'funds' | 'cap' | 'errors';
+export type StopCause = StopReason | 'lost';
+
+/** Where a stream is. `stopping` is a stop pressed while a piece is still in flight:
+ *  the loop finishes the piece that is already paid for and then stops. */
+export type StreamPhase = 'idle' | 'running' | 'stopping' | 'stopped';
+
+/** Consecutive failures that end a stream. A loop that retries a hard failure forever
+ *  is the other way this design can spend without a hand on it. */
+export const MAX_CONSECUTIVE_ERRORS = 3;
+
+/** What the loop knows when it decides whether to fire the next piece. */
+export interface StreamDecisionInput {
+  mode: StreamMode;
+  /** Batched only. */
+  cap: number;
+  /** How many pieces this stream has fired so far. */
+  fired: number;
+  /** True while a piece is still generating. */
+  inFlight: boolean;
+  /** The caller's balance, freshly read — impetus, as a decimal integer string. */
+  balanceImpetus: string;
+  /** The quoted reservation for one piece, same units. */
+  perPieceImpetus: string;
+  stopRequested: boolean;
+  consecutiveErrors: number;
+}
+
+/** Fire, or don't — and when not, whether the stream is over and why. `stop: null`
+ *  means "not now, not over": a piece is still in flight. */
+export type StreamDecision = { fire: true } | { fire: false; stop: StopReason | null };
+
+/** Impetus figures cross the wire as decimal integer strings and are compared exactly.
+ *  A malformed or absent figure reads as 0, which fails the funds check closed. */
+function impetus(value: string | null | undefined): bigint {
+  if (!value || !/^\d+$/.test(value.trim())) return 0n;
+  return BigInt(value.trim());
+}
+
+/** `count` pieces at `perPiece` each, as a decimal string — what the launch control
+ *  shows as the batch total, and what the readout shows as spent so far. Estimates
+ *  both, and both are rendered with a `~`. */
+export function impetusTotal(perPiece: string, count: number): string {
+  const n = Number.isFinite(count) && count > 0 ? BigInt(Math.trunc(count)) : 0n;
+  return (impetus(perPiece) * n).toString();
+}
+
+/**
+ * THE WHOLE OF THE LOOP'S JUDGEMENT. `Muse.tsx` awaits a settlement and asks this
+ * what to do next; it decides nothing itself.
+ *
+ * Order, and every position is deliberate:
+ *
+ *  1. `stopRequested` always wins. A stop pressed mid-stream is the user's, whatever
+ *     else is true.
+ *  2. `inFlight` is not a stop — it is "not yet". Exactly one piece is in flight at a
+ *     time, because a loop that fires on a timer rather than on settlement spends at a
+ *     rate nobody chose.
+ *  3. `consecutiveErrors`, then the cap, then funds.
+ *
+ * THE FUNDS COMPARISON IS THE ENTIRE CEILING OF THIS DESIGN. Infinite mode has no
+ * count; the balance is what ends it. It must therefore be compared against a balance
+ * READ AGAIN as the stream runs, never the one read at launch — a stale balance is a
+ * stream that keeps firing into a refusal.
+ *
+ * Non-vacuity: reverting the funds check must fail "a stream stops with reason 'funds'
+ * when the balance is below the next piece's quoted impetus"; reverting the cap must
+ * fail "a batched stream of K fires exactly K pieces and then stops with reason 'cap'";
+ * reverting the in-flight guard must fail "no second piece is requested while one is
+ * still in flight".
+ */
+export function nextPieceDecision(input: StreamDecisionInput): StreamDecision {
+  if (input.stopRequested) return { fire: false, stop: 'user' };
+  if (input.inFlight) return { fire: false, stop: null };
+  if (input.consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) return { fire: false, stop: 'errors' };
+  if (input.mode === 'batched' && input.fired >= input.cap) return { fire: false, stop: 'cap' };
+  if (impetus(input.balanceImpetus) < impetus(input.perPieceImpetus)) return { fire: false, stop: 'funds' };
+  return { fire: true };
+}
+
+/**
+ * What the launch control says. The price is ON the control rather than behind a
+ * separate step, which is the change this item makes to how spend is seen: once, and
+ * earlier, instead of per piece — not less.
+ */
+export function launchLabel(config: StreamConfig, quote: StreamQuote | null): string {
+  if (!quote) return 'launch';
+  const each = `~${quote.impetus} impetus each`;
+  if (config.mode === 'infinite') return `launch · ${each} · rides until you stop it`;
+  const n = Math.max(0, Math.trunc(config.cap));
+  return `launch ${n} · ${each} · ~${impetusTotal(quote.impetus, n)} total`;
+}
+
+/** Why a stream ended, in words. Every stop reason gets one — including the one
+ *  nobody chose (`lost`), which is what keeps D1's tradeoff visible instead of
+ *  rendering a dead stream as a live one. */
+export function stopLabel(cause: StopCause, fired: number, cap: number): string {
+  switch (cause) {
+    case 'user': return 'stopped — you stopped it';
+    case 'funds': return 'stopped — out of funds';
+    case 'cap': return `stopped — ${fired} of ${cap}`;
+    case 'errors': return `stopped — ${MAX_CONSECUTIVE_ERRORS} fires failed`;
+    case 'lost': return 'stopped — the page lost the stream';
+  }
+}
+
+/** The stream's state in one line. Infinite mode has no progress bar and no total, so
+ *  this readout is the only place a user can watch the money: it carries the pieces
+ *  fired and the impetus this stream has spent, at every phase. */
+export function streamStatusLine(
+  phase: StreamPhase,
+  cause: StopCause | null,
+  fired: number,
+  config: StreamConfig,
+  quote: StreamQuote | null,
+): string {
+  const spent = quote ? ` · ~${impetusTotal(quote.impetus, fired)} impetus this stream` : '';
+  const made = `${fired} ${fired === 1 ? 'piece' : 'pieces'}`;
+  if (phase === 'idle') return 'idle';
+  if (phase === 'running') {
+    const progress = config.mode === 'batched'
+      ? `${fired} of ${Math.max(0, Math.trunc(config.cap))} pieces`
+      : made;
+    return `running · ${progress}${spent}`;
+  }
+  if (phase === 'stopping') return `stopping after this piece · ${made}${spent}`;
+  const why = cause ? stopLabel(cause, fired, Math.max(0, Math.trunc(config.cap))) : 'stopped';
+  return `${why} · ${made}${spent}`;
+}
+
+/** One draw for the stream: the prompt to fire, the fragments it came from, and the
+ *  roll index that reproduces it. */
+export interface StreamDraw {
+  index: number;
+  fragments: Fragment[];
+  prompt: string;
+  paid: boolean;
+}
+
+/**
+ * The draw for ONE piece, at a named roll index.
+ *
+ * The index is not decoration. `rollFragments` is deterministic by design — the same
+ * (garden, steer, index) always yields the same roll, which is what makes a recorded
+ * `rollIndex` replayable — so a stream that drew at a fixed index would fire the same
+ * prompt for every piece it paid for. The loop therefore advances the index once per
+ * piece, and each piece is a different rolled prompt.
+ *
+ * The garden is rebuilt from the fragments and exclusions handed in on each call, so a
+ * fragment turned off on the floor mid-stream is out of the draw for the very next
+ * piece. That is what makes the floor the steering wheel while a stream is riding.
+ *
+ * Non-vacuity: pinning the index to a constant must fail "consecutive stream draws are
+ * different rolls".
+ */
+export function rollAt(
+  gardenFragments: readonly Fragment[],
+  excluded: ReadonlySet<number>,
+  index: number,
+): StreamDraw {
+  const garden = regroup(curatedFragments([...gardenFragments], excluded));
+  const at = Math.max(0, Math.trunc(index));
+  const fragments = rollFragments(garden, at);
+  return {
+    index: at,
+    fragments,
+    prompt: composeTemplate(fragments),
+    // The same verdict the roll cards badge, from the same detector — this module
+    // never forms a second opinion about what conflicts.
+    paid: detectConflicts(fragments).length > 0,
+  };
 }
 
 // ── The stream (noema-238) ───────────────────────────────────────────────────
