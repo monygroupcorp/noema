@@ -11,10 +11,11 @@ import {
   MODUS_AITOOLKIT_TRAINING,
   MODUS_DATASET_CAPTION,
   MODUS_DATASET_DECOMPOSE,
+  MODUS_MUSE_STEER,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains ten entries', () => {
-  assert.equal(CANONICAL_MODI.length, 10)
+test('CANONICAL_MODI contains eleven entries', () => {
+  assert.equal(CANONICAL_MODI.length, 11)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
@@ -159,4 +160,33 @@ test('all modi have non-empty id, nomen, versio', () => {
     assert.ok(m.nomen.length > 0, `${m.id} nomen should be non-empty`)
     assert.ok(m.versio.length > 0, `${m.id} versio should be non-empty`)
   }
+})
+
+test('muse-steer modus is a canon steer job on its OWN ministerium (sync, usage-billed)', () => {
+  // The same assertion the caption and decompose modi carry, and for the same reason: `Cursorum`
+  // is a flat Map<ministerium, Cursor> whose `register` is a bare set, so sharing a key with a
+  // hosted-API provider would replace that provider's ApiCursor, and sharing the decomposer's key
+  // would replace the decomposer — with a green typecheck and a green suite.
+  assert.equal(MODUS_MUSE_STEER.ministerium, 'musesteer')
+  assert.notEqual(MODUS_MUSE_STEER.ministerium, MODUS_DATASET_DECOMPOSE.ministerium)
+  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_DALLE_III, MODUS_GPT_IMAGE_EDIT]) {
+    assert.notEqual(MODUS_MUSE_STEER.ministerium, other.ministerium)
+  }
+  assert.equal(MODUS_MUSE_STEER.genus, 'atomicus')
+  // One chat call in process, returning when the proposal is validated.
+  assert.equal(MODUS_MUSE_STEER.deliveryMode, 'sync')
+  assert.equal(MODUS_MUSE_STEER.canonica, true)
+  // No fixed cost: the cursor reserves a ceiling from the floor size and settles the real token
+  // cost of the one call.
+  assert.equal(MODUS_MUSE_STEER.impetusFixum, undefined)
+  // The exitus is counts, so the cascade finds no output modality and falls to `enhance`; an
+  // instruction in and a proposal out is text in, text out, which is `chat`.
+  assert.equal(MODUS_MUSE_STEER.verbum, 'chat')
+  // The floor travels inline; a session id is not a port here and must not become one — a cursor
+  // cannot resolve an owner, so a cursor reading a resource named in its aditus is unscoped.
+  assert.equal(MODUS_MUSE_STEER.aditus.instruction?.required, true)
+  assert.equal(MODUS_MUSE_STEER.aditus.floor?.required, true)
+  assert.equal('session' in MODUS_MUSE_STEER.aditus, false)
+  assert.deepEqual(Object.keys(MODUS_MUSE_STEER.exitus).sort(), ['additions', 'dropped', 'eliminations'])
+  assert.ok(MODUS_MUSE_STEER.contentHash.length > 0)
 })

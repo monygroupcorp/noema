@@ -76,6 +76,7 @@ import { RemoteAitoolkitTrainingCursor } from './crystal/RemoteAitoolkitTraining
 import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/RemoteAitkLauncher.js'
 import { DatasetCaptionCursor } from './crystal/DatasetCaptionCursor.js'
 import { MuseDecomposeCursor, MUSE_DECOMPOSE_MINISTERIUM } from './crystal/MuseDecomposeCursor.js'
+import { MuseSteerCursor, MUSE_STEER_MINISTERIUM } from './crystal/MuseSteerCursor.js'
 import { CaptionPodLauncher } from './crystal/CaptionPodLauncher.js'
 import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
@@ -595,6 +596,18 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // `datasets` store constructed above rather than opening a second one.
   cursorum.register(MUSE_DECOMPOSE_MINISTERIUM, new MuseDecomposeCursor({
     datasets,
+    providers: (config.apiProviders ?? []).map(({ provider, apiKey }) => ({ provider, apiKey })),
+  }))
+
+  // Muse steer (`modus.muse-steer`) — the same chat rail again, and again its OWN ministerium,
+  // never 'musegarden' (that key is the decomposer's) and never a provider id. Registered
+  // unconditionally for the same reason as the decomposer: a deployment with no chat key refuses
+  // a steer with the cursor's own named error instead of an unresolvable ministerium.
+  //
+  // It takes NO STORE. A steer reads a floor passed inline in the aditus and returns a proposal;
+  // it holds no session store and can write nothing. That is the property the whole feature rests
+  // on — the floor moves only when the user confirms the proposal through the floor routes.
+  cursorum.register(MUSE_STEER_MINISTERIUM, new MuseSteerCursor({
     providers: (config.apiProviders ?? []).map(({ provider, apiKey }) => ({ provider, apiKey })),
   }))
 
