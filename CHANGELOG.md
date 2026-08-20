@@ -1,5 +1,35 @@
 # Changelog
 
+## [5.9.0](https://github.com/monygroupcorp/noema/compare/v5.8.0...v5.9.0) (2026-08-20)
+
+
+### Features
+
+* **crystal:** give the muse session a floor and a piece ledger with lineage ([ee5c5c0](https://github.com/monygroupcorp/noema/commit/ee5c5c08fb3ec471896bdcdb119840f948e8ec6d))
+* **crystal:** give the muse session a floor and a piece ledger with lineage ([d775b5f](https://github.com/monygroupcorp/noema/commit/d775b5fcf2d66a328ea453ac7eee879bebfb4d11))
+* **crystal:** let the muse sampler read per-fragment enabled and weight state ([a2cf9f9](https://github.com/monygroupcorp/noema/commit/a2cf9f9d694f1e0d36062f2dceaae56c89b04b93))
+* **datasets:** append media to an existing dataset ([949020e](https://github.com/monygroupcorp/noema/commit/949020eb11353d8fa5283e5a1eb1252abebf6677))
+* **datasets:** append media to an existing dataset ([b68fb54](https://github.com/monygroupcorp/noema/commit/b68fb546819a48366d653e5d0b38eafbcbfafc1f))
+* **muse:** add a fragment to a session floor by hand ([0cd83a8](https://github.com/monygroupcorp/noema/commit/0cd83a8895f945e0efd191300b9567e32d84ff4d))
+* **muse:** add a fragment to a session floor by hand ([fd9c1be](https://github.com/monygroupcorp/noema/commit/fd9c1be6c55f88c3177682c7687a560f6fbde6c6))
+* **muse:** persist a Muse session and serve it over /v1 ([85f0b5a](https://github.com/monygroupcorp/noema/commit/85f0b5ae55a074babb86ea9495d2ab5b13bc658c))
+* **muse:** persist a Muse session and serve it over /v1 ([1e6a804](https://github.com/monygroupcorp/noema/commit/1e6a80461aa2a3dda33bb3347892b7d03b024d7e))
+* **muse:** read how much variance the cutting floor has left ([a6dae01](https://github.com/monygroupcorp/noema/commit/a6dae0147eec1509977986e9cb6ddc52b6d9163e))
+* **muse:** save a piece back into the session's own dataset ([ebd7883](https://github.com/monygroupcorp/noema/commit/ebd78830d7d288c709d6eb2450fbf7d40cf4e042))
+* **muse:** show fired pieces in Muse as a tile grid ([1b9d154](https://github.com/monygroupcorp/noema/commit/1b9d15453b929896f0cf4f164314ba1a5614713b))
+* **muse:** the cutting floor sheet, and reactions that write to the session ([3bd8c22](https://github.com/monygroupcorp/noema/commit/3bd8c22b87912a70b51853ae082f87ad033b80a3))
+* **muse:** the cutting floor sheet, and reactions that write to the session ([b3a37b0](https://github.com/monygroupcorp/noema/commit/b3a37b0ccf0967e127ff98fde8c1ad590d119745))
+* **muse:** update a recorded piece, and look a session up by dataset ([66c7595](https://github.com/monygroupcorp/noema/commit/66c7595f76b68fc616d030e35351592d01d9eaee))
+* **muse:** update a recorded piece, and look a session up by dataset ([0f8a6c0](https://github.com/monygroupcorp/noema/commit/0f8a6c0034fc94a806fa5b7a84228c96aa05a082))
+
+
+### Bug Fixes
+
+* **api:** declare not_found.dataset and key the authz coverage guard on the resource ([a7a8856](https://github.com/monygroupcorp/noema/commit/a7a8856b047f57121fdb4e826f5465ed36c0c0f9))
+* **api:** declare not_found.dataset and key the authz coverage guard on the resource ([f27c029](https://github.com/monygroupcorp/noema/commit/f27c02923b03b673d074a4f2c83a8349cd5bc771))
+* **telegram:** render resolved inputs as labels, and keep quiet in shared groups ([dd8091e](https://github.com/monygroupcorp/noema/commit/dd8091e517cbd104fab0c2163e30c210b4fdc5ce))
+* **telegram:** render resolved inputs as labels, and keep quiet in shared groups ([19aa351](https://github.com/monygroupcorp/noema/commit/19aa351a2ede51e7da2ed038476269acc9a46bd3))
+
 ## [5.8.0](https://github.com/monygroupcorp/noema/compare/v5.7.1...v5.8.0) (2026-08-18)
 
 
