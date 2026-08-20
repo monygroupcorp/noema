@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import {
@@ -15,12 +15,16 @@ import {
   canFireDecompose,
   canOfferDecompose,
   decomposeCaptionsetId,
+  launchCaptionJob,
   launchDecomposeJob,
 } from '../lib/training';
 import {
   admitPiece,
+  appendFailureNote,
+  appendMediaRequest,
   applyRunResult,
   buildGarden,
+  captionCoverageLine,
   canFireOne,
   categoryColor,
   dismissFromStream,
@@ -41,10 +45,12 @@ import {
   mergedExclusions,
   nextPieceDecision,
   pieceRecord,
+  decomposeGateReason,
   poolDatasetFragments,
   reactionOf,
   recordedPiece,
   releasePending,
+  replaceDataset,
   rollAt,
   rollCurated,
   savedOf,
@@ -163,9 +169,34 @@ import './muse.css';
 // separate, metered surface. The rules the form follows (`manualAddError`,
 // `manualAddRequest`) are pure functions in `lib/muse.ts` and are gated there.
 
+// Adding images to the moodboard (noema-260) is V7's other exit, beside the manual add:
+// the floor is widened by widening the SET. It is the only gesture on this screen that
+// reaches the dataset rather than the session, and it is three steps rather than one —
+// the upload joins the set and is free, a caption pass has to read the set, and a
+// decompose is what turns those captions into fragments. The screen says all three
+// before either metered one is pressed.
+//
+// Two rules it enforces, both pure and both gated in `lib/muse.ts`: a partial upload
+// still appends what landed and names what did not, and a decompose is REFUSED while
+// the chosen caption pass does not cover every image — a decompose over a partial pass
+// mines the older images only, spends doing it, and comes back green.
+//
+// The append is `POST /v1/data/datasets/:id/media`, which is append-only by design:
+// nothing here removes or reorders media, at this layer or any other.
+
 /** One error, as short prose. */
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Upload one file to R2 through the signed-PUT path and return its permanent URL —
+ *  the same two-step contract `Datasets.tsx` and `Profile.tsx` upload through, so there
+ *  is one upload path in the app rather than a second one here. */
+async function uploadImage(file: File): Promise<string> {
+  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
+  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
+  if (!put.ok) throw new Error(`upload failed (${put.status})`);
+  return permanentUrl;
 }
 
 export function Muse() {
@@ -389,6 +420,13 @@ export function Muse() {
   const [decomposing, setDecomposing] = useState(false);
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // ── Add images (noema-260) ────────────────────────────────────────────────
+  // The panel's own disclosure state lives here rather than in the panel, because the
+  // empty-floor row's offer is what opens it and that row sits in the launcher above.
+  const [addOpen, setAddOpen] = useState(false);
+  const [captioning, setCaptioning] = useState(false);
+  const [captionMsg, setCaptionMsg] = useState<{ ok: boolean; text: string; runId?: string } | null>(null);
+
   useEffect(() => {
     let live = true;
     api.listFlows()
@@ -469,6 +507,39 @@ export function Muse() {
       setDecomposeMsg({ ok: false, text: `couldn't decompose: ${String((e as Error).message).slice(0, 160)}` });
     } finally {
       setDecomposing(false);
+    }
+  }
+
+  // A caption pass is a normal metered run and it is ASYNCHRONOUS — it provisions a pod
+  // and the captionset lands on the set when the pass finishes, so this returns at
+  // dispatch rather than at completion. The screen says that instead of implying the
+  // captions are already there, and offers the re-read that picks the new pass up.
+  async function doCaption(dataset: DatasetT) {
+    if (captioning) return;
+    setCaptioning(true);
+    setCaptionMsg(null);
+    try {
+      const run = await launchCaptionJob({ datasetId: dataset.id });
+      setCaptionMsg({
+        ok: true,
+        runId: run.id,
+        text: 'captioning started — it runs on a pod, and the new pass lands on this set when it finishes',
+      });
+    } catch (e) {
+      setCaptionMsg({ ok: false, text: `couldn't start captioning: ${errText(e)}` });
+    } finally {
+      setCaptioning(false);
+    }
+  }
+
+  // Re-read the set. The caption pass writes back out-of-band, so this is how its
+  // captionset (and every pass' recomputed coverage) reaches the screen.
+  async function refreshDatasets() {
+    try {
+      const { datasets: ds } = await api.listDatasetsFull();
+      setDatasets(ds);
+    } catch (e) {
+      setCaptionMsg({ ok: false, text: `couldn't re-read the set: ${errText(e)}` });
     }
   }
 
@@ -695,6 +766,66 @@ export function Muse() {
     );
   }
 
+  // ── What an appended image still needs (noema-260) ────────────────────────
+  // The readout and the two metered steps, built once here so the same node can sit
+  // under the add-images panel wherever that panel is rendered. Every figure on it is
+  // derived from the dataset the server last returned — the count the user is shown
+  // before spending is the count the pass will actually run over.
+  const nextCaptionsetId = decomposeCaptionsetId(d, decomposeSet);
+  const decomposeGate = decomposeGateReason(d, nextCaptionsetId);
+  const total = d.media.length;
+  const afterAppend = (
+    <div className="muse-add-next">
+      <label className="cc-field"><span>Caption pass</span>
+        <select className="cer-input" value={nextCaptionsetId ?? ''}
+          disabled={d.captionsets.length === 0 || decomposing}
+          onChange={(e) => setDecomposeSet(e.target.value)}>
+          {d.captionsets.length === 0 && <option value="">no caption pass yet</option>}
+          {d.captionsets.map((cs) => (
+            <option key={cs.id} value={cs.id}>{cs.name} · {cs.coverage}</option>
+          ))}
+        </select>
+      </label>
+
+      <div className="muse-add-readout mono">{captionCoverageLine(d, nextCaptionsetId)}</div>
+
+      <div className="muse-add-step">
+        <button type="button" className="btn ghost sm" disabled={captioning} onClick={() => void doCaption(d)}>
+          {captioning ? 'starting…' : `Caption all ${total} ${total === 1 ? 'image' : 'images'} →`}
+        </button>
+        <span className="gt-sub mono">
+          a caption pass captions every image in the set, not only the ones just added — this one is
+          {' '}{total} {total === 1 ? 'image' : 'images'} · billed like any other run
+        </span>
+      </div>
+      {captionMsg && (
+        <div className="gt-sub mono">
+          {captionMsg.text}
+          {captionMsg.runId && <> · <Link to={`/run?id=${captionMsg.runId}`}>open run view →</Link></>}
+          {captionMsg.ok && <> · <button type="button" className="linkish" onClick={() => void refreshDatasets()}>re-read the set</button></>}
+        </div>
+      )}
+
+      <label className="cc-field"><span>Trigger word to strip (optional)</span>
+        <input className="cer-input" value={trigger} disabled={decomposing}
+          onChange={(e) => setTrigger(e.target.value)}
+          placeholder="keeps fragments reusable" />
+      </label>
+      <div className="muse-add-step">
+        <button type="button" className="btn accent sm"
+          disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
+          onClick={() => void doDecompose(d)}>
+          {decomposing ? 'Decomposing…' : 'Decompose this pass →'}
+        </button>
+        <span className="gt-sub mono">
+          {decomposeGate
+            ?? 'reads every caption in this pass and stores the fragments on the images they came from · one chat call per caption · billed like any other run'}
+        </span>
+      </div>
+      {decomposeMsg && <div className="gt-sub mono">{decomposeMsg.text}</div>}
+    </div>
+  );
+
   // A dataset nobody has decomposed has no fragments. This is a first-class branch, not an
   // error — noema-221 already established that an absent `fragments` is valid and expected.
   if (build && build.kept === 0) {
@@ -725,15 +856,15 @@ export function Muse() {
                       placeholder="keeps fragments reusable" />
                   </label>
                   <button className="btn accent"
-                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, decomposeSet), inFlight: decomposing })}
+                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, decomposeSet), inFlight: decomposing }) || !!decomposeGate}
                     onClick={() => void doDecompose(d)}>
                     {decomposing ? 'Decomposing…' : 'Decompose these captions →'}
                   </button>
                 </div>
                 <div className="muse-decompose-note mono">
-                  {decomposing
+                  {decomposeGate ?? (decomposing
                     ? 'reading every caption in this set — one pass per caption, this stays open until the last one is written'
-                    : 'reads every caption in this set and stores the fragments on the images they came from · billed like any other run'}
+                    : 'reads every caption in this set and stores the fragments on the images they came from · billed like any other run')}
                 </div>
                 {decomposeMsg && <div className="muse-decompose-note mono">{decomposeMsg.text}</div>}
               </>
@@ -743,6 +874,15 @@ export function Muse() {
                 decompose those captions to grow the garden.
               </div>
             )}
+            {/* V7's other exit, offered from the coldest start there is: the set itself can
+                be widened from here, not only the floor. */}
+            <AddImages
+              dataset={d}
+              open={addOpen}
+              onOpenChange={setAddOpen}
+              onAppended={(updated) => setDatasets((ds) => replaceDataset(ds, updated))}
+              next={null}
+            />
             <Link className={canOfferDecompose(d) ? 'btn ghost' : 'btn accent'} to={`/datasets/${d.id}`}>← back to {d.name}</Link>
           </div>
         </div></div>
@@ -864,12 +1004,23 @@ export function Muse() {
               <button type="button" className="btn ghost sm" disabled={!session} onClick={() => setFloorOpen(true)}>
                 add a fragment yourself — free
               </button>
-              <button type="button" className="btn ghost sm" disabled title="not yet available on this screen">
+              <button type="button" className="btn ghost sm" onClick={() => setAddOpen(true)}>
                 add images to the moodboard
               </button>
             </div>
           )}
         </section>
+
+        {/* Widening the SET (noema-260). Kept out of the sticky launcher above — it is a
+            panel, not a control — and reachable whatever the floor holds: a healthy floor
+            is still a floor that can be grown. */}
+        <AddImages
+          dataset={d}
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onAppended={(updated) => setDatasets((ds) => replaceDataset(ds, updated))}
+          next={afterAppend}
+        />
 
         {/* The stream: what this screen has made, on this screen. Newest first, held
             back while the user is scrolled away from the head of the grid. */}
@@ -1249,6 +1400,140 @@ function ExpandedPiece({
         </div>
       </div>
     </div>
+  );
+}
+
+/** What one chosen file is doing, as words. A row that says nothing while a batch runs
+ *  is a row the user cannot tell apart from a stuck one. */
+const FILE_STATE: Record<string, string> = {
+  waiting: 'waiting',
+  uploading: 'uploading…',
+  added: 'uploaded',
+  failed: 'did not upload',
+};
+
+/**
+ * Add images to the moodboard (noema-260) — V7's second exit, and the only control on
+ * this screen that writes to the DATASET rather than to the session.
+ *
+ * Three properties it holds, each of them a rule rather than a preference:
+ *
+ *   AN EMPTY SELECTION FIRES NOTHING. No signature, no PUT, no append. An append of
+ *   nothing would still mint a dataset version and recompute every pass' coverage over
+ *   an unchanged set — a version recording that nothing happened.
+ *
+ *   A FILE THAT FAILS DOES NOT TAKE THE BATCH WITH IT. What uploaded is appended and
+ *   what did not is named. Abandoning the whole batch on one failure loses the user's
+ *   other files for no reason.
+ *
+ *   THE SET IS REBUILT FROM THE RESPONSE. The append returns the whole dataset — the
+ *   new version, the new media, and every caption pass' recomputed coverage — and that
+ *   is what the screen re-renders from. A locally patched copy would be a version
+ *   behind and would show a coverage denominator that no longer exists.
+ */
+function AddImages({
+  dataset, open, onOpenChange, onAppended, next,
+}: {
+  dataset: DatasetT;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAppended: (dataset: DatasetT) => void;
+  next: ReactNode;
+}) {
+  const [pending, setPending] = useState<File[]>([]);
+  const [states, setStates] = useState<Record<number, string>>({});
+  const [appending, setAppending] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function append() {
+    if (appending) return;
+    // The refusal is the pure one: `appendMediaRequest` returns null for an empty list,
+    // and nothing is signed, uploaded or posted.
+    if (appendMediaRequest(pending.map((f) => f.name)) === null) {
+      setMsg({ ok: false, text: 'choose some images first' });
+      return;
+    }
+    setAppending(true);
+    setMsg(null);
+    setStates(Object.fromEntries(pending.map((_, i) => [i, 'waiting'])));
+
+    const uploaded: string[] = [];
+    const failed: string[] = [];
+    for (const [i, file] of pending.entries()) {
+      setStates((st) => ({ ...st, [i]: 'uploading' }));
+      try {
+        uploaded.push(await uploadImage(file));
+        setStates((st) => ({ ...st, [i]: 'added' }));
+      } catch {
+        failed.push(file.name);
+        setStates((st) => ({ ...st, [i]: 'failed' }));
+      }
+    }
+
+    const request = appendMediaRequest(uploaded);
+    if (!request) {
+      setMsg({ ok: false, text: appendFailureNote(failed) ?? 'nothing uploaded, so nothing was added' });
+      setAppending(false);
+      return;
+    }
+    try {
+      const { dataset: updated } = await api.addDatasetMedia(dataset.id, request);
+      onAppended(updated);
+      setPending([]);
+      const n = request.mediaUrls.length;
+      const note = appendFailureNote(failed);
+      setMsg({
+        ok: true,
+        text: `${n} ${n === 1 ? 'image' : 'images'} added — the set is now ${updated.media.length}`
+          + (note ? ` · ${note}` : '')
+          + '. captioning is the next step; nothing has been spent yet.',
+      });
+    } catch (e) {
+      setMsg({ ok: false, text: `those images uploaded but weren't added to the set: ${errText(e)}` });
+    } finally {
+      setAppending(false);
+    }
+  }
+
+  const label = pending.length === 0
+    ? 'Add images — free'
+    : `Add ${pending.length} ${pending.length === 1 ? 'image' : 'images'} — free`;
+
+  return (
+    <section className="muse-add-images">
+      <details open={open} onToggle={(e) => onOpenChange((e.target as HTMLDetailsElement).open)}>
+        <summary className="muse-manual-summary">add images to the moodboard</summary>
+        <div className="muse-add-images-body">
+          <div className="gt-sub mono">
+            Three steps, and only the first is free: the images join the set, a caption pass has to
+            read the set, and a decompose is what turns those captions into fragments on the floor.
+          </div>
+          <div className="muse-add-images-row">
+            <input
+              type="file" accept="image/*" multiple disabled={appending}
+              aria-label="images to add"
+              onChange={(e) => { setPending(Array.from(e.target.files ?? [])); setStates({}); setMsg(null); }}
+            />
+            <button type="button" className="btn accent sm" disabled={appending || pending.length === 0}
+              onClick={() => void append()}>
+              {appending ? 'uploading…' : label}
+            </button>
+          </div>
+          {pending.length > 0 && (
+            <ul className="muse-add-files mono">
+              {pending.map((f, i) => (
+                <li key={`${i}:${f.name}`} className={`muse-add-file-row ${states[i] ?? 'waiting'}`}>
+                  <span className="muse-add-file-name">{f.name}</span>
+                  <span className="muse-add-file-state">{FILE_STATE[states[i] ?? 'waiting']}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {msg && <div className="gt-sub mono">{msg.text}</div>}
+          {next}
+        </div>
+      </details>
+    </section>
   );
 }
 
