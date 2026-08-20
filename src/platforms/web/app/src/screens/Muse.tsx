@@ -10,6 +10,7 @@ import {
   type MuseReaction,
   type MuseSessionView,
   type MuseSteerProposal,
+  type ModelCard,
 } from '../lib/api';
 import { useRunStream } from '../lib/runStream';
 import {
@@ -41,10 +42,17 @@ import {
   ignitionBlockReason,
   ignitionRequest,
   instructionRemaining,
+  isHold,
   latestSession,
   launchBlockReason,
   launchLabel,
   lineageOf,
+  loraCatalog,
+  loraCatalogReason,
+  loraChoiceLine,
+  loraWarmupNote,
+  loraWeight,
+  chooseLora,
   manualAddError,
   manualAddRequest,
   mergedExclusions,
@@ -52,6 +60,7 @@ import {
   pieceRecord,
   decomposeGateReason,
   poolDatasetFragments,
+  promptWithTrigger,
   proposalPills,
   reactionOf,
   recordDismissal,
@@ -67,6 +76,7 @@ import {
   steerQuoteRequest,
   streamColumns,
   streamPiece,
+  streamRunRequest,
   streamStatusLine,
   t2iFlows,
   weightWrites,
@@ -77,10 +87,14 @@ import {
   MANUAL_CATEGORIES,
   MAX_FLOOR_FRAGMENTS,
   MAX_INSTRUCTION_CHARS,
+  LORA_WEIGHT_MAX,
+  LORA_WEIGHT_MIN,
   NO_DISMISSALS,
   TILE_GESTURES,
   type DismissalState,
   type FloorPill,
+  type HoldState,
+  type LoraChoice,
   type SheetPhase,
   type SteerPill,
   type RollReport,
@@ -114,9 +128,19 @@ import './muse.css';
 // flow can run on a prompt alone, what the request carries, and when the fire button
 // arms — all live in `lib/muse.ts` and are gated there; this screen renders them.
 // Two properties worth reading for: the cost is quoted and shown BEFORE any run is
-// created, and the request carries no `pinnedModels` — a trigger word rides the prompt
-// text and `src/crystal/loraResolver.ts` resolves it server-side, exactly as it does
-// for `Card.tsx` and every other run in the product.
+// created, and a mined fragment's own trigger word is never lifted into `pinnedModels` —
+// it rides the prompt text and `src/crystal/loraResolver.ts` resolves it server-side,
+// exactly as it does for `Card.tsx` and every other run in the product. A model the user
+// picks on the nozzle control below is the one thing this screen does pin, and it pins
+// what they chose and nothing they did not.
+//
+// The nozzle (noema-246) is the model control, on its own beside the flow. A LoRA is
+// chosen from the catalog scoped to the flow's base-model family, and every stream piece
+// fired under it carries both halves: the trigger word in the prompt and the weights in
+// `pinnedModels`. Changing it HOLDS the stream (S6) — a floor change never does, because
+// pieces drawn mid-edit are still pieces the user asked for, while pieces fired mid-model-
+// change come out of the old nozzle at full price. A hold is not a stop: the loop parks
+// with its count, its cap and its run mode intact and resumes on commit.
 //
 // The stream (noema-238) is where a fired piece lands. Ignition used to end at a run id
 // and a link, so seeing what Muse made meant leaving Muse; the pieces now come home to a
@@ -273,6 +297,25 @@ export function Muse() {
   const [stopCause, setStopCause] = useState<StopCause | null>(null);
   const [firedCount, setFiredCount] = useState(0);
   const [streamError, setStreamError] = useState<string | null>(null);
+
+  // ── The nozzle: the LoRA control and the hold it costs (noema-246, S5/S6) ──
+  // A control of its own, beside the flow and off the steer keyboard: the floor is
+  // fuel, this is the nozzle. Everything it decides — which models may be offered,
+  // what a choice does to the next piece, what a hold is — is a pure function in
+  // `lib/muse.ts`; this screen holds the state and renders them.
+  const [familia, setFamilia] = useState<string | null>(null);
+  const [ownModels, setOwnModels] = useState<ModelCard[]>([]);
+  const [publicModels, setPublicModels] = useState<ModelCard[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [lora, setLora] = useState<LoraChoice | null>(null);
+  const [loraOpen, setLoraOpen] = useState(false);
+  // The choice UNDER REVIEW. Nothing reaches the stream until it is committed, which is
+  // what the hold is holding for: a half-made choice must not ride the next piece.
+  const [draft, setDraft] = useState<LoraChoice | null>(null);
+  const [weightText, setWeightText] = useState('');
+  const [hold, setHoldState] = useState<HoldState | null>(null);
+  const [warmup, setWarmup] = useState<LoraChoice | null>(null);
   // The manual path (D3): the roll cards, closed by default. The stream is the front door.
   const [manualOpen, setManualOpen] = useState(false);
 
@@ -578,10 +621,18 @@ export function Muse() {
     setQuote(null);
     setQuoteError(null);
     setFired({});
+    // A LoRA is scoped to ONE base-model family, so a flow change drops the chosen one
+    // rather than carrying it onto a base it cannot work on. The catalog is re-read from
+    // the new flow's own `familia` below.
+    setFamilia(null);
+    setLora(null);
+    setDraft(null);
+    setWeightText('');
+    setWarmup(null);
     if (!id_) return;
     setFlowLoading(true);
     api.getFlow(id_)
-      .then((f) => setBlockReason(ignitionBlockReason(f)))
+      .then((f) => { setBlockReason(ignitionBlockReason(f)); setFamilia(f.familia ?? null); })
       .catch((e) => setBlockReason(`could not read this workflow's inputs (${e instanceof Error ? e.message : String(e)})`))
       .finally(() => setFlowLoading(false));
   }
@@ -722,6 +773,105 @@ export function Muse() {
   useEffect(() => { configRef.current = config; }, [config]);
   useEffect(() => { quoteRef.current = quote; }, [quote]);
 
+  // ── The hold (S6) ─────────────────────────────────────────────────────────
+  // A HOLD IS NOT A STOP. The loop parks on `whenHoldClears()` and keeps everything it
+  // is holding — the fired count, the cap, the run mode, the generation token — so a
+  // commit returns it to `running` with no relaunch and no reset. A stop, by contrast,
+  // leaves the loop for good and the only way back in is `launch()`.
+  const holdRef = useRef<HoldState | null>(null);
+  const holdWaiters = useRef<Array<() => void>>([]);
+  const loraRef = useRef<LoraChoice | null>(lora);
+
+  /** Wake the parked loop without deciding anything for it — it re-reads the hold and
+   *  every other refusal itself, so a stop pressed during a hold is still a stop. */
+  function wakeHold() {
+    const waiting = holdWaiters.current;
+    holdWaiters.current = [];
+    for (const resume of waiting) resume();
+  }
+
+  function setHold(next: HoldState | null) {
+    holdRef.current = next;
+    setHoldState(next);
+    // The readout moves the moment the control does, not when the loop next comes round:
+    // the piece already in flight is paid for and is left to land, and S6 asks for the
+    // hold to be visible while it does.
+    if (runningRef.current) setPhase(next ? 'holding' : 'running');
+    if (!next) wakeHold();
+  }
+
+  function whenHoldClears(): Promise<void> {
+    return new Promise<void>((resume) => { holdWaiters.current.push(resume); });
+  }
+
+  // The committed nozzle reaches the loop here, and a commit that was waiting on the
+  // weights is released once it has: the loop can only fire under a nozzle it can read.
+  useEffect(() => {
+    loraRef.current = lora;
+    if (holdRef.current?.reason === 'loading') setHold(null);
+    // `setHold` is a stable closure over refs; re-running this on every render would
+    // release a hold the user has not committed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lora]);
+
+  // The catalog, scoped to the flow's base-model family. Both lists are asked for
+  // together: the caller's own imports and trained LoRAs sit beside the public ones.
+  useEffect(() => {
+    if (!familia) { setOwnModels([]); setPublicModels([]); setCatalogError(null); return; }
+    let live = true;
+    setCatalogLoading(true);
+    setCatalogError(null);
+    Promise.all([
+      api.listMyModels().catch(() => ({ models: [] as ModelCard[] })),
+      api.listModelsByBasis(familia),
+    ])
+      .then(([mine, shared]) => {
+        if (!live) return;
+        setOwnModels(mine.models ?? []);
+        setPublicModels(shared.models ?? []);
+      })
+      .catch((e) => { if (live) setCatalogError(`couldn't read the model catalog: ${errText(e)}`); })
+      .finally(() => { if (live) setCatalogLoading(false); });
+    return () => { live = false; };
+  }, [familia]);
+
+  const loraOffer = useMemo(
+    () => loraCatalog(ownModels, publicModels, familia),
+    [ownModels, publicModels, familia],
+  );
+  const loraReason = loraCatalogReason(modusId, familia, loraOffer.length);
+
+  /** Opening the control holds a running stream: pieces fired while a model is being
+   *  chosen come out of the old nozzle at full price. */
+  function openLora() {
+    setDraft(lora);
+    setWeightText(lora?.weight != null ? String(lora.weight) : '');
+    setLoraOpen(true);
+    setHold({ reason: 'picking' });
+  }
+
+  /** Cancel resumes on the OLD nozzle — the change is discarded, not half-applied. */
+  function cancelLora() {
+    setLoraOpen(false);
+    setDraft(lora);
+    setHold(null);
+  }
+
+  function commitLora() {
+    const next: LoraChoice | null = draft
+      ? { ...draft, weight: weightText.trim() === '' ? null : loraWeight(Number(weightText)) }
+      : null;
+    const changed = (next?.intellaId ?? null) !== (lora?.intellaId ?? null)
+      || (next?.weight ?? null) !== (lora?.weight ?? null);
+    setLoraOpen(false);
+    setLora(next);
+    setWarmup(changed ? next : warmup);
+    // A committed change stays held until the new nozzle has reached the loop; the effect
+    // above releases it. Committing nothing new releases straight away.
+    if (changed && next) setHold({ reason: 'loading', trigger: next.trigger });
+    else setHold(null);
+  }
+
   const stopRef = useRef(false);
   const runningRef = useRef(false);
   // One token per launch. A loop parked on a settlement that never arrives — a closed
@@ -785,6 +935,9 @@ export function Muse() {
   function requestStop() {
     stopRef.current = true;
     if (runningRef.current) setPhase('stopping');
+    // A stop pressed while the stream is holding must end it: the loop is parked, so it
+    // is woken to re-decide, and `stopRequested` outranks the hold.
+    wakeHold();
   }
 
   async function launch() {
@@ -826,7 +979,19 @@ export function Muse() {
           perPieceImpetus: quoteRef.current?.impetus ?? '0',
           stopRequested: stopRef.current,
           consecutiveErrors,
+          hold: holdRef.current,
         });
+        // THE HOLD PARKS THE LOOP; it never breaks it. Everything this iteration is
+        // carrying — `fired`, `consecutiveErrors`, the generation token, the run mode —
+        // is still here when the change is committed, which is what makes a resume a
+        // resume rather than a relaunch.
+        if (isHold(decision)) {
+          setPhase('holding');
+          await whenHoldClears();
+          if (generationRef.current !== gen) return;
+          if (!stopRef.current) setPhase('running');
+          continue;
+        }
         if (!decision.fire) { end = decision.stop ?? 'user'; break; }
 
         const modus = modusRef.current;
@@ -837,9 +1002,17 @@ export function Muse() {
         // which is what lets a steer mid-stream reach the very next piece.
         const draw = rollAt(flatRef.current, outOfPlayRef.current, fired);
 
+        // The nozzle is read at FIRE time, like the floor: a piece carries the model that
+        // was committed when it was fired. Both halves ride together — the trigger word in
+        // the prompt, and the weights in `pinnedModels` — because either alone is a
+        // full-price no-op. The trigger enters the PROMPT only: it is not a fragment, it is
+        // not on the floor, and it is not in the lineage recorded below.
+        const nozzle = loraRef.current;
+        const firePrompt = promptWithTrigger(draw.prompt, nozzle);
+
         let runId: string;
         try {
-          const { run } = await api.createRun(ignitionRequest(modus, draw.prompt));
+          const { run } = await api.createRun(streamRunRequest(modus, draw.prompt, nozzle));
           runId = run.id;
         } catch (e) {
           if (generationRef.current !== gen) return;
@@ -852,7 +1025,7 @@ export function Muse() {
         fired += 1;
         setFiredCount(fired);
         setStreamError(null);
-        setStream((s) => admitPiece(s, streamPiece(runId, draw.prompt, draw.fragments), frozenRef.current));
+        setStream((s) => admitPiece(s, streamPiece(runId, firePrompt, draw.fragments), frozenRef.current));
 
         // Recorded at FIRE time with the lineage that produced it: the floor moves and the
         // fragment list is rebuilt, so it is not recoverable later. One entry per run — a
@@ -869,6 +1042,9 @@ export function Muse() {
 
         const result = await settlementOf(runId);
         if (generationRef.current !== gen) return;
+        // A piece has come back under this nozzle, so the weights are on the pod: the
+        // warm-up note has nothing left to explain.
+        setWarmup(null);
         // A run that fails after dispatch counts the same as a fire that never landed:
         // either way the loop is repeating something that is not working.
         consecutiveErrors = result.terminal === 'failed' ? consecutiveErrors + 1 : 0;
@@ -881,6 +1057,11 @@ export function Muse() {
       }
     }
   }
+
+  // A stream that is holding is a stream that is LIVE: the flow, the run mode and the cap
+  // are all locked exactly as they are while it rides, because the hold is a pause in the
+  // firing and not a return to configuration.
+  const streamLive = phase === 'running' || phase === 'stopping' || phase === 'holding';
 
   const crumb = (
     <span className="ph-crumb">
@@ -1043,7 +1224,7 @@ export function Muse() {
         <section className="muse-launcher">
           <div className="muse-launcher-row">
             <label className="cc-field"><span>Nozzle</span>
-              <select className="cer-input" value={modusId ?? ''} disabled={phase === 'running' || phase === 'stopping'}
+              <select className="cer-input" value={modusId ?? ''} disabled={streamLive}
                 onChange={(e) => selectFlow(e.target.value)}>
                 <option value="">choose a workflow…</option>
                 {(flows ?? []).map((f) => (
@@ -1052,7 +1233,7 @@ export function Muse() {
               </select>
             </label>
 
-            <fieldset className="muse-mode" disabled={phase === 'running' || phase === 'stopping'}>
+            <fieldset className="muse-mode" disabled={streamLive}>
               <legend className="gc-l">run</legend>
               <label className="muse-mode-opt">
                 <input type="radio" name="muse-mode" checked={config.mode === 'batched'}
@@ -1074,6 +1255,85 @@ export function Muse() {
             </fieldset>
           </div>
 
+          {/* ── The nozzle (S5) ───────────────────────────────────────────────
+              A control of its own, NOT a key on the steer keyboard and not a floor
+              pill: the floor is fuel, this is what it is burned through. Changing it
+              while a stream rides holds the stream (S6) — pieces fired mid-choice come
+              out of the old nozzle at full price. */}
+          <div className="muse-lora">
+            <div className="muse-lora-row">
+              <span className="gc-l">Model</span>
+              <span className="muse-lora-current mono">{loraChoiceLine(lora)}</span>
+              <button
+                type="button"
+                className="btn ghost sm"
+                onClick={() => (loraOpen ? cancelLora() : openLora())}
+              >
+                {loraOpen ? 'cancel' : lora ? 'change model' : 'choose a model'}
+              </button>
+            </div>
+
+            {loraOpen && (
+              <div className="muse-lora-panel">
+                {loraReason ? (
+                  <div className="gt-sub mono">{loraReason}</div>
+                ) : (
+                  <ul className="muse-lora-list">
+                    {loraOffer.map((card) => (
+                      <li key={card.intellaId}>
+                        <button
+                          type="button"
+                          className={`muse-lora-card${draft?.intellaId === card.intellaId ? ' on' : ''}`}
+                          onClick={() => setDraft((d) => chooseLora(d, card))}
+                        >
+                          <span className="muse-lora-name">{card.nomen}</span>
+                          {/* The trigger word is shown on every card and again on the
+                              chosen one: it is the part a user has to see to trust that
+                              the model is reaching the prompt at all. */}
+                          <span className="muse-lora-trigger mono">trigger {card.trigger}</span>
+                          {card.access === 'private' && <span className="muse-lora-own mono">yours</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {catalogLoading && <div className="gt-sub mono">reading the catalog…</div>}
+                {catalogError && <div className="gt-sub mono">{catalogError}</div>}
+
+                <label className="cc-field muse-lora-weight"><span>Weight</span>
+                  <input
+                    className="cer-input" type="number" inputMode="decimal"
+                    min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
+                    placeholder="its own default"
+                    disabled={!draft}
+                    value={weightText}
+                    onChange={(e) => setWeightText(e.target.value)}
+                  />
+                </label>
+
+                <div className="gt-sub mono">
+                  One model at a time — choosing another replaces it. How many a run can stack has not been
+                  measured, so nothing here stacks them.
+                </div>
+
+                <div className="muse-lora-actions">
+                  <button type="button" className="btn accent sm" onClick={commitLora}>
+                    {draft ? `use ${draft.nomen}` : 'fire without a model'}
+                  </button>
+                  <button type="button" className="btn ghost sm" onClick={cancelLora}>cancel</button>
+                </div>
+
+                {streamLive && (
+                  <div className="gt-sub mono">
+                    the stream is holding while you choose — it resumes where it is, with the same count and
+                    the same cap.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* The warning is a GATE, not a caption (V5). An infinite stream carries no
               count, so the balance is the only thing that ends it on its own; the
               acknowledgement is what stands in for the count that is not there. */}
@@ -1082,7 +1342,7 @@ export function Muse() {
               <input
                 type="checkbox"
                 checked={config.acknowledged}
-                disabled={phase === 'running' || phase === 'stopping'}
+                disabled={streamLive}
                 onChange={(e) => setConfig((c) => ({ ...c, acknowledged: e.target.checked }))}
               />
               <span>
@@ -1104,7 +1364,7 @@ export function Muse() {
           </div>
 
           <div className="muse-launcher-row">
-            {phase === 'running' || phase === 'stopping' ? (
+            {streamLive ? (
               <button type="button" className="btn accent muse-stop" disabled={phase === 'stopping'} onClick={requestStop}>
                 {phase === 'stopping' ? 'stopping after this piece…' : 'stop'}
               </button>
@@ -1113,11 +1373,16 @@ export function Muse() {
                 {launchLabel(config, quote)}
               </button>
             )}
-            <span className="muse-state mono">{streamStatusLine(phase, stopCause, firedCount, config, quote)}</span>
+            <span className="muse-state mono">{streamStatusLine(phase, stopCause, firedCount, config, quote, hold)}</span>
           </div>
 
+          {/* The pod fetches a newly chosen LoRA's weights before it can make anything
+              with them, so the first piece under one can be slow. Said, rather than left
+              to read as a stall. */}
+          {warmup && phase === 'running' && <div className="gt-sub mono">{loraWarmupNote(warmup)}</div>}
+
           {flowLoading && <div className="gt-sub mono">reading inputs…</div>}
-          {blockLaunch && phase !== 'running' && phase !== 'stopping' && (
+          {blockLaunch && !streamLive && (
             <div className="gt-sub mono">{blockLaunch}</div>
           )}
           {quoteError && <div className="gt-sub mono">{quoteError}</div>}

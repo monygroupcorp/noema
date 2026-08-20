@@ -31,6 +31,7 @@ import type {
   DatasetMediaItem,
   FlowSummary,
   FlowDescription,
+  ModelCard,
   MuseFragmentIdentity,
   MusePieceRecord,
   MuseReaction,
@@ -294,12 +295,42 @@ export type StopReason = 'user' | 'funds' | 'cap' | 'errors';
 export type StopCause = StopReason | 'lost';
 
 /** Where a stream is. `stopping` is a stop pressed while a piece is still in flight:
- *  the loop finishes the piece that is already paid for and then stops. */
-export type StreamPhase = 'idle' | 'running' | 'stopping' | 'stopped';
+ *  the loop finishes the piece that is already paid for and then stops.
+ *
+ *  `holding` is the nozzle being changed (S6) and it is NOT a stop: the loop parks,
+ *  keeping its fired count, its cap, its run mode and its generation, and committing
+ *  the change returns it to `running` with no relaunch. See `HoldReason`. */
+export type StreamPhase = 'idle' | 'running' | 'holding' | 'stopping' | 'stopped';
 
 /** Consecutive failures that end a stream. A loop that retries a hard failure forever
  *  is the other way this design can spend without a hand on it. */
 export const MAX_CONSECUTIVE_ERRORS = 3;
+
+/**
+ * Why the stream is holding (S6). Both reasons are a nozzle change and nothing else —
+ * a floor change never holds, which is the distinction this whole control turns on:
+ * pieces drawn while the floor is being edited are still pieces the user asked for,
+ * while pieces fired while a model is being chosen come out of the old nozzle at full
+ * price and are exactly the ones they were about to stop wanting.
+ *
+ *  - `picking` — the model control is open or mid-change.
+ *  - `loading` — the change is committed and the new weights are being taken up. The
+ *    first piece under a new LoRA can be slow because the pod fetches those weights,
+ *    so the readout says so instead of reading as a stall.
+ */
+export type HoldReason = 'picking' | 'loading';
+
+/** A hold, and the trigger word it is loading when it has one to name. */
+export interface HoldState { reason: HoldReason; trigger?: string }
+
+/** What the stream is holding for, in words — the same shape `stopLabel` gives a stop,
+ *  and deliberately worded as a wait rather than an ending. */
+export function holdLabel(hold: HoldState): string {
+  if (hold.reason === 'loading') {
+    return hold.trigger ? `holding — loading ${hold.trigger}` : 'holding — loading the model';
+  }
+  return 'holding — choosing a model';
+}
 
 /** What the loop knows when it decides whether to fire the next piece. */
 export interface StreamDecisionInput {
@@ -316,11 +347,24 @@ export interface StreamDecisionInput {
   perPieceImpetus: string;
   stopRequested: boolean;
   consecutiveErrors: number;
+  /** The nozzle change in progress, or `null` when there is none. */
+  hold?: HoldState | null;
 }
 
 /** Fire, or don't — and when not, whether the stream is over and why. `stop: null`
- *  means "not now, not over": a piece is still in flight. */
-export type StreamDecision = { fire: true } | { fire: false; stop: StopReason | null };
+ *  means "not now, not over": a piece is still in flight. The third shape is the same
+ *  family — "not now, not over" — with a reason to show: the nozzle is being changed,
+ *  and the stream resumes from exactly where it is parked. */
+export type StreamDecision =
+  | { fire: true }
+  | { fire: false; stop: StopReason | null }
+  | { fire: false; hold: HoldState };
+
+/** Whether a decision is the non-terminal nozzle hold. The loop parks on this and keeps
+ *  everything it is holding; it must never be folded into the `stop` branch. */
+export function isHold(decision: StreamDecision): decision is { fire: false; hold: HoldState } {
+  return decision.fire === false && 'hold' in decision;
+}
 
 /** Impetus figures cross the wire as decimal integer strings and are compared exactly.
  *  A malformed or absent figure reads as 0, which fails the funds check closed. */
@@ -344,11 +388,17 @@ export function impetusTotal(perPiece: string, count: number): string {
  * Order, and every position is deliberate:
  *
  *  1. `stopRequested` always wins. A stop pressed mid-stream is the user's, whatever
- *     else is true.
+ *     else is true — including while the stream is holding.
  *  2. `inFlight` is not a stop — it is "not yet". Exactly one piece is in flight at a
  *     time, because a loop that fires on a timer rather than on settlement spends at a
  *     rate nobody chose.
- *  3. `consecutiveErrors`, then the cap, then funds.
+ *  3. A HOLD is the same family as `inFlight`: "not now, not over". It sits ABOVE the
+ *     error, cap and funds checks precisely so a nozzle change can never be turned into
+ *     a terminal stop on the way past them — the fired count, the cap and the run mode
+ *     have to survive it (S6), and a hold rendered as a stop looks identical on screen
+ *     for one second and is a different product by the second one.
+ *  4. `consecutiveErrors`, then the cap, then funds. All three are still reached the
+ *     moment the hold is released.
  *
  * THE FUNDS COMPARISON IS THE ENTIRE CEILING OF THIS DESIGN. Infinite mode has no
  * count; the balance is what ends it. It must therefore be compared against a balance
@@ -359,11 +409,14 @@ export function impetusTotal(perPiece: string, count: number): string {
  * when the balance is below the next piece's quoted impetus"; reverting the cap must
  * fail "a batched stream of K fires exactly K pieces and then stops with reason 'cap'";
  * reverting the in-flight guard must fail "no second piece is requested while one is
- * still in flight".
+ * still in flight"; reverting the hold branch must fail "an uncommitted nozzle change
+ * holds the stream instead of firing the next piece", and reverting the hold/stop
+ * distinction must fail "a hold is NOT a stop".
  */
 export function nextPieceDecision(input: StreamDecisionInput): StreamDecision {
   if (input.stopRequested) return { fire: false, stop: 'user' };
   if (input.inFlight) return { fire: false, stop: null };
+  if (input.hold) return { fire: false, hold: input.hold };
   if (input.consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) return { fire: false, stop: 'errors' };
   if (input.mode === 'batched' && input.fired >= input.cap) return { fire: false, stop: 'cap' };
   if (impetus(input.balanceImpetus) < impetus(input.perPieceImpetus)) return { fire: false, stop: 'funds' };
@@ -405,10 +458,17 @@ export function streamStatusLine(
   fired: number,
   config: StreamConfig,
   quote: StreamQuote | null,
+  hold?: HoldState | null,
 ): string {
   const spent = quote ? ` · ~${impetusTotal(quote.impetus, fired)} impetus this stream` : '';
   const made = `${fired} ${fired === 1 ? 'piece' : 'pieces'}`;
   if (phase === 'idle') return 'idle';
+  // A hold carries the SAME figures a running stream carries — the count and the spend
+  // are what a stop would reset, so showing them unchanged is how the readout says this
+  // is a wait and not an ending.
+  if (phase === 'holding') {
+    return `${holdLabel(hold ?? { reason: 'picking' })} · ${made}${spent} · the stream resumes where it is`;
+  }
   if (phase === 'running') {
     const progress = config.mode === 'batched'
       ? `${fired} of ${Math.max(0, Math.trunc(config.cap))} pieces`
@@ -1324,4 +1384,206 @@ export function dismissalOffer(state: DismissalState): SteerOffer | null {
     line: "you've passed on three in a row — want me to suggest a change?",
     instruction: "I keep passing on these — suggest what to change about the floor",
   };
+}
+
+// ── The nozzle: choosing a LoRA, and what every piece then carries (noema-246) ─
+// S5 puts the model on a control of its own, beside the flow and away from the steer
+// keyboard. The floor is fuel and a floor edit changes which fragments the next draw
+// may pull; this is the nozzle, and changing it changes what the pod loads.
+//
+// TWO MECHANISMS, BOTH REQUIRED, and they are not alternatives:
+//
+//   `pinnedModels` on the run request says WHICH weights the run may have — the same
+//   top-level field `ProposalCard.tsx` already sends, carrying `intellaId` (the
+//   unambiguous half of the field's documented "intellaId or slug").
+//
+//   THE TRIGGER WORD IN THE PROMPT is what actually applies them:
+//   `src/crystal/loraResolver.ts` scans the prompt text and rewrites a known trigger
+//   into a `<lora:name:weight>` tag for the pod's loader.
+//
+// A pin with no trigger downloads weights that are never applied — full price, no
+// effect — and a trigger with no pin names weights the run was never given. Hence two
+// separate proofs in the tests below rather than one.
+//
+// THE TRIGGER IS NOT A FLOOR FRAGMENT. It goes into the prompt string and nowhere
+// else: never onto the cutting floor, never steerable, and never into a piece's
+// recorded lineage — lineage is what a reaction reweights (S4), and a ♡ that could
+// reweight a trigger word would let a reaction steer the nozzle.
+
+/**
+ * How many LoRAs one stream may carry. ONE, in v1, and this is a deliberate
+ * self-imposed bound rather than a platform fact: how many LoRAs a run can actually
+ * stack has never been measured, so nothing here guesses a stack limit and no stacking
+ * UI is built on an unmeasured number. Choosing a second LoRA replaces the first.
+ */
+export const MAX_STREAM_LORAS = 1;
+
+/** The weight band the control offers. The resolver itself takes any weight — these are
+ *  the CONTROL's bounds. The floor is deliberately above zero: `trigger:0.0` silences a
+ *  LoRA in the resolver, which would leave the run pinning weights it never applies. */
+export const LORA_WEIGHT_MIN = 0.1;
+export const LORA_WEIGHT_MAX = 2;
+
+/** The chosen nozzle: which weights to pin, and the trigger word that applies them.
+ *  `weight` is `null` until the user sets one, which fires the LoRA at its own
+ *  `defaultWeight` — the resolver's behaviour for a bare trigger. */
+export interface LoraChoice {
+  intellaId: string;
+  nomen: string;
+  trigger: string;
+  weight: number | null;
+}
+
+/**
+ * A catalog card as a choice, or `null` when it cannot be one.
+ *
+ * A card with no trigger word is not offerable: it could be pinned, but nothing in the
+ * prompt would ever apply it, so it is a paid run with no effect. Refusing it in the
+ * picker costs nothing; discovering it costs a piece.
+ */
+export function loraChoiceOf(card: ModelCard): LoraChoice | null {
+  const trigger = (card.trigger ?? '').trim();
+  if (!trigger || !card.intellaId) return null;
+  return { intellaId: card.intellaId, nomen: card.nomen || card.intellaId, trigger, weight: null };
+}
+
+/**
+ * The LoRAs on offer for the selected flow: the caller's own models first, then the
+ * public catalog, de-duplicated by `intellaId`.
+ *
+ * SCOPED TO THE FLOW'S `familia` — the base-model family the flow runs on, read off its
+ * own description. A LoRA trained on another base is a paid run that cannot work, so it
+ * is not offered at all. With no `familia` in hand there is no scope to filter by and
+ * the catalog is EMPTY rather than unscoped: an unscoped list is exactly the list that
+ * contains the run that cannot work.
+ *
+ * Non-vacuity: dropping the `familia` filter must fail "the catalog offered is scoped to
+ * the selected modus's familia".
+ */
+export function loraCatalog(
+  ownModels: readonly ModelCard[],
+  publicModels: readonly ModelCard[],
+  familia: string | null | undefined,
+): ModelCard[] {
+  if (!familia) return [];
+  const out: ModelCard[] = [];
+  const seen = new Set<string>();
+  for (const card of [...ownModels, ...publicModels]) {
+    if (card.genus !== 'lora') continue;
+    if (card.basis !== familia) continue;
+    if (!loraChoiceOf(card)) continue;
+    if (seen.has(card.intellaId)) continue;
+    seen.add(card.intellaId);
+    out.push(card);
+  }
+  return out;
+}
+
+/** Why there is no catalog to show, or `null` when there is one. Said in words rather
+ *  than rendered as an empty list, because "no modus selected" and "this base has no
+ *  LoRAs" are different facts and only one of them is the user's to fix. */
+export function loraCatalogReason(
+  modusId: string | null,
+  familia: string | null | undefined,
+  offered: number,
+): string | null {
+  if (!modusId) return 'choose a workflow first — a model is scoped to the workflow it runs on';
+  if (!familia) return "this workflow doesn't name a base model, so there is no scoped catalog to offer";
+  if (offered <= 0) return `no LoRA with a trigger word is available for ${familia}`;
+  return null;
+}
+
+/**
+ * Choosing a LoRA. ONE at a time (see `MAX_STREAM_LORAS`): a second choice REPLACES the
+ * first rather than stacking with it, and choosing the one already chosen clears it, so
+ * the same control both sets and unsets the nozzle.
+ *
+ * Non-vacuity: accumulating instead of replacing must fail "choosing a second LoRA
+ * replaces the first".
+ */
+export function chooseLora(current: LoraChoice | null, card: ModelCard): LoraChoice | null {
+  const next = loraChoiceOf(card);
+  if (!next) return current;
+  if (current && current.intellaId === next.intellaId) return null;
+  return next;
+}
+
+/** A weight the control will emit: inside the band, or `null` for "the LoRA's own
+ *  default", which is what a bare trigger word means to the resolver. */
+export function loraWeight(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.min(LORA_WEIGHT_MAX, Math.max(LORA_WEIGHT_MIN, value));
+}
+
+/**
+ * The trigger as it is written into a prompt.
+ *
+ * The resolver's syntax is NOT re-implemented here — this emits one of the two forms it
+ * already documents and reads: a bare `trigger` (applied at the LoRA's own
+ * `defaultWeight`) or `trigger:0.8` (an explicit override). Everything else the
+ * resolver understands — the `!`/`.` modifiers, explicit `<lora:…>` tags, the silencing
+ * `:0.0` — stays the resolver's and is never generated here.
+ */
+export function triggerToken(choice: LoraChoice): string {
+  const weight = loraWeight(choice.weight);
+  return weight == null ? choice.trigger : `${choice.trigger}:${weight}`;
+}
+
+/**
+ * The prompt a piece is actually fired with: the drawn prompt, led by the chosen LoRA's
+ * trigger word. With no LoRA chosen it is the drawn prompt, unchanged.
+ *
+ * The trigger is prepended and comma-separated, which is a delimiter the resolver's own
+ * tokenizer splits on, so the word is reachable by its scan wherever the drawn prompt
+ * happens to begin.
+ *
+ * Non-vacuity: returning `prompt` unchanged must fail "a piece fired under a LoRA
+ * carries that LoRA's trigger word in its prompt".
+ */
+export function promptWithTrigger(prompt: string, choice: LoraChoice | null): string {
+  if (!choice) return prompt;
+  const body = prompt.trim();
+  const token = triggerToken(choice);
+  return body ? `${token}, ${body}` : token;
+}
+
+/** The weights the run is given, by `intellaId` — the unambiguous half of the field's
+ *  documented "intellaId or slug", picked once and used consistently. */
+export function pinnedModelsFor(choice: LoraChoice | null): string[] {
+  return choice ? [choice.intellaId] : [];
+}
+
+/**
+ * The run request for ONE stream piece: the drawn prompt carrying the trigger, and the
+ * pinned weights that trigger resolves against.
+ *
+ * BOTH HALVES OR NEITHER. `ignitionRequest` above stays exactly as it is — a mined
+ * fragment's own trigger is still never lifted into `pinnedModels`, because that would
+ * attach a model the user never chose. This path pins only what the user picked on the
+ * nozzle control.
+ *
+ * Non-vacuity: dropping `pinnedModels` must fail "a piece fired under a LoRA names it in
+ * pinnedModels".
+ */
+export function streamRunRequest(modusId: string, prompt: string, choice: LoraChoice | null): RunRequest {
+  const request = ignitionRequest(modusId, promptWithTrigger(prompt, choice));
+  const pinned = pinnedModelsFor(choice);
+  return pinned.length > 0 ? { ...request, pinnedModels: pinned } : request;
+}
+
+/** What the readout says while the first piece under a newly chosen LoRA is being made.
+ *  The pod fetches the weights before it can make anything with them, so the first piece
+ *  can be slow; said in words, it is a wait rather than a stall. */
+export function loraWarmupNote(choice: LoraChoice | null): string | null {
+  if (!choice) return null;
+  return `first piece under ${choice.nomen} may be slow — the pod fetches its weights before it can use them`;
+}
+
+/** The chosen nozzle in one line, trigger word included: S5 asks for the trigger to be
+ *  visible on the chosen model and not only in the picker, because it is the part a user
+ *  has to see to trust that the model is being applied at all. */
+export function loraChoiceLine(choice: LoraChoice | null): string {
+  if (!choice) return 'no model — the workflow’s own base only';
+  const weight = loraWeight(choice.weight);
+  return `${choice.nomen} · trigger ${choice.trigger}${weight == null ? '' : ` · weight ${weight}`}`;
 }
