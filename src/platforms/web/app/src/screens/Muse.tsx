@@ -14,7 +14,7 @@ import {
 } from '../lib/api';
 import { useRunStream } from '../lib/runStream';
 import { AddImages } from '../components/AddImages';
-import { RunStageline } from '../components/RunStageline';
+import { RunStageline, Stageline } from '../components/RunStageline';
 import {
   canFireDecompose,
   canOfferDecompose,
@@ -66,7 +66,9 @@ import {
   mergedExclusions,
   nextPieceDecision,
   nozzleSummaryLine,
+  pieceReadout,
   pieceRecord,
+  pieceStageline,
   decomposeGateReason,
   poolDatasetFragments,
   promptWithTrigger,
@@ -111,6 +113,7 @@ import {
   type HoldState,
   type LoraChoice,
   type MuseControl,
+  type PieceProgress,
   type SheetPhase,
   type SteerPill,
   type RollReport,
@@ -371,9 +374,32 @@ export function Muse() {
   // folded into the piece before the loop is released — `settlePieceResult` owns that
   // ordering, and it is gated in tests/unit/web/muse.test.ts.
   const settlers = useRef(new Map<string, (r: RunResult) => void>());
+
+  // What each running piece's own subscription is currently reporting (noema-273). The
+  // pod is already streaming its phases into this browser; this is where the tile and
+  // the expanded view read them from, so twelve pieces in flight are twelve pieces
+  // saying what they are doing — off ONE subscription each, the one the watcher for
+  // that piece already holds.
+  const [progress, setProgress] = useState<Record<string, PieceProgress>>({});
+  const onPieceProgress = useCallback((runId: string, live: PieceProgress) => {
+    setProgress((m) => {
+      const held = m[runId];
+      if (held && held.stageIdx === live.stageIdx && held.progressus === live.progressus) return m;
+      return { ...m, [runId]: live };
+    });
+  }, []);
+
   const onPieceResult = useCallback((runId: string, result: RunResult) => {
     const waiting = settlers.current.get(runId);
     if (waiting) settlers.current.delete(runId);
+    // The run is over: its last frame is not a state anyone should still be shown, and
+    // holding it would grow one entry per finished piece for the life of the session.
+    setProgress((m) => {
+      if (!(runId in m)) return m;
+      const next = { ...m };
+      delete next[runId];
+      return next;
+    });
     settlePieceResult(
       runId,
       result,
@@ -1600,8 +1626,10 @@ export function Muse() {
                 <PieceTile
                   key={p.runId}
                   piece={p}
+                  progress={progress[p.runId]}
                   onExpand={setExpanded}
                   onResult={onPieceResult}
+                  onProgress={onPieceProgress}
                   reaction={session ? reactionOf(session, p.runId) : undefined}
                   live={!!session && !!recordedPiece(session, p.runId) && reacting !== p.runId}
                   onReact={react}
@@ -1613,7 +1641,7 @@ export function Muse() {
                 keeps its subscription even though its tile is not on screen yet. */}
             {stream.pending.map((p) => (
               p.status === 'running'
-                ? <RunWatcher key={p.runId} runId={p.runId} onResult={onPieceResult} />
+                ? <RunWatcher key={p.runId} runId={p.runId} onResult={onPieceResult} onProgress={onPieceProgress} />
                 : null
             ))}
           </section>
@@ -1753,6 +1781,7 @@ export function Muse() {
         {expandedPiece && (
           <ExpandedPiece
             piece={expandedPiece}
+            progress={progress[expandedPiece.runId]}
             onClose={() => setExpanded(null)}
             reaction={session ? reactionOf(session, expandedPiece.runId) : undefined}
             live={!!session && !!recordedPiece(session, expandedPiece.runId) && reacting !== expandedPiece.runId && saving !== expandedPiece.runId}
@@ -1881,8 +1910,19 @@ export function Muse() {
  *  The subscription ends at terminal (a watcher per finished piece would be an open
  *  stream per finished piece), so the terminal it reports has to carry the run's
  *  outputs already — see `announceTerminal` in lib/runStream.ts. */
-function RunWatcher({ runId, onResult }: { runId: string; onResult: (runId: string, r: RunResult) => void }) {
-  const { terminal, exitus, error } = useRunStream(runId);
+function RunWatcher({ runId, onResult, onProgress }: {
+  runId: string;
+  onResult: (runId: string, r: RunResult) => void;
+  onProgress: (runId: string, live: PieceProgress) => void;
+}) {
+  const { stageIdx, progressus, terminal, exitus, error } = useRunStream(runId);
+  // Every frame this subscription already receives is reported upward, so the piece's
+  // tile can say what the pod is doing. Reporting stops at terminal — the run's last
+  // word is its result, not a phase.
+  useEffect(() => {
+    if (terminal) return;
+    onProgress(runId, { stageIdx, progressus });
+  }, [runId, stageIdx, progressus, terminal, onProgress]);
   useEffect(() => {
     if (!terminal) return;
     onResult(runId, { terminal, exitus, error });
@@ -1932,11 +1972,13 @@ function railProps(
  *  ledger does not hold cannot be reacted to and its rail is disabled rather than silent.
  *  The rest of the rail lives in the expanded view. */
 function PieceTile({
-  piece, onExpand, onResult, reaction, live, onReact, onDismiss,
+  piece, progress, onExpand, onResult, onProgress, reaction, live, onReact, onDismiss,
 }: {
   piece: StreamPiece;
+  progress: PieceProgress | undefined;
   onExpand: (runId: string) => void;
   onResult: (runId: string, r: RunResult) => void;
+  onProgress: (runId: string, live: PieceProgress) => void;
   reaction: MuseReaction | undefined;
   live: boolean;
   onReact: (runId: string, reaction: MuseReaction) => void;
@@ -1944,7 +1986,7 @@ function PieceTile({
 }) {
   return (
     <div className={`muse-tile ${piece.status}`}>
-      {piece.status === 'running' && <RunWatcher runId={piece.runId} onResult={onResult} />}
+      {piece.status === 'running' && <RunWatcher runId={piece.runId} onResult={onResult} onProgress={onProgress} />}
       <button
         type="button"
         className="muse-tile-shot"
@@ -1956,9 +1998,7 @@ function PieceTile({
             ? <video className="muse-tile-media" src={piece.media.url} muted loop playsInline />
             : <img className="muse-tile-media" src={piece.media.url} alt="" loading="lazy" />
         ) : (
-          <span className="muse-tile-wait mono">
-            {piece.status === 'failed' ? (piece.error ?? 'failed') : 'generating…'}
-          </span>
+          <span className="muse-tile-wait mono">{pieceReadout(piece, progress)}</span>
         )}
       </button>
       <div className="muse-tile-rail">
@@ -1979,9 +2019,10 @@ function PieceTile({
  *  produced it (V8). 😂 lives here rather than on the tile: it is recorded and it steers
  *  nothing (S4/V9), so it is not one of the three gestures made at speed. */
 function ExpandedPiece({
-  piece, onClose, reaction, live, onReact, onDismiss, saved, onSave,
+  piece, progress, onClose, reaction, live, onReact, onDismiss, saved, onSave,
 }: {
   piece: StreamPiece;
+  progress: PieceProgress | undefined;
   onClose: () => void;
   reaction: MuseReaction | undefined;
   live: boolean;
@@ -1999,9 +2040,15 @@ function ExpandedPiece({
               ? <video src={piece.media.url} controls playsInline />
               : <img src={piece.media.url} alt="" />
           ) : (
-            <span className="muse-tile-wait mono">
-              {piece.status === 'failed' ? (piece.error ?? 'failed') : 'generating…'}
-            </span>
+            /* The expanded piece has room for the real thing: the same five-stage readout
+               every other watching surface draws, fed from the subscription this piece's
+               tile already holds — expanding a piece opens no second stream. */
+            <div>
+              <Stageline stream={pieceStageline(piece, progress)} />
+              {piece.status === 'failed' && (
+                <span className="muse-tile-wait mono">{pieceReadout(piece, progress)}</span>
+              )}
+            </div>
           )}
         </div>
 
