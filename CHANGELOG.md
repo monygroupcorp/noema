@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.10.1](https://github.com/monygroupcorp/noema/compare/v5.10.0...v5.10.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **muse:** carry a run's outputs in the terminal it announces ([3b632c5](https://github.com/monygroupcorp/noema/commit/3b632c542fcdc0b0e08ad1ce9102d7a9313fa7cc))
+* **muse:** rebuild a resumed session's stream from its ledger ([aef7639](https://github.com/monygroupcorp/noema/commit/aef7639e2f146d955a98abe8912f6f48bbe60ca2))
+
 ## [5.10.0](https://github.com/monygroupcorp/noema/compare/v5.9.0...v5.10.0) (2026-08-21)
 
 
