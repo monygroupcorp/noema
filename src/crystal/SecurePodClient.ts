@@ -22,6 +22,30 @@ const RUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/runner.py'
 // The one-shot LoRA trainer (Slice E) — launched detached for a long single job (not the
 // VRAM-scheduled runner.py, not comfyrunner's held SSE pipeline).
 const AITKTRAINER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/aitktrainer.py')
+// The caption pass — its own pod script, so a caption pod carries a caption runtime instead of a
+// training toolkit. Same detached launch, same bootstrap-and-SSH flow; only the script differs.
+const CAPTIONER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/captioner.py')
+
+/**
+ * Which pod script a detached launch uploads and runs. The provisioning port carries this as an
+ * OPTIONAL value and an absent one is `'trainer'` — the training path predates the selector and
+ * behaves exactly as it did when there was none.
+ */
+export type DetachedPodScript = 'trainer' | 'captioner'
+
+const DETACHED_POD_SCRIPTS: Record<DetachedPodScript, { path: string; name: string }> = {
+  trainer: { path: AITKTRAINER_SCRIPT_PATH, name: 'aitktrainer.py' },
+  captioner: { path: CAPTIONER_SCRIPT_PATH, name: 'captioner.py' },
+}
+
+/**
+ * Resolve the selector to the script a detached launch uploads. Exported because the DEFAULT is
+ * the load-bearing half: an absent selector must resolve to the trainer, which is what keeps
+ * every caller that names none launching what it always launched.
+ */
+export function resolveDetachedPodScript(script?: DetachedPodScript): { path: string; name: string } {
+  return DETACHED_POD_SCRIPTS[script ?? 'trainer']
+}
 
 const log = makeLogger('cursor:runpod:secure')
 
@@ -455,14 +479,17 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }
 
   /**
-   * Provision a SECURE pod and launch a DETACHED pod script (Slice E training) — NOT submit()'s
-   * held SSE pipeline (built for short gens) and NOT runner.py's VRAM scheduler. For one long
-   * single-shot job: provision (SECURE for attempts 1-2, COMMUNITY/any-GPU on the last), wait SSH,
-   * run `setup` (bootstrap ai-toolkit onto the stock torch≥2.9 base — clone + pip install its
-   * deps), upload `aitktrainer.py`, nohup-launch it with `env` (+ injected RUNPOD_POD_ID = the pod
-   * id), close SSH. Fire-and-forget — the pod posts its own `/runner/status` + completion webhook.
-   * `image` is a stock RunPod base (SSH-ready). GPU-gated: live-verified, not CI-covered (the
-   * launcher's logic + the setup recipe are tested hermetically).
+   * Provision a SECURE pod and launch a DETACHED pod script — NOT submit()'s held SSE pipeline
+   * (built for short gens) and NOT runner.py's VRAM scheduler. For one long single-shot job:
+   * provision (SECURE for attempts 1-2, COMMUNITY/any-GPU on the last), wait SSH, run `setup`
+   * (the caller's bootstrap onto the stock base), upload the pod script named by `script`,
+   * nohup-launch it with `env` (+ injected RUNPOD_POD_ID = the pod id), close SSH. Fire-and-forget
+   * — the pod posts its own `/runner/status` + completion webhook. `image` is a stock RunPod base
+   * (SSH-ready). GPU-gated: live-verified, not CI-covered (the launcher's logic + the setup recipe
+   * are tested hermetically).
+   *
+   * `script` selects which pod script runs. It is OPTIONAL and absent means `'trainer'`, so a
+   * caller that names none launches exactly what this method has always launched.
    *
    * RESOLVES AS SOON AS THE POD ID EXISTS. Provisioning (retries included) takes seconds and
    * produces the only value the caller needs — the pod id IS the external run handle. Everything
@@ -484,6 +511,8 @@ export class SecurePodClient implements RunPodClient, Procurator {
     image: string
     env: Record<string, string>
     setup: string[]
+    /** Pod script to upload and launch — default `'trainer'`. */
+    script?: DetachedPodScript
     /** Awaited after provisioning and BEFORE any pod-side work is started. */
     onPodId?: (podId: string) => Promise<void>
     /** Called when the background SSH/bootstrap phase fails, after the pod has been terminated. */
@@ -532,7 +561,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
    */
   private async _finishTrainingPodLaunch(
     podId: string,
-    opts: { env: Record<string, string>; setup: string[]; onLaunchFailed?: (err: unknown) => Promise<void> },
+    opts: {
+      env: Record<string, string>; setup: string[]
+      script?: DetachedPodScript
+      onLaunchFailed?: (err: unknown) => Promise<void>
+    },
     provisionDeadline: number,
   ): Promise<void> {
     let ssh: SshTransportLike | null = null
@@ -540,7 +573,8 @@ export class SecurePodClient implements RunPodClient, Procurator {
       const sshInfo = await this._waitForSsh(podId)
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
       ssh = await this._waitForSshd(sshInfo)
-      await this._bootstrapDetached(ssh, podId, AITKTRAINER_SCRIPT_PATH, 'aitktrainer.py',
+      const pod = resolveDetachedPodScript(opts.script)
+      await this._bootstrapDetached(ssh, podId, pod.path, pod.name,
         { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline)
       await ssh.close()
       ssh = null

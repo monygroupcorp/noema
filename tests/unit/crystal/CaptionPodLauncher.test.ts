@@ -1,18 +1,25 @@
-// The launch shape of a batch caption job — pure resolve → generate → env, with the provisioner
-// faked, so everything the pod is handed is pinned here. Two properties matter most: the manifest
-// carries media ids and NO captions (a caption pass must not be handed the captions it is meant
-// to produce, or the captioner's recaption:false skips them), and the env carries the caption
-// config but no training config.
+// The launch shape of a batch caption job — pure resolve → env, with the provisioner faked, so
+// everything the pod is handed is pinned here. Three properties matter most: the manifest carries
+// media ids and NO captions (a caption pass must not be handed the captions it is meant to
+// produce), the pod is sent a caption bootstrap and the caption script rather than a training
+// one, and the training arm's own launch is untouched by the selector that makes that possible.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CaptionPodLauncher } from '../../../src/crystal/CaptionPodLauncher.js'
-import { POD_DATASET_DIR, DEFAULT_AITK_IMAGE } from '../../../src/crystal/RemoteAitkLauncher.js'
-import type { TrainingPodProvisioner } from '../../../src/crystal/RemoteAitkLauncher.js'
+import { CaptionPodLauncher, CAPTION_POD_SETUP, DEFAULT_CAPTION_MODEL, POD_CAPTION_DIR } from '../../../src/crystal/CaptionPodLauncher.js'
+import { RemoteAitkLauncher, DEFAULT_AITK_IMAGE } from '../../../src/crystal/RemoteAitkLauncher.js'
+import type { TrainingPodProvisioner, DetachedPodScript } from '../../../src/crystal/RemoteAitkLauncher.js'
+import { resolveDetachedPodScript } from '../../../src/crystal/SecurePodClient.js'
+import { DEFAULT_CAPTION_PROMPT } from '../../../src/crystal/aitkConfig.js'
 import type { Dataset, Captionset } from '../../../src/types/dataset.js'
 
+type ProvisionCall = {
+  image: string; env: Record<string, string>; setup: string[]; script?: DetachedPodScript
+  onPodId?: (podId: string) => Promise<void>; onLaunchFailed?: (err: unknown) => Promise<void>
+}
+
 class FakeProvisioner implements TrainingPodProvisioner {
-  calls: Array<{ image: string; env: Record<string, string>; setup: string[] }> = []
-  async provision(opts: { image: string; env: Record<string, string>; setup: string[] }): Promise<{ podId: string }> {
+  calls: ProvisionCall[] = []
+  async provision(opts: ProvisionCall): Promise<{ podId: string }> {
     this.calls.push(opts)
     return { podId: 'pod-9' }
   }
@@ -44,14 +51,14 @@ test('the manifest carries every media id, in order, and NO captions', async () 
   const provisioner = new FakeProvisioner()
   const ds = dataset(
     [{ id: 'media-1', url: 'https://r2.example/a.png' }, { id: 'media-2', url: 'https://r2.example/b.jpg' }],
-    // An existing captionset must not leak into the manifest: recaption:false means any image
-    // arriving with a caption is skipped, so a re-caption would return a copy of this pass.
+    // An existing captionset must not leak into the manifest: a pass captions the whole set, and
+    // a caption handed back in would be a copy of the earlier pass rather than a new one.
     [{ id: 'captionset-old', name: 'first pass', method: 'manual', coverage: '2/2',
        captions: { 'media-1': 'an earlier caption', 'media-2': 'another' } }],
   )
   await launcher(ds, provisioner).launch(spec)
 
-  const manifest = JSON.parse(decode(provisioner.calls[0].env.AITK_MANIFEST_B64))
+  const manifest = JSON.parse(decode(provisioner.calls[0].env.NOEMA_MANIFEST_B64))
   assert.deepEqual(manifest, [
     { url: 'https://r2.example/a.png', id: 'media-1' },
     { url: 'https://r2.example/b.jpg', id: 'media-2' },
@@ -59,31 +66,94 @@ test('the manifest carries every media id, in order, and NO captions', async () 
   assert.ok(!JSON.stringify(manifest).includes('caption'), 'a caption job captions everything')
 })
 
-test('the env sets caption mode + the caption config, and NOT a training config', async () => {
+// THE ITEM. A caption pass loads a vision-language model and runs a forward pass per image; the
+// pod it runs on must carry that and not a training toolkit.
+test('a caption pass does not clone ai-toolkit', async () => {
+  const provisioner = new FakeProvisioner()
+  await launcher(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }]), provisioner).launch(spec)
+
+  const { setup, script } = provisioner.calls[0]
+  const recipe = setup.join('\n')
+  assert.ok(!/git clone|ai-toolkit|submodule|requirements\.txt/.test(recipe),
+    'the caption bootstrap clones nothing and installs no toolkit requirements')
+  assert.ok(!/force-reinstall|torch==/.test(recipe),
+    'the base image already carries the matched framework build — no reinstall')
+  assert.ok(!/apt-get/.test(recipe), 'no system libraries: they exist for a dependency captioning does not have')
+  assert.equal(setup.length, 1, 'one dependency install is the whole bootstrap')
+  assert.match(setup[0], /transformers/)
+  assert.match(setup[0], /boto3/)
+  assert.equal(script, 'captioner', 'the pod runs the caption script, not the trainer')
+  assert.deepEqual(setup, CAPTION_POD_SETUP)
+})
+
+test('the env carries the captioner’s model, prompt and token bound — and no toolkit config', async () => {
   const provisioner = new FakeProvisioner()
   const { externusJobId } = await launcher(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }]), provisioner)
     .launch({ ...spec, captionPrompt: 'describe the subject', maxNewTokens: 96, callbackNonce: 'nonce-1' })
 
   assert.equal(externusJobId, 'pod-9')
-  const { env, image, setup } = provisioner.calls[0]
-  assert.equal(env.NOEMA_JOB_MODE, 'caption')
-  assert.equal('AITK_CONFIG_B64' in env, false, 'there is no training config in a caption job')
-  assert.equal(env.AITK_DATASET_DIR, POD_DATASET_DIR)
-
-  const yaml = decode(env.AITK_CAPTION_CONFIG_B64)
-  assert.match(yaml, /Qwen3VLCaptioner/)
-  assert.match(yaml, /describe the subject/)
-  assert.match(yaml, /max_new_tokens: 96/)
-  // The config's caption target must be the SAME pod dir the pod stages into.
-  assert.ok(yaml.includes(`path_to_caption: "${POD_DATASET_DIR}"`), 'config and staging dir must not drift')
+  const { env, image } = provisioner.calls[0]
+  assert.equal(env.NOEMA_JOB_ID, 'job-1')
+  assert.equal(env.NOEMA_WORK_DIR, POD_CAPTION_DIR)
+  assert.equal(env.NOEMA_CAPTION_MODEL, DEFAULT_CAPTION_MODEL)
+  assert.equal(env.NOEMA_CAPTION_PROMPT, 'describe the subject')
+  assert.equal(env.NOEMA_CAPTION_MAX_NEW_TOKENS, '96')
+  // Config transport is the environment: no yaml, and no training config either.
+  assert.equal('AITK_CONFIG_B64' in env, false)
+  assert.equal('AITK_CAPTION_CONFIG_B64' in env, false)
+  assert.ok(!Object.values(env).some(v => v.includes('job: extension')), 'the pod is handed no toolkit config')
 
   // The nonce the cursor minted rides on the webhook URL, so the callback binds to this run.
   assert.match(env.NOEMA_WEBHOOK_URL, /nonce-1$/)
   assert.equal(env.NOEMA_ACTUM_ID, 'act-1')
+  assert.equal(env.R2_BUCKET_NAME, 'b')
   assert.equal(image, DEFAULT_AITK_IMAGE)
-  // The bootstrap recipe is the training arm's, verbatim — both lines are load-bearing.
-  assert.ok(setup.some(s => s.includes('libgl1')), 'system libs the captioner stack needs')
-  assert.ok(setup.some(s => s.includes('torch==2.9.1')), 'the matched cu128 torch trio')
+})
+
+test('with no prompt or token bound on the spec, the pod falls back to the captioner’s own defaults', async () => {
+  const provisioner = new FakeProvisioner()
+  await launcher(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }]), provisioner).launch(spec)
+  const { env } = provisioner.calls[0]
+  assert.equal(env.NOEMA_CAPTION_PROMPT, DEFAULT_CAPTION_PROMPT)
+  assert.equal('NOEMA_CAPTION_MAX_NEW_TOKENS' in env, false, 'absent → the pod’s default bound')
+})
+
+test('the configured caption model reaches the pod', async () => {
+  const provisioner = new FakeProvisioner()
+  await new CaptionPodLauncher({
+    provisioner, datasets: store(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }])), r2,
+    captionModel: 'some/vl-model',
+    statusUrl: 'https://host.example/runner/status',
+    webhookUrl: 'https://host.example/webhooks/execution',
+  }).launch(spec)
+  assert.equal(provisioner.calls[0].env.NOEMA_CAPTION_MODEL, 'some/vl-model')
+})
+
+// THE TRAINING PATH DOES NOT MOVE. The script selector is optional, and the training arm names
+// none — its provision call must be exactly what it was before the selector existed.
+test('a provision that names no script still launches the trainer', async () => {
+  const provisioner = new FakeProvisioner()
+  await new RemoteAitkLauncher({
+    provisioner,
+    resolver: { async resolve() { return [{ url: 'https://r2.example/a.png' }] } },
+    r2,
+    statusUrl: 'https://host.example/runner/status',
+    webhookUrl: 'https://host.example/webhooks/execution',
+  }).launch({ actumId: 'act-1', jobId: 'job-1', dataset: 'ds-1', triggerWord: 'tok', baseModel: 'klein-4b', steps: 10 })
+
+  const call = provisioner.calls[0]
+  assert.equal(call.script, undefined, 'the training arm names no script')
+  assert.ok(call.setup.some(s => s.includes('git clone')), 'the training bootstrap is unchanged')
+  assert.ok(call.setup.some(s => s.includes('torch==2.9.1')), 'the training bootstrap is unchanged')
+  assert.ok('AITK_CONFIG_B64' in call.env, 'the training env is unchanged')
+})
+
+test('the script selector resolves an absent value to the trainer, and “captioner” to the caption script', () => {
+  assert.equal(resolveDetachedPodScript(undefined).name, 'aitktrainer.py',
+    'omitting the selector behaves exactly as it did before there was one')
+  assert.equal(resolveDetachedPodScript('captioner').name, 'captioner.py')
+  assert.equal(resolveDetachedPodScript('trainer').name, 'aitktrainer.py')
+  assert.ok(resolveDetachedPodScript('captioner').path.endsWith('scripts/pod/captioner.py'))
 })
 
 test('a missing dataset fails at resolve time, before a pod is provisioned', async () => {
