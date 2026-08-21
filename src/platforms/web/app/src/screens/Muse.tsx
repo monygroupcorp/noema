@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import {
   api,
@@ -97,6 +97,12 @@ import {
   steerBlockReason,
   steerFloor,
   steerQuoteRequest,
+  sessionEntry,
+  sessionHistory,
+  sessionHistoryHref,
+  sessionHref,
+  sessionSearchEmptyNote,
+  filterSessionHistory,
   streamColumns,
   streamPiece,
   streamRunRequest,
@@ -104,6 +110,7 @@ import {
   t2iFlows,
   terminalOf,
   toggleControl,
+  unreadableRun,
   weightWrites,
   writeLabel,
   writesForConfirm,
@@ -113,6 +120,7 @@ import {
   MAX_FLOOR_FRAGMENTS,
   MAX_INSTRUCTION_CHARS,
   MUSE_NARROW_VIEWPORT,
+  SESSION_PARAM,
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
   NO_DISMISSALS,
@@ -124,6 +132,7 @@ import {
   type LoraChoice,
   type MuseControl,
   type PieceProgress,
+  type SessionRow,
   type SheetPhase,
   type SteerPill,
   type RollReport,
@@ -263,6 +272,9 @@ function errText(e: unknown): string {
 
 export function Muse() {
   const { id } = useParams();
+  // The session this visit names, if it names one. Absent = the bare resume door.
+  const [searchParams] = useSearchParams();
+  const sessionParam = searchParams.get(SESSION_PARAM);
   const [datasets, setDatasets] = useState<DatasetT[] | null>(null);
 
   useEffect(() => {
@@ -453,16 +465,25 @@ export function Muse() {
   const [dismissals, setDismissals] = useState<DismissalState>(NO_DISMISSALS);
   const steerInput = useRef<HTMLInputElement | null>(null);
 
+  // Which session this visit is in (noema-274). A bare visit is the door the dataset
+  // screen has always opened: resume the most recently worked session, spawn one when
+  // there is none. A visit carrying `?session=` names one, and naming one is a READ —
+  // `mutatum` is both this dataset's session order and what a bare visit resumes by, so
+  // opening an older session must not restamp it and move the door under the user.
   useEffect(() => {
     if (!id) return;
     let live = true;
     setSessionError(null);
-    api.listMuseSessions(id)
-      .then(({ sessions }) => latestSession(sessions) ?? api.spawnMuseSession(id).then((r) => r.session))
+    const entry = sessionEntry(sessionParam);
+    const resolved = entry.kind === 'read'
+      ? api.getMuseSession(entry.sessionId).then((r) => r.session)
+      : api.listMuseSessions(id)
+        .then(({ sessions }) => latestSession(sessions) ?? api.spawnMuseSession(id).then((r) => r.session));
+    resolved
       .then((s) => { if (live) setSession(s); })
       .catch((e) => { if (live) setSessionError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, sessionParam]);
 
   // A reaction is two records: the reaction on the piece, and — for a steer, never for a
   // note — one weight write per fragment of the piece's recorded lineage. The floor
@@ -994,7 +1015,14 @@ export function Muse() {
     // the watcher that follows it the rest of the way.
     void Promise.all(rebuilt.pieces.map(async (p) => {
       const fetched = await api.getRun(p.runId).catch(() => null);
-      if (!live || !fetched) return;
+      if (!live) return;
+      // A run that no longer resolves is a state, not a crash: the tile keeps its place
+      // and its lineage and says the image could not be read, rather than sitting on
+      // "generating…" with nothing left watching it.
+      if (!fetched) {
+        setStream((s) => applyRunResult(s, p.runId, unreadableRun()));
+        return;
+      }
       const kind = terminalOf(fetched.run.status);
       if (!kind) return;
       await announceTerminal(kind, p.runId, async () => ({ run: fetched.run }), (patch) => {
@@ -1309,7 +1337,10 @@ export function Muse() {
   const crumb = (
     <span className="ph-crumb">
       <Link to="/datasets">datasets</Link> <span className="sep">/</span>{' '}
-      <Link to={`/datasets/${id}`}>{d?.name ?? id}</Link> <span className="sep">/</span> <b>muse</b>
+      <Link to={`/datasets/${id}`}>{d?.name ?? id}</Link> <span className="sep">/</span>{' '}
+      {sessionParam
+        ? <><Link to={sessionHistoryHref(id ?? '')}>muse sessions</Link> <span className="sep">/</span> <b>this session</b></>
+        : <b>muse</b>}
     </span>
   );
 
@@ -1941,6 +1972,15 @@ export function Muse() {
           </button>
         </div>
         {sessionError && <div className="muse-dock-note mono">{sessionError}</div>}
+        {/* Opened from the history (noema-274). Reading it moved nothing; the gestures
+            this screen carries are the full set, and using one is real work — which is
+            what makes this the most recently worked session from then on. */}
+        {sessionParam && !sessionError && (
+          <div className="muse-dock-note mono">
+            opened from the history — looking changes nothing, but a reaction, a save or a launch here is
+            work, and makes this the session a bare visit comes back to.
+          </div>
+        )}
         </div>
 
         {/* The consent sheet (S9) — a proposal awaiting a ruling, and a DIFFERENT surface
@@ -2459,4 +2499,113 @@ function useNarrowViewport(): boolean {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return narrow;
+}
+
+// ── The session history (noema-274) ─────────────────────────────────────────
+// `/datasets/:id/muse/sessions` — every session broken off this dataset, most recently
+// worked first, with a search over the fragments each piece was drawn from. The dataset
+// screen carries a count and the door; this is what the door opens onto.
+//
+// It lives in this file rather than in a screen of its own because it is the same
+// surface as the muse screen seen from one step back: the row it opens is a session on
+// `Muse` above, reached by the `?session=` name that screen already resolves, and the
+// two share the rules in `lib/muse.ts` that decide order, readout and search.
+//
+// NOTHING HERE WRITES. The list is one read of `listMuseSessions`; the search runs over
+// what that read already returned, so a keystroke fetches nothing. No run is fetched to
+// draw a row either — a recorded piece carries its lineage, and the images are resolved
+// only when a session is actually opened. Opening a row is a read of one session, so
+// browsing the history cannot move which session a bare visit resumes.
+export function MuseSessions() {
+  const { id } = useParams();
+  const [sessions, setSessions] = useState<MuseSessionView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [name, setName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    api.listMuseSessions(id)
+      .then(({ sessions: list }) => { if (live) setSessions(list); })
+      .catch((e) => { if (!live) return; setSessions([]); setError(errText(e)); });
+    return () => { live = false; };
+  }, [id]);
+
+  // The dataset's name, for the crumb only — the list above does not wait on it.
+  useEffect(() => {
+    let live = true;
+    api.listDatasetsFull()
+      .then(({ datasets }) => { if (live) setName(datasets.find((x) => x.id === id)?.name ?? null); })
+      .catch(() => { /* the crumb falls back to the id */ });
+    return () => { live = false; };
+  }, [id]);
+
+  const rows: SessionRow[] = useMemo(() => sessionHistory(sessions ?? []), [sessions]);
+  const shown = useMemo(() => filterSessionHistory(rows, query), [rows, query]);
+  const emptyNote = sessions === null ? null : sessionSearchEmptyNote(shown, query);
+
+  const crumb = (
+    <span className="ph-crumb">
+      <Link to="/datasets">datasets</Link> <span className="sep">/</span>{' '}
+      <Link to={`/datasets/${id}`}>{name ?? id}</Link> <span className="sep">/</span> <b>muse sessions</b>
+    </span>
+  );
+
+  return (
+    <AppShell title={crumb}>
+      <div className="page"><div className="pw wide">
+        <div className="pagehead">
+          <div>
+            <h1>muse sessions</h1>
+            <div className="sub mono">
+              every session broken off this dataset, most recently worked first. Opening one is a read —
+              it does not change which session the muse door comes back to.
+            </div>
+          </div>
+        </div>
+
+        <div className="muse-hist-search">
+          <input
+            className="cer-input"
+            type="search"
+            placeholder="search the fragments these sessions were drawn from"
+            aria-label="search muse sessions"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <span className="gt-sub mono">{rows.length === 0 ? '' : `${shown.length} of ${rows.length}`}</span>
+        </div>
+
+        {error && <div className="sub mono">{error}</div>}
+        {sessions === null && <div className="sub mono">loading…</div>}
+        {emptyNote && <div className="empty"><div className="t">{emptyNote}</div></div>}
+
+        <ul className="muse-hist">
+          {shown.map((row, i) => (
+            <li key={row.id} className={`muse-hist-row${row.empty ? ' empty' : ''}`}>
+              <div className="muse-hist-main">
+                <span className="muse-hist-line">{row.line}</span>
+                <span className="gt-sub mono">
+                  worked {row.mutatum} · started {row.natum}
+                  {i === 0 && query.trim() === '' ? ' · the muse door resumes here' : ''}
+                </span>
+              </div>
+              {row.lineage.length > 0 && (
+                <div className="pref-chips muse-hist-lineage">
+                  {row.lineage.slice(0, 8).map((text) => (
+                    <span key={text} className="fchip on">{text}</span>
+                  ))}
+                  {row.lineage.length > 8 && (
+                    <span className="gt-sub mono">+{row.lineage.length - 8} more</span>
+                  )}
+                </div>
+              )}
+              <Link className="btn ghost sm" to={sessionHref(id ?? '', row.id)}>open →</Link>
+            </li>
+          ))}
+        </ul>
+      </div></div>
+    </AppShell>
+  );
 }
