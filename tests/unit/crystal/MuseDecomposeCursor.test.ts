@@ -137,6 +137,24 @@ test('fragments stay bound to their own media item after media is appended', asy
   assert.deepEqual(store.writes.map((w) => w.mediaId).sort(), ['m-first', 'm-second'])
 })
 
+test('an archived media item is absent from the set a decompose reads', async () => {
+  const dataset = makeDataset()
+  dataset.media[0]!.archivum = new Date(1)
+  const store = new FakeDatasets(dataset)
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  await cursor.run(actum(aditus))
+
+  // The archived item has left the working set, so its caption is not decomposed and nothing is
+  // written back onto it. Its caption stays on the captionset — the map is keyed by media id and
+  // a restore must find it there.
+  assert.deepEqual(store.writes.map((w) => w.mediaId), ['m-second'])
+  assert.equal(dataset.media[0]!.fragments, undefined)
+  assert.equal(dataset.captionsets[0]!.captions?.['m-first'], 'a woman in a red coat')
+  assert.equal(chat.calls, 1, 'and the archived item costs no provider call')
+})
+
 test('a caption whose media id does not resolve fails the job before any provider call', async () => {
   const dataset = makeDataset()
   dataset.captionsets[0]!.captions = { 'm-unknown': 'a caption for nothing' }

@@ -117,6 +117,19 @@ test('datasetToManifest: emits no captions, even when the dataset already has a 
   assert.deepEqual(m, [{ url: 'https://r2/a.png', id: 'media-1' }])
 })
 
+test('datasetToManifest: an archived media item is absent from the set a caption pass reads', () => {
+  // The manifest is the caption job's whole view of the dataset — the pod stages exactly what
+  // arrives here. An archived item has left the working set, so it is not captioned; the other
+  // items keep their ids, so nothing the pod hands back re-binds.
+  const d = dataset([
+    { id: 'media-1', url: 'https://r2/a.png' },
+    { id: 'media-2', url: 'https://r2/b.jpg' },
+  ])
+  d.media[0].archivum = new Date(1)
+
+  assert.deepEqual(datasetToManifest(d), [{ url: 'https://r2/b.jpg', id: 'media-2' }])
+})
+
 test('parseManifest: an id-less manifest is unchanged (the training path)', () => {
   assert.deepEqual(
     parseManifest('[{"url":"https://r2/a.png","caption":"a koh man"},{"url":"https://r2/b.jpg"}]'),
