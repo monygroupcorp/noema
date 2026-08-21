@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.10.0](https://github.com/monygroupcorp/noema/compare/v5.9.0...v5.10.0) (2026-08-21)
+
+
+### Features
+
+* **muse:** a LoRA control on the stream, and a hold while the nozzle changes ([374cf9d](https://github.com/monygroupcorp/noema/commit/374cf9d8a124746f1ae0377ec6452b831db1e5f1))
+* **muse:** a LoRA control on the stream, and a hold while the nozzle changes ([b0717e4](https://github.com/monygroupcorp/noema/commit/b0717e413d786891afb87566d23f1bba18e7eef6))
+* **muse:** add images to the moodboard from the Muse screen ([86bbd53](https://github.com/monygroupcorp/noema/commit/86bbd5382daafd64ed6125fafe412b5b5b37680e))
+* **muse:** configure a stream, launch once, and it rides until you stop it ([229888d](https://github.com/monygroupcorp/noema/commit/229888d2156f3e63603472c17d71d12e1af05fa8))
+* **muse:** steer a session floor with a short instruction, as a proposal ([d8b47c6](https://github.com/monygroupcorp/noema/commit/d8b47c610a6157535083ecc3744e7e3320ae2f6a))
+* **muse:** steer the floor from a keyboard, through a consent sheet ([9a686bc](https://github.com/monygroupcorp/noema/commit/9a686bca646855afc0086f66be703056b249c248))
+
+
+### Bug Fixes
+
+* keep startup non-fatal and bounded when Telegram cannot start ([1c43147](https://github.com/monygroupcorp/noema/commit/1c43147db75529a2185ddb949052473769c9e27f))
+* **telegram:** let the startup timeouts actually fire ([69c337d](https://github.com/monygroupcorp/noema/commit/69c337d09c0eb049f6938cb82306568705c66185))
+
 ## [5.9.0](https://github.com/monygroupcorp/noema/compare/v5.8.0...v5.9.0) (2026-08-20)
 
 
