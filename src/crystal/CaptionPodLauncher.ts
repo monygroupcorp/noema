@@ -2,15 +2,9 @@ import type { R2Config } from './comfyrunnerClient.js'
 import type { Datasets } from '../types/dataset.js'
 import type { CaptionLauncher, CaptionLaunchSpec } from './DatasetCaptionCursor.js'
 import { datasetToManifest } from './datasetManifest.js'
-import { buildAitkCaptionConfig } from './aitkConfig.js'
+import { DEFAULT_CAPTION_PROMPT } from './aitkConfig.js'
 import { withCallbackNonce } from './RunPodCursor.js'
-import {
-  POD_AITK_DIR,
-  POD_DATASET_DIR,
-  DEFAULT_AITK_REF,
-  DEFAULT_AITK_IMAGE,
-  type TrainingPodProvisioner,
-} from './RemoteAitkLauncher.js'
+import { DEFAULT_AITK_IMAGE, type TrainingPodProvisioner } from './RemoteAitkLauncher.js'
 
 // =============================================================================
 // CaptionPodLauncher — turn a dataset id into a provisioned pod running a caption pass
@@ -19,32 +13,56 @@ import {
 // The runtime adapter behind DatasetCaptionCursor's `launch` port, and the twin of
 // RemoteAitkLauncher. Per run this:
 //   1. resolves the dataset id → a manifest ([{url,id}]) the pod pulls
-//   2. synthesises the caption config (`buildAitkCaptionConfig`) with the POD-SIDE dataset
-//      path — the same generator the training arm's auto-caption step uses
-//   3. base64s the config + manifest and assembles the pod env, with NOEMA_JOB_MODE=caption
-//      so `aitktrainer.py` stops after captioning, harvests the sidecars and uploads them
-//   4. provisions a pod + launches the script detached, returning `{ externusJobId: podId }`.
+//   2. assembles the pod env — the manifest plus the model, prompt and token bound the
+//      captioner runs with
+//   3. provisions a pod, bootstraps a caption runtime onto it, and launches `captioner.py`
+//      detached, returning `{ externusJobId: podId }`.
 //
-// No training config rides along: there is no training in a caption job, so AITK_CONFIG_B64
-// is deliberately absent from the env.
+// A CAPTION PASS CARRIES A CAPTION RUNTIME. It loads one vision-language model and runs a
+// bounded forward pass per media item; it does not train, so it needs neither a training
+// toolkit nor the system libraries and pinned framework stack that toolkit's dependency tree
+// requires. The bootstrap below is one dependency install onto a base image that already
+// carries the matched framework build, and the pod script is this arm's own.
 //
-// The pod paths, the pinned ai-toolkit ref, the base image and the bootstrap recipe are the
-// SAME ones the training launcher uses — imported, not re-declared, so the pod's dataset dir
-// and the generated config's `folder_path` cannot drift apart. Provisioning sits behind the
-// `TrainingPodProvisioner` port, so the whole launch shape (resolve → generate → env) is
-// hermetically testable; only the provisioner's SSH/GPU work is the live seam.
+// CONFIG RIDES AS ENVIRONMENT VARIABLES. The captioner takes its model, prompt and token bound
+// straight off the env this launcher emits — there is no config file format between the two
+// arms, so the caption arm cannot re-acquire the training arm's config coupling by parsing one.
+// `buildAitkCaptionConfig` is untouched and stays the training arm's own auto-caption generator.
+//
+// Provisioning sits behind the shared `TrainingPodProvisioner` port, which the caption arm uses
+// with its own `script`; the whole launch shape (resolve → env → setup) is hermetically
+// testable, and only the provisioner's SSH/GPU work is the live seam.
 // =============================================================================
+
+/** The captioner model the pod loads when the launcher is not configured otherwise. */
+export const DEFAULT_CAPTION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct'
+
+/** Working dir on the caption pod — staged media plus the harvested map. Deliberately not the
+ *  training arm's pod dir: nothing on this pod is shared with a training run. */
+export const POD_CAPTION_DIR = '/caption'
+
+/** Bootstrap for a caption pod. The base image already carries the matched framework build, so
+ *  this is the caption runtime and the uploader and nothing else: no repository clone, no
+ *  submodules, no toolkit requirements tree, no framework reinstall. */
+export const CAPTION_POD_SETUP: string[] = [
+  'pip install --break-system-packages -q --upgrade transformers accelerate pillow boto3',
+]
 
 export interface CaptionPodLauncherDeps {
   provisioner: TrainingPodProvisioner
   /** The dataset store — the caption job resolves media straight off a Dataset. */
   datasets: Pick<Datasets, 'find'>
-  /** The pod base image — a stock RunPod image with torch ≥2.9 (default `DEFAULT_AITK_IMAGE`);
-   *  ai-toolkit is bootstrapped onto it over SSH. */
+  /** The pod base image — a stock RunPod image already carrying torch ≥2.9 + CUDA
+   *  (default `DEFAULT_AITK_IMAGE`); the caption runtime is installed onto it over SSH. */
   image?: string
-  /** ai-toolkit commit to clone on the pod (default `DEFAULT_AITK_REF`). */
+  /**
+   * Accepted for compatibility with the shared pod-rail wiring, and unused: a caption pod clones
+   * no toolkit, so there is no ref to pin.
+   */
   aitkRef?: string
-  /** R2 the pod uploads the harvested caption map to (the finalizer reads it back). */
+  /** Vision-language model the captioner loads (default `DEFAULT_CAPTION_MODEL`). */
+  captionModel?: string
+  /** R2 the pod uploads the caption map to (the finalizer reads it back). */
   r2: R2Config
   /** Our `/runner/status` sink — the pod POSTs its Progressus here. */
   statusUrl: string
@@ -70,25 +88,15 @@ export class CaptionPodLauncher implements CaptionLauncher {
     const manifest = datasetToManifest(dataset)
     if (manifest.length === 0) throw new Error(`dataset ${spec.datasetId} has no media to caption`)
 
-    // 2. synthesise the caption config, pointed at the pod-side dataset dir.
-    const captionYaml = buildAitkCaptionConfig({
-      datasetPath: POD_DATASET_DIR,
-      ...(spec.captionPrompt ? { captionPrompt: spec.captionPrompt } : {}),
-      ...(spec.maxNewTokens !== undefined ? { maxNewTokens: spec.maxNewTokens } : {}),
-    })
-
-    // 3. assemble the pod env (config + manifest base64'd; RUNPOD_POD_ID injected by the provisioner).
+    // 2. assemble the pod env (manifest base64'd; RUNPOD_POD_ID injected by the provisioner).
+    //    The captioner's knobs ride as plain values — the pod reads them, it parses no config.
     const r2 = this.deps.r2
     const env: Record<string, string> = {
-      AITK_DIR: POD_AITK_DIR,
-      AITK_JOB_ID: spec.jobId,
-      // Caption-only run: the pod writes the config, stages the manifest, captions, harvests and
-      // reports. An absent NOEMA_JOB_MODE is the training path, unchanged.
-      NOEMA_JOB_MODE: 'caption',
-      AITK_CAPTION_CONFIG_B64: Buffer.from(captionYaml, 'utf8').toString('base64'),
-      AITK_MANIFEST_B64: Buffer.from(JSON.stringify(manifest), 'utf8').toString('base64'),
-      AITK_DATASET_DIR: POD_DATASET_DIR,
-      AITK_GPU_IDS: spec.gpuId ?? '0',
+      NOEMA_JOB_ID: spec.jobId,
+      NOEMA_WORK_DIR: POD_CAPTION_DIR,
+      NOEMA_MANIFEST_B64: Buffer.from(JSON.stringify(manifest), 'utf8').toString('base64'),
+      NOEMA_CAPTION_MODEL: this.deps.captionModel ?? DEFAULT_CAPTION_MODEL,
+      NOEMA_CAPTION_PROMPT: spec.captionPrompt ?? DEFAULT_CAPTION_PROMPT,
       NOEMA_ACTUM_ID: spec.actumId,
       NOEMA_STATUS_URL: this.deps.statusUrl,
       // Completion sink. When the cursor minted a per-job callback nonce it rides as the last path
@@ -102,29 +110,19 @@ export class CaptionPodLauncher implements CaptionLauncher {
       R2_BUCKET_NAME: r2.bucket,
       R2_PUBLIC_URL: r2.publicUrl ?? '',
     }
+    if (spec.maxNewTokens !== undefined) env.NOEMA_CAPTION_MAX_NEW_TOKENS = String(spec.maxNewTokens)
 
-    // 4. bootstrap recipe — the same one the training launcher uses. Both lines below are
-    //    load-bearing: the apt line installs the system libs ai-toolkit's opencv/ffmpeg need
-    //    (without them run.py crashes on `import cv2`), and the forced cu128 trio restores the
-    //    matched torch stack that ai-toolkit's requirements displace (a mismatched libtorch
-    //    crashes with an undefined symbol at `import torchaudio`).
-    const aitkRef = this.deps.aitkRef ?? DEFAULT_AITK_REF
-    const setup = [
-      'apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 ffmpeg',
-      `rm -rf ${POD_AITK_DIR} && git clone https://github.com/ostris/ai-toolkit ${POD_AITK_DIR}`,
-      `cd ${POD_AITK_DIR} && git checkout ${aitkRef} && git submodule update --init --recursive`,
-      `cd ${POD_AITK_DIR} && pip install --break-system-packages -q -r requirements.txt boto3`,
-      'pip install --break-system-packages -q --force-reinstall --no-deps ' +
-        'torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128',
-    ]
-
-    // 5. provision + launch detached; the pod id IS the external run handle. `provision` resolves
+    // 3. provision + launch detached; the pod id IS the external run handle. `provision` resolves
     //    at the pod id and finishes SSH + bootstrap in the background, so the two hooks below are
     //    how the run stays correlated: the cursor's stamp runs before any pod-side work starts,
-    //    and a background failure fails the run rather than waiting out its deadline.
+    //    and a background failure fails the run rather than waiting out its deadline. `script` is
+    //    what puts the caption pass — rather than the trainer — on this pod.
     const onLaunchFailed = this.deps.onLaunchFailed
     const { podId } = await this.deps.provisioner.provision({
-      image: this.deps.image ?? DEFAULT_AITK_IMAGE, env, setup,
+      image: this.deps.image ?? DEFAULT_AITK_IMAGE,
+      env,
+      setup: CAPTION_POD_SETUP,
+      script: 'captioner',
       ...(spec.onPodId ? { onPodId: spec.onPodId } : {}),
       ...(onLaunchFailed ? { onLaunchFailed: (err: unknown) => onLaunchFailed(spec.actumId, err) } : {}),
     })
