@@ -34,6 +34,19 @@ class FakeDatasets {
     this.ds = { ...this.ds, captionsets }
     return this.ds
   }
+  /** The single-caption write the Mongo store implements: it writes into an EXISTING captionset
+   *  and recomputes that set's coverage from the captions present, so coverage moves as a
+   *  consequence of the write rather than being supplied. Null when the set is not there. */
+  async setCaption(_datasetId: string, captionsetId: string, mediaId: string, caption: string): Promise<Dataset | null> {
+    if (!this.ds) return null
+    const set = this.ds.captionsets.find(c => c.id === captionsetId)
+    if (!set) return null
+    this.writes++
+    const captions = { ...(set.captions ?? {}), [mediaId]: caption }
+    const next: Captionset = { ...set, captions, coverage: captionCoverage(captions, this.ds.media.length) }
+    this.ds = { ...this.ds, captionsets: this.ds.captionsets.map(c => (c.id === next.id ? next : c)) }
+    return this.ds
+  }
   get current(): Dataset | null { return this.ds }
 }
 
@@ -165,4 +178,119 @@ test('the harvest reader parses a caption map and rejects anything that is not o
     { 'media-1': 'a caption' })
   await assert.rejects(() => urlCaptionHarvestReader(fetcher('not json'))('https://r2.example/c.json'), /not valid JSON/)
   await assert.rejects(() => urlCaptionHarvestReader(fetcher('["a caption"]'))('https://r2.example/c.json'), /not a \{mediaId: caption\} object/)
+})
+
+// ── Extending the captionset the run was given (noema-279) ────────────────────────────────────
+//
+// A caption pass adds to the layer instead of rebuilding it. `addCaptionset` REPLACES a
+// captionset by id, so the extend path cannot use it — handing it this pass' harvest alone would
+// drop every caption the set already carried. It writes one caption at a time through
+// `setCaption`, which is also what moves the set's coverage without a second computation here.
+
+const withSet = (ids: string[], captionset: Captionset): Dataset => {
+  const d = dataset(ids)
+  return { ...d, captionsets: [captionset] }
+}
+
+test('harvested captions land in the captionset the run was given, and no second captionset is created', async () => {
+  const existing: Captionset = {
+    id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '1/3',
+    captions: { 'media-1': 'the first image' },
+  }
+  const datasets = new FakeDatasets(withSet(['media-1', 'media-2', 'media-3'], existing))
+  const finalize = makeCaptionFinalizer({
+    datasets,
+    reader: reader({ 'media-2': 'the second image', 'media-3': 'the third image' }),
+  })
+
+  const exitus = await finalize(
+    actum({ dataset: 'ds-1', jobId: 'job-2', captionset: 'captionset-1' }),
+    { outputUrl: 'https://r2.example/c.json' },
+  )
+
+  assert.equal(datasets.current!.captionsets.length, 1, 'the pass added to the layer, it did not make a second one')
+  const written = datasets.current!.captionsets[0]
+  assert.equal(written.id, 'captionset-1')
+  assert.equal(written.name, 'first pass', 'extending does not rename the pass it extends')
+  // The caption the set already carried is still there — extending is additive.
+  assert.deepEqual(written.captions, {
+    'media-1': 'the first image',
+    'media-2': 'the second image',
+    'media-3': 'the third image',
+  })
+  assert.equal(exitus.captionsetId, 'captionset-1')
+  assert.equal(exitus.captioned, 2, 'the exitus counts what THIS pass captioned')
+})
+
+test('extending a captionset moves its coverage to include the new images', async () => {
+  const existing: Captionset = {
+    id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '1/3',
+    captions: { 'media-1': 'the first image' },
+  }
+  const datasets = new FakeDatasets(withSet(['media-1', 'media-2', 'media-3'], existing))
+  const finalize = makeCaptionFinalizer({
+    datasets,
+    reader: reader({ 'media-2': 'the second image', 'media-3': 'the third image' }),
+  })
+
+  const exitus = await finalize(
+    actum({ dataset: 'ds-1', jobId: 'job-2', captionset: 'captionset-1' }),
+    { outputUrl: 'https://r2.example/c.json' },
+  )
+
+  // Coverage is read back off the record the store returned, not computed here — a pass that
+  // covered one of three now covers all three.
+  assert.equal(datasets.current!.captionsets[0].coverage, '3/3')
+  assert.equal(exitus.coverage, '3/3')
+})
+
+test('a pass given no captionset still mints one and captions the whole set', async () => {
+  // The fresh-set path is demoted from the default, never deleted: it is how a dataset gets its
+  // first captionset, and it is the deliberate second pass when a different captioner produces it.
+  const existing: Captionset = {
+    id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '1/2',
+    captions: { 'media-1': 'the first image' },
+  }
+  const datasets = new FakeDatasets(withSet(['media-1', 'media-2'], existing))
+  const finalize = makeCaptionFinalizer({
+    datasets,
+    reader: reader({ 'media-1': 'a fresh look at the first', 'media-2': 'and the second' }),
+  })
+
+  const exitus = await finalize(actum({ dataset: 'ds-1', jobId: 'job-2' }), { outputUrl: 'https://r2.example/c.json' })
+
+  assert.equal(datasets.current!.captionsets.length, 2, 'a pass given no captionset mints its own')
+  const minted = datasets.current!.captionsets[1]
+  assert.equal(minted.id, 'captionset-job-2')
+  assert.deepEqual(minted.captions, { 'media-1': 'a fresh look at the first', 'media-2': 'and the second' })
+  assert.deepEqual(exitus, { captionsetId: 'captionset-job-2', captioned: 2, coverage: '2/2' })
+  // And the pass it did NOT extend is untouched.
+  assert.deepEqual(datasets.current!.captionsets[0].captions, { 'media-1': 'the first image' })
+})
+
+test('extending a captionset that is not on the dataset fails the job before any write', async () => {
+  const datasets = new FakeDatasets(dataset(['media-1']))
+  const finalize = makeCaptionFinalizer({ datasets, reader: reader({ 'media-1': 'a caption' }) })
+  await assert.rejects(
+    () => finalize(actum({ dataset: 'ds-1', jobId: 'job-2', captionset: 'captionset-nope' }),
+      { outputUrl: 'https://r2.example/c.json' }),
+    /is not on dataset/,
+  )
+  assert.equal(datasets.writes, 0)
+})
+
+test('an unknown media id fails an EXTENDING pass too, before it writes anything', async () => {
+  // The validation loop runs before either write path, so the extend route cannot become the way
+  // a caption bound to nothing gets counted.
+  const existing: Captionset = { id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '0/1', captions: {} }
+  const datasets = new FakeDatasets(withSet(['media-1'], existing))
+  const finalize = makeCaptionFinalizer({
+    datasets, reader: reader({ 'media-1': 'fine', 'media-not-here': 'bound to nothing' }),
+  })
+  await assert.rejects(
+    () => finalize(actum({ dataset: 'ds-1', jobId: 'job-2', captionset: 'captionset-1' }),
+      { outputUrl: 'https://r2.example/c.json' }),
+    /not on dataset/,
+  )
+  assert.equal(datasets.writes, 0)
 })

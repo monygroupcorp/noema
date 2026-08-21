@@ -4,7 +4,7 @@
 // no images) so a remote train never launches against an empty dataset.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { corpusToManifest, parseManifest, makeDatasetResolver, datasetToManifest } from '../../../src/crystal/datasetManifest.js'
+import { corpusToManifest, parseManifest, makeDatasetResolver, datasetToManifest, uncoveredMedia } from '../../../src/crystal/datasetManifest.js'
 import type { Corpus, Corpora, Corporum } from '../../../src/types/corpus.js'
 import type { Dataset, Captionset } from '../../../src/types/dataset.js'
 
@@ -145,4 +145,46 @@ test('parseManifest: passes an id through when present, and still rejects a bad 
   // An absent id is valid input, not an error; a missing url still rejects.
   assert.deepEqual(parseManifest('[{"id":"media-1"}]'), null)
   assert.deepEqual(parseManifest('[{"url":"https://r2/a.png","id":42}]'), [{ url: 'https://r2/a.png' }])
+})
+
+// ── Extending a captionset (noema-279) ────────────────────────────────────────────────────────
+// A caption pass adds to the layer it was given rather than rebuilding it. The manifest is where
+// that becomes a spend: the pod downloads every url it is handed before its captioner can decide
+// to skip anything, so the images an extending pass is not captioning have to be absent from the
+// manifest rather than present-and-skipped.
+
+test('a caption pass extending a captionset stages only the media that captionset does not cover', () => {
+  const covered: Captionset = {
+    id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '2/4',
+    captions: { 'media-1': 'the first image', 'media-2': '   ' },   // blank text is not coverage
+  }
+  const d = dataset([
+    { id: 'media-1', url: 'https://r2/a.png' },
+    { id: 'media-2', url: 'https://r2/b.png' },
+    { id: 'media-3', url: 'https://r2/c.png' },
+    { id: 'media-4', url: 'https://r2/d.png' },
+  ], [covered])
+  d.media[3].archivum = new Date(1)      // archived media is never work, extending or not
+
+  assert.deepEqual(datasetToManifest(d, covered), [
+    { url: 'https://r2/b.png', id: 'media-2' },
+    { url: 'https://r2/c.png', id: 'media-3' },
+  ])
+
+  // And the converse, so the filter is a function of the captionset rather than of the dataset:
+  // the same dataset with no captionset to extend stages its whole working set.
+  assert.deepEqual(datasetToManifest(d), [
+    { url: 'https://r2/a.png', id: 'media-1' },
+    { url: 'https://r2/b.png', id: 'media-2' },
+    { url: 'https://r2/c.png', id: 'media-3' },
+  ])
+})
+
+test('uncoveredMedia: a captionset carrying no caption map covers nothing', () => {
+  // A pass written before caption maps were carried reports a coverage string this cannot read.
+  // Deriving work from the map means such a pass is extended over the whole set rather than
+  // being trusted to have covered images it cannot name.
+  const legacy: Captionset = { id: 'captionset-0', name: 'older pass', method: 'manual', coverage: '2/2' }
+  const d = dataset([{ id: 'media-1', url: 'https://r2/a.png' }, { id: 'media-2', url: 'https://r2/b.png' }])
+  assert.deepEqual(uncoveredMedia(d, legacy).map(m => m.id), ['media-1', 'media-2'])
 })

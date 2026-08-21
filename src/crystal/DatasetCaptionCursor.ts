@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import type { Cursor, CursorResult, Actorum } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
+import type { Datasets } from '../types/dataset.js'
+import { uncoveredMedia } from './datasetManifest.js'
 import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
 
 // =============================================================================
@@ -15,9 +17,14 @@ import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
 // run: it appears in run history, it reserves and settles, and it costs credits. There
 // is no free-upkeep lane and no second lifecycle here.
 //
-// One dataset in, one pod, one settlement, one captionset out. The pod captions every
-// image and uploads a `{mediaId: caption}` map; the completion webhook runs the caption
+// One dataset in, one pod, one settlement, one captionset out. The pod captions the images
+// it is staged and uploads a `{mediaId: caption}` map; the completion webhook runs the caption
 // finalizer (`captionFinalizer.ts`), which validates the keys and persists the captionset.
+//
+// A pass EXTENDS by default. Given a captionset in `aditus.captionset` it stages only the media
+// that captionset does not cover and the harvest lands back in it; given none it captions the
+// whole working set and mints one. Because the extending pass can turn out to have no work at
+// all, the emptiness check belongs in `reserve()` — see the note there.
 //
 // This cursor registers under the ministerium 'aitkcaption'. `Cursorum` is a flat
 // Map<ministerium, Cursor> whose `register` is a bare set, so registering a caption cursor
@@ -35,6 +42,12 @@ export interface CaptionLaunchSpec {
   jobId: string
   /** The dataset to caption — a dataset id, resolved against the `Datasets` store. */
   datasetId: string
+  /**
+   * The captionset this pass EXTENDS, when it was given one. Present → only the media that
+   * captionset does not already cover is staged, and the harvest lands back in it. Absent →
+   * the pass captions the whole working set and mints a captionset of its own.
+   */
+  captionsetId?: string
   /** Instruction handed to the captioner; the config generator's default when absent. */
   captionPrompt?: string
   /** Caption length cap in tokens; the config generator's default when absent. */
@@ -62,6 +75,12 @@ export interface CaptionLauncher {
 
 export interface DatasetCaptionCursorDeps {
   launcher: CaptionLauncher
+  /**
+   * The dataset store — read in `reserve()` to find out whether an extending pass has any
+   * uncaptioned media left. REQUIRED, not optional: a guard that a deployment can leave unwired
+   * is a guard that does not run where the money is spent.
+   */
+  datasets: Pick<Datasets, 'find'>
   /** Stamp the externusJobId + `agens` so the completion webhook can find the run. */
   actorum: Pick<Actorum, 'update'>
   /** Reservation cap in pod-seconds (1 impetus pt ≈ 1 SECURE-second) — default `DEFAULT_MAX_CAPTION_SECONDS`. */
@@ -82,9 +101,48 @@ export const DEFAULT_MAX_CAPTION_SECONDS = 1800
 export class DatasetCaptionCursor implements Cursor {
   constructor(private readonly deps: DatasetCaptionCursorDeps) {}
 
-  async reserve(modus: Modus, _aditus: Record<string, unknown>): Promise<bigint> {
+  /**
+   * Price the pass — and refuse one that has nothing to do, BEFORE anything is locked.
+   *
+   * A caption pass reserves a pod-seconds cap and then provisions real hardware, and both the
+   * provisioning and the runtime bootstrap are billed before the first caption exists. A pass
+   * over a captionset that already covers every live image would spend all of that to hand back
+   * what it was given, so the refusal lives here rather than in `run()`: a guard that reserves
+   * first and refuses second still freezes the payer's credits for the length of the run's
+   * expiry window. Same placement, and the same reason, as the decompose cursor's own up-front
+   * refusals.
+   *
+   * Only an EXTENDING pass can be empty. A pass given no captionset captions the whole working
+   * set, and the launcher already fails a dataset with no media at all.
+   */
+  async reserve(modus: Modus, aditus: Record<string, unknown>): Promise<bigint> {
+    await this.assertWork(aditus)
     if (modus.impetusFixum !== undefined) return modus.impetusFixum   // honour a fixed price if one is declared
     return BigInt(this.deps.maxCaptionSeconds ?? DEFAULT_MAX_CAPTION_SECONDS)   // else a pod-seconds upper bound
+  }
+
+  /** Throw when the pass this aditus describes has no image left to caption. No-op for a pass
+   *  that was given no captionset — that one captions everything. */
+  private async assertWork(aditus: Record<string, unknown>): Promise<void> {
+    const captionsetId = typeof aditus.captionset === 'string' ? aditus.captionset.trim() : ''
+    if (!captionsetId) return
+
+    const datasetId = typeof aditus.dataset === 'string' ? aditus.dataset.trim() : ''
+    if (!datasetId) throw new Error('dataset caption: `dataset` is required (a dataset id)')
+
+    const dataset = await this.deps.datasets.find(datasetId)
+    if (!dataset) throw new Error(`dataset caption: dataset '${datasetId}' does not exist`)
+
+    const captionset = dataset.captionsets.find((c) => c.id === captionsetId)
+    if (!captionset) {
+      throw new Error(`dataset caption: captionset '${captionsetId}' is not on dataset '${datasetId}'`)
+    }
+
+    if (uncoveredMedia(dataset, captionset).length === 0) {
+      throw new Error(
+        `dataset caption: captionset '${captionsetId}' already covers every image on dataset '${datasetId}' — nothing to caption`,
+      )
+    }
   }
 
   /**
@@ -110,6 +168,11 @@ export class DatasetCaptionCursor implements Cursor {
     const jobId = String(aditus.jobId ?? actum.id)
     const datasetId = String(aditus.dataset ?? '')
     if (!datasetId) throw new Error('dataset caption: `dataset` is required (a dataset id)')
+    // The captionset this pass extends, when it was given one — the same `aditus` key the
+    // decompose modus uses, and the one the finalizer reads to know where the harvest lands.
+    const captionsetId = typeof aditus.captionset === 'string' && aditus.captionset.trim()
+      ? aditus.captionset.trim()
+      : undefined
     const captionPrompt = typeof aditus.captionPrompt === 'string' && aditus.captionPrompt.trim()
       ? aditus.captionPrompt.trim()
       : undefined
@@ -138,6 +201,7 @@ export class DatasetCaptionCursor implements Cursor {
 
     const { externusJobId } = await this.deps.launcher.launch({
       actumId: actum.id, jobId, datasetId, callbackNonce, onPodId: stamp,
+      ...(captionsetId ? { captionsetId } : {}),
       ...(captionPrompt ? { captionPrompt } : {}),
       ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
       ...(gpuId ? { gpuId } : {}),
