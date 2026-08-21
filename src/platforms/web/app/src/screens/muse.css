@@ -251,3 +251,34 @@
 .muse-consent-dropped { margin-top: 10px; }
 .muse-consent-outcome { margin-top: 10px; }
 .muse-consent-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+
+/* ── The nozzle: the model control and the hold (noema-246) ───────────────────
+   Its own block in the launcher, bordered off from the flow and the run mode so it
+   reads as a separate control rather than another field on the same form — S5's
+   "a separate thing besides their steer", in layout. */
+.muse-lora {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--hair-soft); border-radius: 10px;
+}
+.muse-lora-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.muse-lora-current { flex: 1 1 200px; min-width: 0; font-size: 12.5px; color: var(--ink, inherit); }
+.muse-lora-panel { display: flex; flex-direction: column; gap: 8px; }
+.muse-lora-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-height: 190px; overflow-y: auto;
+}
+.muse-lora-card {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 6px 9px; border: 1px solid var(--hair); border-radius: 9px;
+  background: transparent; color: inherit; cursor: pointer; text-align: left;
+}
+.muse-lora-card.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.muse-lora-name { font-size: 12.5px; }
+/* The trigger is never decoration: it is the half of the attachment that a user can
+   see, so it is legible on the card rather than tucked into a tooltip. */
+.muse-lora-trigger { font-size: 11px; color: var(--muted); }
+.muse-lora-own { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-soft, var(--accent)); }
+.muse-lora-weight { max-width: 12em; }
+.muse-lora-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
