@@ -20,6 +20,7 @@
 
 import type { R2Config } from './comfyrunnerClient.js'
 import type { DatasetResolver } from './datasetManifest.js'
+import type { Progressus } from '../types/progressus.js'
 import type { RemoteAitkLauncher as RemoteAitkLauncherPort, RemoteAitkLaunchSpec } from './RemoteAitoolkitTrainingCursor.js'
 import { buildAitkConfig, buildAitkCaptionConfig } from './aitkConfig.js'
 import { withCallbackNonce } from './RunPodCursor.js'
@@ -51,11 +52,15 @@ export const DEFAULT_AITK_IMAGE = 'runpod/pytorch:1.0.7-cu1281-torch291-ubuntu24
  * pod id), so callers leave it out. Faked in tests; SecurePodClient-backed in prod.
  *
  * `provision` resolves once the pod id exists; the SSH + bootstrap phase that follows runs in the
- * background. Two optional hooks carry what that split needs:
+ * background. Three optional hooks carry what that split needs:
  *   - `onPodId` is awaited after provisioning and BEFORE any pod-side work starts — it is where the
  *     caller records the handle, so nothing pod-side can call back before the run carries it.
  *   - `onLaunchFailed` receives a failure from the background phase (the pod is already terminated
  *     by then), so the run can be failed at once instead of waiting out its deadline.
+ *   - `onPhase` receives the background phase reports (pod locked, bootstrap, detached start) —
+ *     the minutes between "the run started" and "the pod is working", which are invisible to the
+ *     caller once `provision` has resolved. A launcher that wants them on the run's timeline routes
+ *     them to the status sink; one that does not omits the hook and nothing is reported.
  *
  * `script` names which pod script the provisioned pod runs. It is OPTIONAL and an absent value is
  * the trainer, so every caller that predates the selector — and the training arm, which never
@@ -72,6 +77,7 @@ export interface TrainingPodProvisioner {
     script?: DetachedPodScript
     onPodId?: (podId: string) => Promise<void>
     onLaunchFailed?: (err: unknown) => Promise<void>
+    onPhase?: (progressus: Omit<Progressus, 'at'>) => void
   }): Promise<{ podId: string }>
 }
 
@@ -196,6 +202,7 @@ export function securePodTrainingProvisioner(
       script?: DetachedPodScript
       onPodId?: (podId: string) => Promise<void>
       onLaunchFailed?: (err: unknown) => Promise<void>
+      onPhase?: (progressus: Omit<Progressus, 'at'>) => void
     }): Promise<{ podId: string }>
   },
 ): TrainingPodProvisioner {
