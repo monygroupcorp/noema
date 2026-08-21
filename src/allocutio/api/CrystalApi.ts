@@ -80,6 +80,7 @@ import {
   addFragment,
   enabledFragments,
   manualFragment,
+  reconcileFloor,
   recordPiece,
   setFragmentEnabled,
   setFragmentWeight,
@@ -2172,19 +2173,75 @@ export class CrystalApi {
     const owner = this._museSessionOwner(auctor)
     const dataset = await this.getDataset(auctor, datasetId)
 
-    const pooled: Fragment[] = []
-    for (const item of liveMedia(dataset.media)) pooled.push(...(item.fragments ?? []))
-
     const stored = await this._museSessionsStore().create({
       owner,
-      session: spawnSession(dataset.id, pooled),
+      session: spawnSession(dataset.id, this._pooledFragments(dataset)),
     })
     return this._museSessionView(stored)
   }
 
-  /** A session the caller owns. A stranger's id is reported as not found. */
+  /**
+   * A dataset's fragments pooled dataset-wide — every LIVE media item's, in item order.
+   *
+   * The one place this pooling is written. A spawn takes the floor from it and a resume
+   * reconciles against it, and the two reading the same pool is what makes the floor and
+   * the garden the client rolls from describe the same set of fragments.
+   */
+  private _pooledFragments(dataset: { media: Dataset['media'] }): Fragment[] {
+    const pooled: Fragment[] = []
+    for (const item of liveMedia(dataset.media)) pooled.push(...(item.fragments ?? []))
+    return pooled
+  }
+
+  /**
+   * The mother's current pool, resolved with the caller's own ownership, or `null` when
+   * it cannot be read.
+   *
+   * `null` is not an error path — it is the reconcile declining to run. A session whose
+   * mother has been removed, or whose mother the caller can no longer read, still has a
+   * floor and a ledger of its own and is still worth returning; the read that would 404
+   * is swallowed here so a resume keeps working rather than becoming unreachable.
+   */
+  private async _motherPool(auctor: AuctorKey, motherDatasetId: string): Promise<Fragment[] | null> {
+    try {
+      return this._pooledFragments(await this.getDataset(auctor, motherDatasetId))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * A stored session with every fragment its mother now holds and its floor does not
+   * merged in, PERSISTED.
+   *
+   * Persisted rather than decorated onto the view: the record route resolves a piece's
+   * lineage against the STORED floor, so a view-only merge would show fragments the
+   * client can roll from and the ledger would still reject. Unchanged sessions are not
+   * written — `reconcileFloor` returns the same object when there is nothing to add.
+   */
+  private async _reconciledSession(
+    stored: StoredMuseSession,
+    pooled: readonly Fragment[],
+  ): Promise<StoredMuseSession> {
+    const next = reconcileFloor(stored.session, pooled)
+    if (next === stored.session) return stored
+    return (await this._museSessionsStore().save(stored.id, next)) ?? stored
+  }
+
+  /**
+   * A session the caller owns, reconciled with its mother's live garden. A stranger's id
+   * is reported as not found.
+   *
+   * The read that resumes a session is where the merge belongs: the client is about to
+   * roll against the mother as it stands now, so the floor it validates against has to
+   * describe the same fragments. The merge only ever widens the floor (`reconcileFloor`)
+   * — no steer is undone by resuming.
+   */
   async getMuseSession(auctor: AuctorKey, id: string): Promise<MuseSessionView> {
-    return this._museSessionView(await this._museSession(auctor, id))
+    const stored = await this._museSession(auctor, id)
+    const pooled = await this._motherPool(auctor, stored.session.motherDatasetId)
+    if (!pooled) return this._museSessionView(stored)
+    return this._museSessionView(await this._reconciledSession(stored, pooled))
   }
 
   /**
@@ -2200,14 +2257,34 @@ export class CrystalApi {
    * query's own scope, so the list cannot contain a stranger's session at any
    * point. A dataset the caller does not own resolves to no sessions rather than
    * to an error: the dataset read that would 404 is not performed, and an empty
-   * list says nothing about whether that dataset exists.
+   * list says nothing about whether that dataset exists. A mother that cannot be read
+   * keeps that property — the reconcile below declines rather than raising.
+   *
+   * Every session listed is reconciled with the mother's live garden, because this list
+   * is how the client resumes: it takes the most recently changed entry and rolls
+   * against the mother as it stands now.
+   *
+   * THE RECONCILE MUST NOT REORDER THE LIST. A store `save` restamps `mutatum`, which is
+   * the key this list is sorted on and the key the client picks its session by, so the
+   * merges are applied OLDEST FIRST — the most recently changed session is written last
+   * and stays the one a resume lands on. The result is returned in the store's original
+   * order regardless.
    */
   async listMuseSessions(auctor: AuctorKey, datasetId: string): Promise<MuseSessionView[]> {
     const owner = this._museSessionOwner(auctor)
     const id = typeof datasetId === 'string' ? datasetId.trim() : ''
     if (!id) throw Errors.inputMalformed('datasetId is required')
     const stored = await this._museSessionsStore().listByOwner(owner, id)
-    return stored.map((s) => this._museSessionView(s))
+    if (stored.length === 0) return []
+
+    const pooled = await this._motherPool(auctor, id)
+    if (!pooled) return stored.map((s) => this._museSessionView(s))
+
+    const reconciled = new Map<string, StoredMuseSession>()
+    for (const session of [...stored].reverse()) {
+      reconciled.set(session.id, await this._reconciledSession(session, pooled))
+    }
+    return stored.map((s) => this._museSessionView(reconciled.get(s.id) ?? s))
   }
 
   /** Take a fragment out of the draw, or put it back. It stays on the floor either way. */
