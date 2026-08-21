@@ -644,7 +644,11 @@ test('raising PROVISION_BUDGET_MS does not change what any cursor reserves', asy
   const noopActorum = { async update() { return {} as Actum } }
 
   const pod = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
-  const caption = new DatasetCaptionCursor({ launcher: noopLauncher, actorum: noopActorum })
+  // `datasets` is a required dep: the caption cursor refuses an extending pass with nothing left
+  // to caption in reserve(), and it can only know that by reading the captionset it was given.
+  // Nothing here asks for one, so the store is never read.
+  const noopDatasets = { async find() { return null } }
+  const caption = new DatasetCaptionCursor({ launcher: noopLauncher, actorum: noopActorum, datasets: noopDatasets })
   const training = new RemoteAitoolkitTrainingCursor({ launcher: noopLauncher, actorum: noopActorum })
 
   // Each cursor's reservation is stated in its own terms — a declared price, a fitted cost curve,

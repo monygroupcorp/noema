@@ -1,5 +1,5 @@
 import type { R2Config } from './comfyrunnerClient.js'
-import type { Datasets } from '../types/dataset.js'
+import type { Captionset, Datasets } from '../types/dataset.js'
 import type { CaptionLauncher, CaptionLaunchSpec } from './DatasetCaptionCursor.js'
 import type { Progressus } from '../types/progressus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
@@ -14,7 +14,8 @@ import { DEFAULT_AITK_IMAGE, type TrainingPodProvisioner } from './RemoteAitkLau
 //
 // The runtime adapter behind DatasetCaptionCursor's `launch` port, and the twin of
 // RemoteAitkLauncher. Per run this:
-//   1. resolves the dataset id → a manifest ([{url,id}]) the pod pulls
+//   1. resolves the dataset id → a manifest ([{url,id}]) the pod pulls — narrowed to the media
+//      the captionset being extended does not already cover, when the run was given one
 //   2. assembles the pod env — the manifest plus the model, prompt and token bound the
 //      captioner runs with
 //   3. provisions a pod, bootstraps a caption runtime onto it, and launches `captioner.py`
@@ -93,10 +94,26 @@ export class CaptionPodLauncher implements CaptionLauncher {
   async launch(spec: CaptionLaunchSpec): Promise<{ externusJobId: string }> {
     // 1. dataset id → manifest the pod pulls. Fail loud HERE, not on the pod: a caption pass
     //    with nothing to caption would otherwise burn a pod and settle an empty captionset.
+    //
+    //    An EXTENDING pass resolves the captionset it was given and stages only what that pass
+    //    does not already cover, so the images it is not captioning are never downloaded. An id
+    //    naming no captionset on this dataset fails the run rather than quietly widening the
+    //    pass back out to the whole set.
     const dataset = await this.deps.datasets.find(spec.datasetId)
     if (!dataset) throw new Error(`dataset not found: ${spec.datasetId}`)
-    const manifest = datasetToManifest(dataset)
-    if (manifest.length === 0) throw new Error(`dataset ${spec.datasetId} has no media to caption`)
+    let extending: Captionset | undefined
+    if (spec.captionsetId) {
+      extending = dataset.captionsets.find((c) => c.id === spec.captionsetId)
+      if (!extending) {
+        throw new Error(`captionset ${spec.captionsetId} is not on dataset ${spec.datasetId}`)
+      }
+    }
+    const manifest = datasetToManifest(dataset, extending)
+    if (manifest.length === 0) {
+      throw new Error(extending
+        ? `dataset ${spec.datasetId} has no media left to caption in captionset ${extending.id}`
+        : `dataset ${spec.datasetId} has no media to caption`)
+    }
 
     // 2. assemble the pod env (manifest base64'd; RUNPOD_POD_ID injected by the provisioner).
     //    The captioner's knobs ride as plain values — the pod reads them, it parses no config.

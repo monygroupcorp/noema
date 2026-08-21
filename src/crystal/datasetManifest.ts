@@ -21,11 +21,13 @@
 //
 // A Dataset projects here too (`datasetToManifest`), for the batch caption job: same wire
 // shape, each entry additionally carrying the media item's `id` so the pod can echo it back
-// on the harvest instead of the host re-deriving identity from a position.
+// on the harvest instead of the host re-deriving identity from a position. That projection
+// takes an optional captionset to EXTEND, and stages only the media that captionset does not
+// already cover.
 
 import type { Corpus, Corporum } from '../types/corpus.js'
 import { liveMedia } from '../types/dataset.js'
-import type { Dataset } from '../types/dataset.js'
+import type { Captionset, Dataset, DatasetMediaItem } from '../types/dataset.js'
 
 /** One training image: where to fetch it, and its caption if we have one. */
 export interface ManifestItem {
@@ -69,21 +71,45 @@ export function corpusToManifest(corpus: Corpus): DatasetManifest {
 }
 
 /**
- * Project a Dataset to a manifest — its LIVE media in array order, each carrying the media
- * item's `id` so a pod-side artifact can be bound back to the exact item that was staged (see
- * `ManifestItem.id`). Pure + deterministic.
+ * The live media a caption pass has work to do on.
  *
- * Archived media is not staged: a caption pass captions the working set, and an archived item
- * has left it. The manifest is the caption job's whole view of the dataset, so this is the one
- * place that exclusion has to hold for the pod.
+ * With no `captionset`, that is the whole working set — the pass mints a new captionset and
+ * captions everything in it. Given a captionset to EXTEND, it is the live media that captionset
+ * carries no non-empty caption for: the pass adds to the layer rather than rebuilding it.
  *
- * Emits NO `caption` field, even when the dataset already has captionsets. The pod's captioner
- * runs with `recaption: false` and skips any image that already has a `.txt` sidecar, so shipping
- * existing captions would make a caption job hand back a copy of the captionset it started from.
- * A caption job captions everything.
+ * Archived media is never work: a caption pass captions the working set, and an archived item
+ * has left it. Coverage is read off the caption MAP rather than the stored `coverage` string, so
+ * the set of work is derived from the captions that actually exist.
+ *
+ * Pure + deterministic (media order preserved). Shared by the launcher, which stages exactly
+ * this, and by the cursor, which refuses a pass with nothing in it before a pod is provisioned.
  */
-export function datasetToManifest(dataset: Dataset): DatasetManifest {
-  return liveMedia(dataset.media).map(m => ({ url: m.url, id: m.id }))
+export function uncoveredMedia(dataset: Dataset, captionset?: Captionset | null): DatasetMediaItem[] {
+  const live = liveMedia(dataset.media)
+  if (!captionset) return live
+  const captions = captionset.captions ?? {}
+  return live.filter(m => {
+    const text = captions[m.id]
+    return typeof text !== 'string' || text.trim() === ''
+  })
+}
+
+/**
+ * Project a Dataset to a manifest — the media a caption pass has work to do on (see
+ * `uncoveredMedia`) in array order, each carrying the media item's `id` so a pod-side artifact
+ * can be bound back to the exact item that was staged (see `ManifestItem.id`).
+ *
+ * FILTERING IS WHAT SAVES THE SPEND. The pod's captioner runs with `recaption: false` and skips
+ * an image that arrives with a `.txt` sidecar, so shipping the existing captions instead would
+ * also avoid re-captioning — but the pod DOWNLOADS every url in the manifest before it can skip
+ * anything. Work an extending pass is not doing should never leave the server, so the media is
+ * dropped here rather than the captions being shipped for the pod to skip on.
+ *
+ * Emits NO `caption` field. A staged image is one this pass is captioning, and handing the
+ * captioner a caption for it would make the pass return a copy of what it was given.
+ */
+export function datasetToManifest(dataset: Dataset, captionset?: Captionset | null): DatasetManifest {
+  return uncoveredMedia(dataset, captionset).map(m => ({ url: m.url, id: m.id }))
 }
 
 /**

@@ -60,6 +60,9 @@ import {
 //
 //   THE CAPTION CONTROL QUOTES THE WHOLE SET. A caption pass reads every image in the set, so the
 //   figure on the control is the size of the set after the append, never the size of the append.
+//   noema-279 narrowed what an EXTENDING pass reads to the images the chosen pass does not
+//   cover, so this figure is now an upper bound on a pass launched from here rather than its
+//   exact size; the caption screen quotes the pass it is about to launch before it is launched.
 
 export { categoryColor, curatedFragments };
 
@@ -241,8 +244,17 @@ export function Dataset() {
                 </button>
               ))}
               <div className="capset-actions">
-                <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>+ new captionset</Link>
-                <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
+                {/* ONE door. The two controls that stood here pointed at the same route under two
+                    labels, and the distinction they implied is not real: a caption pass extends
+                    the selected pass, and a second captionset is worth having only when a
+                    different captioner will produce it. The caption screen carries the opt-out
+                    for the fresh-set case, so it stays reachable deliberately rather than as a
+                    second identical button. The selected pass rides the link, so the screen
+                    opens on the one that was picked here. */}
+                <Link className="btn ghost sm"
+                  to={active ? `/datasets/${d.id}/caption?captionset=${encodeURIComponent(active)}` : `/datasets/${d.id}/caption`}>
+                  {active ? 'caption the uncaptioned →' : 'run a caption job'}
+                </Link>
                 {canOfferDecompose(d) && (
                   <button className="btn ghost sm" type="button"
                     disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
