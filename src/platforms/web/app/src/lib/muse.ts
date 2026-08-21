@@ -1597,10 +1597,11 @@ export function dismissalOffer(state: DismissalState): SteerOffer | null {
 // reweight a trigger word would let a reaction steer the nozzle.
 
 /**
- * How many LoRAs one stream may carry. ONE, in v1, and this is a deliberate
- * self-imposed bound rather than a platform fact: how many LoRAs a run can actually
- * stack has never been measured, so nothing here guesses a stack limit and no stacking
- * UI is built on an unmeasured number. Choosing a second LoRA replaces the first.
+ * How many LoRAs one stream may carry. ONE, in v1, and this is a deliberate product
+ * bound rather than a platform limit: a run can stack more than one, and the cost of
+ * stacking is time — a longer weight download and a longer diffusion. The bound stays
+ * at one until it is lifted deliberately, so no stacking UI is built here. Choosing a
+ * second LoRA replaces the first.
  */
 export const MAX_STREAM_LORAS = 1;
 
@@ -1773,3 +1774,109 @@ export function loraChoiceLine(choice: LoraChoice | null): string {
   const weight = loraWeight(choice.weight);
   return `${choice.nomen} · trigger ${choice.trigger}${weight == null ? '' : ` · weight ${weight}`}`;
 }
+
+// ── The controls get out of the way once the stream has something on it (noema-264) ──
+//
+// On a wide viewport the configuration and the nozzle read as a header above the grid.
+// On a narrow one they are most of the viewport, and the stream — the thing the user
+// launched and is paying for — is what they scroll past the menu to see.
+//
+// The rule is here, and pure, because this is where it can be gated: the hermetic web
+// tests run from the repo root under `tsx --test` with no react in scope, so a rule that
+// lived in `Muse.tsx` could not be asserted at all.
+
+/** The two blocks of the launcher that collapse to a summary line. The launch/stop
+ *  control, the price readout and the infinite acknowledgement are NOT in this list and
+ *  never collapse: they are what starts, stops and prices the stream. */
+export type MuseControl = 'configuration' | 'nozzle';
+
+export interface ControlCollapseInput {
+  /** Where the stream is. */
+  phase: StreamPhase;
+  /** How many pieces are on the stream right now. */
+  pieces: number;
+  /** The controls the user has opened by hand. */
+  expandedByHand: readonly MuseControl[];
+}
+
+export interface ControlCollapse {
+  configuration: boolean;
+  nozzle: boolean;
+}
+
+/** A stream that has something to show: pieces already on it, or a loop riding toward
+ *  the first one. Until then there is nothing for the controls to be in the way of. */
+function streamHasBegun(input: Pick<ControlCollapseInput, 'phase' | 'pieces'>): boolean {
+  if (input.pieces > 0) return true;
+  return input.phase === 'running' || input.phase === 'holding' || input.phase === 'stopping';
+}
+
+/**
+ * Which launcher controls are collapsed to their summary lines.
+ *
+ * Three properties, and each is load-bearing:
+ *
+ *  - A stream with pieces on it collapses both. The grid gets the viewport.
+ *  - A session with nothing on it opens EXPANDED. Collapsing an idle screen would hide
+ *    the only control that starts anything, which is the one thing a fresh screen is for.
+ *  - The collapse is a DEFAULT, never a lock. A control the user opened stays open while
+ *    the stream rides; nothing re-collapses it under their hand.
+ *
+ * Non-vacuity: reverting the collapse must fail "a stream with pieces on it collapses the
+ * configuration and the nozzle to their summary lines"; reverting the idle branch must
+ * fail "a session with nothing on it opens with the configuration expanded"; reverting
+ * the override must fail "expanding a collapsed control keeps it expanded while the
+ * stream rides".
+ */
+export function collapsedControls(input: ControlCollapseInput): ControlCollapse {
+  const begun = streamHasBegun(input);
+  const held = new Set(input.expandedByHand);
+  return {
+    configuration: begun && !held.has('configuration'),
+    nozzle: begun && !held.has('nozzle'),
+  };
+}
+
+/** The user's hand on a control: opening it, or closing one they opened. A control is
+ *  only ever re-collapsed here — by the user — and never by the stream. */
+export function toggleControl(
+  expandedByHand: readonly MuseControl[],
+  control: MuseControl,
+): MuseControl[] {
+  return expandedByHand.includes(control)
+    ? expandedByHand.filter((c) => c !== control)
+    : [...expandedByHand, control];
+}
+
+/**
+ * The collapsed nozzle in one line: the model that is loaded AND the weight it is
+ * loaded at.
+ *
+ * This is not `loraChoiceLine`, which omits the weight when none is set. A collapsed row
+ * exists to answer "what is firing right now" without being opened, and "at its own
+ * default" is an answer where a missing clause is not — the user is mid-stream and
+ * spending against whatever this says.
+ *
+ * Non-vacuity: dropping the weight clause must fail "a collapsed nozzle still names the
+ * model that is loaded and its weight".
+ */
+export function nozzleSummaryLine(choice: LoraChoice | null): string {
+  if (!choice) return 'no model — the workflow’s own base only';
+  const weight = loraWeight(choice.weight);
+  const at = weight == null ? 'its own default weight' : `weight ${weight}`;
+  return `${choice.nomen} · trigger ${choice.trigger} · ${at}`;
+}
+
+/** The collapsed configuration in one line: what it is firing through, in which run
+ *  mode, and — batched — how many pieces that mode is bounded by. */
+export function configSummaryLine(config: StreamConfig, workflow: string | null): string {
+  const run = config.mode === 'infinite' ? 'infinite' : `batched · ${config.cap} pieces`;
+  const flow = (workflow ?? '').trim();
+  return `${flow || 'no workflow'} · ${run}`;
+}
+
+/** The viewport the phone layout starts at. Declared here and used by `Muse.tsx` to pick
+ *  the picker's chrome, so the query the script switches on is the same string the
+ *  stylesheet switches on — `muse.css`'s `@media (max-width: 640px)` block must be kept
+ *  in step with this value. */
+export const MUSE_NARROW_VIEWPORT = '(max-width: 640px)';

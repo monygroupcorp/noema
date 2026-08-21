@@ -50,6 +50,8 @@ import {
   lineageOf,
   loraCatalog,
   loraCatalogReason,
+  collapsedControls,
+  configSummaryLine,
   loraChoiceLine,
   loraWarmupNote,
   loraWeight,
@@ -58,6 +60,7 @@ import {
   manualAddRequest,
   mergedExclusions,
   nextPieceDecision,
+  nozzleSummaryLine,
   pieceRecord,
   decomposeGateReason,
   poolDatasetFragments,
@@ -84,6 +87,7 @@ import {
   streamStatusLine,
   t2iFlows,
   terminalOf,
+  toggleControl,
   weightWrites,
   writeLabel,
   writesForConfirm,
@@ -92,6 +96,7 @@ import {
   MANUAL_CATEGORIES,
   MAX_FLOOR_FRAGMENTS,
   MAX_INSTRUCTION_CHARS,
+  MUSE_NARROW_VIEWPORT,
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
   NO_DISMISSALS,
@@ -100,6 +105,7 @@ import {
   type FloorPill,
   type HoldState,
   type LoraChoice,
+  type MuseControl,
   type SheetPhase,
   type SteerPill,
   type RollReport,
@@ -323,6 +329,15 @@ export function Muse() {
   const [warmup, setWarmup] = useState<LoraChoice | null>(null);
   // The manual path (D3): the roll cards, closed by default. The stream is the front door.
   const [manualOpen, setManualOpen] = useState(false);
+
+  // ── The controls get out of the way (noema-264) ───────────────────────────
+  // Which launcher blocks the user has opened by hand. The collapse in `collapsedControls`
+  // is a default; this list is what overrides it, and only the user's own hand writes to
+  // it — nothing here re-collapses a block while a stream rides.
+  const [expandedByHand, setExpandedByHand] = useState<MuseControl[]>([]);
+  const openControl = useCallback((control: MuseControl) => {
+    setExpandedByHand((held) => (held.includes(control) ? held : [...held, control]));
+  }, []);
 
   // ── The stream (noema-238) ────────────────────────────────────────────────
   // Fired pieces, newest first, plus the ones held back while the grid is frozen.
@@ -1118,6 +1133,77 @@ export function Muse() {
   // firing and not a return to configuration.
   const streamLive = phase === 'running' || phase === 'stopping' || phase === 'holding';
 
+  // The launcher blocks that are collapsed right now, and the phone question the picker
+  // turns on. `matchMedia` rather than a width read: the picker's chrome changes with the
+  // viewport, so it has to change back when the viewport does.
+  const controls = collapsedControls({ phase, pieces: stream.pieces.length, expandedByHand });
+  const flowLabel = (flows ?? []).find((f) => f.id === modusId)?.nomen ?? modusId;
+  const narrow = useNarrowViewport();
+
+  // The picker's BODY, lifted out so the same control can wear two chromes: inline under
+  // the nozzle row on a wide viewport, and the house pull-up sheet on a phone, where an
+  // inner scroller with its commit actions below it in normal flow puts `use <model>`
+  // under the fold and leaves `cancel` as the only reachable exit (noema-264).
+  const loraPanel = (
+    <>
+      {loraReason ? (
+        <div className="gt-sub mono">{loraReason}</div>
+      ) : (
+        <ul className="muse-lora-list">
+          {loraOffer.map((card) => (
+            <li key={card.intellaId}>
+              <button
+                type="button"
+                className={`muse-lora-card${draft?.intellaId === card.intellaId ? ' on' : ''}`}
+                onClick={() => setDraft((d) => chooseLora(d, card))}
+              >
+                <span className="muse-lora-name">{card.nomen}</span>
+                {/* The trigger word is shown on every card and again on the
+                    chosen one: it is the part a user has to see to trust that
+                    the model is reaching the prompt at all. */}
+                <span className="muse-lora-trigger mono">trigger {card.trigger}</span>
+                {card.access === 'private' && <span className="muse-lora-own mono">yours</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {catalogLoading && <div className="gt-sub mono">reading the catalog…</div>}
+      {catalogError && <div className="gt-sub mono">{catalogError}</div>}
+
+      <label className="cc-field muse-lora-weight"><span>Weight</span>
+        <input
+          className="cer-input" type="number" inputMode="decimal"
+          min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
+          placeholder="its own default"
+          disabled={!draft}
+          value={weightText}
+          onChange={(e) => setWeightText(e.target.value)}
+        />
+      </label>
+
+      <div className="gt-sub mono">
+        One model at a time — choosing another replaces it. A run can stack more than one; what stacking
+        costs is time — a longer download and a longer diffusion — so this control holds the bound at one.
+      </div>
+
+      {streamLive && (
+        <div className="gt-sub mono">
+          the stream is holding while you choose — it resumes where it is, with the same count and
+          the same cap.
+        </div>
+      )}
+
+      <div className="muse-lora-actions">
+        <button type="button" className="btn accent sm" onClick={commitLora}>
+          {draft ? `use ${draft.nomen}` : 'fire without a model'}
+        </button>
+        <button type="button" className="btn ghost sm" onClick={cancelLora}>cancel</button>
+      </div>
+    </>
+  );
+
   const crumb = (
     <span className="ph-crumb">
       <Link to="/datasets">datasets</Link> <span className="sep">/</span>{' '}
@@ -1277,6 +1363,19 @@ export function Muse() {
             button sits beside it for the whole time a stream is riding, so it is
             reachable without scrolling however long the grid below has grown. */}
         <section className="muse-launcher">
+          {/* The configuration collapses once the stream has something on it (noema-264).
+              What does NOT collapse: the launch/stop control, the price readout and the
+              infinite acknowledgement — they sit below this block and stay put. */}
+          {controls.configuration ? (
+            <div className="muse-collapsed">
+              <span className="gc-l">run</span>
+              <span className="muse-collapsed-line mono">{configSummaryLine(config, flowLabel)}</span>
+              <button type="button" className="linkish" onClick={() => openControl('configuration')}>
+                change
+              </button>
+            </div>
+          ) : (
+          <>
           <div className="muse-launcher-row">
             <label className="cc-field"><span>Nozzle</span>
               <select className="cer-input" value={modusId ?? ''} disabled={streamLive}
@@ -1309,85 +1408,68 @@ export function Muse() {
               </label>
             </fieldset>
           </div>
+          {expandedByHand.includes('configuration') && stream.pieces.length > 0 && (
+            <div className="muse-collapsed-foot">
+              <button type="button" className="linkish" onClick={() => setExpandedByHand((held) => toggleControl(held, 'configuration'))}>
+                done — give the stream the screen
+              </button>
+            </div>
+          )}
+          </>
+          )}
 
           {/* ── The nozzle (S5) ───────────────────────────────────────────────
               A control of its own, NOT a key on the steer keyboard and not a floor
               pill: the floor is fuel, this is what it is burned through. Changing it
               while a stream rides holds the stream (S6) — pieces fired mid-choice come
               out of the old nozzle at full price. */}
-          <div className="muse-lora">
-            <div className="muse-lora-row">
+          {/* Collapsed, the nozzle is one line — and it is the line that answers "what
+              is firing right now", weight included. A summary that says nothing is not a
+              summary: the user is mid-stream and spending against whatever it names. */}
+          {controls.nozzle && !loraOpen ? (
+            <div className="muse-lora muse-collapsed">
               <span className="gc-l">Model</span>
-              <span className="muse-lora-current mono">{loraChoiceLine(lora)}</span>
+              <span className="muse-collapsed-line mono">{nozzleSummaryLine(lora)}</span>
               <button
                 type="button"
-                className="btn ghost sm"
-                onClick={() => (loraOpen ? cancelLora() : openLora())}
+                className="linkish"
+                onClick={() => { openControl('nozzle'); openLora(); }}
               >
-                {loraOpen ? 'cancel' : lora ? 'change model' : 'choose a model'}
+                change
               </button>
             </div>
-
-            {loraOpen && (
-              <div className="muse-lora-panel">
-                {loraReason ? (
-                  <div className="gt-sub mono">{loraReason}</div>
-                ) : (
-                  <ul className="muse-lora-list">
-                    {loraOffer.map((card) => (
-                      <li key={card.intellaId}>
-                        <button
-                          type="button"
-                          className={`muse-lora-card${draft?.intellaId === card.intellaId ? ' on' : ''}`}
-                          onClick={() => setDraft((d) => chooseLora(d, card))}
-                        >
-                          <span className="muse-lora-name">{card.nomen}</span>
-                          {/* The trigger word is shown on every card and again on the
-                              chosen one: it is the part a user has to see to trust that
-                              the model is reaching the prompt at all. */}
-                          <span className="muse-lora-trigger mono">trigger {card.trigger}</span>
-                          {card.access === 'private' && <span className="muse-lora-own mono">yours</span>}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {catalogLoading && <div className="gt-sub mono">reading the catalog…</div>}
-                {catalogError && <div className="gt-sub mono">{catalogError}</div>}
-
-                <label className="cc-field muse-lora-weight"><span>Weight</span>
-                  <input
-                    className="cer-input" type="number" inputMode="decimal"
-                    min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
-                    placeholder="its own default"
-                    disabled={!draft}
-                    value={weightText}
-                    onChange={(e) => setWeightText(e.target.value)}
-                  />
-                </label>
-
-                <div className="gt-sub mono">
-                  One model at a time — choosing another replaces it. How many a run can stack has not been
-                  measured, so nothing here stacks them.
-                </div>
-
-                <div className="muse-lora-actions">
-                  <button type="button" className="btn accent sm" onClick={commitLora}>
-                    {draft ? `use ${draft.nomen}` : 'fire without a model'}
-                  </button>
-                  <button type="button" className="btn ghost sm" onClick={cancelLora}>cancel</button>
-                </div>
-
-                {streamLive && (
-                  <div className="gt-sub mono">
-                    the stream is holding while you choose — it resumes where it is, with the same count and
-                    the same cap.
-                  </div>
-                )}
+          ) : (
+            <div className="muse-lora">
+              <div className="muse-lora-row">
+                <span className="gc-l">Model</span>
+                <span className="muse-lora-current mono">{loraChoiceLine(lora)}</span>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => (loraOpen ? cancelLora() : openLora())}
+                >
+                  {loraOpen ? 'cancel' : lora ? 'change model' : 'choose a model'}
+                </button>
               </div>
-            )}
-          </div>
+
+              {/* Wide: the panel opens in place, as it always has. Narrow: it opens as
+                  the house pull-up sheet at the foot of this screen, where its actions
+                  can be pinned. */}
+              {loraOpen && !narrow && <div className="muse-lora-panel">{loraPanel}</div>}
+
+              {!loraOpen && expandedByHand.includes('nozzle') && stream.pieces.length > 0 && (
+                <div className="muse-collapsed-foot">
+                  <button
+                    type="button"
+                    className="linkish"
+                    onClick={() => setExpandedByHand((held) => toggleControl(held, 'nozzle'))}
+                  >
+                    done — give the stream the screen
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* The warning is a GATE, not a caption (V5). An infinite stream carries no
               count, so the balance is the only thing that ends it on its own; the
@@ -1744,6 +1826,23 @@ export function Muse() {
             onConfirm={() => void confirmSheet()}
             onClose={() => setSheet(null)}
           />
+        )}
+
+        {/* The picker as the house pull-up sheet, on a phone (noema-264). It renders
+            OUTSIDE the launcher on purpose: the launcher paints a `backdrop-filter`,
+            which makes it the containing block for any fixed descendant, and a sheet
+            anchored to the launcher rather than to the viewport is not a sheet. */}
+        {loraOpen && narrow && (
+          <div className="muse-sheet" role="dialog" aria-modal="true" onClick={cancelLora}>
+            <div className="muse-sheet-card muse-lora-sheet" onClick={(e) => e.stopPropagation()}>
+              <div className="muse-sheet-head">
+                <span className="gc-l">model</span>
+                <span className="gt-sub mono">{loraChoiceLine(lora)}</span>
+                <button type="button" className="btn ghost sm muse-sheet-close" onClick={cancelLora}>Close</button>
+              </div>
+              <div className="muse-lora-panel">{loraPanel}</div>
+            </div>
+          </div>
         )}
 
         {floorOpen && session && (
@@ -2288,4 +2387,30 @@ function ConsentPill({
       {' '}{pill.text}
     </button>
   );
+}
+
+/**
+ * Whether the viewport is the phone one (noema-264).
+ *
+ * The picker's CHROME changes with the width — inline panel wide, pull-up sheet narrow —
+ * so the script has to switch on the same query the stylesheet does, and has to switch
+ * back when the viewport changes under it (a rotation, a resized window). The query
+ * string itself lives beside the rule it belongs to, in `lib/muse.ts`.
+ */
+function useNarrowViewport(): boolean {
+  const query = () =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(MUSE_NARROW_VIEWPORT)
+      : null;
+  const [narrow, setNarrow] = useState(() => query()?.matches ?? false);
+  useEffect(() => {
+    const mq = query();
+    if (!mq) return;
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return narrow;
 }
