@@ -23,7 +23,7 @@ import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { InsufficientFundsError } from '../../execution/ActumInceptor.js'
 import { InsufficientBursaCreditsError } from '../../types/bursa.js'
-import { DecomposeInFlightError } from '../../crystal/MuseDecomposeCursor.js'
+import { DecomposeInFlightError, DecomposeNothingToDoError } from '../../crystal/MuseDecomposeCursor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -657,6 +657,17 @@ export class CrystalApi {
       // invites the retry that started the duplicate in the first place.
       if (err instanceof DecomposeInFlightError) {
         throw Errors.conflictRunInFlight(err.message, { dataset: err.datasetId })
+      }
+      // The same seam, for the refusal that says there is no work: every captioned item
+      // already carries fragments and the caller did not ask for a re-decompose. A request
+      // outcome about the caller's own dataset — 409 rather than a masked `internal.error`,
+      // and NOT retryable, because the request cannot succeed until the dataset changes or
+      // the caller asks for a redo.
+      if (err instanceof DecomposeNothingToDoError) {
+        throw new ApiError('conflict.nothing_to_decompose', err.message, 409, {
+          retryable: false,
+          details: { dataset: err.datasetId, captionset: err.captionsetId },
+        })
       }
       throw err
     }
