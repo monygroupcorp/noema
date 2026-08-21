@@ -7,6 +7,7 @@ import { api, type Dataset, type DatasetModality, type Vestigium } from '../lib/
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
+import { liveRecords } from '../lib/muse';
 
 const MODALITIES: DatasetModality[] = ['image', 'video', 'audio', '3d'];
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -42,7 +43,8 @@ function relativeTime(iso: string): string {
 // The backend doesn't persist a `readiness` enum (Q1's rich shape is custody/modality/
 // captionsets/versions only) — derive the same three states from live data instead.
 function readinessOf(d: Dataset): Readiness {
-  if (d.media.length === 0) return 'thin';
+  // Over the working set: a set whose every image has been archived is thin again.
+  if (liveRecords(d.media).length === 0) return 'thin';
   if (d.captionsets.length === 0) return 'needs-captioning';
   return 'ready';
 }
@@ -67,7 +69,10 @@ export function Datasets() {
     return () => { live = false; };
   }, []);
 
-  const all = datasets ?? [];
+  // An archived set is simply not here. The list route already excludes it server-side; this
+  // filter is what holds when a record on this screen is archived after it was fetched, so the
+  // shelf never keeps a card for a set that has left it (noema-267).
+  const all = liveRecords(datasets ?? []);
   // When scoped to a project, show only its filed datasets (Provincia.datasetIds).
   const list = scope ? all.filter((d) => scope.datasetIds.includes(d.id)) : all;
 
@@ -140,8 +145,9 @@ export function Datasets() {
             const readiness = readinessOf(d);
             const r = READINESS[readiness];
             const version = d.versions[d.versions.length - 1]?.v ?? '—';
-            const hasMedia = d.media.length > 0;
-            const tiles = hasMedia ? d.media.slice(0, 4).map((m) => m.url) : TILE_FALLBACK;
+            const media = liveRecords(d.media);
+            const hasMedia = media.length > 0;
+            const tiles = hasMedia ? media.slice(0, 4).map((m) => m.url) : TILE_FALLBACK;
             return (
               <Link key={d.id} className="dscard" to={`/datasets/${d.id}`}>
                 <div className="ds-mosaic">
@@ -155,7 +161,7 @@ export function Datasets() {
                     <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
                     <span className={`hemi2 ${custodyGlyph(d.custody)} ds-cust`} title={CUSTODY_LABEL[d.custody]} />
                   </div>
-                  <div className="ds-stats mono">{d.media.length} {d.modality === 'video' ? 'clips' : 'images'} · {d.captionsets.length} captionsets · {version}</div>
+                  <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'} · {d.captionsets.length} captionsets · {version}</div>
                   <div className="ds-meta mono">updated {relativeTime(d.mutatum)} · <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {CUSTODY_LABEL[d.custody]}</div>
                   <div className="ds-ready">
                     <span className="ds-state"><span className={`rdot ${r.dot}`} /> {r.label}</span>

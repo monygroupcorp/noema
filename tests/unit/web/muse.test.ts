@@ -83,6 +83,15 @@ import {
   MANUAL_CATEGORIES,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
+  ARCHIVE_MEANING,
+  ARCHIVE_UNDO_WINDOW_MS,
+  archiveStep,
+  isArchived,
+  liveRecords,
+  undoOffer,
+  type ArchiveTarget,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
   confirmOutcomeNote,
   dismissalOffer,
   droppedNote,
@@ -2603,4 +2612,107 @@ test('a piece whose run cannot be read still renders, and says the image could n
   assert.equal(tile.status, 'failed', 'a run that no longer resolves is a state, not a tile stuck on generating')
   assert.match(tile.error!, /could not be read/)
   assert.deepEqual(tile.lineage.map((f) => f.text), ['a fox'], 'and the piece keeps the lineage it was drawn from')
+})
+
+// ── The archive controls (noema-267) ────────────────────────────────────────
+//
+// Four rules, each gated here rather than in the screen: the confirmation, the undo offer, the
+// filter that keeps an archived image out of the grid, and the count that follows it.
+
+test('archiving asks once before it is done', () => {
+  const set267: ArchiveTarget = { kind: 'dataset', datasetId: 'ds-1' }
+  const image: ArchiveTarget = { kind: 'media', datasetId: 'ds-1', mediaId: 'm-2' }
+
+  // Nothing is asking yet, so the first press on either control is a question, never the act.
+  const firstSet = archiveStep(null, set267)
+  assert.equal(firstSet.ask, true)
+  assert.match(firstSet.ask ? firstSet.question : '', /archive this set\?/)
+  const firstImage = archiveStep(null, image)
+  assert.equal(firstImage.ask, true)
+  assert.match(firstImage.ask ? firstImage.question : '', /remove this image\?/)
+
+  // A second press on the SAME control carries it out, and hands back what to archive.
+  const second = archiveStep(set267, set267)
+  assert.equal(second.ask, false)
+  assert.deepEqual(second.ask === false ? second.archive : null, set267)
+  assert.equal(archiveStep(image, { kind: 'media', datasetId: 'ds-1', mediaId: 'm-2' }).ask, false)
+
+  // A press on a DIFFERENT control asks again — a question open on one image can never carry
+  // a press on another, which is the whole reason the confirmation is per-target.
+  assert.equal(archiveStep(image, { kind: 'media', datasetId: 'ds-1', mediaId: 'm-3' }).ask, true)
+  assert.equal(archiveStep(image, set267).ask, true)
+  assert.equal(archiveStep(set267, image).ask, true)
+  assert.equal(archiveStep({ kind: 'dataset', datasetId: 'ds-2' }, set267).ask, true)
+
+  // And the user is told what archive means, once, in the product's own words: recoverable,
+  // out of the lists, and not an erasure of what pointed at it.
+  assert.match(ARCHIVE_MEANING, /not erasing/)
+  assert.match(ARCHIVE_MEANING, /bring it back/)
+})
+
+test('an archive offers to be taken back', () => {
+  const at = 1_000_000
+  const image: ArchiveTarget = { kind: 'media', datasetId: 'ds-1', mediaId: 'm-2' }
+
+  const offer = undoOffer({ target: image, at }, at + 1_000)
+  assert.notEqual(offer, null, 'an archive that cannot be taken back is not the archive that was designed')
+  assert.match(offer?.label ?? '', /take it back/)
+  assert.deepEqual(offer?.target, image, 'the offer restores exactly what was archived')
+  assert.match(offer?.line ?? '', /left the set/)
+
+  // The whole set says so in its own words.
+  const whole = undoOffer({ target: { kind: 'dataset', datasetId: 'ds-1' }, at }, at)
+  assert.match(whole?.line ?? '', /archived/)
+  assert.deepEqual(whole?.target, { kind: 'dataset', datasetId: 'ds-1' })
+
+  // It is an offer with a window, and nothing archived is on offer before there is one.
+  assert.notEqual(undoOffer({ target: image, at }, at + ARCHIVE_UNDO_WINDOW_MS), null)
+  assert.equal(undoOffer({ target: image, at }, at + ARCHIVE_UNDO_WINDOW_MS + 1), null)
+  assert.equal(undoOffer(null, at), null)
+})
+
+test('an archived image is not rendered in the set\'s grid', () => {
+  const media = [
+    { id: 'm-1', url: 'u1' },
+    { id: 'm-2', url: 'u2', archivum: '2026-08-21T00:00:00.000Z' },
+    { id: 'm-3', url: 'u3' },
+  ]
+
+  assert.deepEqual(liveRecords(media).map((m) => m.id), ['m-1', 'm-3'], 'the archived item is out of the grid')
+  assert.equal(isArchived(media[1] as { archivum?: string }), true)
+  assert.equal(isArchived({}), false, 'an item written before the field existed is live')
+  assert.equal(isArchived({ archivum: '   ' }), false)
+  // A dataset is archived the same way, which is what keeps an archived set off the shelf.
+  assert.deepEqual(
+    liveRecords([{ id: 'ds-1' }, { id: 'ds-2', archivum: '2026-08-21T00:00:00.000Z' }]).map((d) => d.id),
+    ['ds-1'],
+  )
+  // Its chips leave the garden with it — an archived image must not keep seeding rolls.
+  const pooled = poolDatasetFragments([
+    { id: 'm-1', url: 'u1', source: 'upload', addedAt: 'n', fragments: [frag('subject', 'a fox', 'm-1')] },
+    { id: 'm-2', url: 'u2', source: 'upload', addedAt: 'n', archivum: '2026-08-21T00:00:00.000Z', fragments: [frag('setting', 'a harbor', 'm-2')] },
+  ])
+  assert.deepEqual(pooled.map((f) => f.text), ['a fox'])
+})
+
+test('the header counts the images that are left', () => {
+  const captions = Object.fromEntries(['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9']
+    .map((id) => [id, `a caption for ${id}`]))
+  const nine = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'].map((id) => ({ id }))
+  const archivedTwo = nine.map((m, i) => (i > 6 ? { ...m, archivum: '2026-08-21T00:00:00.000Z' } : m))
+
+  // Seven of nine left. The header, the caption quote and the coverage line all say seven —
+  // the server has already recomputed the pass' stored coverage over the same seven, so a
+  // count over the whole array would contradict the fraction printed beside it.
+  assert.equal(liveRecords(archivedTwo).length, 7)
+  assert.equal(captionPassLabel({ media: archivedTwo }), 'Caption all 7 images →')
+  assert.match(captionPassNote({ media: archivedTwo }), /7 images/)
+
+  const partly = { media: archivedTwo, captionsets: [{ id: 'cs-1', coverage: '5/7', captions: { 'm-1': 'a fox', 'm-2': 'a heron', 'm-3': 'a bridge', 'm-4': 'fog', 'm-5': 'a rope' } }] }
+  assert.match(captionCoverageLine(partly, 'cs-1'), /2 of 7 images have no caption in this pass/)
+  assert.match(decomposeGateReason(partly, 'cs-1') ?? '', /2 of 7 images/)
+
+  // The archived images are not counted as uncaptioned work either — they have left the pass.
+  assert.equal(uncaptionedCount({ media: archivedTwo, captionsets: [{ id: 'cs-1', captions }] }, 'cs-1'), 0)
+  assert.match(captionCoverageLine({ media: archivedTwo, captionsets: [{ id: 'cs-1', captions }] }, 'cs-1'), /all 7 images are captioned/)
 })

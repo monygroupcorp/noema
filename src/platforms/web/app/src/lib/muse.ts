@@ -73,6 +73,41 @@ export function curatedFragments(fragments: Fragment[], excluded: ReadonlySet<nu
   return fragments.filter((_, i) => !excluded.has(i));
 }
 
+// ── Archive: what has left the set (noema-267, over the noema-266 server half) ─────────────
+//
+// A dataset or one of its media items is archived by carrying an `archivum` timestamp; absent
+// means live, and a restore removes the field rather than writing a second flag beside it. An
+// archived dataset leaves both list routes server-side. An archived MEDIA item does NOT leave
+// the record it hangs on — every caption map and every fragment list is keyed on the item's id
+// and has to survive a restore — so the payload still carries it, and this side is what stops
+// rendering it and stops counting it.
+//
+// Everything that says how big a set is therefore counts LIVE media: the grid, the header, the
+// coverage line, the caption control's quote and the decompose gate. A captionset's stored
+// coverage is recomputed server-side over the live media on every archive, so a client counting
+// the whole array would print a total that disagrees with the fraction printed beside it.
+
+/** A record whose archived state this side can read. `archivum` arrives as an ISO string on the
+ *  wire, exactly as `natum`/`mutatum` do. */
+export interface Archivable { archivum?: string }
+
+/** Archived — carrying an `archivum`. Absent is live, including on a record written before the
+ *  field existed. */
+export function isArchived(record: Archivable): boolean {
+  return typeof record.archivum === 'string' && record.archivum.trim() !== '';
+}
+
+/**
+ * The live records of a list, in order — the working set of a dataset's media, or the datasets
+ * a library still holds.
+ *
+ * Non-vacuity: dropping the filter must fail "an archived image is not rendered in the set's
+ * grid" and "the header counts the images that are left".
+ */
+export function liveRecords<T extends Archivable>(records: readonly T[]): T[] {
+  return records.filter((r) => !isArchived(r));
+}
+
 /**
  * Pool every media item's fragments into one flat list, dataset-wide, item order
  * preserved. This is the whole dataset's garden, never one item's alone — Muse pools
@@ -80,10 +115,13 @@ export function curatedFragments(fragments: Fragment[], excluded: ReadonlySet<nu
  * 2026-08-18: one dataset, not a pool of several). Non-vacuity: reverting this to
  * pool one item instead of `media` must fail "pools fragments across every media
  * item in the dataset".
+ *
+ * An archived item is not in the pool: it has left the working set, and its fragments would
+ * otherwise keep seeding rolls from an image the set no longer shows.
  */
 export function poolDatasetFragments(media: readonly DatasetMediaItem[]): Fragment[] {
   const out: Fragment[] = [];
-  for (const item of media) out.push(...(item.fragments ?? []));
+  for (const item of liveRecords(media)) out.push(...(item.fragments ?? []));
   return out;
 }
 
@@ -1410,11 +1448,11 @@ export function dismissFromStream(state: StreamState, runId: string): StreamStat
 // is decided here is what the user is told BEFORE either metered step is pressed,
 // and when the second one is refused.
 
-/** The least a dataset has to be for the readouts below to hold: media ids and the
- *  caption passes over them. Structural on purpose — `Dataset` satisfies it, and so
- *  does a fixture, so nothing here needs the whole record. */
+/** The least a dataset has to be for the readouts below to hold: media ids, whether each
+ *  item is archived, and the caption passes over them. Structural on purpose — `Dataset`
+ *  satisfies it, and so does a fixture, so nothing here needs the whole record. */
 export interface CaptionedSet {
-  media: ReadonlyArray<{ id: string }>;
+  media: ReadonlyArray<{ id: string } & Archivable>;
   captionsets: ReadonlyArray<{ id: string; coverage?: string; captions?: Record<string, string> }>;
 }
 
@@ -1430,15 +1468,19 @@ export interface CaptionedSet {
  * With no pass selected every media item is uncaptioned, because there is no pass to
  * be covered by.
  *
+ * An archived item is not counted: it has left the working set, and a caption pass no
+ * longer reads it.
+ *
  * Non-vacuity: deriving this from anything but the caption map — a stored coverage
  * string, the media count alone — must fail "a dataset with 2 media absent from the
  * chosen captionset reports 2 uncaptioned".
  */
 export function uncaptionedCount(dataset: CaptionedSet, captionsetId: string | null): number {
+  const media = liveRecords(dataset.media);
   const set = captionsetId ? dataset.captionsets.find((c) => c.id === captionsetId) : undefined;
   const captions = set?.captions;
-  if (!captions) return dataset.media.length;
-  return dataset.media.filter((m) => {
+  if (!captions) return media.length;
+  return media.filter((m) => {
     const text = captions[m.id];
     return typeof text !== 'string' || text.trim() === '';
   }).length;
@@ -1448,7 +1490,7 @@ export function uncaptionedCount(dataset: CaptionedSet, captionsetId: string | n
  *  actions. A pass whose caption map is not carried says so rather than reporting a
  *  gap it cannot see. */
 export function captionCoverageLine(dataset: CaptionedSet, captionsetId: string | null): string {
-  const total = dataset.media.length;
+  const total = liveRecords(dataset.media).length;
   const set = captionsetId ? dataset.captionsets.find((c) => c.id === captionsetId) : undefined;
   if (!set) return `no caption pass is selected — all ${total} ${total === 1 ? 'image' : 'images'} would be uncaptioned`;
   if (!set.captions) {
@@ -1483,7 +1525,7 @@ export function decomposeGateReason(dataset: CaptionedSet, captionsetId: string 
   if (!set || !set.captions) return null;
   const missing = uncaptionedCount(dataset, captionsetId);
   if (missing === 0) return null;
-  const total = dataset.media.length;
+  const total = liveRecords(dataset.media).length;
   return `${missing} of ${total} images have no caption in this pass — caption the set first, or a decompose reads the captioned images only.`;
 }
 
@@ -1549,16 +1591,100 @@ export function appendFailureNote(failed: readonly string[]): string | null {
  * WHOLE set after an append, not the delta".
  */
 export function captionPassLabel(dataset: Pick<CaptionedSet, 'media'>): string {
-  const total = dataset.media.length;
+  const total = liveRecords(dataset.media).length;
   return `Caption all ${total} ${total === 1 ? 'image' : 'images'} →`;
 }
 
 /** The sentence under the caption control: what the pass covers and that it is metered
  *  like any other run. Same figure as the label, from the same place. */
 export function captionPassNote(dataset: Pick<CaptionedSet, 'media'>): string {
-  const total = dataset.media.length;
+  const total = liveRecords(dataset.media).length;
   return `a caption pass captions every image in the set, not only the ones just added — this one is `
     + `${total} ${total === 1 ? 'image' : 'images'} · billed like any other run`;
+}
+
+// ── The archive controls (noema-267) ─────────────────────────────────────────
+// Ask once, then do it, then offer it back. Three rules, pure, so the screen makes no
+// judgement of its own:
+//
+//   ASK ONCE. The first press on a destructive-looking control asks; only a second press on
+//   the SAME target carries it out. Not a modal essay and not a typed confirmation — the
+//   confirmation is the control itself, restated as a question, which is reachable on a phone
+//   where a hover affordance is not.
+//
+//   OFFER IT BACK. An archive is followed by an undo affordance for a short window. This is
+//   what makes the whole gesture humane, and it is why the server half ships restore in the
+//   same breath as archive.
+//
+//   SAY WHAT ARCHIVE MEANS, ONCE. The user is entitled to know this is recoverable and is not
+//   erasure, in one line, where the action lives.
+
+/** What an archive control acts on: the whole set, or one image in it. */
+export type ArchiveTarget =
+  | { kind: 'dataset'; datasetId: string }
+  | { kind: 'media'; datasetId: string; mediaId: string };
+
+/** Whether two targets name the same thing — what "press the same control again" means. */
+export function isSameTarget(a: ArchiveTarget | null | undefined, b: ArchiveTarget): boolean {
+  if (!a || a.kind !== b.kind || a.datasetId !== b.datasetId) return false;
+  return a.kind === 'media' && b.kind === 'media' ? a.mediaId === b.mediaId : true;
+}
+
+/** Archive, in the product's own words — one line, rendered where the action lives. */
+export const ARCHIVE_MEANING =
+  'archiving is not erasing: an archived set leaves your lists and cannot be used, everything that '
+  + 'already referenced it keeps working, and you can bring it back.';
+
+/** The question a first press asks, in the words of the thing it would archive. */
+export function archiveQuestion(target: ArchiveTarget): string {
+  return target.kind === 'dataset'
+    ? 'archive this set? press again'
+    : 'remove this image? press again';
+}
+
+/** Ask, or carry it out. */
+export type ArchiveStep =
+  | { ask: true; question: string }
+  | { ask: false; archive: ArchiveTarget };
+
+/**
+ * One press on an archive control, given whatever the screen is already asking about.
+ *
+ * A press on a control that is not the one being asked about ASKS — including a press on a
+ * different image while another image's question is open, so a stray tap can never archive
+ * something the user was not looking at.
+ *
+ * Non-vacuity: returning the archive on a first press must fail "archiving asks once before it
+ * is done".
+ */
+export function archiveStep(pending: ArchiveTarget | null, target: ArchiveTarget): ArchiveStep {
+  if (!isSameTarget(pending, target)) return { ask: true, question: archiveQuestion(target) };
+  return { ask: false, archive: target };
+}
+
+/** How long an archive stays takeable-back on screen. Long enough to read the line and change
+ *  your mind, short enough that it is not mistaken for the state of the set. A restore route
+ *  exists either way — the window is the OFFER, never the only way back. */
+export const ARCHIVE_UNDO_WINDOW_MS = 30_000;
+
+/** An archive that just happened: what it was, and when. */
+export interface ArchiveDone { target: ArchiveTarget; at: number }
+
+/** The undo affordance: what it says, what the button says, and what a press restores. */
+export interface ArchiveUndo { line: string; label: string; target: ArchiveTarget }
+
+/**
+ * The offer to take an archive back, or `null` when there is nothing on offer.
+ *
+ * Non-vacuity: dropping the offer must fail "an archive offers to be taken back".
+ */
+export function undoOffer(done: ArchiveDone | null, nowMs: number): ArchiveUndo | null {
+  if (!done) return null;
+  const elapsed = nowMs - done.at;
+  if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > ARCHIVE_UNDO_WINDOW_MS) return null;
+  return done.target.kind === 'dataset'
+    ? { line: 'this set is archived — it has left your datasets.', label: 'take it back', target: done.target }
+    : { line: 'that image has left the set.', label: 'take it back', target: done.target };
 }
 
 // ── The steer keyboard and the consent sheet (noema-261) ─────────────────────
