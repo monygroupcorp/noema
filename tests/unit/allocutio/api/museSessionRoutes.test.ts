@@ -56,7 +56,7 @@ import type {
   CreateMuseSessionInput, MuseSessions, StoredMuseSession,
 } from '../../../../src/types/museSession.js'
 import type { MuseSession } from '../../../../src/crystal/muse/session.js'
-import type { Fragment } from '../../../../src/crystal/muse/taxonomy.js'
+import { fragmentKey, type Fragment } from '../../../../src/crystal/muse/taxonomy.js'
 import type { Actum, Actorum } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
@@ -799,6 +799,206 @@ test('an archived media item does not seed a session spawned after the archive',
     })
     assert.equal(spawned.status, 201)
     assert.deepEqual(spawned.body.session.floor, [], 'an archived item has left the working set Muse draws from')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The floor reconciles with the mother's live garden on resume (noema-272) ──
+//
+// The floor is a snapshot taken once, at spawn; the mother keeps growing. A session
+// spawned before a decomposition landed therefore validates a roll drawn from the
+// mother's CURRENT fragments against a floor that predates them, and the record call
+// rejects every citation it cannot resolve. The read that resumes a session is where
+// that gap is closed, and these four proofs are the clauses that keep the merge from
+// being a different bug: it adds, it never removes, it leaves steer state alone, and it
+// does not move the pointer a resume follows.
+
+/** A mother whose one media item carries no fragments yet — the state before a decompose. */
+async function seedUndecomposedMother(datasets: MemoryDatasets): Promise<Dataset> {
+  return datasets.create({
+    owner: OWNER,
+    name: 'Lantern board',
+    modality: 'image',
+    custody: 'local',
+    media: [{
+      id: 'media-seed',
+      url: 'https://example.invalid/seed.png',
+      source: 'upload',
+      addedAt: new Date(),
+    }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+}
+
+/** One floor entry by the fragment that keys it, or `undefined` when the floor lacks it. */
+function floorEntry(session: any, fragment: Pick<Fragment, 'category' | 'text'>) {
+  const key = fragmentKey(fragment)
+  return session.floor.find((e: { key: string }) => e.key === key)
+}
+
+test('a session resumed against a garden it predates picks up the new fragments', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedUndecomposedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    const sessionId: string = spawned.body.session.id
+    assert.deepEqual(spawned.body.session.floor, [], 'nothing had been decomposed when the session broke off')
+
+    // The decomposition lands on the mother AFTER the session exists.
+    await datasets.setFragments(mother.id, 'media-seed', FRAGMENTS)
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.status, 200)
+    assert.equal(resumed.body.session.floor.length, FRAGMENTS.length, 'the floor holds the mother\'s fragments')
+    assert.equal(resumed.body.session.fragments.length, FRAGMENTS.length)
+    for (const fragment of FRAGMENTS) {
+      const entry = floorEntry(resumed.body.session, fragment)
+      assert.ok(entry, `'${fragment.category}' joined the floor`)
+      assert.equal(entry.enabled, true, 'a newly merged fragment lands in the draw')
+      assert.equal(entry.weight, 1, 'at the default weight')
+    }
+
+    // PERSISTED, not decorated onto the view: the record route resolves a lineage against
+    // the STORED floor, so a view-only merge would leave the piece unrecordable.
+    assert.equal(sessions.store.get(sessionId)!.session.floor.size, FRAGMENTS.length)
+    const recorded = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: { runId: 'run-1', rollIndex: 0, fragments: FRAGMENTS.map((f) => ({ category: f.category, text: f.text })) },
+    })
+    assert.equal(recorded.status, 201, `the roll the mother can produce is recordable: ${JSON.stringify(recorded.body)}`)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('reconciling does not re-enable a fragment the floor darkened, and does not reset a weight', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    const sessionId: string = spawned.body.session.id
+
+    const darkened = { category: FRAGMENTS[0].category, text: FRAGMENTS[0].text }
+    const weighted = { category: FRAGMENTS[1].category, text: FRAGMENTS[1].text }
+    assert.equal((await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/enabled`, {
+      method: 'PATCH', headers: HEADERS, body: { ...darkened, enabled: false },
+    })).status, 200)
+    assert.equal((await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/weight`, {
+      method: 'PATCH', headers: HEADERS, body: { ...weighted, weight: 4 },
+    })).status, 200)
+
+    // A later decomposition widens the mother.
+    const arrival: Fragment = { category: 'mood', text: 'a held breath', source: 'board-c', trigger: '' }
+    await datasets.setFragments(mother.id, 'media-seed', [...FRAGMENTS, arrival])
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.status, 200)
+    assert.equal(floorEntry(resumed.body.session, darkened).enabled, false, 'darkened stays darkened')
+    assert.equal(floorEntry(resumed.body.session, weighted).weight, 4, 'a steered weight stays where the user put it')
+    const merged = floorEntry(resumed.body.session, arrival)
+    assert.ok(merged, 'and the fragment that is genuinely new joined the floor')
+    assert.equal(merged.enabled, true)
+    assert.equal(merged.weight, 1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a fragment the mother no longer has is left on the floor', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const { sessionId } = await sessionWithPiece(url, mother.id, 'run-1')
+
+    // A later decomposition comes back DIFFERENT: one identity has gone from the mother,
+    // and one that was never there has arrived. The merge has to answer both at once —
+    // widening on the arrival while leaving the departure alone — which is what separates
+    // it from a rebuild.
+    const dropped = { category: FRAGMENTS[2].category, text: FRAGMENTS[2].text }
+    const arrival: Fragment = { category: 'mood', text: 'a held breath', source: 'board-c', trigger: '' }
+    await datasets.setFragments(mother.id, 'media-seed', [...FRAGMENTS.slice(0, 2), arrival])
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.status, 200)
+    assert.ok(floorEntry(resumed.body.session, arrival), 'the arrival joined the floor')
+    assert.ok(floorEntry(resumed.body.session, dropped), 'and the departure stayed on it')
+    assert.equal(
+      resumed.body.session.floor.length, FRAGMENTS.length + 1,
+      'the merge widens a floor and never narrows one',
+    )
+    // Which is the point: a piece already recorded cites the departed fragment, and that
+    // lineage still resolves against the floor.
+    assert.equal(resumed.body.session.pieces[0].fragments.length, FRAGMENTS.length)
+    const reacted = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-1`, {
+      method: 'PATCH', headers: HEADERS, body: { reaction: 'up' },
+    })
+    assert.equal(reacted.status, 200)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('the session list reconciles too, and leaves the resume pointer where it was', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedUndecomposedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    for (let i = 0; i < 2; i += 1) {
+      assert.equal((await request(`${url}/v1/data/muse/sessions`, {
+        method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+      })).status, 201)
+    }
+    const before = await request(`${url}/v1/data/muse/sessions?datasetId=${mother.id}`, { headers: HEADERS })
+    assert.equal(before.status, 200)
+    assert.equal(before.body.sessions.length, 2)
+
+    await datasets.setFragments(mother.id, 'media-seed', FRAGMENTS)
+
+    const after = await request(`${url}/v1/data/muse/sessions?datasetId=${mother.id}`, { headers: HEADERS })
+    assert.equal(after.status, 200)
+    for (const session of after.body.sessions) {
+      assert.equal(session.floor.length, FRAGMENTS.length, 'the list is a resume, so it reconciles like one')
+    }
+    // The client resumes into the most recently changed session. Reconciling restamps
+    // every session it writes, so the order this list is read in has to survive it.
+    assert.deepEqual(
+      after.body.sessions.map((s: { id: string }) => s.id),
+      before.body.sessions.map((s: { id: string }) => s.id),
+      'the session a resume lands on is the same one it would have landed on before',
+    )
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a session whose mother cannot be read still resumes', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const { sessionId } = await sessionWithPiece(url, mother.id, 'run-1')
+    datasets.store.delete(mother.id)
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.status, 200, 'the session has a floor and a ledger of its own')
+    assert.equal(resumed.body.session.floor.length, FRAGMENTS.length)
+
+    const listed = await request(`${url}/v1/data/muse/sessions?datasetId=${mother.id}`, { headers: HEADERS })
+    assert.equal(listed.status, 200, 'and the list still resolves to no error')
+    assert.equal(listed.body.sessions.length, 1)
   } finally {
     await closeServer(server)
   }
