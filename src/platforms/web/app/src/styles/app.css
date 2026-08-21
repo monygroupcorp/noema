@@ -986,7 +986,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .capset .radio.on{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--accent)}
 .cs-main{display:flex;flex-direction:column;gap:3px} .cs-main .nm{font-size:13px}
 .cs-sub{font-size:11px;color:var(--faint);display:flex;align-items:center;gap:5px}
-.capset-actions{font-size:11.5px;color:var(--faint);margin-top:8px}
+.capset-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .lnk{background:none;border:0;color:var(--accent-soft);font:inherit;font-size:11.5px;cursor:pointer;padding:0}
 .verrow{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);padding:5px 0}
 .verrow.on{color:var(--text)} .verrow .dot{width:6px;height:6px;border-radius:50%;background:var(--faint)} .verrow.on .dot{background:var(--accent)}
