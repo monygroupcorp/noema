@@ -11,6 +11,8 @@ import type { TrainingPodProvisioner, DetachedPodScript } from '../../../src/cry
 import { resolveDetachedPodScript } from '../../../src/crystal/SecurePodClient.js'
 import { DEFAULT_CAPTION_PROMPT } from '../../../src/crystal/aitkConfig.js'
 import type { Dataset, Captionset } from '../../../src/types/dataset.js'
+import type { Progressus } from '../../../src/types/progressus.js'
+import { registerProgressusRecorder } from '../../../src/execution/progressusSink.js'
 
 type ProvisionCall = {
   image: string; env: Record<string, string>; setup: string[]; script?: DetachedPodScript
@@ -203,4 +205,61 @@ test('launch: with no failure sink configured, provisioning is still called (the
   await launcher(dataset([{ id: 'm1', url: 'https://r2/a.png' }]), provisioner).launch(spec)
   assert.equal(provisioner.calls.length, 1)
   assert.equal(provisioner.calls[0].onLaunchFailed, undefined)
+})
+
+// ── the wait is reported while it happens ────────────────────────────────────
+//
+// A caption pass spends its first minutes acquiring a pod and building an environment on it,
+// before a single caption can exist. Those minutes are the run, as far as someone watching is
+// concerned, so the launcher reports them: `provisioning` on its own account, and whatever the
+// provisioner reports from the background half of the launch (which runs after the launch call
+// has returned, outside its trace, and can reach a timeline only through this hook).
+
+/** Collect what the launcher routes to the in-process status sink. */
+function captureReports(): { reports: Array<{ actumId: string; progressus: Progressus }>; restore: () => void } {
+  const reports: Array<{ actumId: string; progressus: Progressus }> = []
+  registerProgressusRecorder(async (actumId, progressus) => { reports.push({ actumId, progressus }) })
+  return { reports, restore: () => registerProgressusRecorder(async () => {}) }
+}
+
+/** The sink is fire-and-forget; let its microtasks drain before asserting. */
+const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
+
+test('launch: a caption run reports it is provisioning a pod before any caption exists', async () => {
+  const { reports, restore } = captureReports()
+  try {
+    const provisioner = new FakeProvisioner()
+    await launcher(dataset([{ id: 'm1', url: 'https://r2/a.png' }]), provisioner).launch(spec)
+    await settle()
+
+    const first = reports[0]
+    assert.ok(first, 'the pass reports nothing at all while it provisions')
+    assert.equal(first.actumId, 'act-1')
+    assert.equal(first.progressus.phase, 'provisioning')
+    assert.ok(first.progressus.at instanceof Date)
+  } finally { restore() }
+})
+
+test('launch: a caption run reports the pod being prepared', async () => {
+  const { reports, restore } = captureReports()
+  try {
+    // The provisioner's background half — the SSH wait, the bootstrap, the detached start — is
+    // where the bulk of the wait lives; it reports through `onPhase`.
+    const provisioner: TrainingPodProvisioner = {
+      async provision(opts) {
+        opts.onPhase?.({ phase: 'installing', message: 'preparing the pod' })
+        return { podId: 'pod-9' }
+      },
+    }
+    await new CaptionPodLauncher({
+      provisioner, datasets: store(dataset([{ id: 'm1', url: 'https://r2/a.png' }])), r2,
+      statusUrl: 'https://host.example/runner/status',
+      webhookUrl: 'https://host.example/webhooks/execution',
+    }).launch(spec)
+    await settle()
+
+    const phases = reports.map(r => r.progressus.phase)
+    assert.deepEqual(phases, ['provisioning', 'installing'], 'the pod being prepared is its own phase')
+    assert.ok(reports.every(r => r.actumId === 'act-1'), 'every report is bound to this run')
+  } finally { restore() }
 })
