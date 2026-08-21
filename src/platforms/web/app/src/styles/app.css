@@ -1421,3 +1421,19 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .reg-row .pin{order:2; width:44px; height:44px}
   .reg-row .pin svg{width:16px; height:16px}
 }
+
+/* Muse session history (noema-274) — the quiet count beside the dataset's muse door,
+   and the list that door opens onto. */
+.ds-muse-history{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:-4px}
+.ds-muse-history .ds-panel-note{margin:0}
+.ds-muse-history-link{font-size:11.5px;color:var(--accent-soft);text-decoration:none}
+.ds-muse-history-link:hover{text-decoration:underline}
+.muse-hist-search{display:flex;align-items:center;gap:10px;margin:14px 0 10px}
+.muse-hist-search .cer-input{flex:1 1 auto;min-width:0}
+.muse-hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.muse-hist-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:13px 15px}
+.muse-hist-row.empty{border-style:dashed}
+.muse-hist-main{display:flex;flex-direction:column;gap:3px;min-width:190px;flex:1 1 210px}
+.muse-hist-line{font-size:13px}
+.muse-hist-row .muse-hist-lineage{flex:2 1 260px;margin:0}
+.muse-hist-row .btn{margin-left:auto;flex:0 0 auto}
