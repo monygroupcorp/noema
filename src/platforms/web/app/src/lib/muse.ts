@@ -2126,18 +2126,30 @@ export function streamRunRequest(modusId: string, prompt: string, nozzle: Nozzle
   return pinned.length > 0 ? { ...request, pinnedModels: pinned } : request;
 }
 
+/** rth's rider on the nozzle stack (noema-276 shipped no cap, which is the ruling; this
+ *  is the one readout it was still missing): a stack this deep is a longer COLD START,
+ *  not a worse result and not anything refused — the stack still fires at any size, this
+ *  only names the wait more plainly once it is long enough to be worth naming twice. */
+export const DEEP_STACK_WARMUP_THRESHOLD = 4;
+
 /** What the readout says while the first piece under a newly chosen nozzle is being
  *  made. The pod fetches the weights before it can make anything with them, so the first
  *  piece can be slow; said in words, it is a wait rather than a stall. A stack makes this
  *  matter MORE, not less — several sets of weights are fetched before the first piece —
- *  so the note names how many are coming down. */
+ *  so the note names how many are coming down, and past `DEEP_STACK_WARMUP_THRESHOLD`
+ *  it names the cold start explicitly rather than leaving the reader to infer it from a
+ *  count. */
 export function loraWarmupNote(nozzle: NozzleInput): string | null {
   const stack = loraStack(nozzle);
   if (stack.length === 0) return null;
   const names = stack.map((c) => c.nomen).join(' + ');
-  return stack.length === 1
-    ? `first piece under ${names} may be slow — the pod fetches its weights before it can use them`
-    : `first piece under ${names} may be slow — the pod fetches all ${stack.length} sets of weights before it can use them`;
+  if (stack.length === 1) {
+    return `first piece under ${names} may be slow — the pod fetches its weights before it can use them`;
+  }
+  if (stack.length < DEEP_STACK_WARMUP_THRESHOLD) {
+    return `first piece under ${names} may be slow — the pod fetches all ${stack.length} sets of weights before it can use them`;
+  }
+  return `first piece under ${names} may be slow — a stack this deep means a longer cold start, fetching all ${stack.length} sets of weights before the pod can use any of them`;
 }
 
 /** The chosen nozzle in one line, trigger word included: S5 asks for the trigger to be
