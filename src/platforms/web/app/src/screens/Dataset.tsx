@@ -241,14 +241,15 @@ export function Dataset() {
                 </button>
               ))}
               <div className="capset-actions">
-                <Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
+                <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>+ new captionset</Link>
+                <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
                 {canOfferDecompose(d) && (
-                  <> · <button className="lnk" type="button"
+                  <button className="btn ghost sm" type="button"
                     disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
                     onClick={() => void doDecompose(d, active)}>
                     {decomposing ? 'decomposing…' : 'decompose →'}
-                  </button></>
-                )} · <Link className="lnk" to={`/datasets/${d.id}/muse`}>muse →</Link>
+                  </button>
+                )}
               </div>
               <p className="ds-panel-note">{captionCoverageLine(d, nextCaptionsetId)}</p>
               {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
@@ -272,6 +273,7 @@ export function Dataset() {
               onClick={() => navigate(d.captionsets.length === 0 ? `/datasets/${d.id}/caption` : `/datasets/${d.id}/derive`)}>
               {d.captionsets.length === 0 ? 'Caption it, then train →' : 'Train a model from this →'}
             </button>
+            <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>muse →</Link>
             {d.captionsets.length === 0 && <div className="ds-panel-note" style={{ textAlign: 'center' }}>a model learns from the caption layer — make one first</div>}
           </aside>
         </div>
