@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { RouteSpec } from '../../../../src/allocutio/api/apiContract.js'
 import { API_CONTRACT } from '../../../../src/allocutio/api/apiContract.js'
+import { ApiError, Errors } from '../../../../src/allocutio/api/errors.js'
 import { generateOpenApi, generateReference } from '../../../../src/allocutio/api/docgen.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -123,4 +124,35 @@ test('generateOpenApi: POST /mcp publishes as transport-public, with per-tool en
 
   const me = doc.paths['/me'].get
   assert.notDeepEqual(me.security, [], 'an unrelated authenticated route must keep rendering as authenticated')
+})
+
+
+test('every code the Errors taxonomy can construct is declared in the contract, at the same status', () => {
+  // The contract's `errorCodes` is what the published reference tells an agent it may branch on,
+  // so a code `errors.ts` can return and the contract does not carry is invisible to every reader
+  // of the docs. This walks the taxonomy rather than pinning a list, so a code added to
+  // `errors.ts` later fails here until it is declared and the docs are regenerated.
+  const declared = new Map(API_CONTRACT.errorCodes.map((e) => [e.code, e]))
+  const factories = Object.values(Errors) as unknown as Array<(...args: unknown[]) => ApiError>
+  assert.ok(factories.length > 0, 'the taxonomy must not be empty')
+
+  for (const make of factories) {
+    // Every factory takes an optional message/id/details first argument; a placeholder is enough
+    // to reach the code and status, which is all this asserts.
+    const err = make('x')
+    const spec = declared.get(err.code)
+    assert.ok(spec, `error code '${err.code}' is returned by errors.ts but not declared in API_CONTRACT.errorCodes`)
+    assert.equal(
+      spec.httpStatus,
+      err.httpStatus,
+      `error code '${err.code}' is declared as HTTP ${spec.httpStatus} but returned as ${err.httpStatus}`,
+    )
+    if (err.opts.retryable !== undefined) {
+      assert.equal(
+        spec.retryable ?? false,
+        err.opts.retryable,
+        `error code '${err.code}' declares retryable ${String(spec.retryable)} but returns ${String(err.opts.retryable)}`,
+      )
+    }
+  }
 })
