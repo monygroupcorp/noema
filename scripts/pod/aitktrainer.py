@@ -187,6 +187,35 @@ def count_uncaptioned(dataset_dir: str) -> int:
     return n
 
 
+def count_captioned(dataset_dir: str) -> int:
+    """How many image files in the dir already have a sibling .txt caption. The complement of
+    `count_uncaptioned`, and the progress numerator of a caption pass: the captioner writes each
+    sidecar as it finishes that image, so counting them IS "how many are done"."""
+    try:
+        names = os.listdir(dataset_dir)
+    except OSError:
+        return 0
+    n = 0
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext.lower() in _IMG_EXTS and os.path.exists(os.path.join(dataset_dir, f"{stem}.{CAPTION_EXT}")):
+            n += 1
+    return n
+
+
+def build_caption_progress(actum_id: str, done: int, total: int) -> dict:
+    """The per-image Progressus a caption pass reports while the captioner runs.
+
+    Carries NO message on purpose: the host persists any report that carries one, and these arrive
+    once per image, so a message here would write the whole pass into the run's timeline instead of
+    streaming past it. `unit` is the owned taxonomy's `items` (an unknown unit is coerced to it
+    host-side anyway) — the screen says "images", the wire stays canonical.
+    """
+    return {"actumId": actum_id,
+            "progressus": {"phase": "executing", "target": "dataset",
+                           "progress": {"done": done, "total": total, "unit": "items"}}}
+
+
 def harvest_captions(manifest: list, dataset_dir: str):
     """Collect the captioner's output as a {media id: caption} MAP — the wire shape the host
     finalizer consumes.
@@ -339,15 +368,30 @@ def read_job_row(db_path: str, job_id: str) -> dict:
 # Main — drive the run (the untestable shell: subprocess + GPU + network)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_caption(aitk_dir: str, caption_path: str) -> None:
+def run_caption(aitk_dir: str, caption_path: str, on_progress=None, poll_s: float = 2.0) -> None:
     """Run ai-toolkit's Qwen3-VL captioner over the dataset dir (fills missing .txt sidecars).
     Runs as a plain directory captioner — AITK_JOB_ID is removed from its env so the captioner
-    doesn't touch the training Job row we poll. Raises with the run.py tail on failure."""
+    doesn't touch the training Job row we poll. Raises with the run.py tail on failure.
+
+    The captioner is one long-lived process with no progress channel of its own, so `on_progress`
+    is polled from the sidecars it writes: called with no argument every `poll_s` while it runs.
+    A caption is a per-image forward pass on a large model — tens of seconds each — so without
+    this the whole pass is a single silent block."""
     cap_log = os.path.join(aitk_dir, "caption.runlog")
     env = {k: v for k, v in os.environ.items() if k != "AITK_JOB_ID"}
     with open(cap_log, "wb") as lf:
-        rc = subprocess.call(["python", "-u", "run.py", caption_path], cwd=aitk_dir, env=env,
-                             stdout=lf, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(["python", "-u", "run.py", caption_path], cwd=aitk_dir, env=env,
+                                stdout=lf, stderr=subprocess.STDOUT)
+        if on_progress is None:
+            rc = proc.wait()
+        else:
+            while True:
+                try:
+                    rc = proc.wait(timeout=poll_s)
+                    break
+                except subprocess.TimeoutExpired:
+                    on_progress()
+            on_progress()   # the last images land between the final poll and the exit
     if rc != 0:
         raise RuntimeError(f"captioning failed (run.py exit {rc}) | run.py tail:\n{_tail(cap_log)}")
 
@@ -424,14 +468,24 @@ def main() -> int:
         if is_caption:
             if not caption_b64:
                 raise RuntimeError("caption mode: missing required env AITK_CAPTION_CONFIG_B64")
-            _post_status(status_url, {"actumId": actum_id,
-                                      "progressus": {"phase": "executing",
-                                                     "progress": {"done": 0, "total": n, "unit": "images"}}})
+            # Per-image progress. The pass is n forward passes on a VL model — the run's longest
+            # phase — so it reports how many of how many have landed, not just that it started.
+            # Only a CHANGE is posted: the numerator is polled, and a repeat carries nothing new.
+            last_done = count_captioned(dataset_dir)
+            _post_status(status_url, build_caption_progress(actum_id, last_done, n))
+
+            def report_captioned() -> None:
+                nonlocal last_done
+                done = count_captioned(dataset_dir)
+                if done != last_done:
+                    last_done = done
+                    _post_status(status_url, build_caption_progress(actum_id, done, n))
+
             caption_path = os.path.join(config_dir, "caption.yaml")
             with open(caption_path, "w", encoding="utf-8") as f:
                 f.write(base64.b64decode(caption_b64).decode("utf-8"))
             log.info(f"captioning {n} images via {caption_path}")
-            run_caption(aitk_dir, caption_path)
+            run_caption(aitk_dir, caption_path, on_progress=report_captioned)
             log.info("captioning done")
 
             # Harvest the sidecars into a {media id: caption} map, upload it as one JSON object,

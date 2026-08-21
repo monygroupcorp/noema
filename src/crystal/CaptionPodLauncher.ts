@@ -1,6 +1,8 @@
 import type { R2Config } from './comfyrunnerClient.js'
 import type { Datasets } from '../types/dataset.js'
 import type { CaptionLauncher, CaptionLaunchSpec } from './DatasetCaptionCursor.js'
+import type { Progressus } from '../types/progressus.js'
+import { recordProgressus } from '../execution/progressusSink.js'
 import { datasetToManifest } from './datasetManifest.js'
 import { DEFAULT_CAPTION_PROMPT } from './aitkConfig.js'
 import { withCallbackNonce } from './RunPodCursor.js'
@@ -80,6 +82,14 @@ export interface CaptionPodLauncherDeps {
 export class CaptionPodLauncher implements CaptionLauncher {
   constructor(private readonly deps: CaptionPodLauncherDeps) {}
 
+  /**
+   * Put one phase report on the caption run's timeline. Fire-and-forget with a terminal catch:
+   * the sink is a database write and a status report must never be able to fail a launch.
+   */
+  private _report(actumId: string, progressus: Omit<Progressus, 'at'>): void {
+    void recordProgressus(actumId, { ...progressus, at: new Date() }).catch(() => {})
+  }
+
   async launch(spec: CaptionLaunchSpec): Promise<{ externusJobId: string }> {
     // 1. dataset id → manifest the pod pulls. Fail loud HERE, not on the pod: a caption pass
     //    with nothing to caption would otherwise burn a pod and settle an empty captionset.
@@ -117,12 +127,19 @@ export class CaptionPodLauncher implements CaptionLauncher {
     //    how the run stays correlated: the cursor's stamp runs before any pod-side work starts,
     //    and a background failure fails the run rather than waiting out its deadline. `script` is
     //    what puts the caption pass — rather than the trainer — on this pod.
+    //
+    //    The run is reported from here on. A caption pass spends its first minutes acquiring a pod
+    //    and building an environment on it, before a single caption can exist; those phases are
+    //    what `onPhase` carries onto the timeline, so the wait is legible while it happens instead
+    //    of being inferred from a run that has not finished yet.
     const onLaunchFailed = this.deps.onLaunchFailed
+    this._report(spec.actumId, { phase: 'provisioning', target: 'pod', message: 'acquiring a GPU pod' })
     const { podId } = await this.deps.provisioner.provision({
       image: this.deps.image ?? DEFAULT_AITK_IMAGE,
       env,
       setup: CAPTION_POD_SETUP,
       script: 'captioner',
+      onPhase: (progressus) => this._report(spec.actumId, progressus),
       ...(spec.onPodId ? { onPodId: spec.onPodId } : {}),
       ...(onLaunchFailed ? { onLaunchFailed: (err: unknown) => onLaunchFailed(spec.actumId, err) } : {}),
     })

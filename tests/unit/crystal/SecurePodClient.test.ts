@@ -783,3 +783,49 @@ test('the actum carries externusJobId + callbackNonce before any pod-side work c
   assert.ok(order.includes('ssh-wait'), 'the background phase did run')
   assert.ok(order.indexOf('stamp:pod-xyz') < order.indexOf('ssh-wait'))
 })
+
+// The background half of the launch is where the minutes are: the SSH wait, the dependency
+// bootstrap, then the detached start. It runs after the caller has been answered and outside its
+// trace, so `onPhase` is the only way those minutes can reach a run's timeline.
+test('the background launch reports the pod lock, the preparation and the handover', async () => {
+  const detached = deferred<void>()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  const phases: Array<{ phase: string; message?: string }> = []
+  await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPhase: (p) => { phases.push({ phase: p.phase, ...(p.message ? { message: p.message } : {}) }) },
+  })
+  await within(detached.promise, 'the detached launch command')
+
+  assert.deepEqual(phases.map(p => p.phase), ['provisioning', 'installing', 'loading'])
+  // The pod-locked report carries the identity/cost of the machine that was acquired.
+  assert.ok(phases[0].message, 'the pod lock says which pod was acquired')
+  // The bootstrap is reported BEFORE it runs — it is the phase the wait is spent in, not a
+  // summary of one that already finished.
+  assert.equal(phases[1].message, 'preparing the pod')
+})
+
+test('a launch with no phase hook behaves exactly as before', async () => {
+  const detached = deferred<void>()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  const { podId } = await client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'] })
+  await within(detached.promise, 'the detached launch command')
+  assert.equal(podId, 'pod-xyz')
+  assert.equal(terminateSpy.calls.length, 0)
+})
