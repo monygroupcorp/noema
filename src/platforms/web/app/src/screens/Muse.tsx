@@ -22,6 +22,7 @@ import {
 } from '../lib/training';
 import {
   admitPiece,
+  announceTerminal,
   appendFailureNote,
   confirmOutcomeNote,
   dismissalOffer,
@@ -66,8 +67,10 @@ import {
   recordDismissal,
   recordFloorChange,
   recordedPiece,
+  rehydrateStream,
   releasePending,
   replaceDataset,
+  resumePhase,
   rollAt,
   rollCurated,
   savedOf,
@@ -80,6 +83,7 @@ import {
   streamRunRequest,
   streamStatusLine,
   t2iFlows,
+  terminalOf,
   weightWrites,
   writeLabel,
   writesForConfirm,
@@ -884,6 +888,52 @@ export function Muse() {
   // started, so every await is followed by a generation check.
   const generationRef = useRef(0);
   useEffect(() => () => { generationRef.current += 1; runningRef.current = false; }, []);
+
+  // ── Coming back to a session (noema-263) ─────────────────────────────────
+  // The stream is state this screen holds, so a mount starts it empty — but the session
+  // resumed above carries every piece it fired, with the lineage that produced each one.
+  // The tiles are rebuilt from that ledger here, so returning to a session shows what it
+  // made instead of a fresh configuration.
+  //
+  // A REBUILD IS A READ: nothing below creates a run. Resuming is free and the user
+  // presses launch. Once per session — the ledger changes on every reaction and every
+  // save, and a rebuild on each one would put a dismissed tile back on the scroll.
+  const rehydrated = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || runningRef.current) return;
+    if (rehydrated.current === session.id) return;
+    rehydrated.current = session.id;
+
+    const rebuilt = rehydrateStream(session);
+    if (rebuilt.pieces.length === 0) return;
+    setStream(rebuilt);
+    setPhase(resumePhase(rebuilt));
+
+    let live = true;
+    // A recorded piece stores no media URL, so each rebuilt tile resolves its image from
+    // its own run, through the same terminal path a live piece takes. A run that has not
+    // reached terminal is left as it is: the tile stays `running`, which is what mounts
+    // the watcher that follows it the rest of the way.
+    void Promise.all(rebuilt.pieces.map(async (p) => {
+      const fetched = await api.getRun(p.runId).catch(() => null);
+      if (!live || !fetched) return;
+      const kind = terminalOf(fetched.run.status);
+      if (!kind) return;
+      await announceTerminal(kind, p.runId, async () => ({ run: fetched.run }), (patch) => {
+        if (!live) return;
+        setStream((s) => applyRunResult(s, p.runId, {
+          terminal: patch.terminal,
+          exitus: patch.exitus,
+          error: patch.error,
+        }));
+      });
+    }));
+    return () => { live = false; };
+    // Keyed by the session's IDENTITY, not by the session object: the ledger comes back
+    // rewritten from every reaction, save and floor write, and re-running this on each of
+    // those would cancel the run reads a rebuild still has in flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
 
   // The configuration-time quote (D2). One quote prices the run: a t2i reservation is
   // evaluated against the run's NUMERIC inputs, and Muse sends only a prompt, so the
