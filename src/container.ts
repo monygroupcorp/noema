@@ -762,6 +762,11 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
         webhookUrl: config.runpodWebhookUrl,
       }),
       actorum,
+      // The same `datasets` store the launcher reads, wired to the CURSOR as well: `reserve()`
+      // is where a caption pass that has nothing left to caption is refused, and it can only
+      // know that by reading the captionset it was asked to extend. Without this dep the
+      // refusal would exist only in tests.
+      datasets,
       ...(config.aitoolkitRemote.maxCaptionSeconds !== undefined ? { maxCaptionSeconds: config.aitoolkitRemote.maxCaptionSeconds } : {}),
     }))
   }

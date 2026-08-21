@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Dataset } from '../lib/api';
-import { launchCaptionJob } from '../lib/training';
+import { captionRunRequest } from '../lib/captionsets';
+import { uncaptionedCount } from '../lib/muse';
 import { useRunStream } from '../lib/runStream';
 import { Stageline } from '../components/RunStageline';
 
@@ -16,6 +17,13 @@ import { Stageline } from '../components/RunStageline';
 // edit is a `PATCH …/captionsets/:captionsetId/captions/:mediaId`. A caption pass writes its
 // captionset back onto the dataset, so the dataset is re-read when the run goes terminal.
 //
+// noema-279 — A PASS EXTENDS THE CAPTIONSET IT WAS GIVEN. The captionset shown is the one the
+// pass writes into, and the pass captions only the images that captionset does not already
+// cover: adding two images to a set of thirty is a two-image pass, not a thirty-image one. A new
+// captionset is what you want when a different captioner is going to produce it, and there is
+// one, so minting is the explicit choice rather than the default — the control below is opt-in
+// and is also the hand-authored route (an empty pass to write captions into yourself).
+//
 // The pass is WATCHED, not just awaited: it rides `useRunStream`, the same subscription every
 // other run-watching surface uses, and draws the same stage readout. A caption pass spends its
 // first minutes acquiring a pod and preparing it before a single caption can exist, and then
@@ -25,12 +33,16 @@ import { Stageline } from '../components/RunStageline';
 export function CaptionJob() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [search] = useSearchParams();
   const [dataset, setDataset] = useState<Dataset | null | undefined>(undefined);   // undefined = loading
   const [name, setName] = useState('');
   const [runId, setRunId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [activeSet, setActiveSet] = useState<string | null>(null);
+  // Opt out of extending: mint a fresh captionset over the whole set instead. Off by default —
+  // the ruling is that extending is what a caption pass does.
+  const [freshSet, setFreshSet] = useState(false);
   const [editing, setEditing] = useState<{ mediaId: string; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const seeded = useRef(false);
@@ -44,13 +56,17 @@ export function CaptionJob() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Seed the shown captionset from the record the first time it resolves (newest last).
+  // Seed the shown captionset from the record the first time it resolves. A `?captionset=` the
+  // caller arrived with wins when the dataset actually carries it — that is the pass the dataset
+  // screen had selected, and it is the one this pass would extend. Otherwise the newest.
   useEffect(() => {
     if (dataset && !seeded.current && dataset.captionsets.length > 0) {
       seeded.current = true;
-      setActiveSet(dataset.captionsets[dataset.captionsets.length - 1].id);
+      const asked = search.get('captionset');
+      const named = asked && dataset.captionsets.some((cs) => cs.id === asked) ? asked : null;
+      setActiveSet(named ?? dataset.captionsets[dataset.captionsets.length - 1].id);
     }
-  }, [dataset]);
+  }, [dataset, search]);
 
   // Watch the caption run. The pass writes its captionset onto the DATASET, so the result arrives
   // through a re-read of the record rather than through the run's own outputs.
@@ -77,12 +93,25 @@ export function CaptionJob() {
 
   const start = async () => {
     if (!dataset || starting) return;
-    const n = dataset.media.length;
-    if (n === 0) { setMsg({ ok: false, text: 'this dataset has no media to caption yet' }); return; }
-    if (!window.confirm(`Caption all ${n} ${n === 1 ? 'image' : 'images'} in this dataset?\n\nThis launches real GPU compute.`)) return;
+    if (dataset.media.length === 0) { setMsg({ ok: false, text: 'this dataset has no media to caption yet' }); return; }
+
+    // What this pass would actually do, and what it would cost. Extending quotes the images the
+    // shown pass does not cover; minting quotes the whole set. The server refuses an empty
+    // extending pass before it reserves anything — this is the same fact, shown before the ask.
+    const target = freshSet ? null : (dataset.captionsets.find((cs) => cs.id === activeSet)?.id ?? null);
+    const n = target ? uncaptionedCount(dataset, target) : dataset.media.length;
+    if (n === 0) {
+      setMsg({ ok: false, text: 'every image in this captionset is already captioned — nothing for a pass to do' });
+      return;
+    }
+    const what = target
+      ? `Caption the ${n} uncaptioned ${n === 1 ? 'image' : 'images'} and add them to this captionset?`
+      : `Caption all ${n} ${n === 1 ? 'image' : 'images'} into a new captionset?`;
+    if (!window.confirm(`${what}\n\nThis launches real GPU compute.`)) return;
+
     setStarting(true); setMsg(null);
     try {
-      const run = await launchCaptionJob({ datasetId: dataset.id, name });
+      const { run } = await api.createRun(captionRunRequest({ datasetId: dataset.id, name, captionsetId: target }));
       setRunId(run.id);
       setMsg({ ok: true, text: `caption job started · run ${run.id.slice(0, 8)}` });
     } catch (e) {
@@ -121,6 +150,11 @@ export function CaptionJob() {
   // pass per image, so this is the only number that moves during the longest phase of the run.
   const pass = stream.progressus?.progress;
   const set = d.captionsets.find((cs) => cs.id === activeSet) ?? null;
+  // The captionset a pass would extend: the one shown, when there is one. With none, every pass
+  // is a fresh-set pass whether or not the opt-out is on.
+  const extendTarget = set ? set.id : null;
+  const extending = extendTarget !== null && !freshSet;
+  const pending = extending ? uncaptionedCount(d, extendTarget) : d.media.length;
   const captions = set?.captions ?? {};
   const captioned = d.media.filter((m) => typeof captions[m.id] === 'string' && captions[m.id].trim() !== '').length;
 
@@ -141,8 +175,10 @@ export function CaptionJob() {
             <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="captionset name (optional)" disabled={running} />
           </span>
           <span className="cj-seg"><span className="cj-l">runs in</span> <span className="hemi2 lit" /> <b>our compute</b></span>
-          <button className="btn accent cj-adjust" onClick={() => void start()} disabled={running || starting}>
-            {running ? 'captioning…' : starting ? 'starting…' : d.captionsets.length > 0 ? '↻ caption again' : 'Start caption job →'}
+          <button className="btn accent cj-adjust" onClick={() => void start()} disabled={running || starting || pending === 0}>
+            {running ? 'captioning…' : starting ? 'starting…'
+              : extending ? `Caption ${pending} uncaptioned ${pending === 1 ? 'image' : 'images'} →`
+              : `Caption all ${pending} ${pending === 1 ? 'image' : 'images'} →`}
           </button>
         </div>
 
@@ -161,6 +197,23 @@ export function CaptionJob() {
             <Stageline stream={stream} />
           </div>
         )}
+
+        {/* Where the pass lands. Extending is the default and the fresh-set path is the opt-out:
+            a second captionset is worth having when a different captioner will produce it, and
+            there is one captioner — or when you mean to write the captions yourself. */}
+        <div className="cj-seam mono">
+          {d.captionsets.length === 0
+            ? `no captionset on this dataset yet — this pass captions all ${d.media.length} ${d.media.length === 1 ? 'image' : 'images'} and makes one.`
+            : extending
+              ? `this pass adds to “${set?.name}” — ${pending === 0 ? 'it already covers every image' : `${pending} uncaptioned ${pending === 1 ? 'image' : 'images'}, and only ${pending === 1 ? 'that one is' : 'those are'} read`}.`
+              : `this pass makes a NEW captionset over all ${d.media.length} ${d.media.length === 1 ? 'image' : 'images'} — every image is read and billed again.`}
+          {d.captionsets.length > 0 && (
+            <label className="cj-l" style={{ marginLeft: '0.75rem' }}>
+              <input type="checkbox" checked={freshSet} disabled={running}
+                onChange={(e) => setFreshSet(e.target.checked)} /> start a new captionset instead
+            </label>
+          )}
+        </div>
 
         {msg && (
           <div className="cj-seam mono" style={{ color: msg.ok ? 'var(--accent-soft)' : 'var(--red-500, #e5746a)' }}>{msg.text}</div>
