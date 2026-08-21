@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   admitPiece,
+  announceTerminal,
   applyRunResult,
+  settlePieceResult,
   buildGarden,
   canFireOne,
   curatedFragments,
@@ -21,7 +23,11 @@ import {
   STREAM_MAX_COLUMNS,
   STREAM_MIN_COLUMNS,
   TILE_GESTURES,
+  type RunResult,
   type StreamPiece,
+  type StreamState,
+  type TerminalPatch,
+  type TerminalRun,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
   canFireDecompose,
@@ -1486,4 +1492,122 @@ test('the chosen nozzle is named with its trigger word, and a cold one says it m
   // under a new LoRA can be slow. Said, rather than left to read as a stall.
   assert.match(loraWarmupNote(CHOICE())!, /may be slow/)
   assert.equal(loraWarmupNote(null), null)
+})
+
+// ---------------------------------------------------------------------------
+// The piece shows its image (noema-262) — the terminal a tile receives has to carry
+// the run's outputs, because a tile stops watching its run the moment that run is
+// terminal. The four gates below are the ones that fail if any part of that is undone.
+//
+// Fixtures are invented throughout (`run-…`, `https://r2.example/…`).
+// ---------------------------------------------------------------------------
+
+/** A subscriber to one run: it holds the patched state, and it stops listening at the
+ *  first terminal it is told about — which is what the grid does, since a tile mounts
+ *  its watcher only while the piece is running. */
+function watcher(runId: string, start: StreamState) {
+  const held: { stream: StreamState; listening: boolean; order: string[]; released: RunResult[] } = {
+    stream: start, listening: true, order: [], released: [],
+  }
+  const emit = (patch: TerminalPatch) => {
+    if (!held.listening) return
+    held.listening = false
+    settlePieceResult(
+      runId,
+      { terminal: patch.terminal, exitus: patch.exitus, error: patch.error },
+      (id, r) => { held.order.push('fold'); held.stream = applyRunResult(held.stream, id, r) },
+      (r) => { held.order.push('release'); held.released.push(r) },
+    )
+  }
+  return { held, emit }
+}
+
+// Non-vacuity 1 — the media reaches the tile
+
+test("a completed piece's media reaches the tile even though the piece stops being 'running' the moment it completes", async () => {
+  const { held, emit } = watcher('run-1', admitPiece(EMPTY_STREAM, piece('run-1'), false))
+
+  await announceTerminal(
+    'complete',
+    'run-1',
+    async () => ({ run: { exitus: { image: 'https://r2.example/piece-1.png' } } }),
+    emit,
+  )
+
+  const done = held.stream.pieces[0]!
+  assert.equal(done.status, 'ready', 'the run finished and the tile has its piece')
+  assert.equal(
+    done.media?.url,
+    'https://r2.example/piece-1.png',
+    'the outputs are in hand BEFORE the terminal is announced, so the one announcement carries them',
+  )
+  assert.equal(held.listening, false, 'and that announcement is the last thing the tile hears')
+})
+
+// Non-vacuity 2 — a terminal with nothing in it is not a finished piece
+
+test('a terminal with no output does not mark a piece ready-with-no-media', () => {
+  const fired = admitPiece(EMPTY_STREAM, piece('run-1'), false)
+  const empties: Array<Record<string, unknown> | null | undefined> = [
+    null,
+    undefined,
+    {},
+    { text: 'a caption, which is not something a tile can show' },
+  ]
+
+  for (const exitus of empties) {
+    const done = applyRunResult(fired, 'run-1', { terminal: 'complete', exitus })
+    const p = done.pieces[0]!
+    assert.notEqual(p.status, 'ready', 'ready with no media renders as the waiting state, forever')
+    assert.equal(p.media, null)
+    assert.equal(p.status, 'failed')
+    assert.ok(p.error, 'the tile says what happened instead of sitting on "generating…"')
+  }
+
+  // and a terminal that DOES carry media is still the ordinary finished piece
+  const shown = applyRunResult(fired, 'run-1', { terminal: 'complete', exitus: { image: 'https://r2.example/p.png' } })
+  assert.equal(shown.pieces[0]!.status, 'ready')
+})
+
+// Non-vacuity 3 — the loop is released behind the fold, never ahead of it
+
+test("the stream loop is released only after the finished piece's media has been folded in", () => {
+  let stream = admitPiece(EMPTY_STREAM, piece('run-1'), false)
+  const order: string[] = []
+
+  settlePieceResult(
+    'run-1',
+    { terminal: 'complete', exitus: { image: 'https://r2.example/piece-1.png' } },
+    (id, r) => { order.push('fold'); stream = applyRunResult(stream, id, r) },
+    () => {
+      order.push('release')
+      // the next piece is requested on release, so the finished one is on screen by now
+      assert.equal(stream.pieces[0]!.media?.url, 'https://r2.example/piece-1.png')
+      assert.equal(stream.pieces[0]!.status, 'ready')
+    },
+  )
+
+  assert.deepEqual(order, ['fold', 'release'])
+
+  // a run nothing is parked on settles the same way — the fold is not conditional on
+  // there being a loop to release
+  const alone: string[] = []
+  settlePieceResult('run-1', { terminal: 'complete', exitus: {} }, () => { alone.push('fold') })
+  assert.deepEqual(alone, ['fold'])
+})
+
+// Non-vacuity 4 — a failure never buys images at the price of a stuck stream
+
+test('a failed run still marks its piece failed and still releases the loop', async () => {
+  const { held, emit } = watcher('run-1', admitPiece(EMPTY_STREAM, piece('run-1'), false))
+
+  // the run record never comes back: nothing on the failure path may be parked on it
+  const never = new Promise<{ run: TerminalRun }>(() => {})
+  void announceTerminal('failed', 'run-1', () => never, emit)
+  await Promise.resolve()
+
+  assert.equal(held.stream.pieces[0]!.status, 'failed')
+  assert.equal(held.released.length, 1, 'the loop is released, so the stream does not hang on an error')
+  assert.equal(held.released[0]!.terminal, 'failed', 'and it is released with the failure, which the loop counts')
+  assert.deepEqual(held.order, ['fold', 'release'])
 })
