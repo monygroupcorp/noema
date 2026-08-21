@@ -12,20 +12,17 @@ import { api, type Run as RunT, type SseHandle } from './api';
 // The terminal-announcement rule is a pure function and lives with the stream's other
 // pure rules in `./muse`, where the hermetic web tests gate it; this module owns the
 // React state and the SSE handle it is driven from.
-import { announceTerminal } from './muse';
+import { announceTerminal, phaseToStage } from './muse';
 
-export type Phasis =
-  | 'queued' | 'provisioning' | 'pulling' | 'attesting' | 'downloading'
-  | 'installing' | 'loading' | 'warming' | 'executing' | 'uploading'
-  | 'finalizing' | 'cancelling' | 'done' | 'failed';
+// The run readout's vocabulary — the coarse stages, the Phasis→stage mapping and the
+// active sub-line — is pure and lives in `./muse` alongside the rest of the stream's
+// pure rules, for the same reason `announceTerminal` does: that module is React-free,
+// so the hermetic web tests can import it and gate what it decides. It is re-exported
+// here so every surface that already reads the readout off this module keeps doing so.
+export { STAGE_LABELS, phaseToStage, measure } from './muse';
+export type { Phasis, Progressus } from './muse';
 
-export interface Progressus {
-  phase: Phasis;
-  target?: string;
-  message?: string;
-  progress?: { done: number; total?: number; unit: string };
-  etaMs?: number;
-}
+import type { Progressus } from './muse';
 
 export interface RunEvent {
   kind: 'snapshot' | 'progress' | 'complete' | 'failed';
@@ -35,35 +32,6 @@ export interface RunEvent {
   status?: 'complete' | 'failed';
   costUsd?: number;
   executionMs?: number;
-}
-
-// The five stages the timeline shows, in lifecycle order. Every Phasis maps into
-// exactly one of these (kept coarse — the fine phase rides in the active sub-line).
-export const STAGE_LABELS = ['admitted', 'provisioned pod', 'generating', 'upload → R2', 'settle ledger'];
-
-export function phaseToStage(phase: Phasis): number {
-  switch (phase) {
-    case 'queued': return 0;
-    case 'provisioning': case 'pulling': case 'attesting':
-    case 'downloading': case 'installing': case 'loading': case 'warming': return 1;
-    case 'executing': return 2;
-    case 'uploading': return 3;
-    case 'finalizing': case 'cancelling': return 4;
-    case 'done': case 'failed': return 5;
-    default: return 1;
-  }
-}
-
-// The sub-line for the active stage: prefer the runner's human message, else its
-// typed progress measurement, else the raw phase name.
-export function measure(p?: Progressus): string {
-  if (!p) return '…';
-  if (p.message) return p.message;
-  if (p.progress) {
-    const { done, total, unit } = p.progress;
-    return total ? `${done} / ${total} ${unit}` : `${done} ${unit}`;
-  }
-  return p.target ? `${p.phase} · ${p.target}` : p.phase;
 }
 
 export interface RunStreamState {
