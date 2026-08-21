@@ -44,6 +44,9 @@ import {
   floorSheet,
   floorToggle,
   gardenCounts,
+  gestureBlock,
+  gestureBlockLine,
+  gestureTitle,
   ignitionBlockReason,
   ignitionRequest,
   instructionRemaining,
@@ -113,6 +116,7 @@ import {
   TILE_GESTURES,
   type DismissalState,
   type FloorPill,
+  type GestureGate,
   type HoldState,
   type LoraChoice,
   type MuseControl,
@@ -1677,7 +1681,11 @@ export function Muse() {
                   onResult={onPieceResult}
                   onProgress={onPieceProgress}
                   reaction={session ? reactionOf(session, p.runId) : undefined}
-                  live={!!session && !!recordedPiece(session, p.runId) && reacting !== p.runId}
+                  gate={{
+                    hasSession: !!session,
+                    recorded: !!session && !!recordedPiece(session, p.runId),
+                    writing: reacting === p.runId,
+                  }}
                   onReact={react}
                   onDismiss={dismiss}
                 />
@@ -1830,7 +1838,11 @@ export function Muse() {
             progress={progress[expandedPiece.runId]}
             onClose={() => setExpanded(null)}
             reaction={session ? reactionOf(session, expandedPiece.runId) : undefined}
-            live={!!session && !!recordedPiece(session, expandedPiece.runId) && reacting !== expandedPiece.runId && saving !== expandedPiece.runId}
+            gate={{
+              hasSession: !!session,
+              recorded: !!session && !!recordedPiece(session, expandedPiece.runId),
+              writing: reacting === expandedPiece.runId || saving === expandedPiece.runId,
+            }}
             onReact={react}
             onDismiss={dismiss}
             saved={!!session && savedOf(session, expandedPiece.runId)}
@@ -1979,46 +1991,68 @@ function RunWatcher({ runId, onResult, onProgress }: {
 /** What every rail — the tile's and the expanded view's — does with one gesture: the two
  *  steers and 😂 are reactions on the piece, ✕ is a dismissal, and ↓ puts the piece back
  *  into the set. Save is offered only where its rail carries it — the expanded view — so
- *  the tile passes no handler and the gesture reads as unavailable rather than silent. */
+ *  the tile passes no handler and the gesture reads as unavailable rather than silent.
+ *
+ *  Every button carries a `title`, and a refused one carries the REASON it is refused
+ *  (`gestureBlock` -> `gestureTitle`) rather than its own label. The gating is unchanged:
+ *  `disabled` is true in exactly the cases it was true in before — a refusal gains words
+ *  here, it is never relaxed. */
 function railProps(
   key: string,
   runId: string,
-  live: boolean,
+  gate: GestureGate,
+  label: string,
   reaction: MuseReaction | undefined,
   onReact: (runId: string, reaction: MuseReaction) => void,
   onDismiss: (runId: string) => void,
   saved = false,
   onSave?: (runId: string) => void,
-): { disabled: boolean; className: string; onClick?: () => void; title?: string } {
+): { disabled: boolean; className: string; onClick?: () => void; title: string } {
   const REACTIONS: Record<string, MuseReaction> = { up: 'up', down: 'down', laugh: 'note' };
   const asReaction = REACTIONS[key];
+  const block = gestureBlock(gate);
   if (asReaction) {
     return {
-      disabled: !live,
+      disabled: !!block,
       className: `muse-gesture${reaction === asReaction ? ' on' : ''}`,
       onClick: () => onReact(runId, asReaction),
+      title: gestureTitle(block, label),
     };
   }
   if (key === 'dismiss') {
-    return { disabled: !live, className: 'muse-gesture', onClick: () => onDismiss(runId) };
+    return {
+      disabled: !!block,
+      className: 'muse-gesture',
+      onClick: () => onDismiss(runId),
+      title: gestureTitle(block, label),
+    };
   }
-  if (!onSave) return { disabled: true, className: 'muse-gesture' };
+  if (!onSave) {
+    return {
+      disabled: true,
+      className: 'muse-gesture',
+      title: gestureTitle(gestureBlock({ ...gate, offered: false }), label),
+    };
+  }
   // A piece already in the set is shown as saved and is not offered again: the dataset is
   // append-only, so a second save would put the same media in twice.
+  const saveBlock = gestureBlock({ ...gate, saved });
   return {
-    disabled: !live || saved,
+    disabled: !!saveBlock,
     className: `muse-gesture${saved ? ' on' : ''}`,
     onClick: () => onSave(runId),
-    title: saved ? 'saved — this piece is in the set' : 'save this piece back into the set',
+    title: gestureTitle(saveBlock, label),
   };
 }
 
 /** One tile in the stream. Roughly 145px on a phone, which fits three targets legibly —
  *  the two steers and declutter (V8a). They write to the session; a piece the session
- *  ledger does not hold cannot be reacted to and its rail is disabled rather than silent.
+ *  ledger does not hold cannot be reacted to, and its rail is disabled with the reason on
+ *  the control rather than left unexplained. The tile has no room for a sentence, so the
+ *  reason rides the `title` here and is rendered in full in the expanded view.
  *  The rest of the rail lives in the expanded view. */
 function PieceTile({
-  piece, progress, onExpand, onResult, onProgress, reaction, live, onReact, onDismiss,
+  piece, progress, onExpand, onResult, onProgress, reaction, gate, onReact, onDismiss,
 }: {
   piece: StreamPiece;
   progress: PieceProgress | undefined;
@@ -2026,7 +2060,7 @@ function PieceTile({
   onResult: (runId: string, r: RunResult) => void;
   onProgress: (runId: string, live: PieceProgress) => void;
   reaction: MuseReaction | undefined;
-  live: boolean;
+  gate: GestureGate;
   onReact: (runId: string, reaction: MuseReaction) => void;
   onDismiss: (runId: string) => void;
 }) {
@@ -2049,9 +2083,9 @@ function PieceTile({
       </button>
       <div className="muse-tile-rail">
         {TILE_GESTURES.map((g) => {
-          const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss);
+          const rail = railProps(g.key, piece.runId, gate, g.label, reaction, onReact, onDismiss);
           return (
-            <button key={g.key} type="button" {...rail} title={title ?? g.label}>
+            <button key={g.key} type="button" {...rail} aria-label={rail.title}>
               {g.glyph}
             </button>
           );
@@ -2065,18 +2099,19 @@ function PieceTile({
  *  produced it (V8). 😂 lives here rather than on the tile: it is recorded and it steers
  *  nothing (S4/V9), so it is not one of the three gestures made at speed. */
 function ExpandedPiece({
-  piece, progress, onClose, reaction, live, onReact, onDismiss, saved, onSave,
+  piece, progress, onClose, reaction, gate, onReact, onDismiss, saved, onSave,
 }: {
   piece: StreamPiece;
   progress: PieceProgress | undefined;
   onClose: () => void;
   reaction: MuseReaction | undefined;
-  live: boolean;
+  gate: GestureGate;
   onReact: (runId: string, reaction: MuseReaction) => void;
   onDismiss: (runId: string) => void;
   saved: boolean;
   onSave: (runId: string) => void;
 }) {
+  const pieceBlock = gestureBlock(gate);
   return (
     <div className="muse-expanded" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="muse-expanded-card" onClick={(e) => e.stopPropagation()}>
@@ -2100,15 +2135,23 @@ function ExpandedPiece({
 
         <div className="muse-expanded-rail">
           {EXPANDED_GESTURES.map((g) => {
-            const { title, ...rail } = railProps(g.key, piece.runId, live, reaction, onReact, onDismiss, saved, onSave);
+            const rail = railProps(g.key, piece.runId, gate, g.label, reaction, onReact, onDismiss, saved, onSave);
             return (
-              <button key={g.key} type="button" {...rail} title={title ?? g.label}>
+              <button key={g.key} type="button" {...rail} aria-label={rail.title}>
                 {g.glyph}
               </button>
             );
           })}
           <button type="button" className="btn ghost sm muse-expanded-close" onClick={onClose}>Close</button>
         </div>
+
+        {/* The expanded view has the room the tile does not, so the reason a rail is
+            refused is a sentence here rather than only a tooltip. It is the PIECE's
+            state — the one every gesture on this rail shares — so it is read from the
+            gate without the per-gesture `saved`, which the save button carries itself. */}
+        {pieceBlock && (
+          <div className="muse-gesture-reason mono" role="status">{gestureBlockLine(pieceBlock)}</div>
+        )}
 
         <div className="muse-expanded-prompt mono">{piece.prompt}</div>
 

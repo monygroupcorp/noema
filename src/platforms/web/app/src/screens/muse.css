@@ -79,6 +79,13 @@
 .muse-expanded-rail { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--hair-soft); }
 .muse-expanded-rail .muse-gesture { font-size: 16px; min-width: 34px; min-height: 30px; }
 .muse-expanded-close { margin-left: auto; }
+/* Why the rail is refused (noema-277). A disabled control says nothing on its own, and
+   four different states reach the same grey button — so the expanded view, which has the
+   room the 145px tile does not, prints the reason directly under the rail. Muted rather
+   than alarming: three of the four states are ordinary, not failures. */
+.muse-gesture-reason {
+  margin-top: 8px; font-size: 11px; line-height: 1.4; color: var(--muted);
+}
 .muse-expanded-prompt { font-size: 12px; color: var(--muted); margin: 10px 0 12px; word-break: break-word; }
 .muse-expanded-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 
