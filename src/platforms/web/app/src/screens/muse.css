@@ -283,6 +283,23 @@
 .muse-lora-weight { max-width: 12em; }
 .muse-lora-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
+/* ── The stack (noema-276) ────────────────────────────────────────────────────
+   One row per model on the nozzle, in the order they fire, and each row carries its
+   OWN weight field — the layout has to make it obvious that the number beside a name
+   belongs to that name and to nothing else. */
+.muse-lora-stack { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.muse-lora-stacked {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 6px 9px; border: 1px solid var(--hair-soft); border-radius: 9px;
+}
+.muse-lora-ord {
+  flex: 0 0 auto; font-size: 10.5px; color: var(--muted);
+  min-width: 1.4em; text-align: center;
+}
+.muse-lora-stacked .muse-lora-name { flex: 1 1 8em; min-width: 0; }
+.muse-lora-stacked .muse-lora-weight { flex: 0 0 auto; max-width: 11em; }
+.muse-lora-drop { flex: 0 0 auto; font-size: 12px; }
+
 /* ── A collapsed control (noema-264) ──────────────────────────────────────────
    One line that still says what the control is set to, plus the way back into it.
    The line itself takes the room and ellipsizes rather than wrapping the row onto a
@@ -330,6 +347,23 @@
   }
   .muse-lora-sheet .muse-lora-actions .btn { flex: 1 1 auto; }
   .muse-lora-sheet .muse-lora-weight { max-width: none; }
+  /* A stacked row has more on it than a card does; at this width it stops competing for
+     one line and stacks its own parts instead. */
+  .muse-lora-sheet .muse-lora-stacked { align-items: flex-start; }
+  .muse-lora-sheet .muse-lora-stacked .muse-lora-weight { flex: 1 1 100%; }
+
+  /* THE COLLAPSED NOZZLE NAMES ITS STACK, and a phone is where that is hardest: at
+     ~360px one model already fills the line. It wraps to at most three lines and
+     ellipsizes the third rather than truncating at the first name — the elision is on
+     text that is all there, and the row never degrades into a count. The configuration's
+     own collapsed line keeps the single-line rule above; it has a fixed length. */
+  .muse-lora.muse-collapsed .muse-collapsed-line {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
 
   /* The grid is what the user scrolled here to see. */
   .muse-stream { margin: 12px 0 18px; }

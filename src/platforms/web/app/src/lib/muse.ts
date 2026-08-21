@@ -1774,13 +1774,17 @@ export function dismissalOffer(state: DismissalState): SteerOffer | null {
 // reweight a trigger word would let a reaction steer the nozzle.
 
 /**
- * How many LoRAs one stream may carry. ONE, in v1, and this is a deliberate product
- * bound rather than a platform limit: a run can stack more than one, and the cost of
- * stacking is time — a longer weight download and a longer diffusion. The bound stays
- * at one until it is lifted deliberately, so no stacking UI is built here. Choosing a
- * second LoRA replaces the first.
+ * THE NOZZLE HOLDS A STACK. A stream may carry more than one LoRA at a time, and this
+ * module carries no cap on how many: the run request's `pinnedModels` is a list, the
+ * compiler resolves every ref in it against the caller's own models and the public
+ * catalog, and nothing on that path bounds the count.
+ *
+ * No bound is invented here either. What stacking costs is time — a longer weight
+ * download and a longer diffusion per piece — and what it costs in quality, or on the
+ * pod, is not something this control can measure. A number picked here would be a guess
+ * wearing the clothes of a limit. If a bound is ever established, it belongs where it
+ * can be measured and this control should read it rather than restate it.
  */
-export const MAX_STREAM_LORAS = 1;
 
 /** The weight band the control offers. The resolver itself takes any weight — these are
  *  the CONTROL's bounds. The floor is deliberately above zero: `trigger:0.0` silences a
@@ -1796,6 +1800,42 @@ export interface LoraChoice {
   nomen: string;
   trigger: string;
   weight: number | null;
+}
+
+/** The nozzle: an ordered list of choices. Order is the order the user stacked them,
+ *  and it is the order the trigger words are written into the prompt. */
+export type LoraStack = readonly LoraChoice[];
+
+/**
+ * What every nozzle-reading function takes. A single choice IS a stack of one, so the
+ * one-model call sites read exactly as they did — the stack is the general case, not a
+ * second API beside it.
+ */
+export type NozzleInput = LoraChoice | LoraStack | null | undefined;
+
+/**
+ * The nozzle as a list, de-duplicated by `intellaId` and with anything unusable dropped.
+ *
+ * DE-DUPLICATION IS NOT COSMETIC: the compiler de-dupes pinned refs on its own, so a
+ * stack that carried the same model twice would show the user something the run will not
+ * do. A card with no trigger word is dropped for the reason `loraChoiceOf` refuses it —
+ * weights that are downloaded and never applied are a paid run with no effect.
+ */
+export function loraStack(nozzle: NozzleInput): LoraChoice[] {
+  if (!nozzle) return [];
+  const list: readonly LoraChoice[] = Array.isArray(nozzle)
+    ? (nozzle as readonly LoraChoice[])
+    : [nozzle as LoraChoice];
+  const out: LoraChoice[] = [];
+  const seen = new Set<string>();
+  for (const choice of list) {
+    if (!choice || !choice.intellaId) continue;
+    if (!(choice.trigger ?? '').trim()) continue;
+    if (seen.has(choice.intellaId)) continue;
+    seen.add(choice.intellaId);
+    out.push(choice);
+  }
+  return out;
 }
 
 /**
@@ -1858,18 +1898,74 @@ export function loraCatalogReason(
 }
 
 /**
- * Choosing a LoRA. ONE at a time (see `MAX_STREAM_LORAS`): a second choice REPLACES the
- * first rather than stacking with it, and choosing the one already chosen clears it, so
- * the same control both sets and unsets the nozzle.
+ * Stacking a LoRA onto the nozzle, or taking it back off: the same control both adds and
+ * removes, so a card already on the stack is removed by choosing it again.
  *
- * Non-vacuity: accumulating instead of replacing must fail "choosing a second LoRA
- * replaces the first".
+ * TWO REFUSALS RIDE HERE, and both are the stack's own rather than the picker's:
+ *
+ *  - **`familia` scope.** A LoRA trained on another base is a paid run that cannot work.
+ *    `loraCatalog` already declines to OFFER one; this declines to ACCEPT one, so the
+ *    scope holds for every entry of the stack and not only for what the list happens to
+ *    show. With no `familia` in hand there is no scope to check against and nothing can
+ *    be stacked, which is the same answer `loraCatalog` gives to the same question.
+ *  - **No duplicates.** The same `intellaId` cannot be stacked onto itself; choosing it
+ *    again removes it. The compiler would de-dupe a repeated ref anyway, so a stack that
+ *    displayed it twice would be describing a run that does not exist.
+ *
+ * Non-vacuity: dropping the familia check must fail "a LoRA outside the flow's familia
+ * cannot enter the stack"; accumulating a repeat must fail "the same LoRA cannot be
+ * stacked onto itself".
  */
-export function chooseLora(current: LoraChoice | null, card: ModelCard): LoraChoice | null {
+export function chooseLora(
+  current: NozzleInput,
+  card: ModelCard,
+  familia: string | null | undefined,
+): LoraChoice[] {
+  const stack = loraStack(current);
   const next = loraChoiceOf(card);
-  if (!next) return current;
-  if (current && current.intellaId === next.intellaId) return null;
-  return next;
+  if (!next) return stack;
+  if (!familia || card.basis !== familia) return stack;
+  const held = stack.some((c) => c.intellaId === next.intellaId);
+  if (held) return stack.filter((c) => c.intellaId !== next.intellaId);
+  return [...stack, next];
+}
+
+/**
+ * Setting ONE entry's weight, leaving every other entry exactly as it was.
+ *
+ * A stack whose entries share a weight field is worse than no stack: the user sets 0.8
+ * on one model and silently moves another they are already paying for. Each entry
+ * carries its own `weight`, and an entry that has never been given one stays `null` —
+ * "the LoRA's own default" — rather than inheriting its neighbour's.
+ *
+ * Non-vacuity: writing the weight onto every entry must fail "each stacked LoRA carries
+ * its own weight, and an unset weight stays unset rather than inheriting its
+ * neighbour's".
+ */
+export function setLoraWeight(
+  current: NozzleInput,
+  intellaId: string,
+  value: number | null | undefined,
+): LoraChoice[] {
+  return loraStack(current).map((c) =>
+    c.intellaId === intellaId ? { ...c, weight: loraWeight(value) } : c,
+  );
+}
+
+/** Whether two nozzles differ — in which models they carry, in what order, or in the
+ *  weight any one of them is carried at. What the screen holds the stream for. */
+export function nozzleChanged(before: NozzleInput, after: NozzleInput): boolean {
+  const a = loraStack(before);
+  const b = loraStack(after);
+  if (a.length !== b.length) return true;
+  return a.some((c, i) => c.intellaId !== b[i].intellaId || (c.weight ?? null) !== (b[i].weight ?? null));
+}
+
+/** The trigger words the hold is loading, for the readout that names them. `undefined`
+ *  when there is nothing on the nozzle, which is what `HoldState.trigger` omits. */
+export function nozzleTriggerLabel(nozzle: NozzleInput): string | undefined {
+  const stack = loraStack(nozzle);
+  return stack.length === 0 ? undefined : stack.map((c) => c.trigger).join(' + ');
 }
 
 /** A weight the control will emit: inside the band, or `null` for "the LoRA's own
@@ -1894,27 +1990,35 @@ export function triggerToken(choice: LoraChoice): string {
 }
 
 /**
- * The prompt a piece is actually fired with: the drawn prompt, led by the chosen LoRA's
- * trigger word. With no LoRA chosen it is the drawn prompt, unchanged.
+ * The prompt a piece is actually fired with: the drawn prompt, led by the trigger word
+ * of EVERY LoRA on the nozzle. With nothing on the nozzle it is the drawn prompt,
+ * unchanged.
  *
- * The trigger is prepended and comma-separated, which is a delimiter the resolver's own
- * tokenizer splits on, so the word is reachable by its scan wherever the drawn prompt
- * happens to begin.
+ * EVERY entry's trigger, not the first one's. A pinned model whose trigger never reaches
+ * the prompt is exactly the paid-run-with-no-effect that `loraChoiceOf` refuses a
+ * triggerless card to avoid — stacking three and writing one reproduces it twice over,
+ * at full price, per piece.
+ *
+ * The triggers are prepended and comma-separated, which is a delimiter the resolver's
+ * own tokenizer splits on, so each word is reachable by its scan wherever the drawn
+ * prompt happens to begin.
  *
  * Non-vacuity: returning `prompt` unchanged must fail "a piece fired under a LoRA
- * carries that LoRA's trigger word in its prompt".
+ * carries that LoRA's trigger word in its prompt"; writing only the first entry's
+ * trigger must fail "the prompt carries every stacked LoRA's trigger word".
  */
-export function promptWithTrigger(prompt: string, choice: LoraChoice | null): string {
-  if (!choice) return prompt;
+export function promptWithTrigger(prompt: string, nozzle: NozzleInput): string {
+  const stack = loraStack(nozzle);
+  if (stack.length === 0) return prompt;
   const body = prompt.trim();
-  const token = triggerToken(choice);
-  return body ? `${token}, ${body}` : token;
+  const tokens = stack.map(triggerToken).join(', ');
+  return body ? `${tokens}, ${body}` : tokens;
 }
 
 /** The weights the run is given, by `intellaId` — the unambiguous half of the field's
  *  documented "intellaId or slug", picked once and used consistently. */
-export function pinnedModelsFor(choice: LoraChoice | null): string[] {
-  return choice ? [choice.intellaId] : [];
+export function pinnedModelsFor(nozzle: NozzleInput): string[] {
+  return loraStack(nozzle).map((c) => c.intellaId);
 }
 
 /**
@@ -1927,29 +2031,41 @@ export function pinnedModelsFor(choice: LoraChoice | null): string[] {
  * nozzle control.
  *
  * Non-vacuity: dropping `pinnedModels` must fail "a piece fired under a LoRA names it in
- * pinnedModels".
+ * pinnedModels"; pinning only the first entry must fail "a piece fired under two LoRAs
+ * names BOTH in pinnedModels".
  */
-export function streamRunRequest(modusId: string, prompt: string, choice: LoraChoice | null): RunRequest {
-  const request = ignitionRequest(modusId, promptWithTrigger(prompt, choice));
-  const pinned = pinnedModelsFor(choice);
+export function streamRunRequest(modusId: string, prompt: string, nozzle: NozzleInput): RunRequest {
+  const request = ignitionRequest(modusId, promptWithTrigger(prompt, nozzle));
+  const pinned = pinnedModelsFor(nozzle);
   return pinned.length > 0 ? { ...request, pinnedModels: pinned } : request;
 }
 
-/** What the readout says while the first piece under a newly chosen LoRA is being made.
- *  The pod fetches the weights before it can make anything with them, so the first piece
- *  can be slow; said in words, it is a wait rather than a stall. */
-export function loraWarmupNote(choice: LoraChoice | null): string | null {
-  if (!choice) return null;
-  return `first piece under ${choice.nomen} may be slow — the pod fetches its weights before it can use them`;
+/** What the readout says while the first piece under a newly chosen nozzle is being
+ *  made. The pod fetches the weights before it can make anything with them, so the first
+ *  piece can be slow; said in words, it is a wait rather than a stall. A stack makes this
+ *  matter MORE, not less — several sets of weights are fetched before the first piece —
+ *  so the note names how many are coming down. */
+export function loraWarmupNote(nozzle: NozzleInput): string | null {
+  const stack = loraStack(nozzle);
+  if (stack.length === 0) return null;
+  const names = stack.map((c) => c.nomen).join(' + ');
+  return stack.length === 1
+    ? `first piece under ${names} may be slow — the pod fetches its weights before it can use them`
+    : `first piece under ${names} may be slow — the pod fetches all ${stack.length} sets of weights before it can use them`;
 }
 
 /** The chosen nozzle in one line, trigger word included: S5 asks for the trigger to be
  *  visible on the chosen model and not only in the picker, because it is the part a user
  *  has to see to trust that the model is being applied at all. */
-export function loraChoiceLine(choice: LoraChoice | null): string {
-  if (!choice) return 'no model — the workflow’s own base only';
-  const weight = loraWeight(choice.weight);
-  return `${choice.nomen} · trigger ${choice.trigger}${weight == null ? '' : ` · weight ${weight}`}`;
+export function loraChoiceLine(nozzle: NozzleInput): string {
+  const stack = loraStack(nozzle);
+  if (stack.length === 0) return 'no model — the workflow’s own base only';
+  return stack
+    .map((choice) => {
+      const weight = loraWeight(choice.weight);
+      return `${choice.nomen} · trigger ${choice.trigger}${weight == null ? '' : ` · weight ${weight}`}`;
+    })
+    .join(' + ');
 }
 
 // ── The controls get out of the way once the stream has something on it (noema-264) ──
@@ -2034,14 +2150,25 @@ export function toggleControl(
  * default" is an answer where a missing clause is not — the user is mid-stream and
  * spending against whatever this says.
  *
+ * A STACK IS NAMED, NEVER COUNTED. "3 models" answers a question nobody asked: the
+ * trigger word is on this line because it is the part a user has to see to trust that a
+ * model is reaching the prompt at all, and a count carries none of it. Every entry is
+ * named with its trigger and its weight; where the row runs out of room the ELISION is
+ * the stylesheet's, on text that is already there.
+ *
  * Non-vacuity: dropping the weight clause must fail "a collapsed nozzle still names the
  * model that is loaded and its weight".
  */
-export function nozzleSummaryLine(choice: LoraChoice | null): string {
-  if (!choice) return 'no model — the workflow’s own base only';
-  const weight = loraWeight(choice.weight);
-  const at = weight == null ? 'its own default weight' : `weight ${weight}`;
-  return `${choice.nomen} · trigger ${choice.trigger} · ${at}`;
+export function nozzleSummaryLine(nozzle: NozzleInput): string {
+  const stack = loraStack(nozzle);
+  if (stack.length === 0) return 'no model — the workflow’s own base only';
+  return stack
+    .map((choice) => {
+      const weight = loraWeight(choice.weight);
+      const at = weight == null ? 'its own default weight' : `weight ${weight}`;
+      return `${choice.nomen} · trigger ${choice.trigger} · ${at}`;
+    })
+    .join(' + ');
 }
 
 /** The collapsed configuration in one line: what it is firing through, in which run
