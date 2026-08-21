@@ -13,13 +13,19 @@ import {
   ignitionRequest,
   lineageOf,
   poolDatasetFragments,
+  recordedPiece,
+  rehydrateStream,
   releasePending,
+  resumePhase,
   rollCurated,
   streamColumns,
   streamPiece,
   t2iFlows,
+  terminalOf,
   EMPTY_STREAM,
   EXPANDED_GESTURES,
+  REHYDRATE_LIMIT,
+  REHYDRATE_ROWS,
   STREAM_MAX_COLUMNS,
   STREAM_MIN_COLUMNS,
   TILE_GESTURES,
@@ -1610,4 +1616,147 @@ test('a failed run still marks its piece failed and still releases the loop', as
   assert.equal(held.released.length, 1, 'the loop is released, so the stream does not hang on an error')
   assert.equal(held.released[0]!.terminal, 'failed', 'and it is released with the failure, which the loop counts')
   assert.deepEqual(held.order, ['fold', 'release'])
+})
+
+// ---------------------------------------------------------------------------
+// Coming back to a session (noema-263) — the stream is state the screen holds, so a
+// mount starts it empty while the session's ledger still holds every piece it fired.
+// The five gates below are the ones that fail if any part of the rebuild is undone.
+//
+// Fixtures are invented throughout (`ses-…`, `run-…`, `https://r2.example/…`).
+// ---------------------------------------------------------------------------
+
+// Non-vacuity 1 — the pieces come back
+
+test('returning to a session rebuilds its recorded pieces as tiles', () => {
+  const fox = frag('subject', 'a fox')
+  const harbor = frag('setting', 'a foggy harbor')
+  const s = session([fox, harbor], {
+    pieces: [ledgerPiece('run-1', [fox]), ledgerPiece('run-2', [fox, harbor])],
+  })
+
+  const rebuilt = rehydrateStream(s)
+  assert.equal(rebuilt.pieces.length, 2, 'a session with a ledger does not come back as an empty stream')
+  assert.deepEqual(
+    rebuilt.pieces.map((p) => p.runId),
+    ['run-2', 'run-1'],
+    'newest first, the order the grid already lays pieces out in',
+  )
+  assert.deepEqual(rebuilt.pending, [], 'nothing is held back: there is no scroll position to protect on mount')
+
+  // the lineage rides back with each tile, so the expanded view works on a rebuilt tile
+  // without a second call
+  assert.deepEqual(
+    lineageOf(rebuilt.pieces[0]!).map((e) => e.text),
+    ['a fox', 'a foggy harbor'],
+  )
+  // and the prompt is recomposed from that lineage rather than left blank
+  assert.match(rebuilt.pieces[0]!.prompt, /a fox/)
+
+  // a session that has fired nothing has nothing to rebuild
+  assert.deepEqual(rehydrateStream(session([fox])).pieces, [])
+})
+
+// Non-vacuity 2 — a rebuild does not un-do what the session already recorded
+
+test('a rebuilt tile keeps the reaction, the dismissal and the saved flag the session recorded', () => {
+  const fox = frag('subject', 'a fox')
+  const s = session([fox], {
+    pieces: [
+      ledgerPiece('run-kept', [fox], { reaction: 'up', saved: true }),
+      ledgerPiece('run-gone', [fox], { dismissed: true }),
+    ],
+  })
+
+  const rebuilt = rehydrateStream(s)
+  assert.deepEqual(
+    rebuilt.pieces.map((p) => p.runId),
+    ['run-kept'],
+    'a piece the session recorded as dismissed stays off the scroll — ✕ is a decision the ledger holds',
+  )
+
+  // the reaction and the saved flag are read off the SESSION wherever a tile is rendered,
+  // which is what the rebuilt tile is handed: a rebuild is not a second copy of the ledger
+  const tile = rebuilt.pieces[0]!
+  assert.equal(reactionOf(s, tile.runId), 'up', 'a ♡ given before the reload is still on the tile after it')
+  assert.equal(savedOf(s, tile.runId), true, 'and a piece already in the set still reads as saved')
+  assert.equal(recordedPiece(s, tile.runId)?.dismissed, false)
+})
+
+// Non-vacuity 3 — the rebuild is bounded
+
+test('rehydrate asks for no more than the newest N pieces', () => {
+  const fox = frag('subject', 'a fox')
+  const many = Array.from({ length: REHYDRATE_LIMIT * 5 }, (_, i) => ledgerPiece(`run-${i}`, [fox]))
+  const s = session([fox], { pieces: many })
+
+  const rebuilt = rehydrateStream(s)
+  assert.equal(
+    rebuilt.pieces.length,
+    REHYDRATE_LIMIT,
+    'an infinite stream can hold hundreds of pieces, and each rebuilt tile costs one run read',
+  )
+  assert.equal(rebuilt.pieces[0]!.runId, `run-${many.length - 1}`, 'and the ones it takes are the newest')
+  assert.equal(REHYDRATE_LIMIT, STREAM_MAX_COLUMNS * REHYDRATE_ROWS, 'the bound is a screenful of the widest grid')
+
+  // the bound is honoured whatever it is set to, and a session shorter than it is not padded
+  assert.equal(rehydrateStream(s, 3).pieces.length, 3)
+  assert.equal(rehydrateStream(s, 0).pieces.length, 0)
+  assert.equal(rehydrateStream(session([fox], { pieces: many.slice(0, 2) })).pieces.length, 2)
+})
+
+// Non-vacuity 4 — a resumed session says it is resumable
+
+test('a resumed session that is not streaming reads as resumable rather than as a fresh configuration', () => {
+  const fox = frag('subject', 'a fox')
+  const s = session([fox], { pieces: [ledgerPiece('run-1', [fox])] })
+
+  const phase = resumePhase(rehydrateStream(s))
+  assert.equal(phase, 'resumed')
+
+  const line = streamStatusLine(phase, null, 0, CFG({ mode: 'infinite' }), null)
+  assert.notEqual(line, 'idle', 'idle renders the screen as though nothing had been made here')
+  assert.match(line, /resumable/)
+  assert.match(line, /launch/, 'resuming spends nothing — the launch control is still what fires a piece')
+
+  // a session with nothing in its ledger IS a fresh configuration, and still reads as one
+  assert.equal(resumePhase(rehydrateStream(session([fox]))), 'idle')
+  assert.equal(streamStatusLine('idle', null, 0, CFG({ mode: 'infinite' }), null), 'idle')
+})
+
+// Non-vacuity 5 — a piece that was in flight when the page went away is asked, not assumed
+
+test('a piece whose run has not reached terminal comes back as still generating and is watched again', async () => {
+  const fox = frag('subject', 'a fox')
+  const s = session([fox], {
+    pieces: [ledgerPiece('run-open', [fox]), ledgerPiece('run-done', [fox])],
+  })
+
+  let stream = rehydrateStream(s)
+  // every rebuilt tile starts as `running`, which is what mounts the tile's watcher
+  assert.deepEqual(stream.pieces.map((p) => p.status), ['running', 'running'])
+  assert.deepEqual(stream.pieces.map((p) => p.media), [null, null])
+
+  // the run is what decides, and a run that has not finished decides nothing yet
+  assert.equal(terminalOf('running'), null)
+  assert.equal(terminalOf('pending'), null)
+  assert.equal(terminalOf(undefined), null)
+  assert.equal(terminalOf('complete'), 'complete')
+  assert.equal(terminalOf('failed'), 'failed')
+
+  // the run that DID finish while the page was away comes back with its media, through the
+  // same terminal path a live piece takes
+  const finished: TerminalRun = { exitus: { image: 'https://r2.example/rebuilt.png' } }
+  await announceTerminal('complete', 'run-done', async () => ({ run: finished }), (patch) => {
+    stream = applyRunResult(stream, 'run-done', { terminal: patch.terminal, exitus: patch.exitus, error: patch.error })
+  })
+
+  const done = stream.pieces.find((p) => p.runId === 'run-done')!
+  assert.equal(done.status, 'ready')
+  assert.equal(done.media?.url, 'https://r2.example/rebuilt.png')
+
+  // and the one still on the pod is left saying exactly that, with its watcher mounted
+  const open = stream.pieces.find((p) => p.runId === 'run-open')!
+  assert.equal(open.status, 'running', 'a run still going is not folded in as finished, and is not folded in as failed')
+  assert.equal(open.media, null)
 })
