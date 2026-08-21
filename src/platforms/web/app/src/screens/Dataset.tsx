@@ -13,7 +13,13 @@ import {
   replaceDataset,
 } from '../lib/muse';
 import { AddImages } from '../components/AddImages';
-import { canFireDecompose, canOfferDecompose, decomposeCaptionsetId, launchDecomposeJob } from '../lib/training';
+import {
+  canFireDecompose,
+  canOfferDecompose,
+  decomposeCaptionsetId,
+  decomposeFailureNote,
+  launchDecomposeJob,
+} from '../lib/training';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets. Captionsets are a separate versioned layer (the
@@ -114,7 +120,10 @@ export function Dataset() {
       setDatasets(ds);
       setDecomposeMsg({ ok: true, text: 'decompose finished — the chips below come from it' });
     } catch (e) {
-      setDecomposeMsg({ ok: false, text: `couldn't decompose: ${String((e as Error).message).slice(0, 160)}` });
+      // A refusal because this dataset is ALREADY decomposing comes back through here, and
+      // it is a status rather than a failure — `decomposeFailureNote` is what tells them
+      // apart, so a second press reads as "one is running" instead of as an error.
+      setDecomposeMsg({ ok: false, text: decomposeFailureNote(String((e as Error).message)) });
     } finally {
       setDecomposing(false);
     }
@@ -243,7 +252,7 @@ export function Dataset() {
               </div>
               <p className="ds-panel-note">{captionCoverageLine(d, nextCaptionsetId)}</p>
               {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
-              {decomposing && <p className="ds-panel-note">reading every caption in this set — one pass per caption, this stays open until the last one is written.</p>}
+              {decomposing && <p className="ds-panel-note">a decompose is running on this dataset — one pass per caption, and it stays open until the last one is written. Only one runs at a time.</p>}
               {decomposeMsg && <p className="ds-panel-note">{decomposeMsg.text}</p>}
             </div>
 

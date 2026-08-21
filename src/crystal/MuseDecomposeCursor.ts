@@ -23,7 +23,7 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 // first provider call, settles the summed real token cost, appears in run
 // history, and has no separate lifecycle and no free lane.
 //
-// FOUR PROPERTIES ARE LOAD-BEARING HERE:
+// SIX PROPERTIES ARE LOAD-BEARING HERE:
 //
 //   OWN MINISTERIUM — `Cursorum` is a flat Map<ministerium, Cursor> whose
 //     `register` is a bare set. Registering this cursor under 'openai' would
@@ -48,6 +48,26 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 //     set. With no chat-capable provider registered the cursor refuses with a
 //     named error in `reserve()`, before anything is locked, rather than letting
 //     a run reach the wire and come back as an upstream 401 with credits held.
+//
+//   SINGLE FLIGHT PER DATASET — a decompose holds a reservation for its whole
+//     duration, so a second decompose started on top of a running one locks a
+//     second reservation against the same work. A dataset that already has a
+//     decompose running is refused in `reserve()` — i.e. in the same up-front
+//     group as the two refusals above, BEFORE the reservation is locked. A guard
+//     placed in `run()` instead would refuse only after the second run's credits
+//     were already held, which is the thing being fixed rather than a fix. The
+//     claim is taken in `run()` (so `reserve()` stays the read-only estimate its
+//     contract requires) and released in a `finally`, so a run that throws frees
+//     the dataset immediately rather than leaving it claimed. The claim lives on
+//     the cursor instance the container registers, so it is per-process.
+//
+//   BOUNDED CALL — one chat call is made per caption and each is given a
+//     deadline (`DEFAULT_CHAT_CALL_TIMEOUT_MS`). A provider call that never
+//     answers fails the decompose with a named error and aborts the request,
+//     instead of parking the run until the actum's expiry. The expiry reaper is
+//     the backstop for a lost pod, not the timeout for a hung HTTP request:
+//     reaching it means the reservation stays locked for the whole expiry
+//     window for a run that stopped making progress in its first seconds.
 //
 // Ring rules: `src/crystal` is platform-neutral. Nothing here reads
 // `process.env` — provider descriptors and their resolved keys arrive from the
@@ -78,6 +98,31 @@ export const DEFAULT_MAX_DECOMPOSE_CAPTIONS = 200
  */
 export const DEFAULT_TOKENS_PER_CAPTION = 1500
 
+/**
+ * Deadline for ONE caption's chat call.
+ *
+ * A decomposition call is a short prompt and a short JSON answer, so a minute is
+ * far above any healthy round trip and only a call that is not coming back hits
+ * it. The number matters because it is the difference between a stuck call
+ * failing its run in seconds and the run holding its reservation until the actum
+ * expires — see BOUNDED CALL in the header.
+ */
+export const DEFAULT_CHAT_CALL_TIMEOUT_MS = 60_000
+
+/**
+ * A decompose was asked for on a dataset that already has one running.
+ *
+ * Typed rather than a bare `Error` so the API facade can map it to its own
+ * conflict response instead of masking it as an internal error — the caller is
+ * being told a fact about their own dataset, not about the server.
+ */
+export class DecomposeInFlightError extends Error {
+  constructor(readonly datasetId: string) {
+    super(`muse decompose: a decompose is already running on dataset '${datasetId}'`)
+    this.name = 'DecomposeInFlightError'
+  }
+}
+
 /** A provider descriptor plus the bearer key the container resolved for it. */
 export interface ChatProviderBinding {
   provider: ApiProvider
@@ -99,6 +144,8 @@ export interface MuseDecomposeCursorDeps {
   maxCaptions?: number
   /** Overrides `DEFAULT_TOKENS_PER_CAPTION`. */
   tokensPerCaption?: number
+  /** Overrides `DEFAULT_CHAT_CALL_TIMEOUT_MS` — the per-caption call deadline. */
+  chatCallTimeoutMs?: number
 }
 
 /**
@@ -112,9 +159,23 @@ const PROVIDER_PREFERENCE = ['openrouter', 'openai', 'venice']
 export class MuseDecomposeCursor implements Cursor {
   constructor(private readonly deps: MuseDecomposeCursorDeps) {}
 
+  /**
+   * Datasets with a decompose running right now, claimed for the length of `run()`.
+   *
+   * Read by `reserve()` and written only by `run()`: the cursor contract says
+   * `reserve()` is a read-only estimate, and the reservation it prices has not been
+   * locked yet when it is called — a claim taken there would be held on behalf of a
+   * run that may never be dispatched.
+   */
+  private readonly running = new Set<string>()
+
   async reserve(modus: Modus, aditus: Record<string, unknown>): Promise<bigint> {
-    // Both refusals happen HERE — before the reservation is locked and before any
-    // provider call — so an oversized or unservable job costs nothing.
+    // Every refusal happens HERE — before the reservation is locked and before any
+    // provider call — so an oversized, unservable or duplicate job costs nothing.
+    // The single-flight refusal is first because it needs no reads at all.
+    const claimed = String(aditus.dataset ?? '')
+    if (claimed && this.running.has(claimed)) throw new DecomposeInFlightError(claimed)
+
     const binding = this.pickProvider(aditus)
     const { captions } = await this.resolveWork(aditus)
 
@@ -124,7 +185,26 @@ export class MuseDecomposeCursor implements Cursor {
     return chatImpetus(captions.length * perCaption, binding.provider.pricing.chatImpetusPer1kTokens)
   }
 
+  /**
+   * Claim the dataset for the length of the run, then decompose it.
+   *
+   * The claim is what a later `reserve()` sees, and it is released in the `finally`
+   * whatever the run does — returns, throws, or times a call out. A terminal run
+   * therefore frees its dataset at the moment it ends rather than at the moment the
+   * expiry reaper notices it.
+   */
   async run(actum: Actum): Promise<CursorResult> {
+    const datasetId = String(actum.aditus.dataset ?? '')
+    const claimed = datasetId !== '' && !this.running.has(datasetId)
+    if (claimed) this.running.add(datasetId)
+    try {
+      return await this.decompose(actum)
+    } finally {
+      if (claimed) this.running.delete(datasetId)
+    }
+  }
+
+  private async decompose(actum: Actum): Promise<CursorResult> {
     const aditus = actum.aditus
     // The reservation ActumInceptor locked — the upper bound run() must not exceed.
     const reserved = actum.impetus
@@ -140,8 +220,12 @@ export class MuseDecomposeCursor implements Cursor {
     // usage, and the metering must be the REAL cost rather than the estimate.
     let tokens = 0
     const base: FetchLike = this.deps.fetchImpl ?? ((url, init) => fetch(url, init) as unknown as ReturnType<FetchLike>)
+    const timeoutMs = this.deps.chatCallTimeoutMs ?? DEFAULT_CHAT_CALL_TIMEOUT_MS
+    // Which caption's call is on the wire — the loop below sets it before each call so a
+    // deadline names the media item it stopped on rather than the run as a whole.
+    let inFlightMediaId = ''
     const metered: FetchLike = async (url, init) => {
-      const res = await base(url, init)
+      const res = await callWithin(base, url, init, timeoutMs, inFlightMediaId)
       const body = await res.text()
       tokens += totalTokens(body)
       return { ok: res.ok, status: res.status, text: async () => body }
@@ -157,6 +241,7 @@ export class MuseDecomposeCursor implements Cursor {
     let decomposed = 0
     let written = 0
     for (const [mediaId, caption] of captions) {
+      inFlightMediaId = mediaId
       const raw = await extract([caption], dataset.name, trigger)
       // `buildGarden` is the single validation point: out-of-taxonomy categories,
       // blanks and per-category duplicates are dropped there rather than here, so
@@ -268,6 +353,43 @@ export class MuseDecomposeCursor implements Cursor {
     }
 
     return { dataset, captionset, captions }
+  }
+}
+
+/**
+ * One chat call, given a deadline.
+ *
+ * Two mechanisms, because they answer different questions. The `AbortSignal` tears
+ * the request down at the transport so a dead call stops holding a socket; the race
+ * is what makes the DECOMPOSE fail on time, and it holds whether or not the injected
+ * transport honours a signal. A transport that ignores the signal and answers later
+ * has its result discarded — the `catch` on `pending` is there so that late answer
+ * cannot surface as an unhandled rejection after the race has already settled.
+ */
+async function callWithin(
+  base: FetchLike,
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+  timeoutMs: number,
+  mediaId: string,
+): Promise<{ ok: boolean; status: number; text(): Promise<string> }> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const pending = base(url, { ...init, signal: controller.signal })
+  pending.catch(() => {})
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      const where = mediaId ? ` for media item '${mediaId}'` : ''
+      reject(new Error(
+        `muse decompose: the chat call${where} did not answer within ${Math.round(timeoutMs / 1000)}s`,
+      ))
+    }, timeoutMs)
+  })
+  try {
+    return await Promise.race([pending, deadline])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 

@@ -311,3 +311,52 @@ test('throws when modus is not found after initiation', async () => {
     /not found after initiation/,
   )
 })
+
+// ---------------------------------------------------------------------------
+// noema-270: a cursor that THROWS is a terminal run, and is settled here.
+//
+// A sync cursor whose run() rejects leaves an actum the dispatch will never come back to.
+// Left `nascens`, its reservation stays locked until the expiry reaper reaches it — the same
+// terminal outcome the failure already implies, minus the credits the payer cannot use in the
+// meantime. The reaper is the backstop for a run nobody is left to fail, not the mechanism for
+// one that just failed in front of us.
+//
+// Non-vacuity: dropping the settle makes "a decompose that times out settles rather than being
+// left for the expiry reaper" fail — the actum stays nascens and its signa stay locked.
+// ---------------------------------------------------------------------------
+
+test('noema-270: a sync cursor that throws fails the actum and releases its signa, then rethrows', async () => {
+  const acta = makeActa(makeActum())
+  const released: string[][] = []
+  const signorum = makeSignorum()
+  signorum.release = async (ids: string[]) => { released.push(ids) }
+
+  const modus = makeModus()
+  const deps: DispatchDeps = {
+    inceptor: { initiate: async () => makeActum() },
+    modorum: {
+      find: async () => modus,
+      register: async () => {},
+      list: async () => [],
+    } as unknown as DispatchDeps['modorum'],
+    cursorum: {
+      register: () => {},
+      resolve: () => ({
+        reserve: async () => 100n,
+        run: async () => { throw new Error('the chat call did not answer within 60s') },
+      }),
+    },
+    completor: new ActumCompletor({ acta, signorum }),
+  }
+
+  // The error reaches the caller unchanged — settling must not swallow or replace it.
+  await assert.rejects(
+    () => dispatchInceptio(deps, makeInceptio()),
+    /did not answer within 60s/,
+  )
+
+  const after = await acta.findById('actum-1')
+  assert.equal(after?.status, 'fractus', 'the run is terminal, so the actum is terminal')
+  assert.equal(after?.error, 'the chat call did not answer within 60s')
+  assert.deepEqual(released, [['sig-1']], 'nothing ran, so the reservation is released, not settled')
+})
