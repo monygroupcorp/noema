@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.11.0](https://github.com/monygroupcorp/noema/compare/v5.10.1...v5.11.0) (2026-08-21)
+
+
+### Features
+
+* **crystal:** report a caption pass while it runs ([00644fc](https://github.com/monygroupcorp/noema/commit/00644fc6e402ab77142a36dd90296e657b06505e))
+* **datasets:** archive a dataset or one of its images, reversibly ([ab41d1d](https://github.com/monygroupcorp/noema/commit/ab41d1d3f7d0c501ef52515644c638aa982f4b55))
+* **datasets:** archive a dataset or one of its images, reversibly ([c15b093](https://github.com/monygroupcorp/noema/commit/c15b0931fb82a7aab24a4738b64b2b66689a358b))
+* **web:** add images to a dataset from the dataset screen ([2d41297](https://github.com/monygroupcorp/noema/commit/2d41297848c6a96755d8a0a99a4784a9c720065f))
+* **web:** add images to a dataset from the dataset screen ([c0a2886](https://github.com/monygroupcorp/noema/commit/c0a28861dd24daeb0c01761ae5045fabd9b7d79e))
+
+
+### Bug Fixes
+
+* **muse:** make the model picker reachable and let the stream own the viewport ([6103561](https://github.com/monygroupcorp/noema/commit/61035610110e99b22db62130e8c59cadf437d84c))
+* **muse:** make the model picker reachable and let the stream own the viewport ([7fc9f2d](https://github.com/monygroupcorp/noema/commit/7fc9f2df766be2af6f204f4f9cc0e72c76831468))
+* **muse:** one decompose at a time per dataset, and a deadline on every chat call ([c13ca91](https://github.com/monygroupcorp/noema/commit/c13ca914adf337107e348a508ee108d0843fcd27))
+* **muse:** one decompose at a time per dataset, and a deadline on every chat call ([cba9201](https://github.com/monygroupcorp/noema/commit/cba9201aeffa2b616c1fd6c538569e1cc9c556cf))
+
+
+### Performance Improvements
+
+* **crystal:** run a caption pass on its own lean pod ([8d4b359](https://github.com/monygroupcorp/noema/commit/8d4b3599577ad05b99f94672c1504ce3311d4ed6))
+* **crystal:** run a caption pass on its own lean pod ([253822f](https://github.com/monygroupcorp/noema/commit/253822ffa1088f0e151360810177e7fc8bda144a))
+
 ## [5.10.1](https://github.com/monygroupcorp/noema/compare/v5.10.0...v5.10.1) (2026-08-21)
 
 
