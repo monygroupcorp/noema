@@ -282,3 +282,55 @@
 .muse-lora-own { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-soft, var(--accent)); }
 .muse-lora-weight { max-width: 12em; }
 .muse-lora-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* ── A collapsed control (noema-264) ──────────────────────────────────────────
+   One line that still says what the control is set to, plus the way back into it.
+   The line itself takes the room and ellipsizes rather than wrapping the row onto a
+   second line, because the point of the collapse is the height it gives back. */
+.muse-collapsed {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 4px 2px;
+}
+.muse-collapsed-line {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.muse-collapsed .linkish { flex: 0 0 auto; font-size: 12px; }
+.muse-collapsed-foot { display: flex; justify-content: flex-end; font-size: 12px; }
+
+/* ── The phone (noema-264) ────────────────────────────────────────────────────
+   The first narrow-viewport rules this screen has carried. Everything above is the
+   wide layout and stays exactly as it is; the block below is additive.
+   The width is the same one `MUSE_NARROW_VIEWPORT` in `lib/muse.ts` names — the script
+   picks the picker's chrome from that query, and the two must stay in step. */
+@media (max-width: 640px) {
+  /* The launcher is a header on a desktop and most of the viewport on a phone. Trim
+     what it spends on itself so the collapsed lines are nearly all it costs. */
+  .muse-launcher { padding: 9px 10px; gap: 8px; }
+  .muse-launcher-row { gap: 8px; }
+  .muse-mode { gap: 8px; padding: 5px 8px; }
+
+  /* THE PICKER IS A SHEET HERE. `Muse.tsx` renders it inside `.muse-sheet` chrome at
+     this width; these rules are what make its actions reachable at any catalog length:
+     the CARD is the only scroller, the list inside it no longer traps the finger, and
+     the commit actions are pinned to the foot of the card rather than sitting below the
+     fold at the end of a list that grows with every model the user owns. */
+  .muse-lora-sheet { padding-bottom: 0; }
+  .muse-lora-sheet .muse-lora-list {
+    max-height: none; overflow-y: visible;
+    flex-direction: column; flex-wrap: nowrap;
+  }
+  .muse-lora-sheet .muse-lora-card { width: 100%; }
+  .muse-lora-sheet .muse-lora-actions {
+    position: sticky; bottom: 0; z-index: 1;
+    margin: 0 -14px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--hair-soft);
+    background: var(--panel);
+  }
+  .muse-lora-sheet .muse-lora-actions .btn { flex: 1 1 auto; }
+  .muse-lora-sheet .muse-lora-weight { max-width: none; }
+
+  /* The grid is what the user scrolled here to see. */
+  .muse-stream { margin: 12px 0 18px; }
+}
