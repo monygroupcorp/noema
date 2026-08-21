@@ -23,6 +23,9 @@ import type { DatasetResolver } from './datasetManifest.js'
 import type { RemoteAitkLauncher as RemoteAitkLauncherPort, RemoteAitkLaunchSpec } from './RemoteAitoolkitTrainingCursor.js'
 import { buildAitkConfig, buildAitkCaptionConfig } from './aitkConfig.js'
 import { withCallbackNonce } from './RunPodCursor.js'
+import type { DetachedPodScript } from './SecurePodClient.js'
+
+export type { DetachedPodScript }
 
 /** Where the ai-toolkit clone lives on the pod (cloned at bootstrap; `aitktrainer.py`'s AITK_DIR). */
 export const POD_AITK_DIR = '/aitk'
@@ -53,12 +56,20 @@ export const DEFAULT_AITK_IMAGE = 'runpod/pytorch:1.0.7-cu1281-torch291-ubuntu24
  *     caller records the handle, so nothing pod-side can call back before the run carries it.
  *   - `onLaunchFailed` receives a failure from the background phase (the pod is already terminated
  *     by then), so the run can be failed at once instead of waiting out its deadline.
+ *
+ * `script` names which pod script the provisioned pod runs. It is OPTIONAL and an absent value is
+ * the trainer, so every caller that predates the selector — and the training arm, which never
+ * passes one — provisions and launches exactly as it did before. One provisioning path, one
+ * bootstrap-and-launch flow, one place where SSH and failure handling live; the two arms differ
+ * only in the bootstrap they hand in and the script they name.
  */
 export interface TrainingPodProvisioner {
   provision(opts: {
     image: string
     env: Record<string, string>
     setup: string[]
+    /** Pod script to launch — default `'trainer'`. */
+    script?: DetachedPodScript
     onPodId?: (podId: string) => Promise<void>
     onLaunchFailed?: (err: unknown) => Promise<void>
   }): Promise<{ podId: string }>
@@ -182,6 +193,7 @@ export function securePodTrainingProvisioner(
       image: string
       env: Record<string, string>
       setup: string[]
+      script?: DetachedPodScript
       onPodId?: (podId: string) => Promise<void>
       onLaunchFailed?: (err: unknown) => Promise<void>
     }): Promise<{ podId: string }>
