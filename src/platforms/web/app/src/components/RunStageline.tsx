@@ -13,7 +13,10 @@ import { STAGE_LABELS, measure, useRunStream, type RunStreamState } from '../lib
 // A failed run renders no stageline (the caller says what went wrong instead) — mirroring the
 // dispatch page, where a half-lit progress bar under an error reads as work still in flight.
 
-export function Stageline({ stream }: { stream: RunStreamState }) {
+// Narrowed to what the readout actually draws, so a surface that already holds a run's
+// live phase — a Muse tile's piece, say — can render this same timeline from the
+// subscription it already has, without opening a second stream to satisfy a type.
+export function Stageline({ stream }: { stream: Pick<RunStreamState, 'stageIdx' | 'progressus' | 'terminal'> }) {
   if (stream.terminal === 'failed') return null;
   const complete = stream.terminal === 'complete';
   return (

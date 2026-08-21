@@ -18,8 +18,12 @@ import {
   releasePending,
   resumePhase,
   rollCurated,
+  pieceReadout,
+  pieceStageline,
   streamColumns,
   streamPiece,
+  STAGE_LABELS,
+  TILE_READOUT_MAX,
   t2iFlows,
   terminalOf,
   EMPTY_STREAM,
@@ -29,6 +33,7 @@ import {
   STREAM_MAX_COLUMNS,
   STREAM_MIN_COLUMNS,
   TILE_GESTURES,
+  type PieceProgress,
   type RunResult,
   type StreamPiece,
   type StreamState,
@@ -1984,4 +1989,73 @@ test('a piece whose lineage the floor does not hold is refused before it is fire
 
   // No session open means no ledger entry is attempted, so there is nothing to refuse.
   assert.equal(lineageBlockReason(null, [stranger]), null)
+})
+
+// ---------------------------------------------------------------------------
+// The live run readout (noema-273) — a piece that is being made on a live pod says
+// what the pod is doing. Every branch below is one of the item's mandated proofs.
+// ---------------------------------------------------------------------------
+
+function live(stageIdx: number, progressus?: PieceProgress['progressus']): PieceProgress {
+  return { stageIdx, progressus }
+}
+
+test('pieceReadout: a running piece reads its live phase, not \'generating…\'', () => {
+  const running = piece('run-1')
+
+  const setup = pieceReadout(running, live(1, { phase: 'pulling', message: 'pulling image' }))
+  assert.match(setup, new RegExp(STAGE_LABELS[1]!), 'the coarse stage the run is in is named')
+  assert.match(setup, /pulling image/, "the runner's own words for what it is doing are shown")
+  assert.equal(/generating…/.test(setup), false, 'a live run is never described by a static status')
+
+  // the typed measurement is read when the runner sends no words
+  assert.match(
+    pieceReadout(running, live(1, { phase: 'downloading', progress: { done: 3, total: 9, unit: 'files' } })),
+    /3 \/ 9 files/,
+  )
+  // and the phase itself when it sends neither
+  assert.match(pieceReadout(running, live(2, { phase: 'executing' })), /executing/)
+
+  // one tile line, so a long sub-line is trimmed rather than pushed off the tile
+  const long = pieceReadout(running, live(1, { phase: 'downloading', message: 'x'.repeat(200) }))
+  assert.ok(long.length <= TILE_READOUT_MAX, `the tile line stays within ${TILE_READOUT_MAX}`)
+  assert.match(long, new RegExp(STAGE_LABELS[1]!), 'trimming never costs the stage name')
+})
+
+test('pieceReadout: a piece with no frame yet still reads as admitted rather than blank', () => {
+  const running = piece('run-1')
+  assert.equal(pieceReadout(running, undefined), STAGE_LABELS[0])
+  assert.equal(pieceReadout(running, live(0)), STAGE_LABELS[0], 'a snapshot with no progress frame reads the same')
+  assert.ok(pieceReadout(running, undefined).length > 0, 'silence is the state this replaces')
+})
+
+test('pieceReadout: a piece that has landed stops reporting a phase', () => {
+  const landed: StreamPiece = { ...piece('run-1'), status: 'ready', media: { kind: 'image', url: 'https://r2.example/p.png' } }
+  // a stale frame is still held by the caller when the run completes; a finished piece
+  // reading 'executing' is the same untruth as a running one reading 'generating…'
+  const stale = live(2, { phase: 'executing', message: 'sampling' })
+  assert.equal(pieceReadout(landed, stale), '')
+  assert.equal(/executing|sampling/.test(pieceReadout(landed, stale)), false)
+  assert.equal(pieceStageline(landed, stale).terminal, 'complete')
+})
+
+test('pieceReadout: a failed piece shows its error, not a phase', () => {
+  const failed: StreamPiece = { ...piece('run-1'), status: 'failed', error: 'the pod went away' }
+  const stale = live(2, { phase: 'executing', message: 'sampling' })
+  assert.equal(pieceReadout(failed, stale), 'the pod went away', 'failure outranks progress')
+  assert.equal(/executing|sampling/.test(pieceReadout(failed, stale)), false)
+  assert.equal(pieceStageline(failed, stale).terminal, 'failed')
+  // a failure with no message still says something
+  assert.ok(pieceReadout({ ...failed, error: undefined }, stale).length > 0)
+})
+
+test('pieceStageline: the expanded piece draws the stage its own subscription reports', () => {
+  const running = piece('run-1')
+  const drawn = pieceStageline(running, live(3, { phase: 'uploading' }))
+  assert.equal(drawn.terminal, null)
+  assert.equal(drawn.stageIdx, 3)
+  assert.equal(drawn.progressus?.phase, 'uploading')
+  // an out-of-range stage never points past the stages the timeline actually draws
+  assert.ok(pieceStageline(running, live(99)).stageIdx < STAGE_LABELS.length)
+  assert.ok(pieceReadout(running, live(99)).length > 0)
 })
