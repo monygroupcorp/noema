@@ -15,7 +15,7 @@
 //      which discards the captionset the user chose. The caller reports the dropped count.
 //   3. the CALLER'S captionset wins — never `captionsets[0]`.
 
-import type { Dataset } from './api';
+import type { Dataset, RunRequest } from './api';
 import type { DatasetImage } from './training';
 
 /**
@@ -36,4 +36,42 @@ export function captionsToTrainingImages(dataset: Dataset, captionsetId: string)
     out.push({ url: item.url, caption });
   }
   return out;
+}
+
+// ── The caption pass request ────────────────────────────────────────────────────────────────
+// A caption pass is a normal metered run of `modus.dataset-caption`, so the request is the whole
+// client-side API. It lives here rather than in a screen for the same reason the projection
+// above does: WHICH captionset a pass writes into is the decision that costs money, and it is
+// invisible in the UI either way — an extending pass and a fresh pass look identical while they
+// run and differ only in what was billed and what the layer ends up holding.
+
+/**
+ * The run request for a caption pass.
+ *
+ * A pass EXTENDS by default: given a captionset, the server stages only the media that pass does
+ * not already cover and the harvested captions land back in it. `captionsetId: null` (or absent)
+ * is the deliberate fresh-set pass — it captions the whole set and mints a captionset of its own,
+ * which is how a dataset gets its first one.
+ *
+ * `captionset` is the same aditus key a decompose uses to name a pass, so one name means one
+ * thing across both jobs.
+ */
+export function captionRunRequest(cfg: {
+  datasetId: string;
+  name?: string;
+  captionPrompt?: string;
+  captionsetId?: string | null;
+}): RunRequest {
+  const name = cfg.name?.trim();
+  const captionPrompt = cfg.captionPrompt?.trim();
+  const captionsetId = cfg.captionsetId?.trim();
+  return {
+    modusId: 'modus.dataset-caption',
+    aditus: {
+      dataset: cfg.datasetId,
+      ...(captionsetId ? { captionset: captionsetId } : {}),
+      ...(name ? { name } : {}),
+      ...(captionPrompt ? { captionPrompt } : {}),
+    },
+  };
 }

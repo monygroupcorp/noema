@@ -12,7 +12,10 @@ import type { MediaFetcher } from './MediaFetcher.js'
 //
 // The pod uploaded a JSON object mapping `DatasetMediaItem.id → caption` and reported its
 // URL on the completion webhook. This fetches that map, validates it against the dataset,
-// writes it as a `Captionset`, and returns the exitus the run receipt carries.
+// writes it into a `Captionset`, and returns the exitus the run receipt carries.
+//
+// A pass EXTENDS the captionset it was given (`aditus.captionset`) and mints one only when it
+// was given none — see `makeCaptionFinalizer` for why the two paths use different store seams.
 //
 // Two properties this file owns:
 //
@@ -34,7 +37,7 @@ export type CaptionHarvestReader = (url: string) => Promise<Record<string, strin
 
 export interface CaptionFinalizerDeps {
   reader: CaptionHarvestReader
-  datasets: Pick<Datasets, 'find' | 'addCaptionset'>
+  datasets: Pick<Datasets, 'find' | 'addCaptionset' | 'setCaption'>
   /** Captioner recorded on the captionset — default 'Qwen3-VL', the model the pod config runs. */
   method?: string
 }
@@ -50,19 +53,25 @@ export type CaptionFinalize = (actum: Actum, outcome: CaptionOutcome) => Promise
 
 /**
  * Build the caption job's finality: read the harvest, validate it against the dataset, and
- * persist it as a captionset.
+ * persist it — into the captionset the run was given, or into one this pass mints.
  *
  * Inputs come off `actum.aditus` (the caption modus' contract):
- *   - `dataset` → the dataset the captionset is attached to (REQUIRED)
- *   - `name`    → the captionset's display name (defaults to a generated one)
- *   - `jobId`   → the run handle the captionset id is derived from (defaults to the actum id)
+ *   - `dataset`    → the dataset the captionset is attached to (REQUIRED)
+ *   - `captionset` → the captionset this pass EXTENDS. Present → the harvest is written into it
+ *                    and no second captionset is created. Absent → the fresh-set path below.
+ *   - `name`       → the captionset's display name (defaults to a generated one)
+ *   - `jobId`      → the run handle the captionset id is derived from (defaults to the actum id)
  *
- * The captionset id is derived from the job id, so re-running a caption pass under the same job
- * REPLACES its captionset rather than appending a second one (`addCaptionset` replaces by id).
- * Hand-edits made through `setCaption` are simply later writes onto the same captionset.
+ * TWO WRITE PATHS, ONE VALIDATION. Extending writes one caption at a time through `setCaption`,
+ * because `addCaptionset` replaces a captionset wholesale — handing it only this pass' harvest
+ * would drop every caption the set already carried. Minting writes the whole map at once through
+ * `addCaptionset`, which is also what makes a re-run under the same job converge: the captionset
+ * id is derived from the job id, so it replaces rather than appending a second one.
  *
  * `coverage` is deliberately not computed here — the store derives it from the captions actually
- * present over the media count, and a second computation is a second thing to drift.
+ * present over the media count, on both paths, and a second computation is a second thing to
+ * drift. Extending therefore moves the set's coverage as a consequence of the writes rather than
+ * through bookkeeping of its own.
  */
 export function makeCaptionFinalizer(deps: CaptionFinalizerDeps): CaptionFinalize {
   const method = deps.method ?? 'Qwen3-VL'
@@ -93,6 +102,30 @@ export function makeCaptionFinalizer(deps: CaptionFinalizerDeps): CaptionFinaliz
       }
       const text = caption.trim()
       if (text) captions[mediaId] = text
+    }
+
+    // The extend path: the run named a captionset, so this pass adds to it. Every write goes
+    // through `setCaption`, which recomputes that captionset's coverage from the captions
+    // present — so the set's coverage grows to include these images without being computed here.
+    const targetId = typeof a.captionset === 'string' ? a.captionset.trim() : ''
+    if (targetId) {
+      if (!dataset.captionsets.some((c) => c.id === targetId)) {
+        throw new Error(`caption finality: captionset '${targetId}' is not on dataset ${datasetId}`)
+      }
+      let current = dataset
+      for (const [mediaId, caption] of Object.entries(captions)) {
+        const written = await deps.datasets.setCaption(datasetId, targetId, mediaId, caption)
+        if (!written) {
+          throw new Error(`caption finality: captionset '${targetId}' is no longer on dataset ${datasetId}`)
+        }
+        current = written
+      }
+      const set = current.captionsets.find((c) => c.id === targetId)
+      return {
+        captionsetId: targetId,
+        captioned: Object.keys(captions).length,
+        coverage: set?.coverage ?? '',
+      }
     }
 
     const captionset: Captionset = {

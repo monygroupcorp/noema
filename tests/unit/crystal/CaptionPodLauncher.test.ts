@@ -263,3 +263,54 @@ test('launch: a caption run reports the pod being prepared', async () => {
     assert.ok(reports.every(r => r.actumId === 'act-1'), 'every report is bound to this run')
   } finally { restore() }
 })
+
+// ── Extending a captionset (noema-279) ────────────────────────────────────────────────────────
+// The launcher is the only production caller of `datasetToManifest`, so this is where the filter
+// either reaches the pod or does not exist.
+
+test('the pod is staged only the media the extended captionset does not cover', async () => {
+  const provisioner = new FakeProvisioner()
+  const ds = dataset(
+    [
+      { id: 'media-1', url: 'https://r2.example/a.png' },
+      { id: 'media-2', url: 'https://r2.example/b.jpg' },
+      { id: 'media-3', url: 'https://r2.example/c.jpg' },
+    ],
+    [{ id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '1/3',
+       captions: { 'media-1': 'an earlier caption' } }],
+  )
+  await launcher(ds, provisioner).launch({ ...spec, captionsetId: 'captionset-1' })
+
+  const manifest = JSON.parse(decode(provisioner.calls[0].env.NOEMA_MANIFEST_B64))
+  assert.deepEqual(manifest, [
+    { url: 'https://r2.example/b.jpg', id: 'media-2' },
+    { url: 'https://r2.example/c.jpg', id: 'media-3' },
+  ])
+  // The saved download is the point: the covered image's url is nowhere in what the pod is handed.
+  assert.ok(!JSON.stringify(manifest).includes('a.png'), 'a covered image is not downloaded again')
+  assert.ok(!JSON.stringify(manifest).includes('caption'), 'and no caption is shipped back out')
+})
+
+test('a captionset id naming no pass on the dataset fails the launch rather than widening it', async () => {
+  const provisioner = new FakeProvisioner()
+  const ds = dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }])
+  await assert.rejects(
+    () => launcher(ds, provisioner).launch({ ...spec, captionsetId: 'captionset-nope' }),
+    /captionset captionset-nope is not on dataset/,
+  )
+  assert.equal(provisioner.calls.length, 0, 'nothing is provisioned')
+})
+
+test('an extending pass with nothing left to caption fails before a pod is provisioned', async () => {
+  const provisioner = new FakeProvisioner()
+  const ds = dataset(
+    [{ id: 'media-1', url: 'https://r2.example/a.png' }],
+    [{ id: 'captionset-1', name: 'first pass', method: 'Qwen3-VL', coverage: '1/1',
+       captions: { 'media-1': 'already captioned' } }],
+  )
+  await assert.rejects(
+    () => launcher(ds, provisioner).launch({ ...spec, captionsetId: 'captionset-1' }),
+    /has no media left to caption/,
+  )
+  assert.equal(provisioner.calls.length, 0)
+})
