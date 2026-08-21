@@ -194,6 +194,52 @@ test('reportProgressus: a fractus Actum signals the runner to bail (continue:fal
   assert.deepEqual(await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing' } }), { continue: false })
 })
 
+// ── a settled run stays settled ─────────────────────────────────────────────
+//
+// Status posts and the completion webhook travel on separate connections, so a progress frame
+// already in flight can land after the run has settled. Applying it would append an `executing`
+// entry past the terminal one — a finished run shown as still working, and a phase roll-up
+// computed from a timeline that ends mid-flight.
+
+test('reportProgressus: a progress report that arrives after the run has settled does not move it back out of terminal', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum())
+
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(0), progress: { done: 3, total: 9, unit: 'items' } } })
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'done', at: at(1000) } })
+  await actorum.update('act-1', { status: 'completus' })
+
+  // The late frame: emitted by the pod before it learned the run was over.
+  const seen: Progressus[] = []
+  const listener = (d: { actumId: string; progressus: Progressus }) => { if (d.actumId === 'act-1') seen.push(d.progressus) }
+  bus.on('actum.progressus', listener)
+  let late
+  try {
+    late = await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(2000), progress: { done: 9, total: 9, unit: 'items' } } })
+  } finally {
+    bus.off('actum.progressus', listener)
+  }
+
+  const actum = await actorum.findById('act-1')
+  assert.deepEqual(actum?.progressus?.map(p => p.phase), ['executing', 'done'], 'the timeline still ends terminal')
+  assert.deepEqual(seen, [], 'nor is the late frame projected to live subscribers')
+  assert.deepEqual(late, { continue: false }, 'and the runner is told to stop reporting')
+})
+
+test('reportProgressus: a late TERMINAL report is still admitted — it agrees with the outcome', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum())
+
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(0) } })
+  // The completion webhook wins the race with the pod's own terminal status post.
+  await actorum.update('act-1', { status: 'completus' })
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'done', at: at(5000) } })
+
+  const actum = await actorum.findById('act-1')
+  assert.deepEqual(actum?.progressus?.map(p => p.phase), ['executing', 'done'])
+  assert.deepEqual(actum?.phaseDurations, { executing: 5000 }, 'the roll-up still happens on the terminal')
+})
+
 test('reportProgressus: emits the typed actum.progressus bus event', async () => {
   const { actorum, api } = await makeApi()
   await actorum.create(makeActum())

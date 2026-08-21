@@ -286,5 +286,88 @@ class CaptionWebhookTests(unittest.TestCase):
                              "executionTime": 1234})
 
 
+class CaptionProgressTests(unittest.TestCase):
+    """A caption pass reports how many images of how many have been captioned.
+
+    The captioner is one long process with no progress channel of its own, so progress is read off
+    the sidecars it writes and polled out while it runs. Without that, a pass over a set is a single
+    silent block for as long as the whole set takes."""
+
+    def _dir_with(self, images: int) -> str:
+        d = tempfile.mkdtemp()
+        for i in range(images):
+            with open(os.path.join(d, f"{i:04d}.png"), "wb") as f:
+                f.write(b"i")
+        return d
+
+    def test_count_captioned_counts_images_that_have_a_sidecar(self):
+        d = self._dir_with(3)
+        self.assertEqual(t.count_captioned(d), 0)
+        with open(os.path.join(d, "0000.txt"), "w", encoding="utf-8") as f:
+            f.write("a caption")
+        self.assertEqual(t.count_captioned(d), 1)
+        # A .txt with no image beside it is not a captioned image, and never counts.
+        with open(os.path.join(d, "notes.txt"), "w", encoding="utf-8") as f:
+            f.write("x")
+        self.assertEqual(t.count_captioned(d), 1)
+
+    def test_progress_signal_carries_done_of_total_and_no_message(self):
+        sig = t.build_caption_progress("act-1", 3, 9)
+        self.assertEqual(sig["actumId"], "act-1")
+        self.assertEqual(sig["progressus"]["phase"], "executing")
+        self.assertEqual(sig["progressus"]["progress"], {"done": 3, "total": 9, "unit": "items"})
+        # A message would have the host PERSIST every one of these onto the run's timeline.
+        self.assertNotIn("message", sig["progressus"])
+
+    def test_run_caption_reports_progress_while_the_captioner_runs(self):
+        """The captioner is faked as a process that lands one sidecar per poll."""
+        import subprocess as real_subprocess
+
+        d = self._dir_with(3)
+        total = 3
+
+        class FakeProc:
+            def __init__(self) -> None:
+                self.landed = 0
+
+            def _land_one(self) -> None:
+                with open(os.path.join(d, f"{self.landed:04d}.txt"), "w", encoding="utf-8") as f:
+                    f.write("a caption")
+                self.landed += 1
+
+            def wait(self, timeout=None):
+                # A wait with no timeout is the whole pass in one blocking call — the captioner
+                # finishes, and nothing was observable while it worked.
+                if timeout is None:
+                    while self.landed < total:
+                        self._land_one()
+                    return 0
+                if self.landed < total:
+                    self._land_one()
+                    raise real_subprocess.TimeoutExpired(cmd="run.py", timeout=timeout)
+                return 0
+
+        class FakeSubprocess:
+            TimeoutExpired = real_subprocess.TimeoutExpired
+            STDOUT = real_subprocess.STDOUT
+
+            @staticmethod
+            def Popen(*_args, **_kwargs):   # noqa: N802 — mirrors subprocess.Popen
+                return FakeProc()
+
+        reported = []
+        prev = t.subprocess
+        t.subprocess = FakeSubprocess
+        try:
+            t.run_caption(d, os.path.join(d, "caption.yaml"),
+                          on_progress=lambda: reported.append(t.count_captioned(d)), poll_s=0)
+        finally:
+            t.subprocess = prev
+
+        self.assertEqual(reported[-1], total, "the pass must report the last image it captioned")
+        self.assertEqual([n for i, n in enumerate(reported) if i == 0 or n != reported[i - 1]],
+                         [1, 2, 3], "every image captioned is reported as it lands")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

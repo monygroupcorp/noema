@@ -3755,8 +3755,8 @@ export class CrystalApi {
 
     await this._persistAndEmit(actum, progressus)
 
-    // A cancelled/failed Actum tells the runner to bail; otherwise keep going.
-    return { continue: actum.status !== 'fractus' }
+    // A settled Actum tells the runner to bail — there is nothing left for it to report against.
+    return { continue: !isSettled(actum) }
   }
 
   /**
@@ -3778,6 +3778,13 @@ export class CrystalApi {
    * (`reportProgressus`) and the in-process recorder (`recordProgressus`).
    */
   private async _persistAndEmit(actum: Actum, progressus: Progressus): Promise<void> {
+    // A run that has settled is finished, and a report that arrives afterwards must not be able to
+    // put it back in flight. Status posts and the completion webhook travel on separate connections,
+    // so an in-flight progress frame can land after settlement; applying it would append an
+    // `executing` entry past the terminal one and show a finished run as still working. Terminal
+    // reports still land — they agree with the outcome and carry the phase roll-up.
+    if (isSettled(actum) && progressus.phase !== 'done' && progressus.phase !== 'failed') return
+
     // Read-modify-write of the timeline array — safe because a runner posts SEQUENTIALLY
     // (the base-image contract is "emit, await {continue}"; comfyrunner awaits each record),
     // so reports for one Actum never race. If a runner ever fans out concurrent posts,
@@ -4215,6 +4222,11 @@ export interface RunnerEndedSignal {
   gpuHours: number
   status: string
   runnerToken?: string
+}
+
+/** Has this run reached a terminal state? `completus`/`fractus` are final (types/actum.ts). */
+function isSettled(actum: Pick<Actum, 'status'>): boolean {
+  return actum.status === 'completus' || actum.status === 'fractus'
 }
 
 /**

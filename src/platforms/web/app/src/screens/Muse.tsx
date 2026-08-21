@@ -14,6 +14,7 @@ import {
 } from '../lib/api';
 import { useRunStream } from '../lib/runStream';
 import { AddImages } from '../components/AddImages';
+import { RunStageline } from '../components/RunStageline';
 import {
   canFireDecompose,
   canOfferDecompose,
@@ -1252,6 +1253,10 @@ export function Muse() {
           {captionMsg.ok && <> · <button type="button" className="linkish" onClick={() => void refreshDatasets()}>re-read the set</button></>}
         </div>
       )}
+      {/* The pass started here is the same run the caption screen watches, so it gets the same
+          readout rather than a second one: the pod's phases while it provisions and prepares, and
+          its per-image count once it is reading images. */}
+      {captionMsg?.ok && captionMsg.runId && <RunStageline runId={captionMsg.runId} />}
 
       <label className="cc-field"><span>Trigger word to strip (optional)</span>
         <input className="cer-input" value={trigger} disabled={decomposing}

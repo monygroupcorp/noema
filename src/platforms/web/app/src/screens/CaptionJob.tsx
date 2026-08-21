@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { api, type Dataset, type RunStatus } from '../lib/api';
+import { api, type Dataset } from '../lib/api';
 import { launchCaptionJob } from '../lib/training';
+import { useRunStream } from '../lib/runStream';
+import { Stageline } from '../components/RunStageline';
 
 // Caption job (train-caption-job-spec.md, render noema-train-caption-job.png) — captioning is
 // a compute offering you fire and watch fill: the pass runs on our compute, and every caption it
@@ -13,8 +15,12 @@ import { launchCaptionJob } from '../lib/training';
 // a normal metered run of `modus.dataset-caption` started through `launchCaptionJob`, and each
 // edit is a `PATCH …/captionsets/:captionsetId/captions/:mediaId`. A caption pass writes its
 // captionset back onto the dataset, so the dataset is re-read when the run goes terminal.
-
-const POLL_MS = 3000;
+//
+// The pass is WATCHED, not just awaited: it rides `useRunStream`, the same subscription every
+// other run-watching surface uses, and draws the same stage readout. A caption pass spends its
+// first minutes acquiring a pod and preparing it before a single caption can exist, and then
+// reads every image one at a time — so the phases and the per-image count are the screen, not a
+// status word standing in for them.
 
 export function CaptionJob() {
   const { id } = useParams();
@@ -22,7 +28,6 @@ export function CaptionJob() {
   const [dataset, setDataset] = useState<Dataset | null | undefined>(undefined);   // undefined = loading
   const [name, setName] = useState('');
   const [runId, setRunId] = useState<string | null>(null);
-  const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [activeSet, setActiveSet] = useState<string | null>(null);
@@ -47,33 +52,28 @@ export function CaptionJob() {
     }
   }, [dataset]);
 
-  // Poll our caption run until it is terminal, then re-read the dataset — the pass writes its
-  // captionset onto the record, so the result arrives through the dataset, not through the run.
+  // Watch the caption run. The pass writes its captionset onto the DATASET, so the result arrives
+  // through a re-read of the record rather than through the run's own outputs.
+  const stream = useRunStream(runId ?? undefined);
+  const terminal = stream.terminal;
+
   useEffect(() => {
-    if (!runId || runStatus === 'complete' || runStatus === 'failed') return;
+    if (!runId || terminal === null) return;
+    if (terminal === 'failed') {
+      setMsg({ ok: false, text: `caption job failed: ${stream.error ?? 'no reason reported'}` });
+      return;
+    }
     let live = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      api.getRun(runId).then(async ({ run }) => {
-        if (!live) return;
-        setRunStatus(run.status);
-        if (run.status === 'complete') {
-          const d = await load();
-          if (!live) return;
-          const written = typeof run.exitus?.captionsetId === 'string' ? (run.exitus.captionsetId as string) : null;
-          if (written) setActiveSet(written);
-          else if (d && d.captionsets.length > 0) setActiveSet(d.captionsets[d.captionsets.length - 1].id);
-          setMsg({ ok: true, text: 'caption pass finished — review and edit below' });
-        } else if (run.status === 'failed') {
-          setMsg({ ok: false, text: `caption job failed: ${run.failure?.message ?? 'no reason reported'}` });
-        } else {
-          timer = setTimeout(tick, POLL_MS);
-        }
-      }).catch(() => { if (live) timer = setTimeout(tick, POLL_MS); });
-    };
-    timer = setTimeout(tick, POLL_MS);
-    return () => { live = false; clearTimeout(timer); };
-  }, [runId, runStatus, load]);
+    void (async () => {
+      const d = await load();
+      if (!live) return;
+      const written = typeof stream.exitus?.captionsetId === 'string' ? (stream.exitus.captionsetId as string) : null;
+      if (written) setActiveSet(written);
+      else if (d && d.captionsets.length > 0) setActiveSet(d.captionsets[d.captionsets.length - 1].id);
+      setMsg({ ok: true, text: 'caption pass finished — review and edit below' });
+    })();
+    return () => { live = false; };
+  }, [runId, terminal, stream.error, stream.exitus, load]);
 
   const start = async () => {
     if (!dataset || starting) return;
@@ -84,7 +84,6 @@ export function CaptionJob() {
     try {
       const run = await launchCaptionJob({ datasetId: dataset.id, name });
       setRunId(run.id);
-      setRunStatus(run.status);
       setMsg({ ok: true, text: `caption job started · run ${run.id.slice(0, 8)}` });
     } catch (e) {
       setMsg({ ok: false, text: `couldn't start: ${String((e as Error).message).slice(0, 160)}` });
@@ -117,7 +116,10 @@ export function CaptionJob() {
   }
 
   const d = dataset;
-  const running = runId !== null && runStatus !== 'complete' && runStatus !== 'failed';
+  const running = runId !== null && terminal === null;
+  // What the pod itself reports it has captioned, while it is captioning — the pass is one forward
+  // pass per image, so this is the only number that moves during the longest phase of the run.
+  const pass = stream.progressus?.progress;
   const set = d.captionsets.find((cs) => cs.id === activeSet) ?? null;
   const captions = set?.captions ?? {};
   const captioned = d.media.filter((m) => typeof captions[m.id] === 'string' && captions[m.id].trim() !== '').length;
@@ -144,12 +146,19 @@ export function CaptionJob() {
           </button>
         </div>
 
-        {/* run panel — present only while a job started from this screen is in flight */}
+        {/* run panel — the pass as the pod reports it, for a job started from this screen */}
         {runId && (
           <div className="cj-run">
-            <div className="cj-count"><b>{runStatus ?? 'pending'}</b></div>
-            <div className="cj-bar"><span style={{ width: running ? '50%' : '100%' }} /></div>
-            <div className="cj-flight mono">run {runId.slice(0, 8)}</div>
+            <div className="cj-count">
+              {pass && pass.total
+                ? <><b>{pass.done}</b> / {pass.total} captioned</>
+                : <b>{terminal === 'complete' ? 'captioned' : terminal === 'failed' ? 'failed' : 'starting the pass'}</b>}
+            </div>
+            <div className="cj-bar">
+              <span style={{ width: terminal === 'complete' ? '100%' : pass && pass.total ? `${Math.round((pass.done / pass.total) * 100)}%` : '0%' }} />
+            </div>
+            <div className="cj-flight mono">run {runId.slice(0, 8)} · {stream.elapsedSec}s elapsed</div>
+            <Stageline stream={stream} />
           </div>
         )}
 
@@ -157,9 +166,11 @@ export function CaptionJob() {
           <div className="cj-seam mono" style={{ color: msg.ok ? 'var(--accent-soft)' : 'var(--red-500, #e5746a)' }}>{msg.text}</div>
         )}
 
-        {/* honesty seam */}
+        {/* honesty seam — the claim to be showing the work is only made where the work is shown */}
         <div className="cj-seam mono">
-          <span className="hemi2 lit" /> captioning on our compute — we can see the work. A caption pass is metered like any other run.
+          <span className="hemi2 lit" /> {running
+            ? 'captioning on our compute — the stages above are the pod\u2019s own reports.'
+            : 'captioning runs on our compute, and is metered like any other run.'}
         </div>
 
         {/* captionset picker — one dataset can carry several passes */}

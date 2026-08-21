@@ -5,6 +5,7 @@ import type { Procurator, StudioStageCb, StudioProvision } from './Procurator.js
 import type { Materia, MateriaStore } from '../types/materia.js'
 import type { HospitiumStore } from '../types/hospitium.js'
 import type { ActumExecutio } from '../types/actum.js'
+import type { Progressus } from '../types/progressus.js'
 import { makeLogger } from '../lib/logger.js'
 import { SshTransport } from './SshTransport.js'
 import { getTrace } from '../lib/trace.js'
@@ -517,6 +518,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
     onPodId?: (podId: string) => Promise<void>
     /** Called when the background SSH/bootstrap phase fails, after the pod has been terminated. */
     onLaunchFailed?: (err: unknown) => Promise<void>
+    /**
+     * Phase reports for the BACKGROUND half of the launch — the pod lock, the bootstrap, the
+     * detached start. That half runs after the caller has been answered, outside its trace, so a
+     * caller that wants those minutes on a run's timeline hands this in and routes them itself.
+     * Absent, the background phase reports nowhere, exactly as before.
+     */
+    onPhase?: (progressus: Omit<Progressus, 'at'>) => void
   }): Promise<{ podId: string }> {
     const maxAttempts = this.config.podRetries ?? 3
     let podId: string | undefined
@@ -562,9 +570,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
   private async _finishTrainingPodLaunch(
     podId: string,
     opts: {
-      env: Record<string, string>; setup: string[]
+      env: Record<string, string>
+      setup: string[]
       script?: DetachedPodScript
       onLaunchFailed?: (err: unknown) => Promise<void>
+      onPhase?: (progressus: Omit<Progressus, 'at'>) => void
     },
     provisionDeadline: number,
   ): Promise<void> {
@@ -572,10 +582,13 @@ export class SecurePodClient implements RunPodClient, Procurator {
     try {
       const sshInfo = await this._waitForSsh(podId)
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
+      opts.onPhase?.(coldStartProgressus('pod-locked', {
+        podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr,
+      }) ?? { phase: 'provisioning' })
       ssh = await this._waitForSshd(sshInfo)
       const pod = resolveDetachedPodScript(opts.script)
       await this._bootstrapDetached(ssh, podId, pod.path, pod.name,
-        { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline)
+        { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline, opts.onPhase)
       await ssh.close()
       ssh = null
     } catch (err) {
@@ -602,8 +615,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
   private async _bootstrapDetached(
     ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string,
     env: Record<string, string>, setup: string[] = [], deadline?: number,
+    onPhase?: (progressus: Omit<Progressus, 'at'>) => void,
   ): Promise<void> {
     log.info('bootstrapping training pod', { podId, script: scriptName, setupSteps: setup.length })
+    // The pod exists and is being built — a distinct, minutes-long phase from acquiring it.
+    onPhase?.({ phase: 'installing', message: 'preparing the pod' })
     const timeLeft = (): number => (deadline === undefined ? BOOTSTRAP_CMD_TIMEOUT_MS : deadline - Date.now())
     for (const cmd of setup) {
       const left = timeLeft()
@@ -621,6 +637,8 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const envStr = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ')
     await ssh.exec(`${envStr} nohup python3 /root/${scriptName} >> /tmp/${scriptName}.log 2>&1 &`, { timeout: 10_000 })
     log.info('training pod launched', { podId })
+    // Handover: the pod owns the run from here and reports its own phases on /runner/status.
+    onPhase?.({ phase: 'loading', message: 'starting the job on the pod' })
   }
 
   // ── private ──────────────────────────────────────────────────────────────
