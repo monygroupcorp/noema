@@ -45,6 +45,8 @@ import {
   appendFailureNote,
   appendMediaRequest,
   captionCoverageLine,
+  captionPassLabel,
+  captionPassNote,
   decomposeGateReason,
   dismissFromStream,
   floorCounts,
@@ -1067,6 +1069,100 @@ test('the floor is rebuilt from the dataset the append returned, not from the pr
   // A dataset the list has never seen is added rather than dropped.
   assert.equal(replaceDataset([], returned).length, 1)
   assert.equal(replaceDataset(null, returned)[0]!.id, 'moodboard-1')
+})
+
+// ---------------------------------------------------------------------------
+// Adding images from the DATASET screen (noema-265).
+//
+// The panel is one component rendered on two surfaces, so the three rules below are the
+// ones that have to hold wherever it is rendered rather than only where it was first
+// built. They are proved here, over the pure functions in `lib/muse.ts`, because the
+// hermetic web tests run from the repo root and cannot import a `.tsx` file.
+//
+// Fixtures are invented throughout (`m-…`, `set-…`).
+// ---------------------------------------------------------------------------
+
+// ── Non-vacuity 1 — the coverage the append recomputes, and the gate under it ──
+
+test('appending media to a captioned set drops its caption coverage and the decompose control is refused until a caption pass runs', () => {
+  // A fully captioned set of seven, and the two images an append added to it. What the
+  // append RETURNED is what the screen rebuilds from: the larger media list and the same
+  // pass with its coverage denominator recomputed over it.
+  const captions = Object.fromEntries(
+    ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7'].map((id) => [id, `a caption for ${id}`]),
+  )
+  const before = { id: 'set-1', media: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7'].map((id) => ({ id })), captionsets: [{ id: 'cs-1', coverage: '7/7', captions }] }
+  const returned = { id: 'set-1', media: [...before.media, { id: 'm-8' }, { id: 'm-9' }], captionsets: [{ id: 'cs-1', coverage: '7/9', captions }] }
+
+  // Before the append the pass covers everything and the decompose is armed.
+  assert.equal(uncaptionedCount(before, 'cs-1'), 0)
+  assert.equal(decomposeGateReason(before, 'cs-1'), null)
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }) && !decomposeGateReason(before, 'cs-1'), true)
+
+  // The screen re-reads from the returned dataset, so the coverage it shows moved with the set.
+  const entry = replaceDataset([before], returned).find((x) => x.id === 'set-1')!
+  assert.equal(uncaptionedCount(entry, 'cs-1'), 2, 'the two appended images are uncaptioned in the existing pass')
+  assert.match(captionCoverageLine(entry, 'cs-1'), /2 of 9 images have no caption in this pass/)
+
+  // And the decompose is refused until a pass covers them: over this pass it would mine the
+  // seven older captions, spend a chat call each doing it, and come back green.
+  const reason = decomposeGateReason(entry, 'cs-1')
+  assert.ok(reason, 'a pass written before the appended images refuses the decompose')
+  assert.match(reason!, /2 of 9/)
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }) && !decomposeGateReason(entry, 'cs-1'), false)
+
+  // A pass that does cover the appended images arms it again — the refusal is the gap, not the append.
+  const recaptioned = {
+    ...entry,
+    captionsets: [{ id: 'cs-1', coverage: '9/9', captions: Object.fromEntries(entry.media.map((m) => [m.id, `a caption for ${m.id}`])) }],
+  }
+  assert.equal(decomposeGateReason(recaptioned, 'cs-1'), null)
+  assert.match(captionCoverageLine(recaptioned, 'cs-1'), /all 9 images are captioned/)
+})
+
+// ── Non-vacuity 2 — the caption control quotes the set, not the append ────────
+
+test('the caption control quotes the WHOLE set after an append, not the delta', () => {
+  const seven = { media: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7'].map((id) => ({ id })) }
+  const nine = { media: [...seven.media, { id: 'm-8' }, { id: 'm-9' }] }
+
+  // Seven captioned images plus two appended is a NINE-image pass. A pass reads the whole
+  // set, so quoting the two just added would understate what is about to be billed.
+  assert.equal(captionPassLabel(nine), 'Caption all 9 images →')
+  assert.match(captionPassNote(nine), /every image in the set, not only the ones just added/)
+  assert.match(captionPassNote(nine), /9 images/)
+  assert.equal(/\b2 images\b/.test(captionPassLabel(nine) + ' ' + captionPassNote(nine)), false, 'the appended count is never the quoted count')
+
+  // The figure follows the set it is handed, and it is the set AFTER the append.
+  assert.equal(captionPassLabel(seven), 'Caption all 7 images →')
+  assert.equal(captionPassLabel({ media: [{ id: 'm-1' }] }), 'Caption all 1 image →')
+  assert.match(captionPassNote({ media: [{ id: 'm-1' }] }), /1 image ·/)
+  assert.match(captionPassNote(nine), /billed like any other run/)
+})
+
+// ── Non-vacuity 3 — a partial batch keeps what landed ────────────────────────
+
+test('a batch where some uploads fail appends the ones that succeeded and names the ones that did not', () => {
+  // Three files chosen, one of them failed to upload. What landed is still appended.
+  const uploaded = ['https://r2.example/set-8.png', 'https://r2.example/set-9.png']
+  const failed = ['set-10.png']
+
+  const request = appendMediaRequest(uploaded)
+  assert.deepEqual(request, { source: 'upload', mediaUrls: uploaded }, 'the two that landed are appended')
+  const note = appendFailureNote(failed)
+  assert.ok(note, 'the one that did not is named')
+  assert.match(note!, /set-10\.png/)
+  assert.match(note!, /1 did not upload/)
+
+  // Several failures are named together, and the plural is right.
+  assert.match(appendFailureNote(['set-10.png', 'set-11.png'])!, /2 did not upload and were not added: set-10\.png, set-11\.png/)
+
+  // A batch where NOTHING landed appends nothing at all — there is no request to fire, and
+  // the failure is still named rather than swallowed.
+  assert.equal(appendMediaRequest([]), null)
+  assert.ok(appendFailureNote(['set-8.png', 'set-9.png', 'set-10.png']))
+  // And a batch where everything landed has nothing to report.
+  assert.equal(appendFailureNote([]), null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
