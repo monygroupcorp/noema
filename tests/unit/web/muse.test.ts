@@ -126,6 +126,7 @@ import {
   loraChoiceLine,
   loraChoiceOf,
   loraWarmupNote,
+  DEEP_STACK_WARMUP_THRESHOLD,
   loraWeight,
   pinnedModelsFor,
   promptWithTrigger,
@@ -1567,6 +1568,7 @@ test('a piece fired under a LoRA names it in pinnedModels', () => {
 
 const SECOND = card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })
 const THIRD = card({ intellaId: 'lora-3', nomen: 'third-lora', trigger: 'thirdtrig' })
+const FOURTH = card({ intellaId: 'lora-4', nomen: 'fourth-lora', trigger: 'fourthtrig' })
 
 /** The stack the picker would build from a run of choices, all on the same base. */
 function stacked(...cards: ModelCard[]): LoraChoice[] {
@@ -1724,6 +1726,35 @@ test('the readouts name every model on the nozzle rather than counting them', ()
   // The hold names the triggers it is loading, all of them.
   assert.equal(nozzleTriggerLabel(stack), 'trigword + othertrig')
   assert.equal(nozzleTriggerLabel([]), undefined)
+})
+
+// ── Proof — a deep stack's warm-up note names the cold start (rth's rider, noema-281) ──
+//
+// noema-276 shipped the stack with no cap, which is rth's ruling: nothing here bounds how
+// many LoRAs a run may carry, and this note does not change that. It only names the wait
+// more plainly once the stack is deep enough for the wait to be worth naming twice.
+
+test("a stack of four names the cold start; a stack of three doesn't, and the stack still fires either way", () => {
+  const three = stacked(card(), SECOND, THIRD)
+  const four = stacked(card(), SECOND, THIRD, FOURTH)
+  assert.equal(three.length, DEEP_STACK_WARMUP_THRESHOLD - 1)
+  assert.equal(four.length, DEEP_STACK_WARMUP_THRESHOLD)
+
+  // Non-vacuity 1 — the threshold itself: four warns of the cold start, three does not.
+  assert.match(loraWarmupNote(four)!, /cold start/, 'a stack this deep names the cold start explicitly')
+  assert.equal(/cold start/.test(loraWarmupNote(three)!), false, 'three is not a deep stack yet')
+  // Three still gets the plain multi-model note — it is not silent, only not escalated.
+  assert.match(loraWarmupNote(three)!, /may be slow/)
+
+  // Non-vacuity 2 — the subject is the wait, never quality or a limit.
+  assert.match(loraWarmupNote(four)!, /may be slow/)
+  assert.equal(/quality/i.test(loraWarmupNote(four)!), false, 'this is not a claim about output quality')
+  assert.equal(/limit|cap|refus/i.test(loraWarmupNote(four)!), false, 'a warning that reads as a cap is a cap wearing a warning\'s clothes')
+
+  // Non-vacuity 3 — a warned stack still fires: nothing about the note touches the run
+  // request, and every pinned model still reaches it, cold-start warning or not.
+  const request = streamRunRequest('flow-t2i', 'a fox', four)
+  assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2', 'lora-3', 'lora-4'], 'a warned stack still fires, in full')
 })
 
 // ── Proof — the catalog is scoped to the flow's base-model family ───────────
