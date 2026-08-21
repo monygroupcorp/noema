@@ -33,10 +33,12 @@ import type {
   FlowDescription,
   ModelCard,
   MuseFragmentIdentity,
+  MusePiece,
   MusePieceRecord,
   MuseReaction,
   MuseSessionView,
   RunRequest,
+  RunStatus,
 } from './api';
 
 export { buildGarden, gardenCounts, rollReport, formatRoll, CATEGORIES };
@@ -299,8 +301,11 @@ export type StopCause = StopReason | 'lost';
  *
  *  `holding` is the nozzle being changed (S6) and it is NOT a stop: the loop parks,
  *  keeping its fired count, its cap, its run mode and its generation, and committing
- *  the change returns it to `running` with no relaunch. See `HoldReason`. */
-export type StreamPhase = 'idle' | 'running' | 'holding' | 'stopping' | 'stopped';
+ *  the change returns it to `running` with no relaunch. See `HoldReason`.
+ *
+ *  `resumed` is a session reopened with pieces already in its ledger: no loop is riding,
+ *  but the screen is not sitting at a fresh configuration either. See `resumePhase`. */
+export type StreamPhase = 'idle' | 'running' | 'holding' | 'stopping' | 'stopped' | 'resumed';
 
 /** Consecutive failures that end a stream. A loop that retries a hard failure forever
  *  is the other way this design can spend without a hand on it. */
@@ -463,6 +468,10 @@ export function streamStatusLine(
   const spent = quote ? ` · ~${impetusTotal(quote.impetus, fired)} impetus this stream` : '';
   const made = `${fired} ${fired === 1 ? 'piece' : 'pieces'}`;
   if (phase === 'idle') return 'idle';
+  // A reopened session that is not riding carries no fired count and no spend of its own —
+  // both belong to the stream that made its pieces, which ended. What this line has to say
+  // is that there is something here to come back to, so it says that and nothing more.
+  if (phase === 'resumed') return "resumable · this session's pieces are below · launch to make more";
   // A hold carries the SAME figures a running stream carries — the count and the spend
   // are what a stop would reset, so showing them unchanged is how the readout says this
   // is a wait and not an ending.
@@ -707,6 +716,98 @@ export const STREAM_MAX_COLUMNS = 6;
 export function streamColumns(gridPx: number): number {
   const fits = Math.floor((Number.isFinite(gridPx) ? gridPx : 0) / STREAM_TILE_PX);
   return Math.max(STREAM_MIN_COLUMNS, Math.min(STREAM_MAX_COLUMNS, fits));
+}
+
+// ── Coming back to a session (noema-263) ─────────────────────────────────────
+// The stream is state the screen holds, so a mount starts it empty — but every piece the
+// session fired is in the session's own ledger, with the lineage that produced it. A
+// screen that resumes a session can therefore rebuild its stream from the ledger instead
+// of showing nothing, which is the same hydrate-on-mount shape the rest of the app uses.
+//
+// A REBUILD IS A READ. Nothing here fires a run or reads a balance: the pieces come back,
+// and the launch control stays the only thing that spends.
+
+/** How many rows of rebuilt tiles a resumed session comes back with. One screen's worth:
+ *  past this the existing scroll shows the rest, and a session that has been riding an
+ *  infinite stream can hold hundreds of pieces — one run fetch each. */
+export const REHYDRATE_ROWS = 4;
+
+/** The rebuild's bound: the widest grid this screen lays out, four rows deep. */
+export const REHYDRATE_LIMIT = STREAM_MAX_COLUMNS * REHYDRATE_ROWS;
+
+/**
+ * The recorded pieces a resumed session rebuilds: newest first, matching the grid's own
+ * order, never more than `limit` of them, and without the ones the session recorded as
+ * dismissed — ✕ took those off the scroll, and a rebuild that put them back would undo a
+ * decision the ledger is holding.
+ *
+ * Non-vacuity: dropping the bound must fail "rehydrate asks for no more than the newest N
+ * pieces"; carrying the dismissed ones back must fail "a rebuilt tile keeps the reaction,
+ * the dismissal and the saved flag the session recorded".
+ */
+export function rehydratePieces(view: MuseSessionView, limit: number = REHYDRATE_LIMIT): MusePiece[] {
+  const bound = Math.max(0, Math.trunc(limit));
+  const kept: MusePiece[] = [];
+  for (let i = view.pieces.length - 1; i >= 0 && kept.length < bound; i -= 1) {
+    const piece = view.pieces[i]!;
+    if (piece.dismissed) continue;
+    kept.push(piece);
+  }
+  return kept;
+}
+
+/**
+ * The stream a resumed session comes back as.
+ *
+ * Every rebuilt tile starts as `running`, because that is what is true until its run has
+ * been asked: a recorded piece stores no media, so a rebuilt tile resolves its image from
+ * its own run exactly as a live one does, and a piece whose run has not reached terminal
+ * is watched again from there rather than being called finished.
+ *
+ * The prompt is recomposed from the recorded lineage through the same template the roll
+ * composed it with. A model trigger is not a fragment and is not in the lineage, so a
+ * rebuilt prompt names the fragments the piece was drawn from and nothing else.
+ *
+ * The reaction, the dismissal and the saved flag are NOT rebuilt onto the tile: they are
+ * read off the session wherever the tile is rendered (`reactionOf`, `savedOf`), which is
+ * already the rule — the ledger is the record and the tile is not a second copy of it.
+ *
+ * Non-vacuity: returning `EMPTY_STREAM` must fail "returning to a session rebuilds its
+ * recorded pieces as tiles".
+ */
+export function rehydrateStream(view: MuseSessionView, limit: number = REHYDRATE_LIMIT): StreamState {
+  return {
+    pieces: rehydratePieces(view, limit).map((p) => streamPiece(p.runId, composeTemplate(p.fragments), p.fragments)),
+    pending: [],
+  };
+}
+
+/**
+ * What a fetched run says about the tile rebuilt from it: a terminal to announce through
+ * `announceTerminal`, or `null` for a run that is still going.
+ *
+ * A piece that was in flight when the page went away is the row that matters here — the
+ * run keeps going on the pod after the client stops watching, so it may have finished, and
+ * it may equally still be running. Both answers come from the run itself.
+ *
+ * Non-vacuity: folding a non-terminal run in as terminal must fail "a piece whose run has
+ * not reached terminal comes back as still generating and is watched again".
+ */
+export function terminalOf(status: RunStatus | undefined): 'complete' | 'failed' | null {
+  return status === 'complete' || status === 'failed' ? status : null;
+}
+
+/**
+ * The phase a resumed session reads as. A session whose ledger holds pieces is *resumable*:
+ * `idle` renders the screen as a fresh configuration, which says the opposite of what the
+ * ledger holds. It is a readout and nothing more — resuming fires nothing, and the launch
+ * control is still the only thing that spends.
+ *
+ * Non-vacuity: returning `'idle'` unconditionally must fail "a resumed session that is not
+ * streaming reads as resumable rather than as a fresh configuration".
+ */
+export function resumePhase(state: StreamState): StreamPhase {
+  return state.pieces.length > 0 ? 'resumed' : 'idle';
 }
 
 /** One line of a piece's lineage, as the expanded view names it. */
