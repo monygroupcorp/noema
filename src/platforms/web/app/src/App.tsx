@@ -20,7 +20,7 @@ import { Datasets } from './screens/Datasets';
 import { Dataset } from './screens/Dataset';
 import { CaptionJob } from './screens/CaptionJob';
 import { Derive } from './screens/Derive';
-import { Muse } from './screens/Muse';
+import { Muse, MuseSessions } from './screens/Muse';
 import { TrainRun } from './screens/TrainRun';
 import { Shelf } from './screens/Shelf';
 import { Teams } from './screens/Teams';
@@ -64,6 +64,11 @@ export function App() {
       <Route path="/datasets/:id/caption" element={<CaptionJob />} />
       <Route path="/datasets/:id/derive" element={<Derive />} />
       <Route path="/datasets/:id/muse" element={<Muse />} />
+      {/* The sessions broken off a dataset (noema-274). The bare muse route above still
+          means "resume the most recently worked session"; one specific session is named
+          on it as `?session=<id>`, which leaves that existing meaning — and every link
+          and bookmark carrying it — untouched. */}
+      <Route path="/datasets/:id/muse/sessions" element={<MuseSessions />} />
       <Route path="/train/run/:id" element={<TrainRun />} />
       <Route path="/models" element={<Shelf />} />
       <Route path="/teams" element={<Teams />} />

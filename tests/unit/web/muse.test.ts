@@ -139,6 +139,20 @@ import {
   LORA_WEIGHT_MIN,
   type LoraChoice,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  entryStampsSession,
+  filterSessionHistory,
+  matchesSessionQuery,
+  sessionCountLine,
+  sessionEntry,
+  sessionHistory,
+  sessionHistoryHref,
+  sessionHref,
+  sessionRow,
+  sessionSearchEmptyNote,
+  unreadableRun,
+  SESSION_PARAM,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
@@ -2407,4 +2421,155 @@ test('a decompose refused for having nothing to do reads as a status, not as a f
   assert.match(note, /already decomposed/)
   assert.match(note, /nothing was spent/)
   assert.doesNotMatch(note, /couldn't decompose/, 'the press was reasonable — this is the status that was missing')
+})
+
+// ---------------------------------------------------------------------------
+// The session history (noema-274) — every session a dataset carries, findable.
+//
+// The resume lookup was the ONLY consumer of the session list: the screen took the most
+// recently changed session and dropped the rest, so an earlier session could not be
+// addressed from the product at all. These are the rules a history is made of, and the
+// one that keeps browsing from being mistaken for working.
+//
+// Fixtures are invented throughout (`ses-…`, `run-…`, `ds-…`).
+// ---------------------------------------------------------------------------
+
+
+// Non-vacuity 1 — the list is ordered by the work, newest first
+
+test('sessions are listed most recently worked first', () => {
+  const fox = frag('subject', 'a fox')
+  const oldest = session([fox], { id: 'ses-oldest', mutatum: '2026-01-01T00:00:00.000Z' })
+  const newest = session([fox], { id: 'ses-newest', mutatum: '2026-03-09T00:00:00.000Z' })
+  const middle = session([fox], { id: 'ses-middle', mutatum: '2026-02-02T00:00:00.000Z' })
+
+  const rows = sessionHistory([oldest, newest, middle])
+  assert.deepEqual(rows.map((r) => r.id), ['ses-newest', 'ses-middle', 'ses-oldest'])
+
+  // The first row is the session the bare muse door resumes into, which is what makes
+  // the history read the same way the product behaves.
+  assert.equal(rows[0]!.id, latestSession([oldest, newest, middle])!.id)
+})
+
+// Non-vacuity 2 — a session that made nothing is the one most worth finding
+
+test('a session that recorded no pieces is still listed, and says so', () => {
+  const fox = frag('subject', 'a fox')
+  const nothing = session([fox], { id: 'ses-nothing', pieces: [] })
+  const something = session([fox], {
+    id: 'ses-something',
+    pieces: [ledgerPiece('run-1', [fox], { saved: true }), ledgerPiece('run-2', [fox])],
+  })
+
+  const rows = sessionHistory([nothing, something])
+  assert.equal(rows.length, 2, 'a session with an empty ledger is not filtered out of its own history')
+
+  const empty = rows.find((r) => r.id === 'ses-nothing')!
+  assert.equal(empty.empty, true)
+  assert.equal(empty.pieces, 0)
+  assert.match(empty.line, /nothing was recorded/, 'and the row says it out loud rather than rendering a bare 0')
+
+  const worked = rows.find((r) => r.id === 'ses-something')!
+  assert.match(worked.line, /2 pieces/)
+  assert.match(worked.line, /1 saved/)
+  assert.doesNotMatch(worked.line, /nothing was recorded/)
+
+  // One piece is one piece, and a session that saved none of them says that too.
+  assert.match(sessionRow(session([fox], { pieces: [ledgerPiece('run-1', [fox])] })).line, /1 piece · none saved/)
+})
+
+// Non-vacuity 3 — browsing is not working: reading an old session must not move the door
+
+test('opening an older session does not change which session a bare visit resumes', () => {
+  const fox = frag('subject', 'a fox')
+  const current = session([fox], { id: 'ses-current', mutatum: '2026-03-09T00:00:00.000Z' })
+  const older = session([fox], { id: 'ses-older', mutatum: '2026-02-01T00:00:00.000Z' })
+  const all = [current, older]
+
+  // A visit naming a session READS that one session: no list, no spawn, and no write.
+  // `MuseSessions.save` restamps `mutatum`, and `mutatum` is both this list's sort key
+  // and what `latestSession` resumes by — so a history that wrote to a session merely
+  // because it was looked at would silently move the resume pointer onto it.
+  const entry = sessionEntry(older.id)
+  assert.deepEqual(entry, { kind: 'read', sessionId: 'ses-older' })
+  assert.equal(entryStampsSession(entry), false, 'arriving writes nothing to the session it names')
+
+  // and so, after opening the older one, the bare door still resumes the current work
+  assert.equal(latestSession(all)!.id, 'ses-current')
+  assert.equal(sessionHistory(all)[0]!.id, 'ses-current')
+
+  // A bare visit is unchanged: list, resume the most recent, spawn only when there is none.
+  assert.deepEqual(sessionEntry(null), { kind: 'resume' })
+  assert.deepEqual(sessionEntry(''), { kind: 'resume' })
+  assert.deepEqual(sessionEntry('   '), { kind: 'resume' })
+
+  // The session is named ON the existing muse route rather than replacing it, so every
+  // link and bookmark that means "resume" keeps meaning that.
+  assert.equal(sessionHref('ds-1', 'ses-older'), `/datasets/ds-1/muse?${SESSION_PARAM}=ses-older`)
+  assert.equal(sessionHistoryHref('ds-1'), '/datasets/ds-1/muse/sessions')
+  assert.equal(sessionHref('ds/1', 'ses one'), `/datasets/ds%2F1/muse?${SESSION_PARAM}=ses%20one`)
+})
+
+// Non-vacuity 4 — a session is hunted for by what it made
+
+test('a search matches a session by the text of a fragment in a piece\'s lineage', () => {
+  const fox = frag('subject', 'a fox')
+  const harbor = frag('setting', 'a foggy harbor')
+  const cat = frag('subject', 'a cat')
+
+  const foxes = session([fox, harbor], {
+    id: 'ses-foxes',
+    mutatum: '2026-03-09T00:00:00.000Z',
+    pieces: [ledgerPiece('run-1', [fox, harbor])],
+  })
+  const cats = session([cat], {
+    id: 'ses-cats',
+    mutatum: '2026-02-01T00:00:00.000Z',
+    pieces: [ledgerPiece('run-2', [cat])],
+  })
+  const rows = sessionHistory([foxes, cats])
+
+  assert.deepEqual(filterSessionHistory(rows, 'fox').map((r) => r.id), ['ses-foxes'])
+  assert.deepEqual(filterSessionHistory(rows, 'harbor').map((r) => r.id), ['ses-foxes'],
+    'any fragment of the lineage finds it, not just the subject')
+  assert.deepEqual(filterSessionHistory(rows, 'FOGGY').map((r) => r.id), ['ses-foxes'], 'case is not a hurdle')
+  assert.deepEqual(filterSessionHistory(rows, 'cat').map((r) => r.id), ['ses-cats'])
+  assert.deepEqual(filterSessionHistory(rows, '').map((r) => r.id), ['ses-foxes', 'ses-cats'],
+    'an empty search is not a filter, and the order is the history\'s own')
+
+  // The dates a session was worked are searchable too — the other way a session is remembered.
+  assert.deepEqual(filterSessionHistory(rows, '2026-02').map((r) => r.id), ['ses-cats'])
+
+  // A row carries the distinct lineage texts it matched on, so the list can show them.
+  assert.deepEqual(rows.find((r) => r.id === 'ses-foxes')!.lineage, ['a fox', 'a foggy harbor'])
+  assert.equal(matchesSessionQuery(sessionRow(cats), 'fox'), false)
+
+  // And a search that matches nothing says which field it ran over.
+  assert.match(sessionSearchEmptyNote(filterSessionHistory(rows, 'zebra'), 'zebra')!, /fragments/)
+  assert.match(sessionSearchEmptyNote([], '')!, /no muse sessions/)
+  assert.equal(sessionSearchEmptyNote(rows, ''), null)
+})
+
+test('the dataset screen says how many sessions it has, or nothing at all', () => {
+  const fox = frag('subject', 'a fox')
+  assert.equal(sessionCountLine([]), null, 'with no sessions the door alone is the whole story')
+  assert.match(sessionCountLine([session([fox])])!, /1 muse session\b/)
+  assert.match(sessionCountLine([session([fox], { id: 'a' }), session([fox], { id: 'b' })])!, /2 muse sessions/)
+})
+
+test('a piece whose run cannot be read still renders, and says the image could not be read', () => {
+  const fox = frag('subject', 'a fox')
+  const view = session([fox], { pieces: [ledgerPiece('run-gone', [fox])] })
+
+  // The rebuild puts the piece back from the ledger — lineage and all — and its image is
+  // resolved from its own run afterwards, because a recorded piece stores no media.
+  const rebuilt = rehydrateStream(view)
+  assert.equal(rebuilt.pieces.length, 1)
+  assert.equal(rebuilt.pieces[0]!.status, 'running')
+
+  const settled = applyRunResult(rebuilt, 'run-gone', unreadableRun())
+  const tile = settled.pieces[0]!
+  assert.equal(tile.status, 'failed', 'a run that no longer resolves is a state, not a tile stuck on generating')
+  assert.match(tile.error!, /could not be read/)
+  assert.deepEqual(tile.lineage.map((f) => f.text), ['a fox'], 'and the piece keeps the lineage it was drawn from')
 })
