@@ -51,6 +51,7 @@ import {
   latestSession,
   launchBlockReason,
   launchLabel,
+  lineageBlockReason,
   lineageOf,
   loraCatalog,
   loraCatalogReason,
@@ -665,6 +666,14 @@ export function Muse() {
   async function doFire(index: number, prompt: string, lineage: readonly Fragment[]) {
     if (!modusId) return;
     if (!canFireOne(modusId, prompt, blockReason)) return;
+    // BEFORE THE RUN, because the run spends. A lineage the session's floor cannot
+    // resolve is refused at the record call below, and by then the piece has been paid
+    // for and can never be reacted to, saved or dismissed.
+    const unheld = lineageBlockReason(session, lineage);
+    if (unheld) {
+      setFired((prev) => ({ ...prev, [index]: { error: unheld } }));
+      return;
+    }
     setBusy(index);
     try {
       const { run } = await api.createRun(ignitionRequest(modusId, prompt));
@@ -1071,6 +1080,18 @@ export function Muse() {
         // the prompt, and the weights in `pinnedModels` — because either alone is a
         // full-price no-op. The trigger enters the PROMPT only: it is not a fragment, it is
         // not on the floor, and it is not in the lineage recorded below.
+        // BEFORE THE RUN, because the run spends. The same pre-flight the manual path
+        // makes: a draw whose lineage the session's floor cannot resolve is refused at
+        // the record call, and by then the piece has been paid for. It counts as a
+        // consecutive error, so a floor that stays out of step parks the stream through
+        // the loop's own stop rule rather than firing into it.
+        const unheld = lineageBlockReason(sessionRef.current, draw.fragments);
+        if (unheld) {
+          consecutiveErrors += 1;
+          setStreamError(unheld);
+          continue;
+        }
+
         const nozzle = loraRef.current;
         const firePrompt = promptWithTrigger(draw.prompt, nozzle);
 

@@ -56,6 +56,7 @@ import {
   floorSheet,
   floorToggle,
   latestSession,
+  lineageBlockReason,
   manualAddError,
   manualAddRequest,
   mergedExclusions,
@@ -1952,4 +1953,35 @@ test('a collapsed nozzle still names the model that is loaded and its weight', (
   assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /infinite/)
   assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /a workflow/)
   assert.match(configSummaryLine(CFG(), null), /no workflow/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE FIRE PRE-FLIGHT (noema-272)
+//
+// A fire spends before it records: `createRun` reserves and settles, and the ledger
+// entry is written after it returns. A lineage the session's floor cannot resolve is
+// rejected at that record call, by which point the piece has been paid for and can
+// never be reacted to, saved or dismissed. The screen holds both halves already — the
+// floor on the session, the lineage on the draw — so the refusal belongs before the run.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('a piece whose lineage the floor does not hold is refused before it is fired', () => {
+  const fox = frag('subject', 'a fox')
+  const harbor = frag('setting', 'a foggy harbor')
+  const stranger = frag('palette', 'neon pink')
+
+  const s = session([fox, harbor])
+  assert.equal(lineageBlockReason(s, [fox, harbor]), null, 'a lineage the floor holds fires')
+
+  const refusal = lineageBlockReason(s, [fox, stranger])
+  assert.ok(refusal, 'a lineage citing a fragment the floor does not hold does not')
+  assert.match(refusal!, /neon pink/, 'and the refusal names the fragment that is missing')
+
+  // A darkened fragment is still a fragment the floor HOLDS — a piece rolled before it
+  // was taken out of the draw is a real piece with a resolvable lineage.
+  const darkened = session([fox, harbor], { floor: [entry(fox, { enabled: false }), entry(harbor)] })
+  assert.equal(lineageBlockReason(darkened, [fox]), null, 'darkened is not absent')
+
+  // No session open means no ledger entry is attempted, so there is nothing to refuse.
+  assert.equal(lineageBlockReason(null, [stranger]), null)
 })
