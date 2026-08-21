@@ -1298,6 +1298,34 @@ export function appendFailureNote(failed: readonly string[]): string | null {
   return `${failed.length} did not upload and ${failed.length === 1 ? 'was' : 'were'} not added: ${failed.join(', ')}`;
 }
 
+/**
+ * What a caption pass will cover, as the number the control carries.
+ *
+ * A CAPTION PASS READS THE WHOLE SET. It captions every media item the dataset holds,
+ * not the ones that were just appended, and every image in it is one metered call. So
+ * the figure on the control is the size of the SET after the append — 7 + 2 quotes a
+ * nine-image pass — and it is derived from the set alone: there is no appended count in
+ * this signature to quote instead.
+ *
+ * Understating this is the one error this surface is not allowed to make: a control that
+ * says two while nine are billed is a price the user did not agree to.
+ *
+ * Non-vacuity: quoting the appended delta must fail "the caption control quotes the
+ * WHOLE set after an append, not the delta".
+ */
+export function captionPassLabel(dataset: Pick<CaptionedSet, 'media'>): string {
+  const total = dataset.media.length;
+  return `Caption all ${total} ${total === 1 ? 'image' : 'images'} →`;
+}
+
+/** The sentence under the caption control: what the pass covers and that it is metered
+ *  like any other run. Same figure as the label, from the same place. */
+export function captionPassNote(dataset: Pick<CaptionedSet, 'media'>): string {
+  const total = dataset.media.length;
+  return `a caption pass captions every image in the set, not only the ones just added — this one is `
+    + `${total} ${total === 1 ? 'image' : 'images'} · billed like any other run`;
+}
+
 // ── The steer keyboard and the consent sheet (noema-261) ─────────────────────
 // The surface over the steer route. A person writes a short instruction, one metered
 // call returns a PROPOSAL, and the proposal is rendered as a sheet of pills that can be

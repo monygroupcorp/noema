@@ -3,7 +3,16 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset as DatasetT } from '../lib/api';
-import { categoryColor, curatedFragments } from '../lib/muse';
+import {
+  captionCoverageLine,
+  captionPassLabel,
+  captionPassNote,
+  categoryColor,
+  curatedFragments,
+  decomposeGateReason,
+  replaceDataset,
+} from '../lib/muse';
+import { AddImages } from '../components/AddImages';
 import { canFireDecompose, canOfferDecompose, decomposeCaptionsetId, launchDecomposeJob } from '../lib/training';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
@@ -28,6 +37,23 @@ import { canFireDecompose, canOfferDecompose, decomposeCaptionsetId, launchDecom
 // noema-229 (Muse P3) — `categoryColor` and `curatedFragments` now live in `lib/muse.ts`, shared
 // with the dataset-wide Muse screen (`/datasets/:id/muse`), and are re-exported here so this
 // screen's own call sites and its existing test keep working unchanged.
+//
+// noema-265 — growing the set has its home here, against the media grid. The panel itself is
+// `components/AddImages` (noema-260), rendered on the muse screen too; what this screen adds is
+// the chain that follows an append, and it is the SAME chain, from the same pure rules in
+// `lib/muse.ts`:
+//
+//   THE SCREEN REBUILDS FROM WHAT THE APPEND RETURNED. The response carries the new version, the
+//   new media and every pass' recomputed coverage, so the header count, the coverage readout and
+//   the captionset rows all move together. A screen showing nine images over a 7/7 coverage line
+//   is lying about what a caption pass would cost.
+//
+//   THE COVERAGE GATE TRAVELS WITH THE PANEL. A pass that does not cover the appended images
+//   refuses the decompose here exactly as it does on the muse screen — otherwise this surface
+//   becomes the way to walk an uncaptioned image past the gate the other one enforces.
+//
+//   THE CAPTION CONTROL QUOTES THE WHOLE SET. A caption pass reads every image in the set, so the
+//   figure on the control is the size of the set after the append, never the size of the append.
 
 export { categoryColor, curatedFragments };
 
@@ -69,6 +95,10 @@ export function Dataset() {
   const [decomposing, setDecomposing] = useState(false);
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Adding images (noema-265). The append returns the whole dataset; putting THAT back into the
+  // list is what re-reads the screen — nothing here patches a local copy.
+  const [addOpen, setAddOpen] = useState(false);
+
   async function doDecompose(dataset: DatasetT, selectedId: string | null) {
     const captionsetId = decomposeCaptionsetId(dataset, selectedId);
     if (!canFireDecompose({ captionsetId, inFlight: decomposing })) return;
@@ -104,6 +134,22 @@ export function Dataset() {
   }
   const active = activeSet ?? (d.captionsets[0]?.id ?? '');
   const version = d.versions[d.versions.length - 1]?.v ?? '—';
+  const nextCaptionsetId = decomposeCaptionsetId(d, active);
+  const decomposeGate = decomposeGateReason(d, nextCaptionsetId);
+
+  // What an appended image still needs, in the order it needs it: what the chosen pass covers
+  // now, what a pass over the set would cover and cost, and the decompose that stays refused
+  // until it has run. Every figure is derived from the dataset the server last returned.
+  const afterAppend = (
+    <div className="muse-add-next">
+      <div className="muse-add-readout mono">{captionCoverageLine(d, nextCaptionsetId)}</div>
+      <div className="muse-add-step">
+        <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>{captionPassLabel(d)}</Link>
+        <span className="gt-sub mono">{captionPassNote(d)}</span>
+      </div>
+      {decomposeGate && <div className="gt-sub mono">{decomposeGate}</div>}
+    </div>
+  );
 
   const crumb = (
     <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
@@ -160,6 +206,17 @@ export function Dataset() {
                 })}
               </div>
             )}
+
+            {/* Growing the set (noema-265) — against the grid it grows, and the append's response
+                is what the screen re-renders from. */}
+            <AddImages
+              dataset={d}
+              open={addOpen}
+              onOpenChange={setAddOpen}
+              onAppended={(updated) => setDatasets((ds) => replaceDataset(ds, updated))}
+              next={afterAppend}
+              title="add images to this dataset"
+            />
           </div>
 
           {/* the panels */}
@@ -178,12 +235,14 @@ export function Dataset() {
                 <Link className="lnk" to={`/datasets/${d.id}/caption`}>+ new captionset</Link> · <Link className="lnk" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
                 {canOfferDecompose(d) && (
                   <> · <button className="lnk" type="button"
-                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, active), inFlight: decomposing })}
+                    disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
                     onClick={() => void doDecompose(d, active)}>
                     {decomposing ? 'decomposing…' : 'decompose →'}
                   </button></>
                 )} · <Link className="lnk" to={`/datasets/${d.id}/muse`}>muse →</Link>
               </div>
+              <p className="ds-panel-note">{captionCoverageLine(d, nextCaptionsetId)}</p>
+              {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
               {decomposing && <p className="ds-panel-note">reading every caption in this set — one pass per caption, this stays open until the last one is written.</p>}
               {decomposeMsg && <p className="ds-panel-note">{decomposeMsg.text}</p>}
             </div>
