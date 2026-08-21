@@ -218,6 +218,9 @@ function Axes() {
 
 function Cloud({ corpus, baseColors, dimMask, onPick, onFocusPoint }: {
   corpus: Corpus; baseColors: Float32Array; dimMask: Uint8Array | null;
+  // onPick carries the FULL result of a non-drag click: an index when the ray hit a
+  // selectable point, null when it hit empty space. The consumer selects on the former
+  // and deselects on the latter — nothing outside this callback may cancel a pick.
   onPick: (i: number | null) => void; onFocusPoint: (i: number) => void;
 }) {
   const { camera, gl, controls } = useThree() as any;
@@ -434,17 +437,29 @@ function CorpusSpace() {
   const [sphere, setSphere] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' }[]>([]);
   const focusKey = useRef(0);
-  const MIN_R = 0.03, DEFAULT_R = MIN_R;   // double-click starts atomic; expand outward via the slider
+  const MIN_R = 0.03, DEFAULT_R = MIN_R;   // a selection starts atomic; expand outward via the slider
 
   const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };
 
+  // Single click on a point: highlight it, open its neighborhood sphere at the atomic
+  // default radius, and open the side panel — the camera stays exactly where the user
+  // put it. Double-click is this plus a fly-to (focusPoint below).
+  const selectPoint = (i: number) => {
+    if (!corpus) return;
+    const p = corpus.positions;
+    const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
+    setSphere({ x, y, z, r: DEFAULT_R });
+    setActiveCluster(null); setGalleryOpen(true); setPicked(i);
+  };
+  // Single click that hit no point: deselect. Routed through the pick result rather than
+  // a click bubbling off the canvas, so a click that DID hit a point is not cancelled.
+  const clearPick = () => setPicked(null);
   const focusPoint = (i: number) => {                            // double-click: fly + select sphere neighborhood
     if (!corpus) return;
     const p = corpus.positions; focusKey.current++;
     const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
     setFocus({ x, y, z, dist: 1.5, key: focusKey.current });
-    setSphere({ x, y, z, r: DEFAULT_R });
-    setActiveCluster(null); setGalleryOpen(true); setPicked(i);
+    selectPoint(i);
   };
   const focusCluster = (id: number) => {
     if (!corpus) return;
@@ -634,7 +649,11 @@ function CorpusSpace() {
 
   return (
     <AppShell crumb="space">
-      <div className="space" onClick={() => { setPicked(null); }}>
+      {/* No clear-on-click here: deselection is driven by the pick result inside the
+          canvas (see onPick below), which is the only place that knows whether the
+          click landed on a point. Clicks still bubble normally, which the panels
+          above rely on. */}
+      <div className="space">
         {fallbackVestigia ? (
           <SpaceFallbackGrid items={fallbackVestigia} onRemove={removeFallbackItem} onImpressio={setFallbackImpressio} />
         ) : !glOk ? <NoWebGL /> : err ? (
@@ -653,7 +672,7 @@ function CorpusSpace() {
               <color attach="background" args={[BG]} />
               <fog attach="fog" args={[BG, 11, 22]} />
               <Axes />
-              <Cloud corpus={corpus} baseColors={baseColors} dimMask={dimMask} onPick={(i) => setPicked(i)} onFocusPoint={focusPoint} />
+              <Cloud corpus={corpus} baseColors={baseColors} dimMask={dimMask} onPick={(i) => { if (i == null) clearPick(); else selectPoint(i); }} onFocusPoint={focusPoint} />
               <Highlight corpus={corpus} index={picked} />
               {selection.map((s, i) => (
                 <mesh key={i} position={[s.x, s.y, s.z]}>
