@@ -61,6 +61,9 @@ import {
   loraWarmupNote,
   loraWeight,
   chooseLora,
+  setLoraWeight,
+  nozzleChanged,
+  nozzleTriggerLabel,
   manualAddError,
   manualAddRequest,
   mergedExclusions,
@@ -317,14 +320,19 @@ export function Muse() {
   const [publicModels, setPublicModels] = useState<ModelCard[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [lora, setLora] = useState<LoraChoice | null>(null);
+  // The nozzle is a STACK (noema-276): an ordered list of choices, empty when the flow
+  // fires on its own base alone. One model is the list of one; nothing here is a special
+  // case for it.
+  const [lora, setLora] = useState<LoraChoice[]>([]);
   const [loraOpen, setLoraOpen] = useState(false);
-  // The choice UNDER REVIEW. Nothing reaches the stream until it is committed, which is
+  // The stack UNDER REVIEW. Nothing reaches the stream until it is committed, which is
   // what the hold is holding for: a half-made choice must not ride the next piece.
-  const [draft, setDraft] = useState<LoraChoice | null>(null);
-  const [weightText, setWeightText] = useState('');
+  const [draft, setDraft] = useState<LoraChoice[]>([]);
+  // Weight text PER ENTRY, keyed by `intellaId` — a stack where setting one weight moved
+  // another would be worse than no stack at all, so no field is shared between entries.
+  const [weightText, setWeightText] = useState<Record<string, string>>({});
   const [hold, setHoldState] = useState<HoldState | null>(null);
-  const [warmup, setWarmup] = useState<LoraChoice | null>(null);
+  const [warmup, setWarmup] = useState<LoraChoice[]>([]);
   // The manual path (D3): the roll cards, closed by default. The stream is the front door.
   const [manualOpen, setManualOpen] = useState(false);
 
@@ -666,14 +674,14 @@ export function Muse() {
     setQuote(null);
     setQuoteError(null);
     setFired({});
-    // A LoRA is scoped to ONE base-model family, so a flow change drops the chosen one
-    // rather than carrying it onto a base it cannot work on. The catalog is re-read from
-    // the new flow's own `familia` below.
+    // A LoRA is scoped to ONE base-model family, so a flow change drops the WHOLE stack
+    // rather than carrying any of it onto a base it cannot work on. The catalog is
+    // re-read from the new flow's own `familia` below.
     setFamilia(null);
-    setLora(null);
-    setDraft(null);
-    setWeightText('');
-    setWarmup(null);
+    setLora([]);
+    setDraft([]);
+    setWeightText({});
+    setWarmup([]);
     if (!id_) return;
     setFlowLoading(true);
     api.getFlow(id_)
@@ -833,7 +841,7 @@ export function Muse() {
   // leaves the loop for good and the only way back in is `launch()`.
   const holdRef = useRef<HoldState | null>(null);
   const holdWaiters = useRef<Array<() => void>>([]);
-  const loraRef = useRef<LoraChoice | null>(lora);
+  const loraRef = useRef<LoraChoice[]>(lora);
 
   /** Wake the parked loop without deciding anything for it — it re-reads the hold and
    *  every other refusal itself, so a stop pressed during a hold is still a stop. */
@@ -896,9 +904,15 @@ export function Muse() {
 
   /** Opening the control holds a running stream: pieces fired while a model is being
    *  chosen come out of the old nozzle at full price. */
+  function weightTextOf(stack: readonly LoraChoice[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const c of stack) out[c.intellaId] = c.weight != null ? String(c.weight) : '';
+    return out;
+  }
+
   function openLora() {
     setDraft(lora);
-    setWeightText(lora?.weight != null ? String(lora.weight) : '');
+    setWeightText(weightTextOf(lora));
     setLoraOpen(true);
     setHold({ reason: 'picking' });
   }
@@ -907,21 +921,26 @@ export function Muse() {
   function cancelLora() {
     setLoraOpen(false);
     setDraft(lora);
+    setWeightText(weightTextOf(lora));
     setHold(null);
   }
 
   function commitLora() {
-    const next: LoraChoice | null = draft
-      ? { ...draft, weight: weightText.trim() === '' ? null : loraWeight(Number(weightText)) }
-      : null;
-    const changed = (next?.intellaId ?? null) !== (lora?.intellaId ?? null)
-      || (next?.weight ?? null) !== (lora?.weight ?? null);
+    // Each entry takes its OWN field. An entry whose field is empty stays `null` — the
+    // LoRA's own default weight — rather than picking up a neighbour's number.
+    let next: LoraChoice[] = draft;
+    for (const entry of draft) {
+      const text = (weightText[entry.intellaId] ?? '').trim();
+      next = setLoraWeight(next, entry.intellaId, text === '' ? null : Number(text));
+    }
+    const changed = nozzleChanged(lora, next);
     setLoraOpen(false);
     setLora(next);
     setWarmup(changed ? next : warmup);
     // A committed change stays held until the new nozzle has reached the loop; the effect
-    // above releases it. Committing nothing new releases straight away.
-    if (changed && next) setHold({ reason: 'loading', trigger: next.trigger });
+    // above releases it. Committing nothing new releases straight away. Adding or removing
+    // one entry is a nozzle change like any other.
+    if (changed && next.length > 0) setHold({ reason: 'loading', trigger: nozzleTriggerLabel(next) });
     else setHold(null);
   }
 
@@ -1153,9 +1172,9 @@ export function Muse() {
 
         const result = await settlementOf(runId);
         if (generationRef.current !== gen) return;
-        // A piece has come back under this nozzle, so the weights are on the pod: the
-        // warm-up note has nothing left to explain.
-        setWarmup(null);
+        // A piece has come back under this nozzle, so every set of weights it names is on
+        // the pod: the warm-up note has nothing left to explain.
+        setWarmup([]);
         // A run that fails after dispatch counts the same as a fire that never landed:
         // either way the loop is repeating something that is not working.
         consecutiveErrors = result.terminal === 'failed' ? consecutiveErrors + 1 : 0;
@@ -1195,8 +1214,8 @@ export function Muse() {
             <li key={card.intellaId}>
               <button
                 type="button"
-                className={`muse-lora-card${draft?.intellaId === card.intellaId ? ' on' : ''}`}
-                onClick={() => setDraft((d) => chooseLora(d, card))}
+                className={`muse-lora-card${draft.some((c) => c.intellaId === card.intellaId) ? ' on' : ''}`}
+                onClick={() => setDraft((d) => chooseLora(d, card, familia))}
               >
                 <span className="muse-lora-name">{card.nomen}</span>
                 {/* The trigger word is shown on every card and again on the
@@ -1213,20 +1232,45 @@ export function Muse() {
       {catalogLoading && <div className="gt-sub mono">reading the catalog…</div>}
       {catalogError && <div className="gt-sub mono">{catalogError}</div>}
 
-      <label className="cc-field muse-lora-weight"><span>Weight</span>
-        <input
-          className="cer-input" type="number" inputMode="decimal"
-          min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
-          placeholder="its own default"
-          disabled={!draft}
-          value={weightText}
-          onChange={(e) => setWeightText(e.target.value)}
-        />
-      </label>
+      {/* THE STACK, in the order it fires, and each entry with its OWN weight field: a
+          control where one number moved another would be spending the user's money on a
+          model they did not mean to change. An empty field is "its own default". */}
+      {draft.length > 0 && (
+        <ul className="muse-lora-stack">
+          {draft.map((entry, i) => (
+            <li key={entry.intellaId} className="muse-lora-stacked">
+              <span className="muse-lora-ord mono">{i + 1}</span>
+              <span className="muse-lora-name">{entry.nomen}</span>
+              <span className="muse-lora-trigger mono">trigger {entry.trigger}</span>
+              <label className="cc-field muse-lora-weight">
+                <span>Weight</span>
+                <input
+                  className="cer-input" type="number" inputMode="decimal"
+                  min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
+                  placeholder="its own default"
+                  aria-label={`weight for ${entry.nomen}`}
+                  value={weightText[entry.intellaId] ?? ''}
+                  onChange={(e) => setWeightText((w) => ({ ...w, [entry.intellaId]: e.target.value }))}
+                />
+              </label>
+              <button
+                type="button"
+                className="linkish muse-lora-drop"
+                onClick={() => {
+                  setDraft((d) => d.filter((c) => c.intellaId !== entry.intellaId));
+                }}
+              >
+                remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="gt-sub mono">
-        One model at a time — choosing another replaces it. A run can stack more than one; what stacking
-        costs is time — a longer download and a longer diffusion — so this control holds the bound at one.
+        Stack as many as the workflow's base takes — every one of them is pinned and every trigger word
+        is written into the prompt. What stacking costs is time: a longer weight download before the
+        first piece, and a longer diffusion on each one after it.
       </div>
 
       {streamLive && (
@@ -1238,7 +1282,9 @@ export function Muse() {
 
       <div className="muse-lora-actions">
         <button type="button" className="btn accent sm" onClick={commitLora}>
-          {draft ? `use ${draft.nomen}` : 'fire without a model'}
+          {draft.length === 0
+            ? 'fire without a model'
+            : draft.length === 1 ? `use ${draft[0].nomen}` : `use these ${draft.length} models`}
         </button>
         <button type="button" className="btn ghost sm" onClick={cancelLora}>cancel</button>
       </div>
@@ -1489,7 +1535,7 @@ export function Muse() {
                   className="btn ghost sm"
                   onClick={() => (loraOpen ? cancelLora() : openLora())}
                 >
-                  {loraOpen ? 'cancel' : lora ? 'change model' : 'choose a model'}
+                  {loraOpen ? 'cancel' : lora.length > 0 ? 'change models' : 'choose a model'}
                 </button>
               </div>
 
@@ -1557,7 +1603,7 @@ export function Muse() {
           {/* The pod fetches a newly chosen LoRA's weights before it can make anything
               with them, so the first piece under one can be slow. Said, rather than left
               to read as a stall. */}
-          {warmup && phase === 'running' && <div className="gt-sub mono">{loraWarmupNote(warmup)}</div>}
+          {warmup.length > 0 && phase === 'running' && <div className="gt-sub mono">{loraWarmupNote(warmup)}</div>}
 
           {flowLoading && <div className="gt-sub mono">reading inputs…</div>}
           {blockLaunch && !streamLive && (
