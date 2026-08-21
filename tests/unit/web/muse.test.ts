@@ -120,9 +120,12 @@ import {
   promptWithTrigger,
   streamRunRequest,
   triggerToken,
+  loraStack,
+  setLoraWeight,
+  nozzleChanged,
+  nozzleTriggerLabel,
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
-  MAX_STREAM_LORAS,
   type LoraChoice,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
@@ -1542,30 +1545,174 @@ test('a piece fired under a LoRA names it in pinnedModels', () => {
   assert.match(String(request.aditus.prompt), /trigword/)
 })
 
-// ── Proof — one LoRA in v1, by choice ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// THE NOZZLE TAKES A STACK (noema-276)
 //
-// A deliberate self-imposed bound, not a discovered platform fact: how many LoRAs a run
-// can stack has never been measured, so nothing here guesses a limit and no stacking UI
-// is built on an unmeasured number.
+// `pinnedModels` is a list and the compiler resolves every ref in it, so more than one
+// model per stream is a path the platform already runs. The five proofs below are the
+// ones that fail if any half of the stack is dropped — and a half-applied stack is not a
+// degraded feature, it is a paid run that does something other than what the screen says.
+// ═══════════════════════════════════════════════════════════════════════════
 
-test('choosing a second LoRA replaces the first', () => {
-  assert.equal(MAX_STREAM_LORAS, 1)
-  const first = chooseLora(null, card())
-  assert.equal(first?.intellaId, 'lora-1')
+const SECOND = card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })
+const THIRD = card({ intellaId: 'lora-3', nomen: 'third-lora', trigger: 'thirdtrig' })
 
-  const second = chooseLora(first, card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' }))
-  assert.equal(second?.intellaId, 'lora-2')
-  assert.equal(second?.trigger, 'othertrig')
-  assert.deepEqual(pinnedModelsFor(second), ['lora-2'], 'exactly one model rides the run')
-  assert.equal(promptWithTrigger('a fox', second).includes('trigword'), false, 'the replaced trigger is gone from the prompt')
+/** The stack the picker would build from a run of choices, all on the same base. */
+function stacked(...cards: ModelCard[]): LoraChoice[] {
+  let s: LoraChoice[] = []
+  for (const c of cards) s = chooseLora(s, c, 'base-a')
+  return s
+}
 
-  // The same control unsets: choosing what is already chosen clears the nozzle.
-  assert.equal(chooseLora(second, card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })), null)
+// Non-vacuity 1 — both models are actually given to the run
 
-  // A card with no trigger word cannot be chosen at all: it could be pinned, but nothing
+test('a piece fired under two LoRAs names BOTH in pinnedModels', () => {
+  const stack = stacked(card(), SECOND)
+  assert.deepEqual(stack.map((c) => c.intellaId), ['lora-1', 'lora-2'], 'the second stacks ON, it does not replace')
+
+  const request = streamRunRequest('flow-t2i', 'a fox', stack)
+  assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2'], 'both sets of weights are given to the run')
+  assert.deepEqual(pinnedModelsFor(stacked(card(), SECOND, THIRD)), ['lora-1', 'lora-2', 'lora-3'])
+
+  // Order is the order they were stacked, and it is the order they are pinned in.
+  assert.deepEqual(pinnedModelsFor(stacked(SECOND, card())), ['lora-2', 'lora-1'])
+
+  // A single choice is a stack of one — the one-model call sites are unchanged, not a
+  // second code path beside this one.
+  assert.deepEqual(pinnedModelsFor(CHOICE()), ['lora-1'])
+  assert.deepEqual(pinnedModelsFor([]), [])
+  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', []), false)
+})
+
+// Non-vacuity 2 — every stacked trigger reaches the prompt
+//
+// A pinned model whose trigger never appears is a paid run with no effect — the exact
+// refusal `loraChoiceOf` already encodes for one card. Lifting one trigger off a stack of
+// three reproduces it twice, per piece.
+
+test("the prompt carries every stacked LoRA's trigger word", () => {
+  const stack = stacked(card(), SECOND, THIRD)
+  const prompt = promptWithTrigger('a fox, a foggy harbor', stack)
+  assert.match(prompt, /trigword/)
+  assert.match(prompt, /othertrig/)
+  assert.match(prompt, /thirdtrig/)
+  assert.match(prompt, /a foggy harbor/, 'and the drawn prompt is still all there')
+
+  // Every pinned model has its trigger in the prompt that is fired — the two halves ride
+  // together for the whole stack, not just for its first entry.
+  const request = streamRunRequest('flow-t2i', 'a fox', stack)
+  for (const entry of stack) {
+    assert.ok(request.pinnedModels!.includes(entry.intellaId))
+    assert.match(String(request.aditus.prompt), new RegExp(entry.trigger))
+  }
+
+  // Each token is still one of the resolver's own two forms, per entry.
+  const weighted = setLoraWeight(stack, 'lora-2', 0.8)
+  assert.match(promptWithTrigger('a fox', weighted), /othertrig:0\.8/)
+  assert.match(promptWithTrigger('a fox', weighted), /trigword,/, 'an unweighted entry stays a bare trigger')
+})
+
+// Non-vacuity 3 — one weight per entry, and an unset one stays unset
+
+test("each stacked LoRA carries its own weight, and an unset weight stays unset rather than inheriting its neighbour's", () => {
+  const stack = stacked(card(), SECOND, THIRD)
+  const one = setLoraWeight(stack, 'lora-2', 0.8)
+
+  assert.equal(one.find((c) => c.intellaId === 'lora-2')!.weight, 0.8)
+  assert.equal(one.find((c) => c.intellaId === 'lora-1')!.weight, null, 'a neighbour is not moved')
+  assert.equal(one.find((c) => c.intellaId === 'lora-3')!.weight, null)
+
+  // Two entries hold two different weights at once.
+  const two = setLoraWeight(one, 'lora-3', 1.5)
+  assert.deepEqual(two.map((c) => c.weight), [null, 0.8, 1.5])
+
+  // And the unset one is written as a bare trigger — the LoRA's own default — while its
+  // neighbours carry their explicit overrides in the same prompt.
+  const prompt = promptWithTrigger('a fox', two)
+  assert.match(prompt, /othertrig:0\.8/)
+  assert.match(prompt, /thirdtrig:1\.5/)
+  assert.equal(/trigword:/.test(prompt), false, 'an unset weight does not inherit a number from anywhere')
+
+  // The band still bounds every entry, and clearing one returns it to the default.
+  assert.equal(setLoraWeight(two, 'lora-1', 9).find((c) => c.intellaId === 'lora-1')!.weight, LORA_WEIGHT_MAX)
+  assert.equal(setLoraWeight(two, 'lora-2', null).find((c) => c.intellaId === 'lora-2')!.weight, null)
+
+  // A weight change is a nozzle change, which is what holds the stream.
+  assert.equal(nozzleChanged(stack, one), true)
+  assert.equal(nozzleChanged(stack, stacked(card(), SECOND, THIRD)), false)
+  assert.equal(nozzleChanged(stack, stacked(card(), SECOND)), true, 'removing an entry is a nozzle change')
+  assert.equal(nozzleChanged(stacked(card(), SECOND), stacked(SECOND, card())), true, 'so is reordering')
+})
+
+// Non-vacuity 4 — the familia scope survives the stack
+//
+// A LoRA trained on another base is a paid run that cannot work. The rule holds today for
+// the single choice, and it has to hold for EVERY entry: a stack is only as usable as its
+// worst member.
+
+test("a LoRA outside the flow's familia cannot enter the stack", () => {
+  const stack = stacked(card(), SECOND)
+  const foreign = card({ intellaId: 'wrong-base', nomen: 'other-base-lora', trigger: 'wrongtrig', basis: 'base-b' })
+
+  assert.deepEqual(chooseLora(stack, foreign, 'base-a'), stack, 'nothing from another base enters the stack')
+  assert.equal(pinnedModelsFor(chooseLora(stack, foreign, 'base-a')).includes('wrong-base'), false)
+
+  // With no familia in hand there is no scope to check against, so nothing can be
+  // stacked — the same answer the catalog gives to the same question.
+  assert.deepEqual(chooseLora([], card(), null), [])
+  assert.deepEqual(chooseLora([], card(), undefined), [])
+  assert.deepEqual(loraCatalog([], [card(), foreign], 'base-a').map((m) => m.intellaId), ['lora-1'])
+
+  // A card with no trigger word cannot enter either: it could be pinned, but nothing
   // would ever apply it — full price, no effect.
   assert.equal(loraChoiceOf(card({ trigger: '' })), null)
-  assert.equal(chooseLora(first, card({ intellaId: 'lora-3', trigger: '' }))?.intellaId, 'lora-1')
+  assert.deepEqual(chooseLora(stack, card({ intellaId: 'lora-9', trigger: '' }), 'base-a'), stack)
+})
+
+// Non-vacuity 5 — a model cannot be stacked onto itself
+
+test('the same LoRA cannot be stacked onto itself', () => {
+  const stack = stacked(card(), SECOND)
+
+  // The same control both stacks and unstacks: choosing what is already on it takes it
+  // off, which is the only way the picker has to remove one.
+  assert.deepEqual(chooseLora(stack, card(), 'base-a').map((c) => c.intellaId), ['lora-2'])
+  assert.deepEqual(chooseLora(chooseLora(stack, card(), 'base-a'), card(), 'base-a').map((c) => c.intellaId), ['lora-2', 'lora-1'])
+
+  // And a duplicate that arrives any other way is dropped rather than pinned twice: the
+  // compiler de-dupes a repeated ref, so a stack carrying it twice would be describing a
+  // run that does not exist.
+  const doubled = [CHOICE(), CHOICE({ nomen: 'same-lora-again' })]
+  assert.deepEqual(loraStack(doubled).map((c) => c.intellaId), ['lora-1'])
+  assert.deepEqual(pinnedModelsFor(doubled), ['lora-1'], 'one model, pinned once')
+  assert.equal(promptWithTrigger('a fox', doubled), promptWithTrigger('a fox', CHOICE()))
+})
+
+// The readouts name the stack, and the hold names what it is loading
+
+test('the readouts name every model on the nozzle rather than counting them', () => {
+  const stack = setLoraWeight(stacked(card(), SECOND), 'lora-2', 0.8)
+
+  for (const line of [loraChoiceLine(stack), nozzleSummaryLine(stack)]) {
+    assert.match(line, /sample-lora/)
+    assert.match(line, /other-lora/, 'a second model is NAMED, never summed into a count')
+    assert.match(line, /trigword/)
+    assert.match(line, /othertrig/)
+    assert.equal(/2 models/.test(line), false, 'a count carries none of what the line exists to say')
+  }
+  assert.match(nozzleSummaryLine(stack), /own default weight/, 'the unweighted entry still says which weight it fires at')
+  assert.match(nozzleSummaryLine(stack), /weight 0\.8/)
+
+  // The warm-up note matters MORE with a stack: the pod fetches every set of weights
+  // before the first piece, so it says how many are coming down.
+  assert.match(loraWarmupNote(stack)!, /may be slow/)
+  assert.match(loraWarmupNote(stack)!, /sample-lora/)
+  assert.match(loraWarmupNote(stack)!, /other-lora/)
+  assert.equal(loraWarmupNote([]), null)
+
+  // The hold names the triggers it is loading, all of them.
+  assert.equal(nozzleTriggerLabel(stack), 'trigword + othertrig')
+  assert.equal(nozzleTriggerLabel([]), undefined)
 })
 
 // ── Proof — the catalog is scoped to the flow's base-model family ───────────
