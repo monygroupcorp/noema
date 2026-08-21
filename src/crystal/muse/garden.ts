@@ -216,7 +216,18 @@ export type ChatEndpoint = {
 /** The `fetch` shape used here, so a caller can inject one in tests. */
 export type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
+  init: {
+    method: string
+    headers: Record<string, string>
+    body: string
+    /**
+     * Optional cancellation, so a caller that puts a deadline on a call can tear the
+     * request down at the transport rather than leave a dead socket open. Passed
+     * straight to `fetch`; a transport that ignores it is still correct, because the
+     * caller's deadline — not the signal — is what fails the call.
+     */
+    signal?: AbortSignal
+  },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>
 
 export type ChatExtractorOpts = {

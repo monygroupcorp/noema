@@ -1,8 +1,10 @@
 // The decompose half of Muse: a captionset in, fragments on the dataset's media items. Pins the
-// four things a decompose run depends on before any of it reaches a provider — fragments keyed by
-// media id (never by position into an append-only array), a per-job cap enforced before the
-// reservation, its own ministerium (so the hosted-API provider registrations survive), and a
-// closed door when no chat provider is registered.
+// six things a decompose run depends on — fragments keyed by media id (never by position into an
+// append-only array), a per-job cap enforced before the reservation, its own ministerium (so the
+// hosted-API provider registrations survive), a closed door when no chat provider is registered,
+// one decompose at a time per dataset (refused before the reservation is locked), and a deadline
+// on every chat call so a run that stops getting answers fails instead of holding its
+// reservation until the actum expires.
 //
 // Hermetic by construction: a fake store and a fake transport, no Mongo and no network. It
 // therefore says nothing about what a real decompose does to a real dataset.
@@ -13,6 +15,8 @@ import {
   MUSE_DECOMPOSE_MINISTERIUM,
   DEFAULT_MAX_DECOMPOSE_CAPTIONS,
   DEFAULT_TOKENS_PER_CAPTION,
+  DEFAULT_CHAT_CALL_TIMEOUT_MS,
+  DecomposeInFlightError,
   type ChatProviderBinding,
 } from '../../../src/crystal/MuseDecomposeCursor.js'
 import { ApiCursor, httpApiTransport } from '../../../src/crystal/ApiCursor.js'
@@ -382,4 +386,152 @@ test('a provider error fails the run instead of writing a partial item', async (
   const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl })
   await assert.rejects(() => cursor.run(actum(aditus)), /chat completion failed \(502\)/)
   assert.equal(store.writes.length, 0)
+})
+
+// ── single flight, and where the refusal lands (non-vacuity 5) ────────────────
+//
+// A decompose holds its reservation for the whole run, so a second one started on top of a
+// running one locks a SECOND reservation against the same work. Both properties are asserted
+// here: that the second is refused at all, and that it is refused from `reserve()` — the call
+// ActumInceptor makes BEFORE it locks anything. A guard that let `reserve()` through and
+// refused inside `run()` would leave the second reservation locked until the reaper.
+
+/** A transport held open on demand, so a run can be parked mid-flight and released later. */
+function heldChat(): { fetchImpl: FetchLike; started: Promise<void>; release: () => void; calls: number } {
+  const chat = fakeChat()
+  let release!: () => void
+  let announceStart!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  const started = new Promise<void>((r) => { announceStart = r })
+  const inner = chat.fetchImpl
+  return {
+    get calls() { return chat.calls },
+    started,
+    release,
+    fetchImpl: async (url, init) => {
+      announceStart()
+      await held
+      return inner(url, init)
+    },
+  }
+}
+
+test('a second decompose for a dataset already decomposing is refused', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const held = heldChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: held.fetchImpl })
+
+  const first = cursor.run(actum(aditus))
+  await held.started
+
+  await assert.rejects(
+    () => cursor.reserve(modus(), aditus),
+    (err: Error) => err instanceof DecomposeInFlightError && /already running on dataset 'ds-1'/.test(err.message),
+  )
+
+  held.release()
+  await first
+})
+
+test('the refusal happens BEFORE any reservation is locked', async () => {
+  // ActumInceptor calls reserve() first and locks signa against its answer; a refusal that
+  // only reached run() would already be holding the second reservation it was meant to prevent.
+  const store = new FakeDatasets(makeDataset())
+  const held = heldChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: held.fetchImpl })
+
+  const first = cursor.run(actum(aditus))
+  await held.started
+  await assert.rejects(() => cursor.reserve(modus(), aditus), DecomposeInFlightError)
+
+  held.release()
+  await first
+})
+
+test('a decompose on a DIFFERENT dataset is not caught by the guard', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const held = heldChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: held.fetchImpl })
+
+  const first = cursor.run(actum(aditus))
+  await held.started
+  // Unknown, but refused for NOT EXISTING — not for a decompose that is running elsewhere.
+  await assert.rejects(
+    () => cursor.reserve(modus(), { dataset: 'ds-other', captionset: 'cs-1' }),
+    /dataset 'ds-other' does not exist/,
+  )
+
+  held.release()
+  await first
+})
+
+test('a finished decompose frees its dataset for the next one', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  await cursor.run(actum(aditus))
+  assert.ok(await cursor.reserve(modus(), aditus) > 0n, 'the claim must not outlive the run that took it')
+})
+
+// ── the per-call deadline (non-vacuity 6) ────────────────────────────────────
+//
+// One chat call per caption, and no deadline on any of them: a provider call that never
+// answers parks the whole run until the actum's expiry, holding the reservation for the
+// entire expiry window. The deadline is what makes a stuck call a failure of the run.
+
+test('a chat call that never answers fails the decompose instead of running until the actum expires', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const silent: FetchLike = () => new Promise(() => {})   // answers never
+  const cursor = new MuseDecomposeCursor({
+    datasets: store, providers: [binding()], fetchImpl: silent, chatCallTimeoutMs: 20,
+  })
+
+  await assert.rejects(
+    () => cursor.run(actum(aditus)),
+    /the chat call for media item 'm-first' did not answer within/,
+  )
+  assert.equal(store.writes.length, 0, 'a run that never got an answer writes nothing')
+})
+
+test('the deadline aborts the call it gave up on', async () => {
+  const store = new FakeDatasets(makeDataset())
+  let seen: AbortSignal | undefined
+  const silent: FetchLike = (_url, init) => { seen = init.signal; return new Promise(() => {}) }
+  const cursor = new MuseDecomposeCursor({
+    datasets: store, providers: [binding()], fetchImpl: silent, chatCallTimeoutMs: 20,
+  })
+
+  await assert.rejects(() => cursor.run(actum(aditus)), /did not answer within/)
+  assert.ok(seen, 'the transport must be handed a signal to cancel with')
+  assert.equal(seen?.aborted, true, 'a call the run gave up on must not be left open')
+})
+
+test('a timed-out decompose releases its dataset rather than leaving it claimed for the reaper', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const silent: FetchLike = () => new Promise(() => {})
+  const cursor = new MuseDecomposeCursor({
+    datasets: store, providers: [binding()], fetchImpl: silent, chatCallTimeoutMs: 20,
+  })
+
+  await assert.rejects(() => cursor.run(actum(aditus)), /did not answer within/)
+  // The dataset is free the moment the run ends — not fifteen minutes later, when the
+  // expiry reaper would have been the one to notice.
+  assert.ok(await cursor.reserve(modus(), aditus) > 0n)
+})
+
+test('a healthy call is not cut off by the deadline', async () => {
+  const store = new FakeDatasets(makeDataset())
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({
+    datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl, chatCallTimeoutMs: 5_000,
+  })
+  const result = await cursor.run(actum(aditus))
+  assert.equal(result.kind, 'sync')
+  assert.equal(chat.calls, 2)
+  assert.equal(store.writes.length, 2)
+})
+
+test('the default deadline is a real bound', () => {
+  assert.ok(DEFAULT_CHAT_CALL_TIMEOUT_MS > 0 && Number.isFinite(DEFAULT_CHAT_CALL_TIMEOUT_MS))
 })
