@@ -3,10 +3,16 @@
 // caller actually watches immediately after starting a run). The server emits
 // `data:`-only frames (no event: field) in four shapes: an initial `snapshot`,
 // then a stream of `progress` (carrying a Progressus), and a terminal `complete` /
-// `failed`. Terminal events carry NO exitus — we fetch the run for its outputs
-// on completion, mirroring the backend's own agent relay.
+// `failed`. Terminal events carry NO exitus — the run is fetched for its outputs
+// on completion, mirroring the backend's own agent relay, and the terminal is
+// announced together with those outputs in ONE state update (see `announceTerminal`)
+// so a subscriber that stops listening at terminal still receives the media.
 import { useEffect, useRef, useState } from 'react';
 import { api, type Run as RunT, type SseHandle } from './api';
+// The terminal-announcement rule is a pure function and lives with the stream's other
+// pure rules in `./muse`, where the hermetic web tests gate it; this module owns the
+// React state and the SSE handle it is driven from.
+import { announceTerminal } from './muse';
 
 export type Phasis =
   | 'queued' | 'provisioning' | 'pulling' | 'attesting' | 'downloading'
@@ -141,18 +147,16 @@ export function useRunStream(id: string | undefined): RunStreamState {
         setState((s) => ({ ...s, progressus: msg.progressus, stageIdx: phaseToStage(msg.progressus!.phase) }));
         return;
       }
-      if (msg.kind === 'complete') {
-        setState((s) => ({ ...s, stageIdx: 5, terminal: 'complete', costUsd: msg.costUsd, executionMs: msg.executionMs }));
-        api.getRun(runId).then(({ run: r }) => { if (live) setState((s) => ({ ...s, exitus: r.exitus ?? null })); }).catch(() => {});
+      if (msg.kind === 'complete' || msg.kind === 'failed') {
         es.close();
-        return;
-      }
-      if (msg.kind === 'failed') {
-        setState((s) => ({ ...s, terminal: 'failed' }));
-        api.getRun(runId).then(({ run: r }) => {
-          if (live) setState((s) => ({ ...s, error: r.failure?.message, charged: r.cost ?? '0' }));
-        }).catch(() => {});
-        es.close();
+        // A completed run is announced only once its outputs are in hand, so `terminal`
+        // and `exitus` land in one update; the frame's own measurements ride along.
+        const measured = msg.kind === 'complete'
+          ? { stageIdx: 5, costUsd: msg.costUsd, executionMs: msg.executionMs }
+          : {};
+        void announceTerminal(msg.kind, runId, api.getRun, (patch) => {
+          if (live) setState((s) => ({ ...s, ...measured, ...patch }));
+        });
         return;
       }
     }
