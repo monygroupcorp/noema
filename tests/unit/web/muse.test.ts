@@ -85,12 +85,32 @@ import {
   type StreamConfig,
   type StreamDecisionInput,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  chooseLora,
+  holdLabel,
+  isHold,
+  loraCatalog,
+  loraCatalogReason,
+  loraChoiceLine,
+  loraChoiceOf,
+  loraWarmupNote,
+  loraWeight,
+  pinnedModelsFor,
+  promptWithTrigger,
+  streamRunRequest,
+  triggerToken,
+  LORA_WEIGHT_MAX,
+  LORA_WEIGHT_MIN,
+  MAX_STREAM_LORAS,
+  type LoraChoice,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
   Fragment,
   DatasetMediaItem,
   FlowSummary,
+  ModelCard,
   MuseFloorEntry,
   MusePiece,
   MuseSessionView,
@@ -1245,4 +1265,225 @@ test('a partly-applied sheet says which changes did not land', () => {
   const note = confirmOutcomeNote(2, ['off · palette: neon pink (network error)'])
   assert.match(note, /^2 changes applied to the floor/, 'what landed stays landed and is counted')
   assert.match(note, /neon pink/, 'and what did not is named rather than dropped silently')
+})
+
+// ---------------------------------------------------------------------------
+// The nozzle and the holding state (noema-246) — S5 and S6.
+//
+// The distinction every test below turns on: A FLOOR CHANGE NEVER STOPS THE STREAM, A
+// NOZZLE CHANGE ALWAYS DOES. A floor edit only changes which fragments the next draw may
+// pull, so pieces arriving meanwhile are still pieces the user asked for. A model change
+// changes what makes them: pieces fired while a model is being chosen come out of the old
+// nozzle, cost full price, and are exactly the ones the user was about to stop wanting.
+//
+// Fixtures are invented throughout (`sample-lora`, `trigword`).
+// ---------------------------------------------------------------------------
+
+function card(over: Partial<ModelCard> = {}): ModelCard {
+  return {
+    intellaId: 'lora-1',
+    nomen: 'sample-lora',
+    genus: 'lora',
+    basis: 'base-a',
+    trigger: 'trigword',
+    access: 'public',
+    ...over,
+  }
+}
+
+const CHOICE = (over: Partial<LoraChoice> = {}): LoraChoice => ({
+  intellaId: 'lora-1', nomen: 'sample-lora', trigger: 'trigword', weight: null, ...over,
+})
+
+// ── Proof — a nozzle change holds the stream ────────────────────────────────
+
+test('an uncommitted nozzle change holds the stream instead of firing the next piece', () => {
+  const held = nextPieceDecision(DEC({ hold: { reason: 'picking' } }))
+  assert.deepEqual(held, { fire: false, hold: { reason: 'picking' } })
+  assert.equal(isHold(held), true)
+  assert.equal(held.fire, false, 'nothing is fired under a nozzle nobody has finished choosing')
+
+  // The same input with nothing being chosen fires — so the hold is what refused it, and
+  // not one of the other refusals standing in.
+  assert.deepEqual(nextPieceDecision(DEC()), { fire: true })
+  assert.deepEqual(nextPieceDecision(DEC({ hold: null })), { fire: true })
+
+  // Committing is what releases it, and a commit that is still taking up the weights is
+  // still a hold: the loop may not fire under a nozzle that is only half applied.
+  const loading = nextPieceDecision(DEC({ hold: { reason: 'loading', trigger: 'trigword' } }))
+  assert.equal(isHold(loading), true)
+  assert.match(holdLabel({ reason: 'loading', trigger: 'trigword' }), /loading trigword/)
+  assert.match(holdLabel({ reason: 'picking' }), /choosing a model/)
+})
+
+// ── Proof — a hold is not a stop, and this is the one most likely to rot ────
+//
+// A hold implemented as a stop looks identical on screen for the first second and is a
+// different product by the second one: the fired count restarts, the cap is spent, and
+// "resume" becomes "launch again".
+
+test('a hold is NOT a stop: the fired count, the cap and the run mode all survive it, and the stream resumes without a relaunch', () => {
+  const mid = DEC({ mode: 'batched', cap: 12, fired: 7, hold: { reason: 'picking' } })
+  const held = nextPieceDecision(mid)
+
+  // It is not a stop, in the shape of the value itself: no `stop` at all, so a loop that
+  // reads `decision.stop` finds nothing terminal to break on.
+  assert.equal(isHold(held), true)
+  assert.equal('stop' in held, false, 'a hold carries no stop reason, because it is not an ending')
+
+  // Everything the stream was carrying is still what it is carrying: releasing the hold —
+  // and changing NOTHING else — fires the eighth piece of the same batch of twelve.
+  const resumed = nextPieceDecision({ ...mid, hold: null })
+  assert.deepEqual(resumed, { fire: true }, 'the stream resumes rather than relaunching')
+  const stillBatched = nextPieceDecision({ ...mid, hold: null, fired: 12 })
+  assert.deepEqual(stillBatched, { fire: false, stop: 'cap' }, 'the cap and the run mode came through the hold intact')
+
+  // The hold sits ABOVE the error, cap and funds checks, so a nozzle change can never be
+  // converted into a terminal stop on the way past one of them.
+  assert.equal(isHold(nextPieceDecision({ ...mid, fired: 12 })), true, 'a hold at the cap is still a hold')
+  assert.equal(isHold(nextPieceDecision({ ...mid, balanceImpetus: '0' })), true)
+  assert.equal(isHold(nextPieceDecision({ ...mid, consecutiveErrors: MAX_CONSECUTIVE_ERRORS })), true)
+
+  // A stop pressed DURING a hold is still a stop — the user outranks the nozzle.
+  assert.deepEqual(
+    nextPieceDecision({ ...mid, stopRequested: true }),
+    { fire: false, stop: 'user' },
+  )
+
+  // And the readout says a wait, never an ending: the count and the spend are shown
+  // unchanged, which is precisely what a stop would have reset.
+  const line = streamStatusLine('holding', null, 7, CFG({ mode: 'batched', cap: 12 }), { modusId: 'flow-t2i', impetus: '40' }, { reason: 'picking' })
+  assert.match(line, /holding — choosing a model/)
+  assert.match(line, /7 pieces/, 'the fired count survives the hold and is shown')
+  assert.match(line, /~280 impetus this stream/, 'so does the spend')
+  assert.equal(/stopped/.test(line), false, 'a hold is never presented as a stop')
+  assert.match(
+    streamStatusLine('holding', null, 2, CFG(), null, { reason: 'loading', trigger: 'trigword' }),
+    /holding — loading trigword/,
+  )
+})
+
+// ── Proof — the trigger word rides the prompt (without it: full price, no effect) ──
+
+test('a piece fired under a LoRA carries that LoRA\'s trigger word in its prompt', () => {
+  const drawn = 'a fox, a foggy harbor, low sun'
+  const withLora = promptWithTrigger(drawn, CHOICE())
+  assert.match(withLora, /trigword/, 'the trigger is in the prompt the resolver reads')
+  assert.match(withLora, /a foggy harbor/, 'and the drawn prompt is still all there')
+  assert.equal(promptWithTrigger(drawn, null), drawn, 'no model chosen, no change to the prompt')
+
+  // The request fired for a stream piece carries it too — this is the string that reaches
+  // `loraResolver`, and without the trigger in it the pinned weights are downloaded and
+  // never applied.
+  const request = streamRunRequest('flow-t2i', drawn, CHOICE())
+  assert.match(String(request.aditus.prompt), /trigword/)
+
+  // The two forms this emits are the resolver's own: a bare trigger fires at the LoRA's
+  // `defaultWeight`, and `trigger:N` is an explicit override. Nothing else is generated —
+  // the `!`/`.` modifiers and the `<lora:…>` tag form stay the resolver's.
+  assert.equal(triggerToken(CHOICE()), 'trigword')
+  assert.equal(triggerToken(CHOICE({ weight: 0.8 })), 'trigword:0.8')
+  assert.equal(loraWeight(null), null)
+  assert.equal(loraWeight(9), LORA_WEIGHT_MAX)
+  assert.equal(loraWeight(0), LORA_WEIGHT_MIN, 'the control never emits the weight that silences a pinned LoRA')
+
+  // AND IT IS NOT A FLOOR FRAGMENT. The trigger goes into the prompt string only: it is
+  // not in the lineage a piece records, so a ♡ can never reweight the nozzle.
+  const lineage = [frag('subject', 'a fox'), frag('setting', 'a foggy harbor')]
+  const record = pieceRecord('run-1', 3, lineage)
+  assert.equal(record.fragments.some((f) => f.text.includes('trigword')), false)
+  assert.equal(lineageOf({ lineage }).some((e) => e.text.includes('trigword')), false)
+})
+
+// ── Proof — the weights are pinned (without them: a trigger naming nothing) ──
+
+test('a piece fired under a LoRA names it in pinnedModels', () => {
+  const request = streamRunRequest('flow-t2i', 'a fox', CHOICE())
+  assert.deepEqual(request.pinnedModels, ['lora-1'], 'pinned by intellaId — the unambiguous half of the field')
+  assert.equal(request.modusId, 'flow-t2i')
+  assert.deepEqual(pinnedModelsFor(null), [])
+
+  // No model chosen, nothing pinned — and a mined fragment's own trigger is STILL never
+  // lifted into `pinnedModels`. Only what the user picked on the control is pinned.
+  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', null), false)
+  assert.equal('pinnedModels' in ignitionRequest('flow-t2i', 'a fox'), false)
+
+  // Both halves or neither: the pinned run is also the one carrying the trigger.
+  assert.match(String(request.aditus.prompt), /trigword/)
+})
+
+// ── Proof — one LoRA in v1, by choice ───────────────────────────────────────
+//
+// A deliberate self-imposed bound, not a discovered platform fact: how many LoRAs a run
+// can stack has never been measured, so nothing here guesses a limit and no stacking UI
+// is built on an unmeasured number.
+
+test('choosing a second LoRA replaces the first', () => {
+  assert.equal(MAX_STREAM_LORAS, 1)
+  const first = chooseLora(null, card())
+  assert.equal(first?.intellaId, 'lora-1')
+
+  const second = chooseLora(first, card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' }))
+  assert.equal(second?.intellaId, 'lora-2')
+  assert.equal(second?.trigger, 'othertrig')
+  assert.deepEqual(pinnedModelsFor(second), ['lora-2'], 'exactly one model rides the run')
+  assert.equal(promptWithTrigger('a fox', second).includes('trigword'), false, 'the replaced trigger is gone from the prompt')
+
+  // The same control unsets: choosing what is already chosen clears the nozzle.
+  assert.equal(chooseLora(second, card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })), null)
+
+  // A card with no trigger word cannot be chosen at all: it could be pinned, but nothing
+  // would ever apply it — full price, no effect.
+  assert.equal(loraChoiceOf(card({ trigger: '' })), null)
+  assert.equal(chooseLora(first, card({ intellaId: 'lora-3', trigger: '' }))?.intellaId, 'lora-1')
+})
+
+// ── Proof — the catalog is scoped to the flow's base-model family ───────────
+//
+// A LoRA from another base model is a paid run that cannot work. Refusing it in the
+// picker costs nothing; discovering it costs a piece.
+
+test("the catalog offered is scoped to the selected modus's familia", () => {
+  const own = [card({ intellaId: 'mine-1', nomen: 'my-lora', access: 'private' })]
+  const shared = [
+    card({ intellaId: 'lora-1' }),
+    card({ intellaId: 'wrong-base', basis: 'base-b' }),
+    card({ intellaId: 'a-checkpoint', genus: 'model' }),
+    card({ intellaId: 'no-trigger', trigger: '' }),
+    card({ intellaId: 'mine-1', nomen: 'my-lora' }),
+  ]
+
+  const offered = loraCatalog(own, shared, 'base-a')
+  assert.deepEqual(offered.map((m) => m.intellaId), ['mine-1', 'lora-1'])
+  assert.equal(offered.some((m) => m.basis !== 'base-a'), false, 'nothing from another base is offerable')
+  assert.equal(offered.some((m) => m.genus !== 'lora'), false)
+  assert.equal(offered.some((m) => !m.trigger), false)
+
+  // No familia in hand is an EMPTY catalog, never an unscoped one — an unscoped list is
+  // exactly the list that contains the run that cannot work.
+  assert.deepEqual(loraCatalog(own, shared, null), [])
+  assert.deepEqual(loraCatalog(own, shared, undefined), [])
+
+  // And the emptiness is explained rather than rendered as a blank list, because "no
+  // workflow chosen" and "this base has no LoRAs" are different facts.
+  assert.match(loraCatalogReason(null, null, 0)!, /choose a workflow first/)
+  assert.match(loraCatalogReason('flow-t2i', null, 0)!, /base model/)
+  assert.match(loraCatalogReason('flow-t2i', 'base-a', 0)!, /base-a/)
+  assert.equal(loraCatalogReason('flow-t2i', 'base-a', 2), null)
+})
+
+// ── The readouts around the nozzle ──────────────────────────────────────────
+
+test('the chosen nozzle is named with its trigger word, and a cold one says it may be slow', () => {
+  // S5 asks for the trigger on the CHOSEN model too, not only in the picker: it is the
+  // part a user has to be able to see to trust that the model is reaching the prompt.
+  assert.match(loraChoiceLine(CHOICE()), /sample-lora/)
+  assert.match(loraChoiceLine(CHOICE()), /trigword/)
+  assert.match(loraChoiceLine(CHOICE({ weight: 0.8 })), /0\.8/)
+  assert.match(loraChoiceLine(null), /no model/)
+
+  // The pod fetches the weights before it can make anything with them, so the first piece
+  // under a new LoRA can be slow. Said, rather than left to read as a stall.
+  assert.match(loraWarmupNote(CHOICE())!, /may be slow/)
+  assert.equal(loraWarmupNote(null), null)
 })
