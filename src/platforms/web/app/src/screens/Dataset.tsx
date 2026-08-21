@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
-import { api, type Dataset as DatasetT } from '../lib/api';
+import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
   captionCoverageLine,
   captionPassLabel,
@@ -11,6 +11,8 @@ import {
   curatedFragments,
   decomposeGateReason,
   replaceDataset,
+  sessionCountLine,
+  sessionHistoryHref,
 } from '../lib/muse';
 import { AddImages } from '../components/AddImages';
 import {
@@ -110,6 +112,20 @@ export function Dataset() {
   // default pass is the new work only. This is the explicit ask for everything, and the control
   // beside it says how many images that is before it is pressed.
   const [redoAll, setRedoAll] = useState(false);
+
+  // The sessions broken off this dataset (noema-274). A count and a door, nothing more —
+  // the history itself is a screen over, so this panel stays the quiet thing it was. The
+  // read is a list; no run is fetched here and nothing is written, so it cannot move
+  // which session the muse door resumes.
+  const [museSessions, setMuseSessions] = useState<MuseSessionView[] | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    api.listMuseSessions(id)
+      .then(({ sessions }) => { if (live) setMuseSessions(sessions); })
+      .catch(() => { if (live) setMuseSessions([]); });
+    return () => { live = false; };
+  }, [id]);
 
   // Adding images (noema-265). The append returns the whole dataset; putting THAT back into the
   // list is what re-reads the screen — nothing here patches a local copy.
@@ -313,6 +329,14 @@ export function Dataset() {
               {d.captionsets.length === 0 ? 'Caption it, then train →' : 'Train a model from this →'}
             </button>
             <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>muse →</Link>
+            {/* Beside the door, not behind it: how many sessions this dataset has, and the
+                way to the ones that are not the current work. */}
+            {sessionCountLine(museSessions ?? []) && (
+              <div className="ds-muse-history">
+                <span className="ds-panel-note">{sessionCountLine(museSessions ?? [])}</span>
+                <Link className="ds-muse-history-link" to={sessionHistoryHref(d.id)}>past sessions →</Link>
+              </div>
+            )}
             {d.captionsets.length === 0 && <div className="ds-panel-note" style={{ textAlign: 'center' }}>a model learns from the caption layer — make one first</div>}
           </aside>
         </div>
