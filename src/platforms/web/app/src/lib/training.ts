@@ -144,6 +144,33 @@ export function canFireDecompose(gate: { captionsetId: string | null; inFlight: 
 }
 
 /**
+ * The wire code the server answers with when the dataset already has a decompose running.
+ *
+ * This screen's `inFlight` is one tab's own memory of the pass it started: a second tab, a
+ * reload, or a phone that went to sleep all arm the control again while the first pass is
+ * still going. The server is the one that knows, and it refuses the second pass before any
+ * reservation is taken — so this code is the readout's real source, not the local flag.
+ */
+export const DECOMPOSE_IN_FLIGHT_CODE = 'conflict.run_in_flight';
+
+/**
+ * The note to show when a decompose could not be launched.
+ *
+ * A refusal because one is ALREADY running is not an error the user did anything about — it
+ * is the status they were missing, so it is worded as the status. Everything else is
+ * surfaced as it arrives, trimmed.
+ *
+ * Non-vacuity: dropping the in-flight branch makes "a refused second pass reads as a
+ * running first pass, not as a failure" fail.
+ */
+export function decomposeFailureNote(message: string): string {
+  if (message.includes(DECOMPOSE_IN_FLIGHT_CODE)) {
+    return 'a decompose is already running on this dataset — it holds a reservation until it finishes, and the chips appear when it does.';
+  }
+  return `couldn't decompose: ${message.slice(0, 160)}`;
+}
+
+/**
  * Launch a decompose pass. The run is synchronous: this promise settles when the pass has
  * written its fragments, so the caller re-reads the dataset afterwards rather than polling.
  * Throws on a failed dispatch (caller surfaces the error).
