@@ -18,6 +18,8 @@ import {
   canOfferDecompose,
   decomposeCaptionsetId,
   decomposeFailureNote,
+  decomposePlanNote,
+  decomposeWorkload,
   launchDecomposeJob,
 } from '../lib/training';
 
@@ -100,6 +102,11 @@ export function Dataset() {
   // chips. The rules — offered at all, which captionset, when armed — live in `lib/training.ts`.
   const [decomposing, setDecomposing] = useState(false);
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // noema-278 — the whole-set path, off by default. A decompose runs one model call per item,
+  // and an item that already carries fragments has already been through the extractor, so the
+  // default pass is the new work only. This is the explicit ask for everything, and the control
+  // beside it says how many images that is before it is pressed.
+  const [redoAll, setRedoAll] = useState(false);
 
   // Adding images (noema-265). The append returns the whole dataset; putting THAT back into the
   // list is what re-reads the screen — nothing here patches a local copy.
@@ -107,11 +114,13 @@ export function Dataset() {
 
   async function doDecompose(dataset: DatasetT, selectedId: string | null) {
     const captionsetId = decomposeCaptionsetId(dataset, selectedId);
-    if (!canFireDecompose({ captionsetId, inFlight: decomposing })) return;
+    // With `redo` the workload is the whole pass, so the pending count is not what gates it.
+    const pending = redoAll ? undefined : decomposeWorkload(dataset, captionsetId).pending;
+    if (!canFireDecompose({ captionsetId, inFlight: decomposing, pending })) return;
     setDecomposing(true);
     setDecomposeMsg(null);
     try {
-      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId! });
+      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, redo: redoAll });
       if (run.status === 'failed') {
         setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
         return;
@@ -145,6 +154,14 @@ export function Dataset() {
   const version = d.versions[d.versions.length - 1]?.v ?? '—';
   const nextCaptionsetId = decomposeCaptionsetId(d, active);
   const decomposeGate = decomposeGateReason(d, nextCaptionsetId);
+  // What the next decompose would actually run, and the sentence that says it. Derived from
+  // the dataset the server last returned — the same record the chips above are rendered from.
+  const decomposeWork = decomposeWorkload(d, nextCaptionsetId);
+  const decomposeArmed = canFireDecompose({
+    captionsetId: nextCaptionsetId,
+    inFlight: decomposing,
+    ...(redoAll ? {} : { pending: decomposeWork.pending }),
+  }) && !decomposeGate;
 
   // What an appended image still needs, in the order it needs it: what the chosen pass covers
   // now, what a pass over the set would cover and cost, and the decompose that stays refused
@@ -245,12 +262,22 @@ export function Dataset() {
                 <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>run a caption job</Link>
                 {canOfferDecompose(d) && (
                   <button className="btn ghost sm" type="button"
-                    disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
+                    disabled={!decomposeArmed}
                     onClick={() => void doDecompose(d, active)}>
-                    {decomposing ? 'decomposing…' : 'decompose →'}
+                    {decomposing ? 'decomposing…' : redoAll ? 're-decompose all →' : 'decompose →'}
                   </button>
                 )}
               </div>
+              {canOfferDecompose(d) && (
+                <>
+                  <p className="ds-panel-note">{decomposePlanNote(decomposeWork, redoAll)}</p>
+                  <label className="ds-panel-note">
+                    <input type="checkbox" checked={redoAll} disabled={decomposing}
+                      onChange={(e) => setRedoAll(e.currentTarget.checked)} />
+                    {' '}re-decompose images that already have chips
+                  </label>
+                </>
+              )}
               <p className="ds-panel-note">{captionCoverageLine(d, nextCaptionsetId)}</p>
               {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
               {decomposing && <p className="ds-panel-note">a decompose is running on this dataset — one pass per caption, and it stays open until the last one is written. Only one runs at a time.</p>}

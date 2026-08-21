@@ -95,6 +95,14 @@ export interface DecomposeConfig {
   captionsetId: string;
   /** Trained trigger word to strip out of the fragments, so they stay reusable. */
   trigger?: string;
+  /**
+   * Decompose every captioned item again, including the ones that already carry fragments.
+   *
+   * Off by default and never implied: a decompose costs one model call per item it runs, so
+   * the default pass is the new work only. This is the whole-set path — a better extractor, a
+   * changed trigger, a pass worth rebuilding — and it is the caller's explicit ask.
+   */
+  redo?: boolean;
 }
 
 /** The minimum shape of a dataset this module needs: its captionsets, in record order. */
@@ -109,8 +117,81 @@ export function decomposeRunRequest(cfg: DecomposeConfig): RunRequest {
       dataset: cfg.datasetId,
       captionset: cfg.captionsetId,
       ...(trigger ? { trigger } : {}),
+      // Sent only when it is asked for. The server's default is the incremental pass, so an
+      // absent key is the cheap path; a `redo: false` riding along on every request would put
+      // the expensive one one typo away.
+      ...(cfg.redo ? { redo: true } : {}),
     },
   };
+}
+
+/**
+ * The minimum shape of a dataset the workload rules need: the captionsets with their caption
+ * maps, and the media items with whatever fragments a past decompose left on them.
+ */
+export interface DecomposableDataset {
+  captionsets: Array<{ id: string; captions?: Record<string, string> }>;
+  media: Array<{ id: string; fragments?: unknown[] }>;
+}
+
+/** What a decompose over one captionset would actually run. */
+export interface DecomposeWorkload {
+  /** Items this pass would send to the model — captioned, and not yet decomposed. */
+  pending: number;
+  /** Captioned items that already carry fragments, so an incremental pass skips them. */
+  already: number;
+  /** Captioned items in the chosen pass — `pending + already`. */
+  captioned: number;
+}
+
+/**
+ * How much work a decompose over this captionset has left.
+ *
+ * An item that already carries fragments has been decomposed; the server skips it, so the
+ * control must not quote it as work about to happen. The count is derived from the dataset
+ * the server last returned — this reads state, it never writes any.
+ *
+ * The one place it can read high: archived media is not carried on the client record, so an
+ * archived-but-captioned item is counted here and dropped by the server. The refusal for a
+ * pass with nothing to do is the server's, and it arrives as a status either way.
+ *
+ * Non-vacuity: counting every caption instead of the undecomposed ones must fail "the
+ * control counts only the items a decompose would actually run".
+ */
+export function decomposeWorkload(
+  d: DecomposableDataset,
+  captionsetId: string | null,
+): DecomposeWorkload {
+  const set = captionsetId ? d.captionsets.find((cs) => cs.id === captionsetId) : undefined;
+  const captioned = Object.entries(set?.captions ?? {})
+    .filter(([, text]) => String(text ?? '').trim() !== '')
+    .map(([mediaId]) => mediaId);
+  const decomposed = new Set(
+    d.media.filter((m) => (m.fragments?.length ?? 0) > 0).map((m) => m.id),
+  );
+  const already = captioned.filter((id) => decomposed.has(id)).length;
+  return { pending: captioned.length - already, already, captioned: captioned.length };
+}
+
+/**
+ * What the control is about to do, in words — the count of items it would run, or that there
+ * are none left, plus what the whole-set path would cost instead.
+ *
+ * A decompose spends one model call per item it runs, so the number of items IS the price;
+ * saying it before the press is what keeps the expensive path from being the accidental one.
+ */
+export function decomposePlanNote(w: DecomposeWorkload, redo: boolean): string {
+  const items = (n: number) => `${n} ${n === 1 ? 'image' : 'images'}`;
+  if (redo) {
+    return `re-decomposing all ${items(w.captioned)} in this pass — one model call each, and it replaces the fragments they carry now.`;
+  }
+  if (w.pending === 0) {
+    return w.captioned === 0
+      ? 'nothing in this pass is captioned yet, so there is nothing to decompose.'
+      : `every image in this pass is already decomposed — nothing to run. Ask for a re-decompose to rebuild all ${items(w.captioned)}.`;
+  }
+  const skipped = w.already > 0 ? ` ${items(w.already)} are already decomposed and are skipped.` : '';
+  return `${items(w.pending)} left to decompose — one model call each.${skipped}`;
 }
 
 /**
@@ -139,7 +220,15 @@ export function decomposeCaptionsetId(d: CaptionsetBearing, selectedId: string |
  * open until the last caption is written — and it spends one chat call per caption, so a
  * second pass cannot start while one is in flight.
  */
-export function canFireDecompose(gate: { captionsetId: string | null; inFlight: boolean }): boolean {
+export function canFireDecompose(gate: {
+  captionsetId: string | null;
+  inFlight: boolean;
+  /** Items the pass would run. `0` disarms the control — the server refuses that pass, and
+   *  firing it anyway is a press that can only come back as a refusal. Omitted where the
+   *  caller has no workload to hand (the gate then rests on the two rules above). */
+  pending?: number;
+}): boolean {
+  if (gate.pending === 0) return false;
   return gate.captionsetId !== null && gate.captionsetId !== '' && !gate.inFlight;
 }
 
@@ -154,6 +243,15 @@ export function canFireDecompose(gate: { captionsetId: string | null; inFlight: 
 export const DECOMPOSE_IN_FLIGHT_CODE = 'conflict.run_in_flight';
 
 /**
+ * The wire code the server answers with when the pass has nothing left to decompose.
+ *
+ * The server holds the authoritative record — it knows about archived media this app does
+ * not carry, and it is the one that refuses BEFORE a reservation is taken. A control armed
+ * from a stale copy of the dataset lands here, and this is what turns that into a status.
+ */
+export const DECOMPOSE_NOTHING_TO_DO_CODE = 'conflict.nothing_to_decompose';
+
+/**
  * The note to show when a decompose could not be launched.
  *
  * A refusal because one is ALREADY running is not an error the user did anything about — it
@@ -166,6 +264,9 @@ export const DECOMPOSE_IN_FLIGHT_CODE = 'conflict.run_in_flight';
 export function decomposeFailureNote(message: string): string {
   if (message.includes(DECOMPOSE_IN_FLIGHT_CODE)) {
     return 'a decompose is already running on this dataset — it holds a reservation until it finishes, and the chips appear when it does.';
+  }
+  if (message.includes(DECOMPOSE_NOTHING_TO_DO_CODE)) {
+    return 'everything in this pass is already decomposed, so nothing was run and nothing was spent — ask for a re-decompose to rebuild it.';
   }
   return `couldn't decompose: ${message.slice(0, 160)}`;
 }

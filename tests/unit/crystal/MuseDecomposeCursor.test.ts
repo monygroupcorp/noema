@@ -2,9 +2,11 @@
 // six things a decompose run depends on — fragments keyed by media id (never by position into an
 // append-only array), a per-job cap enforced before the reservation, its own ministerium (so the
 // hosted-API provider registrations survive), a closed door when no chat provider is registered,
-// one decompose at a time per dataset (refused before the reservation is locked), and a deadline
+// one decompose at a time per dataset (refused before the reservation is locked), a deadline
 // on every chat call so a run that stops getting answers fails instead of holding its
-// reservation until the actum expires.
+// reservation until the actum expires, and — since noema-278 — an incremental pass: items that
+// already carry fragments are not sent to the model again, a pass with nothing left to do is
+// refused before a signum is locked, and `redo` is the explicit way to rebuild the whole set.
 //
 // Hermetic by construction: a fake store and a fake transport, no Mongo and no network. It
 // therefore says nothing about what a real decompose does to a real dataset.
@@ -17,6 +19,7 @@ import {
   DEFAULT_TOKENS_PER_CAPTION,
   DEFAULT_CHAT_CALL_TIMEOUT_MS,
   DecomposeInFlightError,
+  DecomposeNothingToDoError,
   type ChatProviderBinding,
 } from '../../../src/crystal/MuseDecomposeCursor.js'
 import { ApiCursor, httpApiTransport } from '../../../src/crystal/ApiCursor.js'
@@ -471,7 +474,12 @@ test('a finished decompose frees its dataset for the next one', async () => {
   const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
 
   await cursor.run(actum(aditus))
-  assert.ok(await cursor.reserve(modus(), aditus) > 0n, 'the claim must not outlive the run that took it')
+  // The run is over, so its claim is gone. Asked with `redo` because the pass it just finished
+  // left nothing else to do — the claim is what is under test here, not the workload.
+  assert.ok(
+    await cursor.reserve(modus(), { ...aditus, redo: true }) > 0n,
+    'the claim must not outlive the run that took it',
+  )
 })
 
 // ── the per-call deadline (non-vacuity 6) ────────────────────────────────────
@@ -534,4 +542,128 @@ test('a healthy call is not cut off by the deadline', async () => {
 
 test('the default deadline is a real bound', () => {
   assert.ok(DEFAULT_CHAT_CALL_TIMEOUT_MS > 0 && Number.isFinite(DEFAULT_CHAT_CALL_TIMEOUT_MS))
+})
+
+// ── incremental by default (non-vacuity 7) ───────────────────────────────────
+//
+// A decompose costs one chat call per caption it runs, and `setFragments` overwrites what was
+// there. Running every caption every time means growing a captioned set by two images pays for
+// the whole set and rebuilds fragments that were already correct. The record of what is already
+// decomposed is `DatasetMediaItem.fragments` — the field this job itself writes — so the work
+// left is a fact the cursor can read before it calls anything.
+
+/** The dataset above with `m-first` already decomposed by an earlier pass. */
+function partlyDecomposed(): Dataset {
+  const dataset = makeDataset()
+  dataset.media[0]!.fragments = [
+    { category: 'subject', text: 'a woman', source: 'sample-board', trigger: '' },
+  ]
+  return dataset
+}
+
+test('a media item that already carries fragments is not sent to the model a second time', async () => {
+  const dataset = partlyDecomposed()
+  const before = dataset.media[0]!.fragments
+  const store = new FakeDatasets(dataset)
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  // The reservation is taken against the work, not against the captionset: one caption left.
+  const reserved = await cursor.reserve(modus(), aditus)
+  assert.equal(
+    reserved,
+    chatImpetus(1 * DEFAULT_TOKENS_PER_CAPTION, OPENROUTER_PROVIDER.pricing.chatImpetusPer1kTokens),
+    'a pass with one item left must not lock the ceiling of a whole-set pass',
+  )
+
+  await cursor.run(actum(aditus, reserved))
+
+  assert.equal(chat.calls, 1, 'the decomposed item costs no provider call')
+  assert.deepEqual(store.writes.map((w) => w.mediaId), ['m-second'])
+  assert.equal(dataset.media[0]!.fragments, before, 'and its existing fragments are left alone')
+  assert.ok(dataset.media[1]!.fragments?.[0]?.text.includes('a cat on a wall'))
+})
+
+test('a decompose with nothing left to do is refused before anything is reserved', async () => {
+  // THE MONEY PROOF. `reserve()` is what ActumInceptor calls before it locks a signum, so a
+  // refusal that only reached `run()` would freeze credits against a job with no work in it —
+  // the same defect the single-flight guard is placed here to avoid.
+  const dataset = makeDataset()
+  for (const item of dataset.media) {
+    item.fragments = [{ category: 'subject', text: 'already', source: 'sample-board', trigger: '' }]
+  }
+  const store = new FakeDatasets(dataset)
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  await assert.rejects(
+    () => cursor.reserve(modus(), aditus),
+    (err: Error) => err instanceof DecomposeNothingToDoError && /already carries fragments/.test(err.message),
+  )
+  await assert.rejects(() => cursor.run(actum(aditus)), DecomposeNothingToDoError)
+  assert.equal(chat.calls, 0)
+  assert.equal(store.writes.length, 0, 'nothing is rewritten by a run that had nothing to do')
+})
+
+test('a decompose asked to redo everything decomposes an item that already has fragments', async () => {
+  const dataset = partlyDecomposed()
+  const store = new FakeDatasets(dataset)
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  const redo = { ...aditus, redo: true }
+  const reserved = await cursor.reserve(modus(), redo)
+  assert.equal(
+    reserved,
+    chatImpetus(2 * DEFAULT_TOKENS_PER_CAPTION, OPENROUTER_PROVIDER.pricing.chatImpetusPer1kTokens),
+    'the redo path is priced for the whole pass, which is why it is not the default',
+  )
+
+  const result = await cursor.run(actum(redo, reserved))
+
+  assert.equal(chat.calls, 2)
+  assert.deepEqual(store.writes.map((w) => w.mediaId).sort(), ['m-first', 'm-second'])
+  // The already-decomposed item was rebuilt from its caption rather than left as it was.
+  assert.ok(dataset.media[0]!.fragments?.[0]?.text.includes('a woman in a red coat'))
+  assert.equal(result.kind, 'sync')
+  if (result.kind !== 'sync') return
+  assert.deepEqual(result.exitus.exitus, { decomposed: 2, fragments: 2 })
+})
+
+test('redo is an explicit ask: a value that is not one is left on the incremental path', async () => {
+  const store = new FakeDatasets(partlyDecomposed())
+  const chat = fakeChat()
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  // A loose truthiness test here would make every one of these decompose the whole set.
+  for (const value of ['false', 'no', '', 0, null, undefined]) {
+    const reserved = await cursor.reserve(modus(), { ...aditus, redo: value })
+    assert.equal(
+      reserved,
+      chatImpetus(1 * DEFAULT_TOKENS_PER_CAPTION, OPENROUTER_PROVIDER.pricing.chatImpetusPer1kTokens),
+      `redo: ${JSON.stringify(value)} must not be read as a request to redo everything`,
+    )
+  }
+  assert.equal(chat.calls, 0)
+})
+
+test('the run reports how many items it actually decomposed, not how many the captionset holds', async () => {
+  const dataset = partlyDecomposed()
+  const store = new FakeDatasets(dataset)
+  const chat = fakeChat(120)
+  const cursor = new MuseDecomposeCursor({ datasets: store, providers: [binding()], fetchImpl: chat.fetchImpl })
+
+  const result = await cursor.run(actum(aditus, 10_000n))
+  assert.equal(result.kind, 'sync')
+  if (result.kind !== 'sync') return
+
+  // The captionset holds two captions and one item was already decomposed: a run reporting two
+  // would disagree with its own settlement, which is the summed real cost of the calls it made.
+  assert.equal(Object.keys(dataset.captionsets[0]!.captions ?? {}).length, 2)
+  assert.deepEqual(result.exitus.exitus, { decomposed: 1, fragments: 1 })
+  assert.equal(
+    result.exitus.impetus,
+    chatImpetus(1 * 120, OPENROUTER_PROVIDER.pricing.chatImpetusPer1kTokens),
+    'the settlement is one call, and the count must say one item',
+  )
 })
