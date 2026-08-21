@@ -23,7 +23,7 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 // first provider call, settles the summed real token cost, appears in run
 // history, and has no separate lifecycle and no free lane.
 //
-// SIX PROPERTIES ARE LOAD-BEARING HERE:
+// SEVEN PROPERTIES ARE LOAD-BEARING HERE:
 //
 //   OWN MINISTERIUM — `Cursorum` is a flat Map<ministerium, Cursor> whose
 //     `register` is a bare set. Registering this cursor under 'openai' would
@@ -60,6 +60,19 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 //     contract requires) and released in a `finally`, so a run that throws frees
 //     the dataset immediately rather than leaving it claimed. The claim lives on
 //     the cursor instance the container registers, so it is per-process.
+//
+//   INCREMENTAL BY DEFAULT — a media item that already carries fragments is
+//     already decomposed, and `DatasetMediaItem.fragments` is the record of it:
+//     it is what `setFragments` writes and what the chip garden is pooled from.
+//     A default decompose therefore reads the fragments the dataset already holds
+//     and runs only the captions whose item has none, so growing a captioned set
+//     by two images costs two calls rather than one per item in the whole set. A
+//     run with NOTHING left to do is refused in `reserve()` — in the same up-front
+//     group as the refusals above and for the reason stated there: a refusal taken
+//     after the reservation would freeze credits against a job that was never
+//     going to do any work. `redo` in the aditus is the explicit opt-in that
+//     decomposes everything again (a better extractor, a changed trigger, a bad
+//     pass); it is never the default, because it is the expensive path.
 //
 //   BOUNDED CALL — one chat call is made per caption and each is given a
 //     deadline (`DEFAULT_CHAT_CALL_TIMEOUT_MS`). A provider call that never
@@ -123,6 +136,25 @@ export class DecomposeInFlightError extends Error {
   }
 }
 
+/**
+ * A decompose was asked for on a captionset whose every media item already carries
+ * fragments, and without `redo`.
+ *
+ * Typed for the same reason `DecomposeInFlightError` is: the caller is being told a
+ * fact about their own dataset — there is nothing left to decompose — and the API
+ * facade maps it to a request outcome instead of an internal error. Thrown from
+ * `reserve()`, before a reservation exists.
+ */
+export class DecomposeNothingToDoError extends Error {
+  constructor(readonly datasetId: string, readonly captionsetId: string) {
+    super(
+      `muse decompose: every captioned media item on dataset '${datasetId}' already carries ` +
+        `fragments from captionset '${captionsetId}' — pass \`redo\` to decompose them again`,
+    )
+    this.name = 'DecomposeNothingToDoError'
+  }
+}
+
 /** A provider descriptor plus the bearer key the container resolved for it. */
 export interface ChatProviderBinding {
   provider: ApiProvider
@@ -177,12 +209,17 @@ export class MuseDecomposeCursor implements Cursor {
     if (claimed && this.running.has(claimed)) throw new DecomposeInFlightError(claimed)
 
     const binding = this.pickProvider(aditus)
-    const { captions } = await this.resolveWork(aditus)
+    // `work` is what this run would actually send to the model — the captions whose media
+    // item has no fragments yet, or every caption under `redo`. `resolveWork` refuses an
+    // empty one HERE, so a decompose with nothing left to do never reaches a reservation.
+    const { work } = await this.resolveWork(aditus)
 
     if (modus.impetusFixum !== undefined) return modus.impetusFixum
 
     const perCaption = this.deps.tokensPerCaption ?? DEFAULT_TOKENS_PER_CAPTION
-    return chatImpetus(captions.length * perCaption, binding.provider.pricing.chatImpetusPer1kTokens)
+    // Priced on the work, not on the captionset: a re-decompose of two new images must
+    // not lock the ceiling of a whole-set pass.
+    return chatImpetus(work.length * perCaption, binding.provider.pricing.chatImpetusPer1kTokens)
   }
 
   /**
@@ -210,7 +247,7 @@ export class MuseDecomposeCursor implements Cursor {
     const reserved = actum.impetus
 
     const binding = this.pickProvider(aditus)
-    const { dataset, captions } = await this.resolveWork(aditus)
+    const { dataset, work } = await this.resolveWork(aditus)
 
     const trigger = typeof aditus.trigger === 'string' ? aditus.trigger.trim() : ''
     const model = typeof aditus.model === 'string' && aditus.model.trim() ? aditus.model.trim() : undefined
@@ -238,9 +275,12 @@ export class MuseDecomposeCursor implements Cursor {
       ...(model ? { model } : {}),
     })
 
+    // Counted over the work this run did, never over the captionset it read: a run that
+    // skipped twenty-eight already-decomposed items and reported thirty would disagree
+    // with its own settlement, which is the summed real token cost of the calls it made.
     let decomposed = 0
     let written = 0
-    for (const [mediaId, caption] of captions) {
+    for (const [mediaId, caption] of work) {
       inFlightMediaId = mediaId
       const raw = await extract([caption], dataset.name, trigger)
       // `buildGarden` is the single validation point: out-of-taxonomy categories,
@@ -304,10 +344,19 @@ export class MuseDecomposeCursor implements Cursor {
    * Every media id is checked against the dataset HERE, before the first provider
    * call: a caption whose id does not resolve fails the job outright rather than
    * silently writing its fragments onto some other item.
+   *
+   * `captions` is what the captionset offers; `work` is what this run would actually
+   * pay for — see INCREMENTAL BY DEFAULT in the header. The cap and the reservation
+   * are both taken against `work`, because that is what costs.
    */
   private async resolveWork(
     aditus: Record<string, unknown>,
-  ): Promise<{ dataset: Dataset; captionset: Captionset; captions: Array<[string, string]> }> {
+  ): Promise<{
+    dataset: Dataset
+    captionset: Captionset
+    captions: Array<[string, string]>
+    work: Array<[string, string]>
+  }> {
     const datasetId = String(aditus.dataset ?? '')
     if (!datasetId) throw new Error('muse decompose: `dataset` is required (a dataset id)')
     const captionsetId = String(aditus.captionset ?? '')
@@ -336,13 +385,6 @@ export class MuseDecomposeCursor implements Cursor {
       throw new Error(`muse decompose: captionset '${captionsetId}' carries no captions to decompose`)
     }
 
-    const cap = this.deps.maxCaptions ?? DEFAULT_MAX_DECOMPOSE_CAPTIONS
-    if (captions.length > cap) {
-      throw new Error(
-        `muse decompose: captionset '${captionsetId}' carries ${captions.length} captions, above the ${cap}-caption per-job cap`,
-      )
-    }
-
     const known = new Set(dataset.media.map((m) => m.id))
     for (const [mediaId] of captions) {
       if (!known.has(mediaId)) {
@@ -352,7 +394,29 @@ export class MuseDecomposeCursor implements Cursor {
       }
     }
 
-    return { dataset, captionset, captions }
+    // What is already decomposed, read off the record the last decompose wrote. An item
+    // carrying fragments has been through the extractor; running it again buys the same
+    // answer at the same price and overwrites the fragments a user may have curated
+    // against. `redo` is the explicit way to ask for exactly that.
+    const decomposedIds = new Set(
+      dataset.media.filter((m) => (m.fragments?.length ?? 0) > 0).map((m) => m.id),
+    )
+    const redo = isRedo(aditus.redo)
+    const work = redo ? captions : captions.filter(([mediaId]) => !decomposedIds.has(mediaId))
+
+    // A job with nothing left to do is refused before a signum is locked — reserve()
+    // reaches this, and a refusal taken any later would hold a reservation for a run
+    // that was never going to make a call. See INCREMENTAL BY DEFAULT in the header.
+    if (work.length === 0) throw new DecomposeNothingToDoError(datasetId, captionsetId)
+
+    const cap = this.deps.maxCaptions ?? DEFAULT_MAX_DECOMPOSE_CAPTIONS
+    if (work.length > cap) {
+      throw new Error(
+        `muse decompose: this decompose would run ${work.length} captions, above the ${cap}-caption per-job cap`,
+      )
+    }
+
+    return { dataset, captionset, captions, work }
   }
 }
 
@@ -391,6 +455,21 @@ async function callWithin(
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
+}
+
+/**
+ * Whether the aditus asked for a full re-decompose.
+ *
+ * Strict by construction, because this is the expensive path: only a real `true` or the
+ * strings a form control produces for it turn it on. Anything else — absent, empty,
+ * `'false'`, `0`, a stray object — leaves the run incremental. A loose truthiness test
+ * here would make `redo: 'no'` decompose the whole set.
+ */
+function isRedo(value: unknown): boolean {
+  if (value === true) return true
+  if (typeof value !== 'string') return false
+  const v = value.trim().toLowerCase()
+  return v === 'true' || v === '1' || v === 'yes'
 }
 
 /** One item's validated fragments, in `CATEGORIES` order so a re-run reads the same. */

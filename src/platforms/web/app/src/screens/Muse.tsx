@@ -19,6 +19,9 @@ import {
   canFireDecompose,
   canOfferDecompose,
   decomposeCaptionsetId,
+  decomposeFailureNote,
+  decomposePlanNote,
+  decomposeWorkload,
   launchCaptionJob,
   launchDecomposeJob,
 } from '../lib/training';
@@ -655,6 +658,10 @@ export function Muse() {
   const [trigger, setTrigger] = useState('');
   const [decomposing, setDecomposing] = useState(false);
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // noema-278 — the whole-set path, off by default and offered from BOTH decompose controls on
+  // this screen. An item that already carries fragments has been through the extractor, and a
+  // decompose spends one model call per item it runs, so the default pass is the new work only.
+  const [redoAll, setRedoAll] = useState(false);
 
   // ── Add images (noema-260) ────────────────────────────────────────────────
   // The panel's own disclosure state lives here rather than in the panel, because the
@@ -743,11 +750,13 @@ export function Muse() {
   // its text. When it returns, the dataset is re-read so the garden fills without a refresh.
   async function doDecompose(dataset: DatasetT) {
     const captionsetId = decomposeCaptionsetId(dataset, decomposeSet);
-    if (!canFireDecompose({ captionsetId, inFlight: decomposing })) return;
+    // With `redo` the workload is the whole pass, so the pending count is not what gates it.
+    const pending = redoAll ? undefined : decomposeWorkload(dataset, captionsetId).pending;
+    if (!canFireDecompose({ captionsetId, inFlight: decomposing, pending })) return;
     setDecomposing(true);
     setDecomposeMsg(null);
     try {
-      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, trigger });
+      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, trigger, redo: redoAll });
       if (run.status === 'failed') {
         setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
         return;
@@ -756,7 +765,9 @@ export function Muse() {
       setDatasets(ds);
       setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
     } catch (e) {
-      setDecomposeMsg({ ok: false, text: `couldn't decompose: ${String((e as Error).message).slice(0, 160)}` });
+      // Same reading the dataset screen does: a refusal because one is already running, or
+      // because there is nothing left to decompose, is a status rather than a failure.
+      setDecomposeMsg({ ok: false, text: decomposeFailureNote(String((e as Error).message)) });
     } finally {
       setDecomposing(false);
     }
@@ -1322,6 +1333,22 @@ export function Muse() {
   // before spending is the count the pass will actually run over.
   const nextCaptionsetId = decomposeCaptionsetId(d, decomposeSet);
   const decomposeGate = decomposeGateReason(d, nextCaptionsetId);
+  // What the next decompose would actually run, and the sentence that says it — the same
+  // rules the dataset screen arms its control on, so a decompose costs the same either door.
+  const decomposeWork = decomposeWorkload(d, nextCaptionsetId);
+  const decomposeArmed = canFireDecompose({
+    captionsetId: nextCaptionsetId,
+    inFlight: decomposing,
+    ...(redoAll ? {} : { pending: decomposeWork.pending }),
+  }) && !decomposeGate;
+  // The opt-in itself, rendered by both controls below.
+  const redoToggle = (
+    <label className="gt-sub mono">
+      <input type="checkbox" checked={redoAll} disabled={decomposing}
+        onChange={(e) => setRedoAll(e.currentTarget.checked)} />
+      {' '}re-decompose images that already have fragments
+    </label>
+  );
   const afterAppend = (
     <div className="muse-add-next">
       <label className="cc-field"><span>Caption pass</span>
@@ -1362,15 +1389,15 @@ export function Muse() {
       </label>
       <div className="muse-add-step">
         <button type="button" className="btn accent sm"
-          disabled={!canFireDecompose({ captionsetId: nextCaptionsetId, inFlight: decomposing }) || !!decomposeGate}
+          disabled={!decomposeArmed}
           onClick={() => void doDecompose(d)}>
-          {decomposing ? 'Decomposing…' : 'Decompose this pass →'}
+          {decomposing ? 'Decomposing…' : redoAll ? 'Re-decompose this pass →' : 'Decompose this pass →'}
         </button>
         <span className="gt-sub mono">
-          {decomposeGate
-            ?? 'reads every caption in this pass and stores the fragments on the images they came from · one chat call per caption · billed like any other run'}
+          {decomposeGate ?? decomposePlanNote(decomposeWork, redoAll)}
         </span>
       </div>
+      {redoToggle}
       {decomposeMsg && <div className="gt-sub mono">{decomposeMsg.text}</div>}
     </div>
   );
@@ -1404,16 +1431,17 @@ export function Muse() {
                       onChange={(e) => setTrigger(e.target.value)}
                       placeholder="keeps fragments reusable" />
                   </label>
+                  {redoToggle}
                   <button className="btn accent"
-                    disabled={!canFireDecompose({ captionsetId: decomposeCaptionsetId(d, decomposeSet), inFlight: decomposing }) || !!decomposeGate}
+                    disabled={!decomposeArmed}
                     onClick={() => void doDecompose(d)}>
-                    {decomposing ? 'Decomposing…' : 'Decompose these captions →'}
+                    {decomposing ? 'Decomposing…' : redoAll ? 'Re-decompose these captions →' : 'Decompose these captions →'}
                   </button>
                 </div>
                 <div className="muse-decompose-note mono">
                   {decomposeGate ?? (decomposing
-                    ? 'reading every caption in this set — one pass per caption, this stays open until the last one is written'
-                    : 'reads every caption in this set and stores the fragments on the images they came from · billed like any other run')}
+                    ? 'reading every caption left to decompose — one pass per caption, this stays open until the last one is written'
+                    : decomposePlanNote(decomposeWork, redoAll))}
                 </div>
                 {decomposeMsg && <div className="muse-decompose-note mono">{decomposeMsg.text}</div>}
               </>
