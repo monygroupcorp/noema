@@ -139,10 +139,25 @@ async function runDispatch(
   const by = inceptio.by
   const animaId    = 'animaId'    in by ? by.animaId    : undefined
   const commitment = 'commitment' in by ? by.commitment : undefined
-  const cursorResult = await withTrace(
-    makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
-    () => cursor.run(actum),
-  )
+  //
+  // A cursor that THROWS is a terminal run, so settle it here: `fail()` releases the
+  // signa the initiation locked and stamps the actum `fractus`, and the error is then
+  // rethrown unchanged for the caller to translate. Without this the actum stays
+  // `nascens` with its reservation held until the expiry reaper reaches it — the same
+  // terminal outcome, minus the credits the payer cannot use in the meantime. `fail()`
+  // is idempotent and returns early on an already-terminal actum, so the reaper and the
+  // completion webhook keep behaving exactly as they did; a settle failure is not
+  // allowed to replace the original error.
+  let cursorResult
+  try {
+    cursorResult = await withTrace(
+      makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
+      () => cursor.run(actum),
+    )
+  } catch (err) {
+    await completor.fail(actum, (err as Error)?.message ?? String(err)).catch(() => {})
+    throw err
+  }
 
   if (cursorResult.kind === 'sync') {
     // 4a. Sync: complete immediately. Thread the same identified-owner branch used for

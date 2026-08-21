@@ -36,9 +36,11 @@ import {
   type TerminalRun,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
+  DECOMPOSE_IN_FLIGHT_CODE,
   canFireDecompose,
   canOfferDecompose,
   decomposeCaptionsetId,
+  decomposeFailureNote,
   decomposeRunRequest,
 } from '../../../src/platforms/web/app/src/lib/training.js'
 import {
@@ -348,6 +350,21 @@ test('canFireDecompose: a second decompose cannot be fired while one is in fligh
   assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: false }), true)
   assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: true }), false)
   assert.equal(canFireDecompose({ captionsetId: null, inFlight: false }), false)
+})
+
+// `inFlight` above is one tab's memory of the pass IT launched — a reload, a second tab, or a
+// phone that slept all arm the control again while the first pass is still running. The server
+// is what refuses that second pass; these pin how the screen reads the refusal.
+
+test('a refused second pass reads as a running first pass, not as a failure', () => {
+  const note = decomposeFailureNote(`409 {"error":{"code":"${DECOMPOSE_IN_FLIGHT_CODE}","message":"..."}}`)
+  assert.match(note, /already running on this dataset/)
+  assert.doesNotMatch(note, /couldn't decompose/, 'the press was reasonable — this is the status that was missing')
+})
+
+test('every other launch failure is still surfaced as a failure, and trimmed', () => {
+  assert.match(decomposeFailureNote('502 upstream said no'), /couldn't decompose: 502 upstream said no/)
+  assert.ok(decomposeFailureNote('x'.repeat(500)).length < 200)
 })
 
 // ---------------------------------------------------------------------------

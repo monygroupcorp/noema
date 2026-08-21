@@ -23,6 +23,7 @@ import type { Cursorum, ActumCompletor, Actorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { InsufficientFundsError } from '../../execution/ActumInceptor.js'
 import { InsufficientBursaCreditsError } from '../../types/bursa.js'
+import { DecomposeInFlightError } from '../../crystal/MuseDecomposeCursor.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
@@ -647,6 +648,14 @@ export class CrystalApi {
           available: err.credits.toString(),
           required: err.required.toString(),
         })
+      }
+      // A cursor refusing a duplicate of work it is already running is the same kind of
+      // seam: a request outcome the caller can act on ("wait for the one you started"),
+      // not a server fault. Mapped here so it reaches the caller as a 409 with its code
+      // instead of the wrapper's masked `internal.error`, which reads as a bug and
+      // invites the retry that started the duplicate in the first place.
+      if (err instanceof DecomposeInFlightError) {
+        throw Errors.conflictRunInFlight(err.message, { dataset: err.datasetId })
       }
       throw err
     }
