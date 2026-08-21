@@ -692,6 +692,34 @@ export const api = {
       { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ caption }) },
     ).then(j<{ dataset: Dataset }>),
 
+  // ── Archive (the delete that strands nothing) ────────────────────────────
+  // Archiving a set takes it out of both list routes and out of every picker built on them.
+  // It is not an erasure: the record stays, so a Muse session naming it as a mother dataset,
+  // a session dataset behind a saved piece and a past run's lineage all keep resolving. Each
+  // of the four calls returns the WHOLE dataset back, which is what a caller re-renders from.
+  // Writes, so they take `authHeaders()`: ownership is resolved from the caller server-side
+  // and never from a parameter.
+  archiveDataset: (id: string) =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/archive`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
+  restoreDataset: (id: string) =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/restore`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
+  // One media item. The item leaves the dataset's working set — the media a caption pass or a
+  // decompose reads, and every captionset's coverage, which the server recomputes against what
+  // is left — while staying on the record, because caption maps and fragments are keyed on its
+  // id and have to survive the restore.
+  archiveDatasetMedia: (datasetId: string, mediaId: string) =>
+    fetch(
+      `/v1/data/datasets/${encodeURIComponent(datasetId)}/media/${encodeURIComponent(mediaId)}/archive`,
+      { method: 'POST', headers: authHeaders() },
+    ).then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
+  restoreDatasetMedia: (datasetId: string, mediaId: string) =>
+    fetch(
+      `/v1/data/datasets/${encodeURIComponent(datasetId)}/media/${encodeURIComponent(mediaId)}/restore`,
+      { method: 'POST', headers: authHeaders() },
+    ).then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
+
   // ── Muse sessions ────────────────────────────────────────────────────────
   // The session is the only place a Muse floor or piece ledger is written. Every
   // mutator returns the WHOLE updated session, so a caller re-renders from the
@@ -1154,6 +1182,11 @@ export interface DatasetMediaItem {
    *  empty — an item nothing has decomposed yet is a valid, expected state, rendered as an empty
    *  garden, not an error. No live decompose happens from this field. */
   fragments?: Fragment[];
+  /** Set when the item has been archived out of the working set. ISO string, as `addedAt` is;
+   *  absent means live, including on an item written before the field existed. The item stays
+   *  on the record so its caption and its fragments survive a restore, so this side is what
+   *  stops rendering and counting it. */
+  archivum?: string;
 }
 export interface DatasetVersionView { v: string; count: number; when: string }
 
@@ -1226,6 +1259,10 @@ export interface Dataset {
   versions: DatasetVersionView[];
   natum: string;
   mutatum: string;
+  /** Set when the set has been archived. Absent means live. An archived set is gone from both
+   *  list routes, so it arrives here only as the response to an archive — which is what keeps
+   *  the undo reachable on the screen that did it. */
+  archivum?: string;
 }
 // The body `POST /v1/data/datasets/:id/media` takes — the same discriminated ingestion
 // shape as creation, minus the fields that only make sense when minting a set.

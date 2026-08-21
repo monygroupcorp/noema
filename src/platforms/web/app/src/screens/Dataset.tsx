@@ -4,15 +4,23 @@ import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
+  ARCHIVE_MEANING,
+  archiveStep,
   captionCoverageLine,
   captionPassLabel,
   captionPassNote,
   categoryColor,
   curatedFragments,
   decomposeGateReason,
+  isArchived,
+  isSameTarget,
+  liveRecords,
   replaceDataset,
   sessionCountLine,
   sessionHistoryHref,
+  undoOffer,
+  type ArchiveDone,
+  type ArchiveTarget,
 } from '../lib/muse';
 import { AddImages } from '../components/AddImages';
 import {
@@ -67,8 +75,29 @@ import {
 //   noema-279 narrowed what an EXTENDING pass reads to the images the chosen pass does not
 //   cover, so this figure is now an upper bound on a pass launched from here rather than its
 //   exact size; the caption screen quotes the pass it is about to launch before it is launched.
+//
+// noema-267 — the archive controls, over the server half (noema-266). Removing an image lives
+// against the grid it removes from; archiving the whole set lives with the set's own identity in
+// the header, not buried in a menu. Both are plain buttons in the flow of the page rather than
+// hover affordances, because this screen is used on a phone.
+//
+//   ASK ONCE, THEN DO IT, THEN OFFER IT BACK. The rules are `archiveStep`/`undoOffer` in
+//   `lib/muse.ts` — the screen holds which target is being asked about and what was just
+//   archived, and renders what those two return.
+//
+//   THE SCREEN COUNTS WHAT IS LEFT. Archived media stays on the record (captions and fragments
+//   are keyed on its id and have to survive a restore), so the payload still carries it and this
+//   screen filters it: the grid, the header count, the coverage line, the caption quote and the
+//   decompose plan all read the LIVE media. The server recomputes each pass' stored coverage
+//   over the same live set, so a header counting the whole array would contradict the fraction
+//   printed beside it.
+//
+//   AN ARCHIVED SET IS NOT RE-READ FROM THE LIST. It has left `listDatasetsFull` by design, so
+//   the archive's own response is put back into local state and the undo is offered from there.
 
 export { categoryColor, curatedFragments };
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function Dataset() {
   const { id } = useParams();
@@ -131,6 +160,63 @@ export function Dataset() {
   // list is what re-reads the screen — nothing here patches a local copy.
   const [addOpen, setAddOpen] = useState(false);
 
+  // Archiving (noema-267). `asking` is the control whose question is open; `done` is what was just
+  // archived, which is what the undo is offered over. `now` only exists so the offer expires on
+  // its own rather than sitting there until the next render.
+  const [asking, setAsking] = useState<ArchiveTarget | null>(null);
+  const [done, setDone] = useState<ArchiveDone | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveErr, setArchiveErr] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!done) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [done]);
+
+  // The archive call itself, once a press has been confirmed. Both routes return the WHOLE
+  // dataset, so the response goes back into the list and the screen re-reads from it.
+  async function runArchive(target: ArchiveTarget) {
+    setArchiving(true);
+    setArchiveErr(null);
+    try {
+      const updated = target.kind === 'dataset'
+        ? await api.archiveDataset(target.datasetId)
+        : await api.archiveDatasetMedia(target.datasetId, target.mediaId);
+      setDatasets((ds) => replaceDataset(ds, updated));
+      setDone({ target, at: Date.now() });
+      setNow(Date.now());
+    } catch (e) {
+      setArchiveErr(errText(e));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  // One press on an archive control: the first asks, a second press on the SAME control does it.
+  function pressArchive(target: ArchiveTarget) {
+    const step = archiveStep(asking, target);
+    if (step.ask) { setAsking(target); setArchiveErr(null); return; }
+    setAsking(null);
+    void runArchive(step.archive);
+  }
+
+  async function takeItBack(target: ArchiveTarget) {
+    setArchiving(true);
+    setArchiveErr(null);
+    try {
+      const updated = target.kind === 'dataset'
+        ? await api.restoreDataset(target.datasetId)
+        : await api.restoreDatasetMedia(target.datasetId, target.mediaId);
+      setDatasets((ds) => replaceDataset(ds, updated));
+      setDone(null);
+    } catch (e) {
+      setArchiveErr(errText(e));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   async function doDecompose(dataset: DatasetT, selectedId: string | null) {
     const captionsetId = decomposeCaptionsetId(dataset, selectedId);
     // With `redo` the workload is the whole pass, so the pending count is not what gates it.
@@ -171,11 +257,18 @@ export function Dataset() {
   }
   const active = activeSet ?? (d.captionsets[0]?.id ?? '');
   const version = d.versions[d.versions.length - 1]?.v ?? '—';
-  const nextCaptionsetId = decomposeCaptionsetId(d, active);
-  const decomposeGate = decomposeGateReason(d, nextCaptionsetId);
+  // The working set, and the record every readout below is derived from. Archived media is
+  // still on `d` — it has to be, so a restore can bring its caption and its chips back — so
+  // `working` is what the grid renders and what every count, quote and gate is taken over.
+  const live = liveRecords(d.media);
+  const working = { ...d, media: live };
+  const archivedSet = isArchived(d);
+  const undo = undoOffer(done, now);
+  const nextCaptionsetId = decomposeCaptionsetId(working, active);
+  const decomposeGate = decomposeGateReason(working, nextCaptionsetId);
   // What the next decompose would actually run, and the sentence that says it. Derived from
   // the dataset the server last returned — the same record the chips above are rendered from.
-  const decomposeWork = decomposeWorkload(d, nextCaptionsetId);
+  const decomposeWork = decomposeWorkload(working, nextCaptionsetId);
   const decomposeArmed = canFireDecompose({
     captionsetId: nextCaptionsetId,
     inFlight: decomposing,
@@ -187,10 +280,10 @@ export function Dataset() {
   // until it has run. Every figure is derived from the dataset the server last returned.
   const afterAppend = (
     <div className="muse-add-next">
-      <div className="muse-add-readout mono">{captionCoverageLine(d, nextCaptionsetId)}</div>
+      <div className="muse-add-readout mono">{captionCoverageLine(working, nextCaptionsetId)}</div>
       <div className="muse-add-step">
-        <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>{captionPassLabel(d)}</Link>
-        <span className="gt-sub mono">{captionPassNote(d)}</span>
+        <Link className="btn ghost sm" to={`/datasets/${d.id}/caption`}>{captionPassLabel(working)}</Link>
+        <span className="gt-sub mono">{captionPassNote(working)}</span>
       </div>
       {decomposeGate && <div className="gt-sub mono">{decomposeGate}</div>}
     </div>
@@ -206,26 +299,71 @@ export function Dataset() {
         <div className="pagehead ds-detail-head">
           <div>
             <h1 className="ds-d-name">{d.name} <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span></h1>
-            <div className="sub mono">{d.media.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
+            {/* The count is the LIVE media — archiving two of nine and still reading nine would
+                contradict the coverage line beside it, which the server has already moved. */}
+            <div className="sub mono">{live.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
+          </div>
+          {/* Archiving the SET, with the set's own identity — not buried in a menu. It asks
+              once, says what archive means, and offers the set back after. */}
+          <div className="right ds-archive">
+            {archivedSet ? (
+              <button className="btn ghost sm" type="button" disabled={archiving}
+                onClick={() => void takeItBack({ kind: 'dataset', datasetId: d.id })}>
+                {archiving ? 'working…' : 'take this set back'}
+              </button>
+            ) : (
+              <>
+                <button className="btn ghost sm" type="button" disabled={archiving}
+                  onClick={() => pressArchive({ kind: 'dataset', datasetId: d.id })}>
+                  {isSameTarget(asking, { kind: 'dataset', datasetId: d.id }) ? 'archive this set? press again' : 'archive this set'}
+                </button>
+                {isSameTarget(asking, { kind: 'dataset', datasetId: d.id }) && (
+                  <button className="btn ghost sm" type="button" onClick={() => setAsking(null)}>keep it</button>
+                )}
+              </>
+            )}
+            <div className="sub ds-archive-note">{ARCHIVE_MEANING}</div>
+            {archivedSet && <div className="sub mono">this set is archived — it is out of your datasets until you take it back.</div>}
+            {archiveErr && <div className="sub mono">that did not go through: {archiveErr}</div>}
           </div>
         </div>
+
+        {/* The offer to take back whatever was just archived, for as long as it stands. */}
+        {undo && (
+          <div className="ds-undo">
+            <span className="sub mono">{undo.line}</span>
+            <button className="btn ghost sm" type="button" disabled={archiving}
+              onClick={() => void takeItBack(undo.target)}>{undo.label}</button>
+          </div>
+        )}
 
         <div className="ds-detail">
           {/* the media — king */}
           <div className="ds-images">
             <div className="ds-imgs-head"><span className="mono ds-showing">showing {d.captionsets.find((cs) => cs.id === active)?.name ?? '—'} · {version}</span>
             </div>
-            {d.media.length === 0 ? (
+            {live.length === 0 ? (
               <p className="ds-panel-note">no media in this dataset yet.</p>
             ) : (
               <div className="ds-imgrid">
-                {d.media.map((m) => {
+                {live.map((m) => {
                   const fragments = m.fragments ?? [];
                   const excluded = excludedByItem[m.id] ?? new Set<number>();
                   return (
                     <figure key={m.id} className="ds-img">
                       <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
                       <figcaption className="mono">{m.source === 'upload' ? 'uploaded' : 'from a generation'}</figcaption>
+                      {/* Removing ONE image, against the grid it leaves. Asks once; the second
+                          press does it and the undo appears above. */}
+                      <div className="ds-img-actions">
+                        <button className="btn ghost sm" type="button" disabled={archiving}
+                          onClick={() => pressArchive({ kind: 'media', datasetId: d.id, mediaId: m.id })}>
+                          {isSameTarget(asking, { kind: 'media', datasetId: d.id, mediaId: m.id }) ? 'remove it? press again' : 'remove'}
+                        </button>
+                        {isSameTarget(asking, { kind: 'media', datasetId: d.id, mediaId: m.id }) && (
+                          <button className="btn ghost sm" type="button" onClick={() => setAsking(null)}>keep it</button>
+                        )}
+                      </div>
                       {fragments.length > 0 && (
                         <div className="pref-chips ds-garden">
                           {fragments.map((f, i) => {
@@ -255,7 +393,7 @@ export function Dataset() {
             {/* Growing the set (noema-265) — against the grid it grows, and the append's response
                 is what the screen re-renders from. */}
             <AddImages
-              dataset={d}
+              dataset={working}
               open={addOpen}
               onOpenChange={setAddOpen}
               onAppended={(updated) => setDatasets((ds) => replaceDataset(ds, updated))}
@@ -288,15 +426,15 @@ export function Dataset() {
                   to={active ? `/datasets/${d.id}/caption?captionset=${encodeURIComponent(active)}` : `/datasets/${d.id}/caption`}>
                   {active ? 'caption the uncaptioned →' : 'run a caption job'}
                 </Link>
-                {canOfferDecompose(d) && (
+                {canOfferDecompose(working) && (
                   <button className="btn ghost sm" type="button"
                     disabled={!decomposeArmed}
-                    onClick={() => void doDecompose(d, active)}>
+                    onClick={() => void doDecompose(working, active)}>
                     {decomposing ? 'decomposing…' : redoAll ? 're-decompose all →' : 'decompose →'}
                   </button>
                 )}
               </div>
-              {canOfferDecompose(d) && (
+              {canOfferDecompose(working) && (
                 <>
                   <p className="ds-panel-note">{decomposePlanNote(decomposeWork, redoAll)}</p>
                   <label className="ds-panel-note">
@@ -306,7 +444,7 @@ export function Dataset() {
                   </label>
                 </>
               )}
-              <p className="ds-panel-note">{captionCoverageLine(d, nextCaptionsetId)}</p>
+              <p className="ds-panel-note">{captionCoverageLine(working, nextCaptionsetId)}</p>
               {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
               {decomposing && <p className="ds-panel-note">a decompose is running on this dataset — one pass per caption, and it stays open until the last one is written. Only one runs at a time.</p>}
               {decomposeMsg && <p className="ds-panel-note">{decomposeMsg.text}</p>}
