@@ -91,6 +91,10 @@ import {
   nextPieceDecision,
   rollAt,
   stopLabel,
+  collapsedControls,
+  configSummaryLine,
+  nozzleSummaryLine,
+  toggleControl,
   streamStatusLine,
   MAX_CONSECUTIVE_ERRORS,
   type LaunchState,
@@ -1759,4 +1763,80 @@ test('a piece whose run has not reached terminal comes back as still generating 
   const open = stream.pieces.find((p) => p.runId === 'run-open')!
   assert.equal(open.status, 'running', 'a run still going is not folded in as finished, and is not folded in as failed')
   assert.equal(open.media, null)
+})
+
+// ── The controls get out of the way on a phone (noema-264) ──────────────────
+//
+// The rule lives in `lib/muse.ts` and not in `Muse.tsx` because that is the only place
+// it can be gated: these tests run from the repo root under `tsx --test`, which has no
+// react. The CSS half of this item is NOT gated by anything here.
+
+const COLLAPSE = (over: Partial<Parameters<typeof collapsedControls>[0]> = {}) =>
+  collapsedControls({ phase: 'running', pieces: 4, expandedByHand: [], ...over })
+
+// Non-vacuity 1 — the collapse happens at all
+
+test('a stream with pieces on it collapses the configuration and the nozzle to their summary lines', () => {
+  const collapsed = COLLAPSE()
+  assert.equal(collapsed.configuration, true)
+  assert.equal(collapsed.nozzle, true, 'the grid is what the user scrolled here to see')
+
+  // a stream that has stopped still has its pieces on it, and they are still the reason
+  // the controls are not the screen
+  assert.deepEqual(COLLAPSE({ phase: 'stopped' }), { configuration: true, nozzle: true })
+  assert.deepEqual(COLLAPSE({ phase: 'resumed' }), { configuration: true, nozzle: true })
+
+  // and a loop riding toward its first piece has already begun, whatever has landed yet
+  assert.deepEqual(COLLAPSE({ phase: 'running', pieces: 0 }), { configuration: true, nozzle: true })
+  assert.deepEqual(COLLAPSE({ phase: 'holding', pieces: 0 }), { configuration: true, nozzle: true })
+})
+
+// Non-vacuity 2 — an empty screen keeps the control that starts something
+
+test('a session with nothing on it opens with the configuration expanded', () => {
+  const fresh = COLLAPSE({ phase: 'idle', pieces: 0 })
+  assert.equal(fresh.configuration, false, 'collapsing an empty screen hides the only control that starts anything')
+  assert.equal(fresh.nozzle, false, 'and the model is chosen before the first piece, not after it')
+
+  // the same is true of a session reopened with nothing in its ledger
+  assert.deepEqual(COLLAPSE({ phase: 'stopped', pieces: 0 }), { configuration: false, nozzle: false })
+})
+
+// Non-vacuity 3 — the collapse is a default, never a lock
+
+test('expanding a collapsed control keeps it expanded while the stream rides', () => {
+  const opened = COLLAPSE({ expandedByHand: ['nozzle'] })
+  assert.equal(opened.nozzle, false, 'nothing re-collapses a control under the user\'s hand')
+  assert.equal(opened.configuration, true, 'and opening one says nothing about the other')
+
+  // it stays open across every phase the stream moves through afterwards
+  for (const phase of ['running', 'holding', 'stopping', 'stopped'] as const) {
+    assert.equal(collapsedControls({ phase, pieces: 9, expandedByHand: ['nozzle'] }).nozzle, false)
+  }
+
+  // the user's hand is also the only thing that closes it again
+  assert.deepEqual(toggleControl([], 'configuration'), ['configuration'])
+  assert.deepEqual(toggleControl(['configuration'], 'configuration'), [])
+  assert.deepEqual(toggleControl(['nozzle'], 'configuration'), ['nozzle', 'configuration'])
+  assert.equal(COLLAPSE({ expandedByHand: toggleControl(['nozzle'], 'nozzle') }).nozzle, true)
+})
+
+// Non-vacuity 4 — collapsed stays legible
+
+test('a collapsed nozzle still names the model that is loaded and its weight', () => {
+  const line = nozzleSummaryLine(CHOICE({ weight: 0.8 }))
+  assert.match(line, /sample-lora/, 'which model is loaded is exactly what a collapsed row exists to answer')
+  assert.match(line, /trigword/)
+  assert.match(line, /0\.8/, 'the user is mid-stream and spending against this weight')
+
+  // an unset weight is a weight, and the line says which one it is rather than omitting it
+  assert.match(nozzleSummaryLine(CHOICE()), /own default/)
+  assert.match(nozzleSummaryLine(null), /no model/)
+
+  // the configuration's own line names the run mode and, when the mode has one, the cap
+  assert.match(configSummaryLine(CFG({ mode: 'batched', cap: 12 }), 'a workflow'), /batched/)
+  assert.match(configSummaryLine(CFG({ mode: 'batched', cap: 12 }), 'a workflow'), /12/)
+  assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /infinite/)
+  assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /a workflow/)
+  assert.match(configSummaryLine(CFG(), null), /no workflow/)
 })
