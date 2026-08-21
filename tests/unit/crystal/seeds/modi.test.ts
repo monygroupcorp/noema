@@ -64,6 +64,25 @@ test('dataset-caption modus is a canon caption job on its OWN ministerium (async
   assert.ok(MODUS_DATASET_CAPTION.contentHash.length > 0)
 })
 
+test('the caption modus declares every key its cursor and finalizer read', () => {
+  // `validateAditus` builds its result by iterating the SCHEMA, so a key the modus does not
+  // declare is not copied forward — an undeclared port survives only on the routes that skip
+  // that validation. `captionset` is the key `DatasetCaptionCursor` (staging + the launch
+  // aditus it echoes) and `captionFinalizer` (the extend path) both read, so it is declared.
+  // Undeclared, an extending pass would silently become a whole-set pass on any route that
+  // validates: a fresh captionset, and every image captioned again at pod cost.
+  assert.equal('captionset' in MODUS_DATASET_CAPTION.aditus, true, 'captionset must be a declared port')
+  assert.equal(MODUS_DATASET_CAPTION.aditus.captionset?.required, false)
+  // 'text' is what both readers parse — `typeof aditus.captionset === 'string'`, then trimmed.
+  assert.equal(MODUS_DATASET_CAPTION.aditus.captionset?.type, 'text')
+  // Optional and with no default: `validateAditus` omits an absent optional port that has no
+  // default, which is exactly the "mint a fresh captionset" path. A default here would make
+  // every pass an extending pass of one hard-coded set.
+  assert.equal(MODUS_DATASET_CAPTION.aditus.captionset?.default, undefined)
+  // The descriptio is user-facing contract text — it must not still promise a whole-set pass.
+  assert.match(MODUS_DATASET_CAPTION.descriptio, /EXTENDS/)
+})
+
 test('frames-to-video modus is host-side (ministerium ffmpeg, sync, video out)', () => {
   assert.equal(MODUS_FRAMES_TO_VIDEO.ministerium, 'ffmpeg')
   assert.equal(MODUS_FRAMES_TO_VIDEO.deliveryMode, 'sync')
@@ -152,6 +171,35 @@ test('dataset-decompose modus is a canon decompose job on its OWN ministerium (s
   assert.equal(MODUS_DATASET_DECOMPOSE.aditus.captionset?.required, true)
   assert.deepEqual(Object.keys(MODUS_DATASET_DECOMPOSE.exitus).sort(), ['decomposed', 'fragments'])
   assert.ok(MODUS_DATASET_DECOMPOSE.contentHash.length > 0)
+})
+
+test('the decompose modus declares every key its cursor reads', () => {
+  // Same rule as the caption modus above: `validateAditus` iterates the schema, so an
+  // undeclared key is dropped wherever that validation runs. `redo` is the whole-set rebuild
+  // opt-in `MuseDecomposeCursor.resolveWork` reads; undeclared, a deliberate rebuild would
+  // silently become an incremental pass that skips everything already decomposed.
+  assert.equal('redo' in MODUS_DATASET_DECOMPOSE.aditus, true, 'redo must be a declared port')
+  assert.equal(MODUS_DATASET_DECOMPOSE.aditus.redo?.required, false)
+  // 'text' is the type that survives the round trip. `isRedo` accepts a real `true` or one of
+  // 'true' | '1' | 'yes'; a declared 'text' port is coerced with `String(value)`, which maps
+  // `true` to 'true' and `false` to 'false' — both read the same way as the raw value. The
+  // strictness lives in `isRedo`, and the declared type must not undo it.
+  assert.equal(MODUS_DATASET_DECOMPOSE.aditus.redo?.type, 'text')
+  // No default: an absent optional port with no default is omitted, which is the incremental
+  // path. A default of any accepted string would make every decompose the expensive one.
+  assert.equal(MODUS_DATASET_DECOMPOSE.aditus.redo?.default, undefined)
+  // The descriptio is user-facing contract text — it must say the pass is incremental.
+  assert.match(MODUS_DATASET_DECOMPOSE.descriptio, /INCREMENTAL/)
+})
+
+test("the decompose modus' exitus matches what the cursor actually returns", () => {
+  // `MuseDecomposeCursor.run` returns `exitus: { decomposed, fragments }` and nothing else.
+  // Pinned in both directions: a port the cursor does not populate is as misleading as a key
+  // the cursor returns and the modus never declares.
+  assert.deepEqual(Object.keys(MODUS_DATASET_DECOMPOSE.exitus).sort(), ['decomposed', 'fragments'])
+  assert.equal('skipped' in MODUS_DATASET_DECOMPOSE.exitus, false, 'the cursor does not return a skipped count')
+  assert.equal(MODUS_DATASET_DECOMPOSE.exitus.decomposed?.type, 'int')
+  assert.equal(MODUS_DATASET_DECOMPOSE.exitus.fragments?.type, 'int')
 })
 
 test('all modi have non-empty id, nomen, versio', () => {

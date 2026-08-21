@@ -301,7 +301,7 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
 export const MODUS_DATASET_CAPTION: Modus = make({
   id: 'modus.dataset-caption',
   nomen: 'Dataset Captioning — batch',
-  descriptio: 'Dataset Captioning (batch) — captions every image in a dataset in one pod pass and stores the result as a captionset on that dataset. Pick it to prepare a dataset for LoRA training; use the single-image caption spell for one-off captions.',
+  descriptio: 'Dataset Captioning (batch) — captions a dataset\'s images in one pod pass and stores the result as a captionset on that dataset. Given a captionset it EXTENDS it, captioning only the images that captionset does not already cover; given none it captions the whole working set and mints one. Pick it to prepare a dataset for LoRA training; use the single-image caption spell for one-off captions.',
   genus: 'atomicus',
   versio: '1.0.0',
 
@@ -328,7 +328,12 @@ export const MODUS_DATASET_CAPTION: Modus = make({
   // The user-facing contract: a DATASET id plus optional captioner knobs. The modus synthesises
   // the ai-toolkit caption yaml (buildAitkCaptionConfig) — users never author a config.
   aditus: {
-    dataset:        { type: 'text', required: true,  description: 'Id of the dataset to caption — every image in it is captioned' },
+    dataset:        { type: 'text', required: true,  description: 'Id of the dataset to caption' },
+    // The EXTEND port. Declared because the cursor and the finalizer both read it: present, the
+    // pass stages only the media this captionset does not cover and the harvest is written back
+    // into it; absent, the pass captions the whole working set and mints a fresh captionset.
+    // Typed 'text' because that is what both readers parse — a trimmed captionset id string.
+    captionset:     { type: 'text', required: false, description: 'Id of the captionset on that dataset to EXTEND — only the images it does not already cover are captioned. Absent: caption the whole working set into a fresh captionset.' },
     name:           { type: 'text', required: false, description: 'Display name for the resulting captionset (defaults to a generated one)' },
     captionPrompt:  { type: 'text', required: false, description: 'Instruction handed to the captioner (defaults to the training-caption prompt)' },
     maxNewTokens:   { type: 'int',  required: false, description: 'Caption length cap in tokens (captioner default when absent)' },
@@ -342,13 +347,13 @@ export const MODUS_DATASET_CAPTION: Modus = make({
   },
 
   natum:   new Date('2026-08-14'),
-  mutatum: new Date('2026-08-14'),
+  mutatum: new Date('2026-08-21'),
 })
 
 export const MODUS_DATASET_DECOMPOSE: Modus = make({
   id: 'modus.dataset-decompose',
   nomen: 'Dataset Decompose — captions into prompt fragments',
-  descriptio: 'Dataset Decompose — runs every caption in one captionset through the Muse decomposer and stores the resulting prompt fragments on the media items they came from. Pick it to fill a dataset\'s chip garden after captioning; caption the dataset first if it has no captionset yet.',
+  descriptio: 'Dataset Decompose — runs captions from one captionset through the Muse decomposer and stores the resulting prompt fragments on the media items they came from. INCREMENTAL by default: only the media items that carry no fragments yet are decomposed, and a pass with nothing left to do is refused. Pass `redo` to decompose the whole captionset again. Pick it to fill a dataset\'s chip garden after captioning; caption the dataset first if it has no captionset yet.',
   genus: 'atomicus',
   versio: '1.0.0',
 
@@ -374,18 +379,30 @@ export const MODUS_DATASET_DECOMPOSE: Modus = make({
   aditus: {
     dataset:    { type: 'text', required: true,  description: 'Id of the dataset whose media items the fragments land on' },
     captionset: { type: 'text', required: true,  description: 'Id of the captionset on that dataset to decompose' },
+    // The whole-set rebuild opt-in. Declared because the cursor reads it, and typed 'text' to
+    // match what the cursor already parses: `isRedo` accepts a real `true` or one of the strings
+    // a form control produces for it ('true' | '1' | 'yes', case- and space-insensitive), and
+    // nothing else. 'text' is the only declared type that preserves that — `validateAditus`
+    // coerces a declared 'text' port with `String(value)`, which maps `true` to 'true' and
+    // `false` to 'false', both of which `isRedo` reads the same way it reads the raw value. No
+    // declared type here turns an otherwise-incremental value truthy.
+    redo:       { type: 'text', required: false, description: 'Decompose the WHOLE captionset again, including media items that already carry fragments — the expensive path, never the default. On: true | \'true\' | \'1\' | \'yes\'. Anything else leaves the pass incremental.' },
     trigger:    { type: 'text', required: false, description: 'Trigger word to strip from fragments, so they stay reusable rather than branded to one model' },
     model:      { type: 'text', required: false, description: 'Chat model id for the decomposer (the provider default when absent)' },
     provider:   { type: 'text', required: false, description: 'Hosted-API provider id to decompose on (the deployment default when absent)' },
   },
 
+  // Matches the cursor's return exactly. Both counts are over the work THIS pass did, never over
+  // the captionset it read — the same basis the settlement uses. The cursor does not compute or
+  // return a skipped count, so none is declared: a declared exitus key nothing writes is as
+  // misleading as an undeclared port.
   exitus: {
     decomposed: { type: 'int', description: 'How many media items this pass wrote fragments onto' },
     fragments:  { type: 'int', description: 'How many fragments were written in total' },
   },
 
   natum:   new Date('2026-08-18'),
-  mutatum: new Date('2026-08-18'),
+  mutatum: new Date('2026-08-21'),
 })
 
 export const MODUS_MUSE_STEER: Modus = make({
