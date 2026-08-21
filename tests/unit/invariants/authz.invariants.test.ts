@@ -54,7 +54,7 @@ import type {
 } from '../../../src/types/museSession.js'
 import { recordPiece, spawnSession, type MuseSession } from '../../../src/crystal/muse/session.js'
 import type { Fragment } from '../../../src/crystal/muse/taxonomy.js'
-import { captionCoverage, nextDatasetVersion } from '../../../src/types/dataset.js'
+import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../src/types/dataset.js'
 import { API_CONTRACT } from '../../../src/allocutio/api/apiContract.js'
 
 // The two identities. A owns everything seeded; B owns nothing and may reach nothing.
@@ -172,13 +172,13 @@ class MemDatasets implements Datasets {
     return full
   }
   private _owned(owner: string): Dataset[] {
-    return [...this.store.values()].filter((d) => d.owner === owner)
+    return [...this.store.values()].filter((d) => d.owner === owner && !isArchived(d))
   }
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
     return { entries: this._owned(opts.owner) }
   }
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
-    return { entries: this._owned(opts.owner).map((d) => ({ id: d.id, name: d.name, images: d.media.length })) }
+    return { entries: this._owned(opts.owner).map((d) => ({ id: d.id, name: d.name, images: liveMedia(d.media).length })) }
   }
   async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
     const d = this.store.get(datasetId)
@@ -193,7 +193,7 @@ class MemDatasets implements Datasets {
     const target = d?.captionsets.find((c) => c.id === captionsetId)
     if (!d || !target) return null
     const captions = { ...(target.captions ?? {}), [mediaId]: caption }
-    const updated: Captionset = { ...target, captions, coverage: captionCoverage(captions, d.media.length) }
+    const updated: Captionset = { ...target, captions, coverage: coverageOver(captions, d.media) }
     const next: Dataset = {
       ...d,
       captionsets: d.captionsets.map((c) => (c.id === captionsetId ? updated : c)),
@@ -209,7 +209,7 @@ class MemDatasets implements Datasets {
     const next: Dataset = {
       ...d,
       media,
-      captionsets: d.captionsets.map((c) => ({ ...c, coverage: captionCoverage(c.captions, media.length) })),
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
       versions: [...d.versions, { v: nextDatasetVersion(d.versions), count: media.length, when: new Date() }],
       mutatum: new Date(),
     }
@@ -226,6 +226,56 @@ class MemDatasets implements Datasets {
     }
     this.store.set(datasetId, next)
     return next
+  }
+
+  // ── Archive (noema-266) ──────────────────────────────────────────────────
+  // Mirrors MongoDataset exactly: `list`/`listSummaries` exclude archived datasets and `find`
+  // does not; archiving or restoring media recomputes every captionset's coverage through the
+  // same shared `coverageOver`, so this double cannot claim arithmetic the store would not.
+  async archiveDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (d.archivum) return d
+    const now = new Date()
+    const updated: Dataset = { ...d, archivum: now, mutatum: now }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async restoreDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (!d.archivum) return d
+    const { archivum: _gone, ...rest } = d
+    const updated: Dataset = { ...rest, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, new Date())
+  }
+  async restoreMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, null)
+  }
+  private async _setMediaArchivum(datasetId: string, mediaId: string, archivum: Date | null): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const target = d.media.find((m) => m.id === mediaId)
+    if (!target) return null
+    if (Boolean(target.archivum) === Boolean(archivum)) return d
+    const media = d.media.map((m) => {
+      if (m.id !== mediaId) return m
+      if (archivum) return { ...m, archivum }
+      const { archivum: _gone, ...rest } = m
+      return rest
+    })
+    const updated: Dataset = {
+      ...d,
+      media,
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, updated)
+    return updated
   }
 }
 
@@ -523,6 +573,13 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
     // The spawn reaches the dataset through the same resolution, so a stranger cannot
     // break a session off someone else's mother either.
     { name: 'spawnMuseSession', call: (id) => api.spawnMuseSession(B, id) },
+    // Archive and restore are the most consequential writes on this surface — one takes a
+    // dataset out of its owner's listing, the other puts it back — so both resolve ownership
+    // the same way and neither may be reachable by naming someone else's id.
+    { name: 'archiveDataset', call: (id) => api.archiveDataset(B, id) },
+    { name: 'restoreDataset', call: (id) => api.restoreDataset(B, id) },
+    { name: 'archiveDatasetMedia', call: (id) => api.archiveDatasetMedia(B, id, mediaId) },
+    { name: 'restoreDatasetMedia', call: (id) => api.restoreDatasetMedia(B, id, mediaId) },
   ], () => snapshot(datasets.store))
 
   const stillThere = await api.getDataset(A, mine.id)
@@ -533,6 +590,8 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
     'B\'s media append left A\'s media set exactly as it was',
   )
   assert.equal(stillThere.captionsets[0].coverage, '1/1', 'and therefore left the coverage it derives alone')
+  assert.equal(stillThere.archivum, undefined, 'B\'s archive attempt left A\'s dataset live')
+  assert.equal(stillThere.media[0].archivum, undefined, 'and left A\'s media in the working set')
   assert.equal((await api.listDatasets(B)).datasets.length, 0, 'B\'s own list stays empty')
   assert.equal((await api.listDatasets(A)).datasets.length, 1, 'A still sees their own dataset')
 })

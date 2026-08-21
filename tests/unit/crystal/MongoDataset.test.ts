@@ -232,3 +232,102 @@ test('addMedia leaves an already-decomposed media item\'s fragments on that item
 test('addMedia returns null for an unknown dataset', async () => {
   assert.equal(await store.addMedia('nope', appended), null)
 })
+
+// ── Archive + restore (noema-266) ────────────────────────────────────────────
+//
+// The store half of the archive: the list filter, the find passthrough that keeps every
+// reference resolving, the coverage recomputation that must ride along with a media archive,
+// and the restore that makes the whole thing an archive rather than a delete. The hermetic
+// proofs of the same behaviour, through the HTTP surface, live in
+// tests/unit/allocutio/api/datasetsRoutes.test.ts.
+
+const twoImages = {
+  ...base,
+  media: [
+    { id: 'm1', url: 'https://r2.example/m1.png', source: 'upload' as const, addedAt: new Date() },
+    { id: 'm2', url: 'https://r2.example/m2.png', source: 'upload' as const, addedAt: new Date() },
+  ],
+  captionsets: [{ id: 'c1', name: 'natural language', method: 'manual', coverage: '1/2', captions: { m1: 'a caption' } }],
+}
+
+test('an archived dataset is gone from list and listSummaries', async () => {
+  const kept = await store.create(base)
+  const gone = await store.create({ ...base, name: 'archived one' })
+
+  const archived = await store.archiveDataset(gone.id)
+  assert.ok(archived?.archivum instanceof Date, 'archive stamps a timestamp, not a boolean')
+
+  assert.deepEqual((await store.list({ owner: base.owner })).entries.map((d) => d.id), [kept.id])
+  assert.deepEqual((await store.listSummaries({ owner: base.owner })).entries.map((d) => d.id), [kept.id])
+})
+
+test('an archived dataset is still returned by find, so nothing that referenced it breaks', async () => {
+  const d = await store.create(base)
+  await store.archiveDataset(d.id)
+
+  const found = await store.find(d.id)
+  assert.equal(found?.id, d.id, 'archive is not erasure — find is what a reference resolves through')
+  assert.equal(found?.media.length, 1)
+  assert.ok(found?.archivum)
+})
+
+test('archiving media recomputes every captionset\'s coverage against the media that is left', async () => {
+  const d = await store.create(twoImages)
+
+  // Coverage is stored, not derived at read time, so the archive has to move it.
+  const afterUncaptioned = await store.archiveMedia(d.id, 'm2')
+  assert.equal(afterUncaptioned?.captionsets[0].coverage, '1/1')
+  assert.equal((await store.find(d.id))?.captionsets[0].coverage, '1/1', 'and the recomputation is persisted')
+
+  // Archiving the captioned item moves the numerator too — its caption stays on the record,
+  // keyed by media id, but it is not coverage of the working set.
+  const afterCaptioned = await store.archiveMedia(d.id, 'm1')
+  assert.equal(afterCaptioned?.captionsets[0].coverage, '0/0')
+  assert.equal(afterCaptioned?.captionsets[0].captions?.m1, 'a caption')
+
+  // The thin projection counts the live media, not the rows.
+  assert.equal((await store.listSummaries({ owner: base.owner })).entries[0].images, 0)
+})
+
+test('an archived media item stays on the record, stamped rather than removed', async () => {
+  const d = await store.create(twoImages)
+  await store.archiveMedia(d.id, 'm1')
+
+  const found = await store.find(d.id)
+  assert.equal(found?.media.length, 2, 'caption maps and fragments are keyed on the media id')
+  assert.ok(found?.media.find((m) => m.id === 'm1')?.archivum)
+  assert.equal(found?.media.find((m) => m.id === 'm2')?.archivum, undefined)
+})
+
+test('an archived dataset and an archived media item can both be restored', async () => {
+  const d = await store.create(twoImages)
+  await store.archiveMedia(d.id, 'm2')
+  await store.archiveDataset(d.id)
+  assert.equal((await store.list({ owner: base.owner })).entries.length, 0)
+
+  const restored = await store.restoreDataset(d.id)
+  assert.equal(restored?.archivum, undefined, 'restore removes the field rather than flipping a second flag')
+  assert.deepEqual((await store.list({ owner: base.owner })).entries.map((x) => x.id), [d.id])
+  assert.equal((await store.find(d.id))?.archivum, undefined, 'and the field is gone from the document')
+
+  const back = await store.restoreMedia(d.id, 'm2')
+  assert.equal(back?.media.find((m) => m.id === 'm2')?.archivum, undefined)
+  assert.equal(back?.captionsets[0].coverage, '1/2', 'a restore recomputes coverage the same way an archive does')
+  assert.equal((await store.listSummaries({ owner: base.owner })).entries[0].images, 2)
+})
+
+test('archive and restore are idempotent, and an unknown id or media id returns null', async () => {
+  const d = await store.create(twoImages)
+  const first = await store.archiveDataset(d.id)
+  const second = await store.archiveDataset(d.id)
+  assert.deepEqual(second?.archivum, first?.archivum, 'a repeated archive does not re-date the archive')
+
+  await store.restoreDataset(d.id)
+  assert.equal((await store.restoreDataset(d.id))?.archivum, undefined)
+
+  assert.equal(await store.archiveDataset('nope'), null)
+  assert.equal(await store.restoreDataset('nope'), null)
+  assert.equal(await store.archiveMedia('nope', 'm1'), null)
+  assert.equal(await store.archiveMedia(d.id, 'not-a-media-id'), null)
+  assert.equal(await store.restoreMedia(d.id, 'not-a-media-id'), null)
+})
