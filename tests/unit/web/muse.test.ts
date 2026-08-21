@@ -42,11 +42,14 @@ import {
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
   DECOMPOSE_IN_FLIGHT_CODE,
+  DECOMPOSE_NOTHING_TO_DO_CODE,
   canFireDecompose,
   canOfferDecompose,
   decomposeCaptionsetId,
   decomposeFailureNote,
+  decomposePlanNote,
   decomposeRunRequest,
+  decomposeWorkload,
 } from '../../../src/platforms/web/app/src/lib/training.js'
 import {
   appendFailureNote,
@@ -2321,4 +2324,87 @@ test('adding a reason never turns a refusal into permission', () => {
   const lines = (['no-session', 'not-recorded', 'in-flight', 'saved', 'not-offered'] as const)
     .map((b) => gestureBlockLine(b))
   assert.equal(new Set(lines).size, lines.length)
+})
+
+// ── what a decompose has left to do (noema-278) ──────────────────────────────
+//
+// A decompose spends one model call per item it runs, and an item that already carries
+// fragments has been through the extractor. The control must therefore quote the work that is
+// actually left rather than the size of the pass, must not fire at all when there is none, and
+// must make the rebuild-everything path an explicit ask that says what it covers.
+
+/** A dataset with a caption pass over three images, `decomposed` of which carry fragments. */
+function decomposeSet(captioned: string[], decomposed: string[]) {
+  const frag = [{ category: 'subject' as const, text: 'a woman', source: 'set', trigger: '' }]
+  return {
+    captionsets: [{
+      id: 'cs-1',
+      captions: Object.fromEntries(captioned.map((id) => [id, `caption for ${id}`])),
+    }],
+    media: ['m-1', 'm-2', 'm-3'].map((id) => ({
+      id,
+      ...(decomposed.includes(id) ? { fragments: frag } : {}),
+    })),
+  }
+}
+
+test('the control counts only the items a decompose would actually run', () => {
+  const partly = decomposeSet(['m-1', 'm-2', 'm-3'], ['m-1', 'm-2'])
+  assert.deepEqual(decomposeWorkload(partly, 'cs-1'), { pending: 1, already: 2, captioned: 3 })
+
+  // Counting captions instead would quote three images — and three model calls — for one item's
+  // worth of new fragments.
+  const fresh = decomposeSet(['m-1', 'm-2', 'm-3'], [])
+  assert.deepEqual(decomposeWorkload(fresh, 'cs-1'), { pending: 3, already: 0, captioned: 3 })
+
+  // An empty caption is no caption: it produces no fragment, so it is not work.
+  const blank = decomposeSet(['m-1', 'm-2'], [])
+  blank.captionsets[0]!.captions['m-2'] = '   '
+  assert.deepEqual(decomposeWorkload(blank, 'cs-1'), { pending: 1, already: 0, captioned: 1 })
+
+  // No pass chosen, and a pass that is not on the dataset, are both "nothing to run".
+  assert.deepEqual(decomposeWorkload(partly, null), { pending: 0, already: 0, captioned: 0 })
+  assert.deepEqual(decomposeWorkload(partly, 'cs-elsewhere'), { pending: 0, already: 0, captioned: 0 })
+})
+
+test('the decompose control says how many images are left, or that there are none', () => {
+  const left = decomposePlanNote({ pending: 2, already: 28, captioned: 30 }, false)
+  assert.match(left, /2 images left to decompose/)
+  assert.match(left, /28 images are already decomposed/)
+
+  const none = decomposePlanNote({ pending: 0, already: 30, captioned: 30 }, false)
+  assert.match(none, /already decomposed/)
+  assert.doesNotMatch(none, /left to decompose/)
+
+  // The expensive path names its own size rather than borrowing the incremental sentence.
+  const redo = decomposePlanNote({ pending: 0, already: 30, captioned: 30 }, true)
+  assert.match(redo, /all 30 images/)
+  assert.match(redo, /replaces the fragments/)
+
+  // One image is one image.
+  assert.match(decomposePlanNote({ pending: 1, already: 0, captioned: 1 }, false), /1 image left/)
+})
+
+test('a decompose with nothing left to run is not armed, and a redo of the same set is', () => {
+  const armedGate = { captionsetId: 'cs-1', inFlight: false }
+  assert.equal(canFireDecompose({ ...armedGate, pending: 2 }), true)
+  assert.equal(canFireDecompose({ ...armedGate, pending: 0 }), false)
+  // A redo hands no pending count — the whole pass is the work, whatever is decomposed already.
+  assert.equal(canFireDecompose(armedGate), true)
+  // The other two rules still bite regardless of the workload.
+  assert.equal(canFireDecompose({ captionsetId: 'cs-1', inFlight: true, pending: 2 }), false)
+  assert.equal(canFireDecompose({ captionsetId: null, inFlight: false, pending: 2 }), false)
+})
+
+test('a decompose asks to redo everything only when the user said so', () => {
+  assert.equal('redo' in decomposeRunRequest({ datasetId: 'ds-1', captionsetId: 'cs-1' }).aditus, false)
+  assert.equal('redo' in decomposeRunRequest({ datasetId: 'ds-1', captionsetId: 'cs-1', redo: false }).aditus, false)
+  assert.equal(decomposeRunRequest({ datasetId: 'ds-1', captionsetId: 'cs-1', redo: true }).aditus.redo, true)
+})
+
+test('a decompose refused for having nothing to do reads as a status, not as a failure', () => {
+  const note = decomposeFailureNote(`409 {"error":{"code":"${DECOMPOSE_NOTHING_TO_DO_CODE}","message":"..."}}`)
+  assert.match(note, /already decomposed/)
+  assert.match(note, /nothing was spent/)
+  assert.doesNotMatch(note, /couldn't decompose/, 'the press was reasonable — this is the status that was missing')
 })
