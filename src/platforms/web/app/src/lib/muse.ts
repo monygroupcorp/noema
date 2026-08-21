@@ -1064,6 +1064,92 @@ export function savedOf(view: MuseSessionView, runId: string): boolean {
   return recordedPiece(view, runId)?.saved ?? false;
 }
 
+// ── Why a gesture is refused (noema-277) ─────────────────────────────────────
+// A gesture on a piece is a weight written against a recorded lineage, so the rail
+// is gated on the session's ledger holding that piece. Four different situations
+// reach that same refusal, and only one of them is "unavailable" in any sense a
+// reader would recognise: the ledger has no entry for the piece, a gesture on it is
+// already being written, the piece is already in the set, or no session is open yet.
+//
+// The gating rule itself is unchanged by anything below — `gestureBlock` returns a
+// non-null value in exactly the cases the rail was already disabled in. What is added
+// is the reason, so a refused control can say which of the four it is.
+
+/** Why a gesture on a piece cannot be made right now.
+ *
+ *  - `no-session` — no session is open yet, so there is no ledger to write against.
+ *  - `not-recorded` — the session holds no entry for this piece, so a reaction has no
+ *    lineage to attach to. This is a state a piece does not leave on its own.
+ *  - `in-flight` — a gesture on this piece is already being written. The only one of
+ *    the four that resolves by waiting.
+ *  - `saved` — the piece is already in the set. The set is append-only, so a second
+ *    save would put the same media in twice.
+ *  - `not-offered` — this rail does not carry this gesture (the tile omits save, which
+ *    is a decision considered rather than made at scroll speed). */
+export type GestureBlock = 'no-session' | 'not-recorded' | 'in-flight' | 'saved' | 'not-offered';
+
+/** Everything the rail knows about one piece when it decides whether a gesture may be
+ *  made. `saved` and `offered` are per-gesture; the first three are per-piece. */
+export interface GestureGate {
+  /** Whether a session is open at all. */
+  hasSession: boolean;
+  /** Whether the session's ledger holds this piece. */
+  recorded: boolean;
+  /** Whether a gesture on this piece is already being written. */
+  writing: boolean;
+  /** Save only: the piece is already in the set. */
+  saved?: boolean;
+  /** False when this rail does not carry the gesture. Defaults to true. */
+  offered?: boolean;
+}
+
+/**
+ * The single reason a gesture is refused, or `null` when it may be made.
+ *
+ * Order is the order the screen already refused in, and it is preserved deliberately:
+ * a rail with no session is refused before the ledger is consulted, a piece the ledger
+ * never took is refused before an in-flight write, and `saved` is read last because it
+ * only ever applies to a piece that is otherwise gestureable.
+ *
+ * Non-vacuity: returning `null` unconditionally must fail every reason test below;
+ * reordering `saved` above `not-recorded` must fail "a piece the ledger never took
+ * says so".
+ */
+export function gestureBlock(gate: GestureGate): GestureBlock | null {
+  if (gate.offered === false) return 'not-offered';
+  if (!gate.hasSession) return 'no-session';
+  if (!gate.recorded) return 'not-recorded';
+  if (gate.writing) return 'in-flight';
+  if (gate.saved) return 'saved';
+  return null;
+}
+
+/** The sentence a refusal is worded as — the product's own words for the state, in the
+ *  register the rest of the screen speaks in.
+ *
+ *  `not-recorded` says what happened and stops there. It does not say "try again": a
+ *  piece that was never written to the session does not become written by waiting, and
+ *  offering a retry that does not exist would be the same silence in a friendlier font. */
+const GESTURE_REASON: Record<GestureBlock, string> = {
+  'no-session': 'the session is still opening — gestures land once it is ready',
+  'not-recorded': 'this piece was not written to the session, so there is nothing to react against',
+  'in-flight': 'writing your last gesture on this piece…',
+  saved: 'saved — this piece is in the set',
+  'not-offered': 'open the piece to save it back into the set',
+};
+
+/** The words for a refusal. */
+export function gestureBlockLine(block: GestureBlock): string {
+  return GESTURE_REASON[block];
+}
+
+/** What a rail button says: the reason it is refused, or its own label when it is not.
+ *  Every disabled gesture therefore carries a reason rather than a bare glyph, and the
+ *  saved piece keeps the wording it already had. */
+export function gestureTitle(block: GestureBlock | null, label: string): string {
+  return block ? GESTURE_REASON[block] : label;
+}
+
 /** The factor one steer moves a fragment's weight by. The sampler's bounds are
  *  0.125–8 — a 64:1 span — so a doubling per tap reaches either end in three steps
  *  and every step stays inside a range the sampler still draws from. */

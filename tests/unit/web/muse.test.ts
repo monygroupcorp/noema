@@ -60,6 +60,9 @@ import {
   floorDisabledIndices,
   floorSheet,
   floorToggle,
+  gestureBlock,
+  gestureBlockLine,
+  gestureTitle,
   latestSession,
   lineageBlockReason,
   manualAddError,
@@ -2205,4 +2208,117 @@ test('pieceStageline: the expanded piece draws the stage its own subscription re
   // an out-of-range stage never points past the stages the timeline actually draws
   assert.ok(pieceStageline(running, live(99)).stageIdx < STAGE_LABELS.length)
   assert.ok(pieceReadout(running, live(99)).length > 0)
+})
+
+// ---------------------------------------------------------------------------
+// Why a gesture is refused (noema-277) — the rail says which of four states it is in.
+//
+// Four different situations render the same disabled control. `gestureBlock` names
+// which one, `gestureBlockLine` gives the words, and `gestureTitle` puts the reason on
+// the button in place of its label. The gating is NOT changed by any of it: the tests
+// below assert that a refusal gains words and never gains permission.
+
+const OPEN = { hasSession: true, recorded: true, writing: false }
+
+test('a piece the ledger never took says so, and says it in the product’s own words', () => {
+  const block = gestureBlock({ ...OPEN, recorded: false })
+  assert.equal(block, 'not-recorded')
+
+  // The sentence names what happened — the piece was not written to the session — and
+  // therefore why there is nothing to react against.
+  const line = gestureBlockLine('not-recorded')
+  assert.match(line, /not written to the session/)
+  assert.match(line, /nothing to react against/)
+
+  // It must NOT promise a retry: a piece that was never recorded does not become
+  // recorded by waiting or by tapping again, and this item adds no retry affordance.
+  assert.doesNotMatch(line, /try again|retry|refresh/i)
+
+  // And the button carries the reason instead of its own label.
+  const gesture = TILE_GESTURES[0]!
+  assert.equal(gestureTitle(block, gesture.label), line)
+  assert.notEqual(gestureTitle(block, gesture.label), gesture.label)
+})
+
+test('a gesture already being written reads as in flight, not as unavailable', () => {
+  const block = gestureBlock({ ...OPEN, writing: true })
+  assert.equal(block, 'in-flight')
+
+  // This is the only one of the four that resolves by waiting, so it must not be worded
+  // as the not-recorded refusal — the two render identically without a reason.
+  const line = gestureBlockLine('in-flight')
+  assert.match(line, /writing/i)
+  assert.notEqual(line, gestureBlockLine('not-recorded'))
+  assert.notEqual(line, gestureBlockLine('no-session'))
+
+  // A piece being written is still a recorded piece: the ledger is not the reason here.
+  assert.doesNotMatch(line, /not written to the session/)
+})
+
+test('a piece already in the set still says it is saved', () => {
+  const fox = frag('subject', 'a fox')
+  const view = session([fox], { pieces: [ledgerPiece('run-1', [fox], { saved: true })] })
+  const saved = savedOf(view, 'run-1')
+  assert.equal(saved, true)
+
+  const block = gestureBlock({ ...OPEN, saved })
+  assert.equal(block, 'saved')
+  assert.match(gestureBlockLine('saved'), /saved/)
+  assert.match(gestureBlockLine('saved'), /in the set/)
+
+  // `saved` is read LAST: a saved piece in a session that never recorded it is refused
+  // for the ledger, which is the more fundamental reason of the two.
+  assert.equal(gestureBlock({ ...OPEN, recorded: false, saved: true }), 'not-recorded')
+
+  // A piece NOT in the set keeps its own label rather than borrowing a reason.
+  const save = EXPANDED_GESTURES[EXPANDED_GESTURES.length - 1]!
+  assert.equal(save.key, 'save')
+  assert.equal(gestureTitle(gestureBlock({ ...OPEN, saved: false }), save.label), save.label)
+})
+
+test('with no session open the rail says the session is not ready rather than nothing', () => {
+  const block = gestureBlock({ hasSession: false, recorded: false, writing: false })
+  assert.equal(block, 'no-session')
+
+  const line = gestureBlockLine('no-session')
+  assert.match(line, /session/)
+  assert.notEqual(line, gestureBlockLine('not-recorded'))
+
+  // Every gesture on both rails carries it — none of them falls back to a bare glyph.
+  for (const g of [...TILE_GESTURES, ...EXPANDED_GESTURES]) {
+    assert.equal(gestureTitle(block, g.label), line)
+  }
+})
+
+test('the tile does not carry save, and says that rather than reading as unavailable', () => {
+  // The tile passes no save handler (V8a): the gesture is not offered there, which is a
+  // different statement from the piece being ungestureable.
+  const block = gestureBlock({ ...OPEN, offered: false })
+  assert.equal(block, 'not-offered')
+  assert.match(gestureBlockLine('not-offered'), /open the piece/i)
+  assert.equal(TILE_GESTURES.some((g) => g.key === 'save'), false)
+})
+
+test('adding a reason never turns a refusal into permission', () => {
+  // The gating rule is unchanged: a gesture is permitted in exactly the case the screen
+  // permitted it before — a session open, the piece in its ledger, nothing in flight.
+  assert.equal(gestureBlock(OPEN), null)
+  assert.equal(gestureTitle(null, 'more like this'), 'more like this')
+
+  for (const gate of [
+    { ...OPEN, hasSession: false },
+    { ...OPEN, recorded: false },
+    { ...OPEN, writing: true },
+    { ...OPEN, saved: true },
+    { ...OPEN, offered: false },
+  ]) {
+    assert.notEqual(gestureBlock(gate), null, 'a refused gesture stays refused')
+    assert.ok(gestureBlockLine(gestureBlock(gate)!).length > 0, 'and it is refused out loud')
+  }
+
+  // Every state has words, and no two states share them — the whole point is that the
+  // four are distinguishable to a reader.
+  const lines = (['no-session', 'not-recorded', 'in-flight', 'saved', 'not-offered'] as const)
+    .map((b) => gestureBlockLine(b))
+  assert.equal(new Set(lines).size, lines.length)
 })
