@@ -47,7 +47,7 @@ import express from 'express'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
-import { captionCoverage, nextDatasetVersion } from '../../../../src/types/dataset.js'
+import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../../src/types/dataset.js'
 import type {
   Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem,
   Datasets, DatasetSummaryListPage,
@@ -80,13 +80,13 @@ class MemoryDatasets implements Datasets {
   }
   async find(id: string): Promise<Dataset | null> { return this.store.get(id) ?? null }
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
-    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner) }
+    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner && !isArchived(d)) }
   }
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
     const { entries } = await this.list(opts)
     return {
       entries: entries.map((d) => ({
-        id: d.id, name: d.name, images: d.media.length, updatedAt: d.mutatum.toISOString(),
+        id: d.id, name: d.name, images: liveMedia(d.media).length, updatedAt: d.mutatum.toISOString(),
       })),
     }
   }
@@ -97,7 +97,7 @@ class MemoryDatasets implements Datasets {
     const updated: Dataset = {
       ...d,
       media,
-      captionsets: d.captionsets.map((c) => ({ ...c, coverage: captionCoverage(c.captions, media.length) })),
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
       versions: [...d.versions, { v: nextDatasetVersion(d.versions), count: media.length, when: new Date() }],
       mutatum: new Date(),
     }
@@ -107,7 +107,7 @@ class MemoryDatasets implements Datasets {
   async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
     const d = this.store.get(datasetId)
     if (!d) return null
-    const next: Captionset = { ...captionset, coverage: captionCoverage(captionset.captions, d.media.length) }
+    const next: Captionset = { ...captionset, coverage: coverageOver(captionset.captions, d.media) }
     const captionsets = d.captionsets.some((c) => c.id === next.id)
       ? d.captionsets.map((c) => (c.id === next.id ? next : c))
       : [...d.captionsets, next]
@@ -121,7 +121,7 @@ class MemoryDatasets implements Datasets {
     const target = d.captionsets.find((c) => c.id === captionsetId)
     if (!target) return null
     const captions = { ...(target.captions ?? {}), [mediaId]: caption }
-    const next: Captionset = { ...target, captions, coverage: captionCoverage(captions, d.media.length) }
+    const next: Captionset = { ...target, captions, coverage: coverageOver(captions, d.media) }
     const updated: Dataset = {
       ...d,
       captionsets: d.captionsets.map((c) => (c.id === captionsetId ? next : c)),
@@ -139,6 +139,56 @@ class MemoryDatasets implements Datasets {
     const updated: Dataset = {
       ...d,
       media: d.media.map((m) => (m.id === mediaId ? { ...m, fragments: [...fragments] } : m)),
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+
+  // ── Archive (noema-266) ──────────────────────────────────────────────────
+  // Mirrors MongoDataset exactly: `list`/`listSummaries` exclude archived datasets and `find`
+  // does not; archiving or restoring media recomputes every captionset's coverage through the
+  // same shared `coverageOver`, so this double cannot claim arithmetic the store would not.
+  async archiveDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (d.archivum) return d
+    const now = new Date()
+    const updated: Dataset = { ...d, archivum: now, mutatum: now }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async restoreDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (!d.archivum) return d
+    const { archivum: _gone, ...rest } = d
+    const updated: Dataset = { ...rest, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, new Date())
+  }
+  async restoreMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, null)
+  }
+  private async _setMediaArchivum(datasetId: string, mediaId: string, archivum: Date | null): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const target = d.media.find((m) => m.id === mediaId)
+    if (!target) return null
+    if (Boolean(target.archivum) === Boolean(archivum)) return d
+    const media = d.media.map((m) => {
+      if (m.id !== mediaId) return m
+      if (archivum) return { ...m, archivum }
+      const { archivum: _gone, ...rest } = m
+      return rest
+    })
+    const updated: Dataset = {
+      ...d,
+      media,
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
       mutatum: new Date(),
     }
     this.store.set(datasetId, updated)
@@ -707,6 +757,48 @@ test('the instruction is limited at the server, and an empty one never reaches a
     assert.equal(stranger.status, 404)
     assert.equal(stranger.body.error.code, 'not_found.muse_session')
     assert.equal(ring.cast.length, 0, "and a stranger's steer never reached a run either")
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── Archive is not erasure: an archived mother still resolves (noema-266) ────
+
+test('a session spawns off an archived mother, and a piece still saves into it', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  await datasets.archiveDataset(mother.id)
+
+  const { server, url } = await createServer(
+    datasets, new MemoryMuseSessions(), readOnlyActorum([completedRun('run-1', 'https://example.invalid/piece-1.png')]),
+  )
+  try {
+    // The mother is gone from the lists, and every reference into it still resolves — which is
+    // the whole reason archive stamps a field rather than removing the row.
+    assert.equal((await datasets.list({ owner: OWNER })).entries.length, 0)
+
+    const { sessionId } = await sessionWithPiece(url, mother.id, 'run-1')
+    const saved = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-1/save`, {
+      method: 'POST', headers: HEADERS,
+    })
+    assert.equal(saved.status, 201, `an archived mother must still resolve: ${JSON.stringify(saved.body)}`)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an archived media item does not seed a session spawned after the archive', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  await datasets.archiveMedia(mother.id, 'media-seed')
+
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    assert.deepEqual(spawned.body.session.floor, [], 'an archived item has left the working set Muse draws from')
   } finally {
     await closeServer(server)
   }

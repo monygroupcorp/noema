@@ -18,7 +18,7 @@ import express from 'express'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
-import { captionCoverage, nextDatasetVersion } from '../../../../src/types/dataset.js'
+import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../../src/types/dataset.js'
 import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
 import type { Actum, Actorum } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
@@ -37,17 +37,17 @@ class MemoryDatasets implements Datasets {
   }
   async find(id: string): Promise<Dataset | null> { return this.store.get(id) ?? null }
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
-    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner) }
+    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner && !isArchived(d)) }
   }
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
     const { entries } = await this.list(opts)
-    return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: d.media.length, updatedAt: d.mutatum.toISOString() })) }
+    return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: liveMedia(d.media).length, updatedAt: d.mutatum.toISOString() })) }
   }
   // Same semantics as MongoDataset.addCaptionset: replace-by-id, coverage derived, mutatum bumped.
   async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
     const d = this.store.get(datasetId)
     if (!d) return null
-    const next: Captionset = { ...captionset, coverage: captionCoverage(captionset.captions, d.media.length) }
+    const next: Captionset = { ...captionset, coverage: coverageOver(captionset.captions, d.media) }
     const captionsets = d.captionsets.some((c) => c.id === next.id)
       ? d.captionsets.map((c) => (c.id === next.id ? next : c))
       : [...d.captionsets, next]
@@ -62,7 +62,7 @@ class MemoryDatasets implements Datasets {
     const target = d.captionsets.find((c) => c.id === captionsetId)
     if (!target) return null
     const captions = { ...(target.captions ?? {}), [mediaId]: caption }
-    const next: Captionset = { ...target, captions, coverage: captionCoverage(captions, d.media.length) }
+    const next: Captionset = { ...target, captions, coverage: coverageOver(captions, d.media) }
     const updated: Dataset = { ...d, captionsets: d.captionsets.map((c) => (c.id === captionsetId ? next : c)), mutatum: new Date() }
     this.store.set(datasetId, updated)
     return updated
@@ -77,8 +77,58 @@ class MemoryDatasets implements Datasets {
     const updated: Dataset = {
       ...d,
       media,
-      captionsets: d.captionsets.map((c) => ({ ...c, coverage: captionCoverage(c.captions, media.length) })),
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
       versions: [...d.versions, { v: nextDatasetVersion(d.versions), count: media.length, when: new Date() }],
+      mutatum: new Date(),
+    }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+
+  // ── Archive (noema-266) ──────────────────────────────────────────────────
+  // Mirrors MongoDataset exactly: `list`/`listSummaries` exclude archived datasets and `find`
+  // does not; archiving or restoring media recomputes every captionset's coverage through the
+  // same shared `coverageOver`, so this double cannot claim arithmetic the store would not.
+  async archiveDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (d.archivum) return d
+    const now = new Date()
+    const updated: Dataset = { ...d, archivum: now, mutatum: now }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async restoreDataset(datasetId: string): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    if (!d.archivum) return d
+    const { archivum: _gone, ...rest } = d
+    const updated: Dataset = { ...rest, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, new Date())
+  }
+  async restoreMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, null)
+  }
+  private async _setMediaArchivum(datasetId: string, mediaId: string, archivum: Date | null): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const target = d.media.find((m) => m.id === mediaId)
+    if (!target) return null
+    if (Boolean(target.archivum) === Boolean(archivum)) return d
+    const media = d.media.map((m) => {
+      if (m.id !== mediaId) return m
+      if (archivum) return { ...m, archivum }
+      const { archivum: _gone, ...rest } = m
+      return rest
+    })
+    const updated: Dataset = {
+      ...d,
+      media,
+      captionsets: d.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) })),
       mutatum: new Date(),
     }
     this.store.set(datasetId, updated)
@@ -615,6 +665,182 @@ test('a stranger cannot append media to another owner\'s dataset', async () => {
     assert.equal(after.body.datasets[0].media.length, 1)
     assert.equal(after.body.datasets[0].media[0].url, 'https://r2.example/a.png')
     assert.equal(after.body.datasets[0].versions.length, 1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── Archive + restore (noema-266) ────────────────────────────────────────────
+//
+// One test per non-vacuity claim of the archive design: an archived dataset leaves the two
+// lists but is still resolvable, an archived media item leaves the working set and moves every
+// captionset's stored coverage with it, both are restorable, and both routes scope to the
+// authenticated caller.
+
+test('an archived dataset is gone from list and listSummaries', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const kept = await seedDataset(url, headers, ['https://r2.example/keep.png'])
+    const gone = await seedDataset(url, headers, ['https://r2.example/gone.png'])
+
+    const archived = await request(`${url}/v1/data/datasets/${gone.id}/archive`, { method: 'POST', headers })
+    assert.equal(archived.status, 200)
+    assert.ok(archived.body.dataset.archivum, 'archive stamps a timestamp, not a boolean')
+
+    const full = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.deepEqual((full.body.datasets as Dataset[]).map((d) => d.id), [kept.id])
+
+    const summaries = await request(`${url}/v1/data/datasets`, { headers })
+    assert.deepEqual((summaries.body.datasets as Array<{ id: string }>).map((d) => d.id), [kept.id])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an archived dataset is still returned by find, so nothing that referenced it breaks', async () => {
+  const datasets = new MemoryDatasets()
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png'])
+    assert.equal((await request(`${url}/v1/data/datasets/${ds.id}/archive`, { method: 'POST', headers })).status, 200)
+
+    // Archive is not erasure. `find` is the seam every reference resolves through — a Muse
+    // session's mother dataset, a session dataset behind a saved piece, a past run's lineage.
+    const found = await datasets.find(ds.id)
+    assert.equal(found?.id, ds.id)
+    assert.equal(found?.media.length, 1)
+    assert.ok(found?.archivum)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('archiving media recomputes every captionset\'s coverage against the media that is left', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, [
+      'https://r2.example/a.png', 'https://r2.example/b.png', 'https://r2.example/c.png',
+    ])
+    const [a, b, c] = ds.media
+
+    const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
+      method: 'POST',
+      headers,
+      body: { id: 'pass-1', name: 'natural language', method: 'manual', captions: { [a.id]: 'one' } },
+    })
+    assert.equal(attached.status, 201)
+    assert.equal(attached.body.dataset.captionsets[0].coverage, '1/3')
+
+    // Coverage is STORED, not derived at read time: an archive that skipped the recomputation
+    // would leave this pass reading 1/3 against an image no longer in the set.
+    const archivedB = await request(`${url}/v1/data/datasets/${ds.id}/media/${b.id}/archive`, { method: 'POST', headers })
+    assert.equal(archivedB.status, 200)
+    assert.equal(archivedB.body.dataset.captionsets[0].coverage, '1/2')
+
+    // Archiving the captioned item moves the numerator too — the caption stays on the record
+    // (it is keyed by media id) but it is not coverage of the working set.
+    const archivedA = await request(`${url}/v1/data/datasets/${ds.id}/media/${a.id}/archive`, { method: 'POST', headers })
+    assert.equal(archivedA.status, 200)
+    assert.equal(archivedA.body.dataset.captionsets[0].coverage, '0/1')
+    assert.equal(archivedA.body.dataset.captionsets[0].captions[a.id], 'one')
+
+    // And the summary count is the live count, not the row count.
+    const summaries = await request(`${url}/v1/data/datasets`, { headers })
+    assert.equal(summaries.body.datasets[0].images, 1)
+    assert.equal(summaries.body.datasets[0].id, ds.id)
+    assert.equal(c.id, ds.media[2].id)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an archived media item is absent from the media a reader is handed', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png'])
+
+    const archived = await request(`${url}/v1/data/datasets/${ds.id}/media/${ds.media[0].id}/archive`, { method: 'POST', headers })
+    assert.equal(archived.status, 200)
+
+    const media = archived.body.dataset.media as DatasetMediaItem[]
+    assert.equal(media.length, 2, 'the item stays on the record — caption maps and fragments are keyed on its id')
+    assert.ok(media[0].archivum)
+    assert.equal(media[1].archivum, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an archived dataset and an archived media item can both be restored', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png', 'https://r2.example/b.png'])
+    const mediaId = ds.media[0].id
+
+    assert.equal((await request(`${url}/v1/data/datasets/${ds.id}/media/${mediaId}/archive`, { method: 'POST', headers })).status, 200)
+    assert.equal((await request(`${url}/v1/data/datasets/${ds.id}/archive`, { method: 'POST', headers })).status, 200)
+    assert.equal((await request(`${url}/v1/data/datasets/full`, { headers })).body.datasets.length, 0)
+
+    const restored = await request(`${url}/v1/data/datasets/${ds.id}/restore`, { method: 'POST', headers })
+    assert.equal(restored.status, 200)
+    assert.equal(restored.body.dataset.archivum, undefined, 'restore removes the field rather than flipping a second flag')
+
+    const back = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.equal(back.body.datasets.length, 1)
+    assert.equal(back.body.datasets[0].id, ds.id)
+
+    const restoredMedia = await request(`${url}/v1/data/datasets/${ds.id}/media/${mediaId}/restore`, { method: 'POST', headers })
+    assert.equal(restoredMedia.status, 200)
+    assert.equal((restoredMedia.body.dataset.media as DatasetMediaItem[])[0].archivum, undefined)
+
+    const summaries = await request(`${url}/v1/data/datasets`, { headers })
+    assert.equal(summaries.body.datasets[0].images, 2)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('archiving a dataset the caller does not own is refused', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const owner = { 'x-api-key': 'owner-1' }
+    const stranger = { 'x-api-key': 'stranger-1' }
+    const ds = await seedDataset(url, owner, ['https://r2.example/a.png'])
+    const mediaId = ds.media[0].id
+
+    const attempt = await request(`${url}/v1/data/datasets/${ds.id}/archive`, { method: 'POST', headers: stranger })
+    assert.equal(attempt.status, 404, 'a dataset the caller does not own reads as absent, not forbidden')
+
+    const mediaAttempt = await request(`${url}/v1/data/datasets/${ds.id}/media/${mediaId}/archive`, { method: 'POST', headers: stranger })
+    assert.equal(mediaAttempt.status, 404)
+
+    const restoreAttempt = await request(`${url}/v1/data/datasets/${ds.id}/restore`, { method: 'POST', headers: stranger })
+    assert.equal(restoreAttempt.status, 404)
+
+    // A 404 can be returned AFTER a write — assert the dataset itself is untouched.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: owner })
+    assert.equal(after.body.datasets.length, 1)
+    assert.equal(after.body.datasets[0].archivum, undefined)
+    assert.equal((after.body.datasets[0].media as DatasetMediaItem[])[0].archivum, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('archiving a media id that names no item on the dataset is a 400', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const ds = await seedDataset(url, headers, ['https://r2.example/a.png'])
+
+    const res = await request(`${url}/v1/data/datasets/${ds.id}/media/not-a-media-id/archive`, { method: 'POST', headers })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.error.code, 'input.malformed')
   } finally {
     await closeServer(server)
   }

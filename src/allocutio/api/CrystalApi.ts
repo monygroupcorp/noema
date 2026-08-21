@@ -63,7 +63,7 @@ export interface ListRunsOpts {
   limit?: number
 }
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
-import { captionCoverage } from '../../types/dataset.js'
+import { coverageOver, liveMedia } from '../../types/dataset.js'
 import type {
   Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets, IngestMediaInput,
 } from '../../types/dataset.js'
@@ -1964,7 +1964,7 @@ export class CrystalApi {
       id,
       name,
       method,
-      coverage: captionCoverage(captions, d.media.length),
+      coverage: coverageOver(captions, d.media),
       ...(captions ? { captions } : {}),
     }
 
@@ -1990,6 +1990,68 @@ export class CrystalApi {
     const updated = await this._datasetsStore().setCaption(d.id, captionsetId, mediaId, caption)
     if (!updated) throw new ApiError('not_found.dataset', `Captionset '${captionsetId}' not found`, 404)
     return updated
+  }
+
+  /**
+   * Archive a Dataset the caller owns — the delete that strands nothing.
+   *
+   * The dataset leaves both list routes and every picker built on them; it is not erased, and
+   * `getDataset` still resolves it, so a Muse session's mother, a session dataset behind a
+   * saved piece, and a past run's lineage all keep working. Reversible through
+   * `restoreDataset`.
+   *
+   * Ownership resolves through `getDataset` — from the authenticated caller, never from a
+   * request parameter — so a dataset the caller does not own reports as not found, exactly as
+   * an id that never existed does. Nothing here spends.
+   */
+  async archiveDataset(auctor: AuctorKey, datasetId: string): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+    const updated = await this._datasetsStore().archiveDataset(d.id)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
+  }
+
+  /** Restore an archived Dataset the caller owns — it returns to both list routes. Same
+   *  ownership resolution as `archiveDataset`; an archived dataset still resolves through
+   *  `getDataset`, which is what makes a restore reachable at all. */
+  async restoreDataset(auctor: AuctorKey, datasetId: string): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+    const updated = await this._datasetsStore().restoreDataset(d.id)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
+  }
+
+  /** Archive ONE media item on a Dataset the caller owns. The item leaves the working set —
+   *  the caption manifest, the decompose, the summary count, Muse's fragment pool — and every
+   *  captionset's coverage is recomputed against the media that is left. The record itself
+   *  stays, because caption maps and fragments are keyed on the media id. Same ownership
+   *  resolution as `setCaption`; a media id naming no item on the dataset is a 400. */
+  async archiveDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<Dataset> {
+    const d = await this._ownedDatasetWithMedia(auctor, datasetId, mediaId)
+    const updated = await this._datasetsStore().archiveMedia(d.id, mediaId)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
+  }
+
+  /** Restore ONE archived media item on a Dataset the caller owns — it rejoins the working set
+   *  and every captionset's coverage is recomputed against it. */
+  async restoreDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<Dataset> {
+    const d = await this._ownedDatasetWithMedia(auctor, datasetId, mediaId)
+    const updated = await this._datasetsStore().restoreMedia(d.id, mediaId)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return updated
+  }
+
+  /** Resolve a Dataset the caller owns and assert the media id names an item on it — the same
+   *  pair of checks `setCaption` makes, in one place so the media-scoped writes cannot drift on
+   *  what a valid target is. An ARCHIVED item is still a valid target: it is on the dataset,
+   *  and it is exactly what a restore names. */
+  private async _ownedDatasetWithMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<Dataset> {
+    const d = await this.getDataset(auctor, datasetId)
+    if (!d.media.some((m) => m.id === mediaId)) {
+      throw Errors.inputMalformed(`mediaId '${mediaId}' is not a media item on this dataset`)
+    }
+    return d
   }
 
   /** Validate a caption map against the dataset's own media, or throw. Every key must be
@@ -2092,15 +2154,17 @@ export class CrystalApi {
    * Spawn a session off a dataset the caller owns.
    *
    * The session is spawned from the dataset's fragments pooled DATASET-WIDE —
-   * every media item's fragments, in item order — not from one item's alone. A
-   * session is a break-off of the whole dataset.
+   * every LIVE media item's fragments, in item order — not from one item's alone. A
+   * session is a break-off of the whole dataset. An archived item has left the working
+   * set, so its fragments do not seed a session drawn after the archive; sessions already
+   * spawned keep the floor they were given, which is what a break-off means.
    */
   async spawnMuseSession(auctor: AuctorKey, datasetId: string): Promise<MuseSessionView> {
     const owner = this._museSessionOwner(auctor)
     const dataset = await this.getDataset(auctor, datasetId)
 
     const pooled: Fragment[] = []
-    for (const item of dataset.media) pooled.push(...(item.fragments ?? []))
+    for (const item of liveMedia(dataset.media)) pooled.push(...(item.fragments ?? []))
 
     const stored = await this._museSessionsStore().create({
       owner,
