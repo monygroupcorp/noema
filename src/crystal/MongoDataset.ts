@@ -1,6 +1,6 @@
 import { Collection, Filter, Document } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import { captionCoverage, nextDatasetVersion } from '../types/dataset.js'
+import { coverageOver, liveMedia, nextDatasetVersion } from '../types/dataset.js'
 import type { Fragment } from './muse/taxonomy.js'
 import type {
   Captionset,
@@ -47,7 +47,7 @@ function toSummary(d: Dataset): DatasetSummary {
   return {
     id: d.id,
     name: d.name,
-    images: d.media.length,
+    images: liveMedia(d.media).length,
     updatedAt: d.mutatum instanceof Date ? d.mutatum.toISOString() : String(d.mutatum),
   }
 }
@@ -69,7 +69,10 @@ export class MongoDataset implements Datasets {
 
   private async _page(opts: DatasetListOpts): Promise<{ entries: Dataset[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
-    const filter: Filter<Document> = { owner: opts.owner }
+    // Archived datasets are gone from the lists. `archivum` is UNSET on restore rather than
+    // set to null, so "no archivum field" is the whole of live — and a document written before
+    // this field existed carries none, which is correct: it is live.
+    const filter: Filter<Document> = { owner: opts.owner, archivum: { $exists: false } }
 
     if (opts.cursor) {
       const c = decodeCursor(opts.cursor)
@@ -127,7 +130,7 @@ export class MongoDataset implements Datasets {
     const media = [...current.media, ...items]
     const captionsets = current.captionsets.map((c) => ({
       ...c,
-      coverage: captionCoverage(c.captions, media.length),
+      coverage: coverageOver(c.captions, media),
     }))
     const mutatum = new Date()
     const version = { v: nextDatasetVersion(current.versions), count: media.length, when: mutatum }
@@ -153,7 +156,7 @@ export class MongoDataset implements Datasets {
 
     const next: Captionset = {
       ...captionset,
-      coverage: captionCoverage(captionset.captions, current.media.length),
+      coverage: coverageOver(captionset.captions, current.media),
     }
     const captionsets = current.captionsets.some((c) => c.id === next.id)
       ? current.captionsets.map((c) => (c.id === next.id ? next : c))
@@ -174,7 +177,7 @@ export class MongoDataset implements Datasets {
     if (!target) return null
 
     const captions = { ...(target.captions ?? {}), [mediaId]: caption }
-    const updated: Captionset = { ...target, captions, coverage: captionCoverage(captions, current.media.length) }
+    const updated: Captionset = { ...target, captions, coverage: coverageOver(captions, current.media) }
     const captionsets = current.captionsets.map((c) => (c.id === captionsetId ? updated : c))
 
     const mutatum = new Date()
@@ -197,6 +200,90 @@ export class MongoDataset implements Datasets {
     const mutatum = new Date()
     await this.col.updateOne({ id: datasetId }, { $set: { media, mutatum } })
     return { ...current, media, mutatum }
+  }
+
+  /**
+   * Archive the dataset — the delete that strands nothing.
+   *
+   * `archivum` is stamped and `mutatum` bumped. The lists (`list`/`listSummaries`) filter on
+   * `archivum: {$exists:false}` and so stop returning it; `find` is deliberately untouched, so
+   * a Muse session's mother, a session dataset behind a saved piece, and a past run's lineage
+   * all keep resolving through it. Archive is not erasure.
+   *
+   * Idempotent: an already-archived dataset keeps its first `archivum` and is returned as it
+   * stands, so a repeated call cannot re-date the archive.
+   */
+  async archiveDataset(datasetId: string): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+    if (current.archivum) return current
+
+    const mutatum = new Date()
+    await this.col.updateOne({ id: datasetId }, { $set: { archivum: mutatum, mutatum } })
+    return { ...current, archivum: mutatum, mutatum }
+  }
+
+  /** Restore an archived dataset by REMOVING `archivum` (`$unset`), not by writing a second
+   *  flag beside it — one field, and "absent" is the only spelling of live. Bumps `mutatum`,
+   *  which is the pagination sort key, so a restored dataset comes back at the top of the
+   *  list it left. Idempotent on a dataset that is already live. */
+  async restoreDataset(datasetId: string): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+    if (!current.archivum) return current
+
+    const mutatum = new Date()
+    await this.col.updateOne({ id: datasetId }, { $set: { mutatum }, $unset: { archivum: '' } })
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { archivum: _gone, ...rest } = current
+    return { ...rest, mutatum }
+  }
+
+  /**
+   * Archive ONE media item, and recompute every captionset's coverage against what is left.
+   *
+   * The recomputation is the point, not a courtesy: `coverage` is STORED, derived once at
+   * write time (`addMedia`/`addCaptionset`/`setCaption` all do it), never at read time. An
+   * archive that moved the media set without moving the fraction would leave a pass reading
+   * `7/9` against images that are no longer in the set, and the shortfall could never be
+   * closed. `coverageOver` moves both sides: the archived item leaves the denominator, and
+   * its caption — which stays on the record, keyed by media id — leaves the numerator.
+   *
+   * The item is stamped, never removed: `media` is append-only because every caption map and
+   * every fragment list is keyed on `DatasetMediaItem.id`.
+   */
+  async archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, new Date())
+  }
+
+  /** Restore ONE archived media item — the item rejoins the working set and every captionset's
+   *  coverage is recomputed against it, the same write `archiveMedia` performs in reverse. */
+  async restoreMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
+    return this._setMediaArchivum(datasetId, mediaId, null)
+  }
+
+  /** One writer for both directions, so an archive and a restore cannot disagree about what
+   *  moves with the media set. `null` clears the field. Idempotent: a media item already in
+   *  the requested state is returned untouched, coverage included. */
+  private async _setMediaArchivum(datasetId: string, mediaId: string, archivum: Date | null): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+    const target = current.media.find((m) => m.id === mediaId)
+    if (!target) return null
+    if (Boolean(target.archivum) === Boolean(archivum)) return current
+
+    const media = current.media.map((m) => {
+      if (m.id !== mediaId) return m
+      if (archivum) return { ...m, archivum }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { archivum: _gone, ...rest } = m
+      return rest
+    })
+    const captionsets = current.captionsets.map((c) => ({ ...c, coverage: coverageOver(c.captions, media) }))
+    const mutatum = new Date()
+
+    await this.col.updateOne({ id: datasetId }, { $set: { media, captionsets, mutatum } })
+    return { ...current, media, captionsets, mutatum }
   }
 
   // The rich/thin split projects down from the SAME document — no separate

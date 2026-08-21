@@ -2776,6 +2776,666 @@ Edit one caption within one caption pass on a dataset the caller owns — captio
 }
 ```
 
+### POST /v1/data/datasets/:id/archive
+
+Archive a dataset the caller owns. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
+### POST /v1/data/datasets/:id/restore
+
+Restore an archived dataset the caller owns — it returns to both dataset list routes. Idempotent on a dataset that is already live. A dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
+### POST /v1/data/datasets/:id/media/:mediaId/archive
+
+Archive one media item on a dataset the caller owns. The item leaves the dataset's working set — the media a caption pass or a decompose reads, the summary count, and the fragments a Muse session is spawned from — and every captionset's coverage is recomputed against the media that is left. The item itself stays on the record, so captions and fragments keyed on its id are preserved for a restore. Reversible via POST /v1/data/datasets/:id/media/:mediaId/restore. Idempotent. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
+### POST /v1/data/datasets/:id/media/:mediaId/restore
+
+Restore one archived media item on a dataset the caller owns — it rejoins the dataset's working set and every captionset's coverage is recomputed against it. Idempotent on an item that is already live. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "object",
+      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "name": {
+          "type": "string"
+        },
+        "modality": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "3d"
+          ]
+        },
+        "custody": {
+          "type": "string",
+          "enum": [
+            "sealed",
+            "local",
+            "remote"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "generation"
+                ]
+              },
+              "actumId": {
+                "type": "string",
+                "description": "FK -> Actum. Present iff source === 'generation'."
+              },
+              "addedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "url",
+              "source",
+              "addedAt"
+            ]
+          }
+        },
+        "captionsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+              },
+              "coverage": {
+                "type": "string",
+                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+              },
+              "captions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "method",
+              "coverage"
+            ]
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "v": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "v",
+              "count",
+              "when"
+            ]
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "name",
+        "modality",
+        "custody",
+        "media",
+        "captionsets",
+        "versions",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "dataset"
+  ]
+}
+```
+
 ### POST /v1/data/muse/sessions
 
 Break a Muse session off a dataset the caller owns. The session copies the dataset's fragments, pooled dataset-wide across every media item, and works from its own copies — the mother dataset is never written to. A dataset the caller does not own is reported as not found.

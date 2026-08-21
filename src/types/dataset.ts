@@ -68,6 +68,42 @@ export interface DatasetMediaItem {
    *  not an error — render it as an empty garden. Nothing decomposes live from this field; a
    *  decompose is always a run. */
   fragments?: Fragment[]
+  /** When this item was archived. Absent means live.
+   *
+   *  A timestamp rather than a boolean, following the collection's own `natum`/`mutatum`
+   *  naming: it records WHEN, and it makes a restore the removal of the field rather than a
+   *  second flag to keep in step with the first.
+   *
+   *  Archived media leaves the working set — the caption manifest, the decompose, the
+   *  summary count, the coverage denominator and Muse's fragment pool all read `liveMedia`
+   *  — but the item itself stays on the record, because a captionset's caption map, an
+   *  item's fragments and a past run's lineage are all keyed on `DatasetMediaItem.id`. */
+  archivum?: Date
+}
+
+/** Archived — a dataset or a media item carrying an `archivum` timestamp. Absent means live. */
+export function isArchived(x: { archivum?: Date }): boolean {
+  return x.archivum != null
+}
+
+/** The media of a dataset still in the working set: everything not archived, in array order.
+ *  Derived in ONE place so every reader of "the media of this dataset" agrees on what the set
+ *  is — the caption manifest, the decompose, the summary count, the coverage denominator and
+ *  Muse's fragment pool all resolve through here. */
+export function liveMedia(media: DatasetMediaItem[]): DatasetMediaItem[] {
+  return media.filter((m) => !isArchived(m))
+}
+
+/** A captionset's coverage over a dataset's LIVE media: the captions bound to a live media
+ *  item, over the live media count. Archiving media moves BOTH sides of the fraction, so a
+ *  pass reading `7/9` reads `7/7` once the two uncaptioned items are archived, rather than
+ *  reporting a shortfall against images no longer in the set. Formats through
+ *  `captionCoverage`, so the string is still built in exactly one place. */
+export function coverageOver(captions: Record<string, string> | undefined, media: DatasetMediaItem[]): string {
+  const live = liveMedia(media)
+  const liveIds = new Set(live.map((m) => m.id))
+  const bound = Object.fromEntries(Object.entries(captions ?? {}).filter(([mediaId]) => liveIds.has(mediaId)))
+  return captionCoverage(bound, live.length)
 }
 
 /** One snapshot of the dataset's media set — grows as media is added. */
@@ -115,6 +151,14 @@ export interface Dataset {
   natum: Date
   /** "mutatum" = changed — when this dataset was last modified */
   mutatum: Date
+  /** When this dataset was archived. Absent means live.
+   *
+   *  An archived dataset is gone from `list` and `listSummaries` — the two reads a person's
+   *  own listing and every picker are built on — and is unusable from them. It is NOT erased:
+   *  `find` still resolves it, because a Muse session names a mother dataset, a saved piece
+   *  lands in a session dataset, and a past run's lineage names media that must still resolve.
+   *  Restoring is the removal of this field. */
+  archivum?: Date
 }
 
 /** Thin projection of a Dataset for pickers (e.g. the training-run builder).
@@ -226,4 +270,23 @@ export interface Datasets {
    *  is append-only and a positional write re-binds to a different item as soon as media is
    *  added. Owner scoping lives at the API layer, as above. */
   setFragments(datasetId: string, mediaId: string, fragments: Fragment[]): Promise<Dataset | null>
+  /** Archive a dataset: stamp `archivum` and bump `mutatum`. `list` and `listSummaries` stop
+   *  returning it; `find` still does, so every reference into it keeps resolving. Idempotent —
+   *  an already-archived dataset keeps its original `archivum` and is returned unchanged.
+   *  Returns null when the dataset does not exist. Owner scoping is resolved at the API layer
+   *  from the authenticated caller, as it is for every other method here. */
+  archiveDataset(datasetId: string): Promise<Dataset | null>
+  /** Restore an archived dataset: remove `archivum` and bump `mutatum`. Idempotent on a live
+   *  dataset. Returns null when the dataset does not exist. */
+  restoreDataset(datasetId: string): Promise<Dataset | null>
+  /** Archive ONE media item: stamp its `archivum`, bump `mutatum`, and recompute every
+   *  captionset's `coverage` against the media that is left. The recomputation is not optional
+   *  — coverage is stored, not derived at read time, so an archive that skipped it would leave
+   *  a pass reading `7/9` against images no longer in the set. Idempotent. Returns null when
+   *  the dataset does not exist or the media id names no item on it. */
+  archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null>
+  /** Restore ONE archived media item: remove its `archivum`, bump `mutatum`, and recompute
+   *  every captionset's `coverage` against the media that is back. Idempotent. Returns null
+   *  when the dataset does not exist or the media id names no item on it. */
+  restoreMedia(datasetId: string, mediaId: string): Promise<Dataset | null>
 }

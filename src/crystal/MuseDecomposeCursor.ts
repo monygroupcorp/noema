@@ -1,6 +1,7 @@
 import type { Cursor, CursorResult } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
+import { isArchived } from '../types/dataset.js'
 import type { Captionset, Dataset, Datasets } from '../types/dataset.js'
 import type { ApiProvider } from './apiProviders.js'
 import { chatImpetus } from './apiProviders.js'
@@ -235,9 +236,15 @@ export class MuseDecomposeCursor implements Cursor {
       throw new Error(`muse decompose: captionset '${captionsetId}' is not on dataset '${datasetId}'`)
     }
 
+    // Archived media has left the working set, so a caption bound to an archived item is not
+    // decomposed — dropped here rather than rejected below, because an archived id IS on the
+    // dataset. An id naming no item at all is still an error (the `known` check further down).
+    const archived = new Set(dataset.media.filter(isArchived).map((m) => m.id))
+
     const captions = Object.entries(captionset.captions ?? {})
       .map(([mediaId, text]) => [mediaId, String(text ?? '').trim()] as [string, string])
       .filter(([, text]) => text.length > 0)
+      .filter(([mediaId]) => !archived.has(mediaId))
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 
     if (captions.length === 0) {

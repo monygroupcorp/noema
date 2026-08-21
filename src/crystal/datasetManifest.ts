@@ -24,6 +24,7 @@
 // on the harvest instead of the host re-deriving identity from a position.
 
 import type { Corpus, Corporum } from '../types/corpus.js'
+import { liveMedia } from '../types/dataset.js'
 import type { Dataset } from '../types/dataset.js'
 
 /** One training image: where to fetch it, and its caption if we have one. */
@@ -68,9 +69,13 @@ export function corpusToManifest(corpus: Corpus): DatasetManifest {
 }
 
 /**
- * Project a Dataset to a manifest — its media in array order, each carrying the media item's
- * `id` so a pod-side artifact can be bound back to the exact item that was staged (see
+ * Project a Dataset to a manifest — its LIVE media in array order, each carrying the media
+ * item's `id` so a pod-side artifact can be bound back to the exact item that was staged (see
  * `ManifestItem.id`). Pure + deterministic.
+ *
+ * Archived media is not staged: a caption pass captions the working set, and an archived item
+ * has left it. The manifest is the caption job's whole view of the dataset, so this is the one
+ * place that exclusion has to hold for the pod.
  *
  * Emits NO `caption` field, even when the dataset already has captionsets. The pod's captioner
  * runs with `recaption: false` and skips any image that already has a `.txt` sidecar, so shipping
@@ -78,7 +83,7 @@ export function corpusToManifest(corpus: Corpus): DatasetManifest {
  * A caption job captions everything.
  */
 export function datasetToManifest(dataset: Dataset): DatasetManifest {
-  return dataset.media.map(m => ({ url: m.url, id: m.id }))
+  return liveMedia(dataset.media).map(m => ({ url: m.url, id: m.id }))
 }
 
 /**
