@@ -71,6 +71,7 @@ import {
   rollAt,
   rollCurated,
   savedOf,
+  settlePieceResult,
   steerBlockReason,
   steerFloor,
   steerQuoteRequest,
@@ -352,15 +353,19 @@ export function Muse() {
 
   // A piece's run reaching terminal is also what releases the stream loop: the next
   // piece is requested on SETTLEMENT, never on a timer, so the loop parks on a promise
-  // that this resolves. One waiter per run, removed as it is resolved.
+  // that this resolves. One waiter per run, removed as it is resolved. The result is
+  // folded into the piece before the loop is released — `settlePieceResult` owns that
+  // ordering, and it is gated in tests/unit/web/muse.test.ts.
   const settlers = useRef(new Map<string, (r: RunResult) => void>());
   const onPieceResult = useCallback((runId: string, result: RunResult) => {
-    setStream((s) => applyRunResult(s, runId, result));
     const waiting = settlers.current.get(runId);
-    if (waiting) {
-      settlers.current.delete(runId);
-      waiting(result);
-    }
+    if (waiting) settlers.current.delete(runId);
+    settlePieceResult(
+      runId,
+      result,
+      (id, r) => setStream((s) => applyRunResult(s, id, r)),
+      waiting,
+    );
   }, []);
 
   // ── The session (noema-241) ───────────────────────────────────────────────
@@ -1708,7 +1713,10 @@ export function Muse() {
 
 /** Headless: one piece's subscription to its own run. Reports terminal upward once,
  *  where `applyRunResult` folds the produced media into the piece. Split out so a held
- *  piece — one that has no tile on screen yet — is still watched. */
+ *  piece — one that has no tile on screen yet — is still watched.
+ *  The subscription ends at terminal (a watcher per finished piece would be an open
+ *  stream per finished piece), so the terminal it reports has to carry the run's
+ *  outputs already — see `announceTerminal` in lib/runStream.ts. */
 function RunWatcher({ runId, onResult }: { runId: string; onResult: (runId: string, r: RunResult) => void }) {
   const { terminal, exitus, error } = useRunStream(runId);
   useEffect(() => {
