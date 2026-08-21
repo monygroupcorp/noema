@@ -2512,11 +2512,26 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
+    { code: 'input.model_not_resolved', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'conflict.slug_taken', httpStatus: 409 },
+    // The same work is already running on the caller's own resource. Retryable: the request
+    // succeeds once the running one ends.
+    { code: 'conflict.run_in_flight', httpStatus: 409, retryable: true },
+    // There is no work left to do. NOT retryable: the request cannot succeed until the resource
+    // changes or the caller asks for a rebuild.
+    { code: 'conflict.nothing_to_decompose', httpStatus: 409, retryable: false },
+    { code: 'license.restricted', httpStatus: 403 },
+    { code: 'content.refused', httpStatus: 403 },
+    { code: 'secret.required', httpStatus: 422 },
+    { code: 'deposit.price_unavailable', httpStatus: 422 },
+    { code: 'feature.not_implemented', httpStatus: 501 },
+    { code: 'purse.disabled', httpStatus: 503 },
+    { code: 'rate.limited', httpStatus: 429, retryable: true },
     { code: 'capacity.no_pods', httpStatus: 503, retryable: true },
     { code: 'internal.unavailable', httpStatus: 503, retryable: true },
+    { code: 'internal.upstream_unavailable', httpStatus: 503, retryable: true },
     { code: 'internal.error', httpStatus: 500, retryable: true },
   ],
 }
