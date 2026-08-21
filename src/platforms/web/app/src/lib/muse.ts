@@ -999,6 +999,37 @@ export function pieceRecord(
   return { runId, rollIndex, fragments: lineage.map((f) => ({ category: f.category, text: f.text })) };
 }
 
+/**
+ * Why a piece must not be fired: its lineage cites a fragment the open session's floor
+ * does not hold. `null` when it is safe to fire.
+ *
+ * A FIRE SPENDS BEFORE IT RECORDS. `createRun` reserves and spends, and the ledger entry
+ * is written afterwards; a lineage the floor cannot resolve is rejected at the record
+ * call, by which point the run has already happened and been paid for, and the piece can
+ * never be reacted to, saved or dismissed. This is the pre-flight that keeps that from
+ * being paid for at all — it is derived from the floor and the lineage the screen
+ * already holds, and it reads nothing on the spend path.
+ *
+ * No session open means no ledger entry is attempted, so there is nothing to refuse and
+ * this returns `null`.
+ *
+ * With the resume-time floor reconcile in place this should not fire; it is the guard
+ * for the case where the floor and the garden have drifted apart anyway.
+ *
+ * Non-vacuity: reverting this to `null` must fail "a piece whose lineage the floor does
+ * not hold is refused before it is fired".
+ */
+export function lineageBlockReason(
+  view: MuseSessionView | null,
+  lineage: readonly Fragment[],
+): string | null {
+  if (!view) return null;
+  const held = new Set(view.floor.map((e) => e.key));
+  const missing = lineage.find((f) => !held.has(fragmentKey(f)));
+  if (!missing) return null;
+  return `this session's floor doesn't hold '${missing.category}: ${missing.text}' — reload the screen to pick up the set's fragments`;
+}
+
 /** One fragment as the floor sheet renders it. A disabled fragment is a pill like any
  *  other — dark, still listed, still tappable (S8). */
 export interface FloorPill {

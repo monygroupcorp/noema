@@ -220,6 +220,50 @@ export function rebuildFragments(
 }
 
 /**
+ * Widen the floor with every fragment identity `fragments` holds and the floor does
+ * not, each one landing in the draw at the default state.
+ *
+ * A session's floor is a snapshot of the mother taken once, at spawn, while the mother
+ * keeps growing: a decomposition that lands afterwards reaches the dataset and not the
+ * session. The two then disagree about what exists — a prompt rolled against the
+ * mother's current fragments cites identities the floor never held, and `recordPiece`
+ * rejects that lineage. This is the merge that closes the gap on resume.
+ *
+ * IT ADDS AND IT NEVER REMOVES. A fragment the mother no longer holds — its media item
+ * archived, a later decomposition returning something different — stays on the floor.
+ * The session is a break-off and its copies are its own; dropping one would strand the
+ * lineage of every piece already recorded against it, which is the thing the floor
+ * exists to keep resolvable. `rebuildFragments` is the other operation, and the
+ * difference between the two is why both exist.
+ *
+ * IT DOES NOT TOUCH STEER STATE. An identity the floor already holds is left exactly as
+ * it stands: darkened stays darkened, and a weight stays where the user put it. Only a
+ * genuinely new identity is given `DEFAULT_FRAGMENT_STATE`. Rebuilding the floor from
+ * the mother instead would undo every steer the session had accumulated.
+ *
+ * The session is returned UNCHANGED — the same object — when there is nothing to add,
+ * so a caller can compare by reference and skip a write.
+ */
+export function reconcileFloor(
+  session: MuseSession,
+  fragments: readonly Fragment[],
+): MuseSession {
+  const added: Fragment[] = []
+  const seen = new Set<string>()
+  for (const fragment of fragments) {
+    const key = fragmentKey(fragment)
+    if (session.floor.has(key) || seen.has(key)) continue
+    seen.add(key)
+    added.push(copyFragment(fragment))
+  }
+  if (added.length === 0) return session
+
+  const floor = new Map(session.floor)
+  for (const fragment of added) floor.set(fragmentKey(fragment), { ...DEFAULT_FRAGMENT_STATE })
+  return { ...session, fragments: [...session.fragments, ...added], floor }
+}
+
+/**
  * Name the session's own dataset — the record its saved pieces land in.
  *
  * Called once, by the first save: the dataset is minted lazily rather than at spawn,
