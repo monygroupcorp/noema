@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Actum } from '../../../src/types/actum.js'
-import type { Exitus } from '../../../src/types/cursus.js'
+import type { Actorum, Exitus } from '../../../src/types/cursus.js'
 
 // ── Helpers (copied from executionWebhook.test.ts pattern) ───────────────────
 
@@ -48,7 +48,7 @@ function makeCompletor(): CompletorMock {
  * `actum` is what the reported job id resolves to (as before). `others` are additional acta the
  * store knows about, so a nonce can be made to resolve to a DIFFERENT actum than the job id does.
  */
-function makeActorum(actum: Actum | null, others: Actum[] = []) {
+function makeActorum(actum: Actum | null, others: Actum[] = []): Actorum {
   const all = [...(actum ? [actum] : []), ...others]
   return {
     async create(a: Omit<Actum, 'inceptum'>) { return { ...a, inceptum: new Date() } as Actum },
@@ -57,6 +57,9 @@ function makeActorum(actum: Actum | null, others: Actum[] = []) {
     async findByExternusJobId(_jobId: string) { return actum },
     async findByCallbackNonce(nonce: string) { return all.find(a => a.callbackNonce === nonce) ?? null },
     async findExpired() { return [] as Actum[] },
+    async findByNullifier() { throw new Error('findByNullifier is not exercised by this suite') },
+    async findInFlight() { throw new Error('findInFlight is not exercised by this suite') },
+    async findByCompositum() { throw new Error('findByCompositum is not exercised by this suite') },
   }
 }
 

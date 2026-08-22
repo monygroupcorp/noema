@@ -7,7 +7,12 @@
   // directories are listed with their measured error counts and each is a follow-on item, so the
   // tranche has a written end state and cannot quietly become a permanent exclusion:
   //
-  //   tests/unit/crystal/     251 errors / 46 files  — follow-on item (volume)
+  //   tests/unit/crystal/     164 errors / 42 files  — follow-on items (volume); this directory is
+  //                                                    drained in named tranches, not in one pass, so
+  //                                                    the row shrinks per tranche and is removed when
+  //                                                    the last one lands. The pod/webhook tranche
+  //                                                    (RunPodCursor, executionWebhook, webhookRouter,
+  //                                                    alchemyWebhook) is now in `include` below.
   //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
   //   tests/unit/execution/    83 errors /  6 files  — follow-on item (volume)
   //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
@@ -30,6 +35,10 @@
     "tests/unit/ledger/**/*",
     "tests/unit/invariants/**/*",
     "tests/unit/api/**/*",
-    "tests/unit/flow/**/*"
+    "tests/unit/flow/**/*",
+    "tests/unit/crystal/RunPodCursor.*",
+    "tests/unit/crystal/executionWebhook.*",
+    "tests/unit/crystal/webhookRouter.*",
+    "tests/unit/crystal/alchemyWebhook.*"
   ]
 }
