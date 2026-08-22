@@ -1,5 +1,32 @@
 # Changelog
 
+## [5.12.0](https://github.com/monygroupcorp/noema/compare/v5.11.0...v5.12.0) (2026-08-21)
+
+
+### Features
+
+* **crystal:** a caption pass extends the captionset it was given ([d7c3d29](https://github.com/monygroupcorp/noema/commit/d7c3d291d5f3be3aa515d6d05648cbbeadb3db64))
+* **datasets:** remove an image, archive a set, and take either back ([7527e9c](https://github.com/monygroupcorp/noema/commit/7527e9c5d9bfb01c77cc5b485bf186f236535df5))
+* **muse:** a session history off the dataset, and every past piece rehydrated from its run ([4dcc88a](https://github.com/monygroupcorp/noema/commit/4dcc88a10bc384e0ced286de257fc2a6698fb28a))
+* **muse:** every running piece reads its live phase ([cfdedb9](https://github.com/monygroupcorp/noema/commit/cfdedb99d57a9d82900e0294c1bb78797f81fa35))
+* **muse:** every running piece reads its live phase ([f808c43](https://github.com/monygroupcorp/noema/commit/f808c43a6886685d2ca831ba58d2eda594f68eae))
+* **muse:** name the cold start on a deep LoRA stack ([64b9a3c](https://github.com/monygroupcorp/noema/commit/64b9a3ce7fd6190a302beaabab4b1400a1d89d6c))
+* **muse:** the nozzle takes a stack — fire under more than one LoRA at a time ([0f55f28](https://github.com/monygroupcorp/noema/commit/0f55f28423589b93fd0a5f18567fed10cbf93ca6))
+* **muse:** the nozzle takes a stack — fire under more than one LoRA at a time ([568e86c](https://github.com/monygroupcorp/noema/commit/568e86c49b0a47f8c1aa5e7449179b617bb1c78f))
+* **web:** give the dataset screen's actions their real weight ([6cf4c39](https://github.com/monygroupcorp/noema/commit/6cf4c39353fd07615f53665a45412c66d52c0abb))
+* **web:** give the dataset screen's actions their real weight ([9ca0deb](https://github.com/monygroupcorp/noema/commit/9ca0deb48d447e1b4ee085fc68ab193a30bd63f3))
+
+
+### Bug Fixes
+
+* **crystal:** the caption and decompose modi declare every port their cursors read ([766491b](https://github.com/monygroupcorp/noema/commit/766491b6ffa959d9c22eeb29552cd1e5c7a7a568))
+* **muse:** a disabled gesture says why — the reaction rail no longer goes quiet on a piece the ledger never took ([cda752f](https://github.com/monygroupcorp/noema/commit/cda752fba46eb9a7462993d21576ae8472c6bccd))
+* **muse:** a disabled gesture says why it is refused ([1c52e11](https://github.com/monygroupcorp/noema/commit/1c52e11193b7de475ba3570fc723fe941fba6ca0))
+* **muse:** decompose only what has not been decomposed, and refuse a pass with nothing to do ([7135d95](https://github.com/monygroupcorp/noema/commit/7135d95ee8e65d344dff8f3406c28af183e2c2df))
+* **muse:** reconcile a session's floor with its mother's garden on resume ([02f422d](https://github.com/monygroupcorp/noema/commit/02f422d57f0d884beac9566f82fd475ad659d783))
+* **muse:** reconcile a session's floor with its mother's garden on resume ([40587ef](https://github.com/monygroupcorp/noema/commit/40587efb81339efc0ad9e26ebbdaec98263af809))
+* **space:** a single click on a point selects it without moving the camera ([5a6ed18](https://github.com/monygroupcorp/noema/commit/5a6ed18cd247ff7a6e16d459aa8e70af81cea349))
+
 ## [5.11.0](https://github.com/monygroupcorp/noema/compare/v5.10.1...v5.11.0) (2026-08-21)
 
 
