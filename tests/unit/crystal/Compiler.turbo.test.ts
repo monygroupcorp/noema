@@ -10,6 +10,7 @@ import { CANONICAL_INTELLAE } from '../../../src/crystal/seeds/intellae.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import { canonicalFamilia } from '../../../src/crystal/aitkConfig.js'
 import type { Intellarum, Intella, Intellae } from '../../../src/types/intelligendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -63,9 +64,9 @@ for (const f of FLOWS) {
     const compiler = compilerWith(makeIntellarum([]))
     const { spec } = await compiler.compile(f.essentia, { prompt: 'a fox' })
     assert.ok(spec.models.find(m => m.id === f.unetId), `${f.unetId} in spec.models`)
-    assert.equal(spec.customNodes?.[0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
+    assert.equal(asComfyUI(spec).customNodes?.[0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
     // prompt routes through the LoraTextExtractor (node 20)
-    const extractor = spec.workflow.inputTemplate['20'] as { class_type: string; inputs: Record<string, unknown> }
+    const extractor = asComfyUI(spec).workflow.inputTemplate['20'] as { class_type: string; inputs: Record<string, unknown> }
     assert.equal(extractor.class_type, 'LoraTextExtractor-b1f83aa2')
     assert.equal(extractor.inputs.text, 'a fox')
   })
@@ -75,7 +76,7 @@ for (const f of FLOWS) {
     const r = await compilerWith(intellarum).compile(f.essentia, { prompt: 'a portrait, mytrigger style' })
     assert.equal(r.appliedLoras?.length, 1)
     assert.equal(r.appliedLoras?.[0].slug, `${f.familia}style`)
-    const node20 = r.spec.workflow.inputTemplate['20'] as { inputs: Record<string, unknown> }
+    const node20 = asComfyUI(r.spec).workflow.inputTemplate['20'] as { inputs: Record<string, unknown> }
     assert.match(node20.inputs.text as string, new RegExp(`<lora:${f.familia}style:1>`))
     assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
   })

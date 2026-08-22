@@ -7,6 +7,7 @@ import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateR
 import { ESSENTIA_LTX_T2V, ESSENTIA_LTX_I2V } from '../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -23,7 +24,7 @@ function makeCompiler(fixedSeed = 42) {
 test('compile(ESSENTIA_LTX_T2V) slots the prompt into the positive CLIPTextEncode', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_LTX_T2V, { prompt: 'a slow pan over a misty forest' })
-  const positive = spec.workflow.inputTemplate['3'] as { class_type: string; inputs: Record<string, unknown> }
+  const positive = asComfyUI(spec).workflow.inputTemplate['3'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(positive.class_type, 'CLIPTextEncode')
   assert.equal(positive.inputs.text, 'a slow pan over a misty forest')
 })
@@ -44,10 +45,10 @@ test('compile(ESSENTIA_LTX_T2V) includes the LTX checkpoint + Gemma text encoder
 test('compile(ESSENTIA_LTX_T2V) forwards the ComfyUI-LTXVideo customNodes pack', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_LTX_T2V, { prompt: 'a cat' })
-  assert.ok(Array.isArray(spec.customNodes), 'customNodes is carried onto the spec')
-  assert.equal(spec.customNodes!.length, 1)
-  assert.equal(spec.customNodes![0].url, 'https://github.com/Lightricks/ComfyUI-LTXVideo')
-  assert.equal(spec.customNodes![0].name, 'ComfyUI-LTXVideo')
+  assert.ok(Array.isArray(asComfyUI(spec).customNodes), 'customNodes is carried onto the spec')
+  assert.equal(asComfyUI(spec).customNodes!.length, 1)
+  assert.equal(asComfyUI(spec).customNodes![0].url, 'https://github.com/Lightricks/ComfyUI-LTXVideo')
+  assert.equal(asComfyUI(spec).customNodes![0].name, 'ComfyUI-LTXVideo')
 })
 
 test('compile(ESSENTIA_LTX_I2V) slots the prompt + image and carries the LTX weights/customNodes', async () => {
@@ -57,19 +58,19 @@ test('compile(ESSENTIA_LTX_I2V) slots the prompt + image and carries the LTX wei
     image: 'https://r2.example/source.png?sig=abc',
   })
 
-  const positive = spec.workflow.inputTemplate['3'] as { class_type: string; inputs: Record<string, unknown> }
+  const positive = asComfyUI(spec).workflow.inputTemplate['3'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(positive.class_type, 'CLIPTextEncode')
   assert.equal(positive.inputs.text, 'the figure turns to face the camera')
 
   // The image aditus rides the media-input primitive: LoadImage's slot carries the
   // destFilename (not the URL) — same pattern as Compiler.mediaInputs.test.ts.
-  assert.ok(spec.mediaInputs, 'spec carries mediaInputs for the source image')
-  assert.equal(spec.mediaInputs!.length, 1)
-  const loadImage = spec.workflow.inputTemplate['15'] as { class_type: string; inputs: Record<string, unknown> }
+  assert.ok(asComfyUI(spec).mediaInputs, 'spec carries mediaInputs for the source image')
+  assert.equal(asComfyUI(spec).mediaInputs!.length, 1)
+  const loadImage = asComfyUI(spec).workflow.inputTemplate['15'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(loadImage.class_type, 'LoadImage')
-  assert.equal(loadImage.inputs.image, spec.mediaInputs![0].destFilename)
+  assert.equal(loadImage.inputs.image, asComfyUI(spec).mediaInputs![0].destFilename)
 
   const checkpoint = spec.models.find(m => m.role === 'checkpoint')
   assert.equal(checkpoint!.id, 'intella.ltx-2.3-distilled')
-  assert.equal(spec.customNodes![0].url, 'https://github.com/Lightricks/ComfyUI-LTXVideo')
+  assert.equal(asComfyUI(spec).customNodes![0].url, 'https://github.com/Lightricks/ComfyUI-LTXVideo')
 })

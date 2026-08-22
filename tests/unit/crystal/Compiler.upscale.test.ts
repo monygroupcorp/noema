@@ -6,6 +6,7 @@ import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateR
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import { CANONICAL_FUNDAMENTA } from '../../../src/crystal/seeds/fundamenta.js'
 import { CANONICAL_ESSENTIAE } from '../../../src/crystal/seeds/essentiae.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 // End-to-end proof that the REAL landed `upscale` flow + the i2i image-input primitive
 // integrate: an image input compiles to a runner download, the graph's LoadImage node
@@ -25,10 +26,10 @@ test('real upscale flow: image → mediaInputs + LoadImage filename + upscale mo
   const { spec } = await compiler.compile(upscale!, { image: 'https://r2.example/cat.png' })
 
   // i2i: the image input became a runner download, and the LoadImage slot carries the filename.
-  assert.equal(spec.mediaInputs?.length, 1, 'exactly one media input')
-  const mi = spec.mediaInputs![0]
+  assert.equal(asComfyUI(spec).mediaInputs?.length, 1, 'exactly one media input')
+  const mi = asComfyUI(spec).mediaInputs![0]
   assert.equal(mi.url, 'https://r2.example/cat.png', 'runner is told the source URL')
-  const loadImage = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const loadImage = asComfyUI(spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.equal(loadImage.inputs.image, mi.destFilename, 'LoadImage.image = the downloaded filename, not the URL')
 
   // The 4x-UltraSharp weight resolved into the manifest (fundament weight + template url/dest fallback).

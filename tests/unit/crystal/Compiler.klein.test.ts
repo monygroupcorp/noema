@@ -10,6 +10,7 @@ import { CANONICAL_INTELLAE } from '../../../src/crystal/seeds/intellae.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import { canonicalFamilia } from '../../../src/crystal/aitkConfig.js'
 import type { Intellarum, Intella, Intellae } from '../../../src/types/intelligendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 // Hermetic acceptance for the canonical FLUX.2 Klein 4B TXT2IMG flow ('klein').
 // Mirrors Compiler.turbo.test.ts: compiles the REAL seed against the REAL template,
@@ -64,9 +65,9 @@ test('compile(klein) resolves the 4B stack (4B unet + Qwen3-4B TE + flux2 VAE) a
   assert.ok(spec.models.find(m => m.id === 'intella.flux2-klein-4b'), '4B unet in spec.models')
   assert.ok(spec.models.find(m => m.id === 'intella.qwen3-4b-flux2'), 'Qwen3-4B (not 8B) text encoder in spec.models')
   assert.ok(spec.models.find(m => m.id === 'intella.flux2-vae-full-encoder'), 'flux2 VAE in spec.models')
-  assert.equal(spec.customNodes?.[0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
+  assert.equal(asComfyUI(spec).customNodes?.[0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
   // prompt routes through the LoraTextExtractor (node 200)
-  const extractor = spec.workflow.inputTemplate['200'] as { class_type: string; inputs: Record<string, unknown> }
+  const extractor = asComfyUI(spec).workflow.inputTemplate['200'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(extractor.class_type, 'LoraTextExtractor-b1f83aa2')
   assert.equal(extractor.inputs.text, 'a fox')
 })
@@ -74,7 +75,7 @@ test('compile(klein) resolves the 4B stack (4B unet + Qwen3-4B TE + flux2 VAE) a
 test('compile(klein) routes guidance into CFGGuider.cfg and width/height into scheduler + latent', async () => {
   const compiler = compilerWith(makeIntellarum([]))
   const { spec } = await compiler.compile(ESSENTIA_KLEIN, { prompt: 'a fox', guidance: 2.5, steps: 6, width: 768, height: 1344 })
-  const g = (id: string) => (spec.workflow.inputTemplate[id] as { inputs: Record<string, unknown> }).inputs
+  const g = (id: string) => (asComfyUI(spec).workflow.inputTemplate[id] as { inputs: Record<string, unknown> }).inputs
   assert.equal(g('63').cfg, 2.5, 'guidance rides CFGGuider.cfg (klein has no FluxGuidance node)')
   assert.equal(g('62').steps, 6)
   assert.equal(g('62').width, 768)
@@ -88,7 +89,7 @@ test('compile(klein) stacks a flux2-familia LoRA from its trigger word (the impo
   const r = await compilerWith(intellarum).compile(ESSENTIA_KLEIN, { prompt: 'a portrait, ps2 style' })
   assert.equal(r.appliedLoras?.length, 1)
   assert.equal(r.appliedLoras?.[0].slug, 'impresstation')
-  const node200 = r.spec.workflow.inputTemplate['200'] as { inputs: Record<string, unknown> }
+  const node200 = asComfyUI(r.spec).workflow.inputTemplate['200'] as { inputs: Record<string, unknown> }
   assert.match(node200.inputs.text as string, /<lora:impresstation:1>/)
   assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
 })
