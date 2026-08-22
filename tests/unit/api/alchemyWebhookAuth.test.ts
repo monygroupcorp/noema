@@ -29,7 +29,7 @@ import type { AlchemyWebhookDeps, AlchemyWebhookRequest } from '../../../src/api
 import { permissiveSanctionsScreen } from '../../../src/compliance/SanctionsScreen.js'
 import { fixedPricer } from '../../../src/crystal/AssetPricer.js'
 import type { Depositum, Depositorum, Petitionum, Testimonium, Testimoniorum } from '../../../src/types/catena.js'
-import type { Signum, Signorum } from '../../../src/types/significandi.js'
+import type { Signum, Signorum, Reservatio, Transferatio } from '../../../src/types/significandi.js'
 
 // ── Constants (mirror the implementation) ─────────────────────────────────────
 
@@ -144,6 +144,15 @@ function makeSignorum() {
     async release() {},
     async history() { return [] },
     async settle() {},
+    // Admission-only suite: the handler never reaches these. They are present so the
+    // double satisfies Signorum, and they throw rather than return a plausible value —
+    // a silent default here would let a future call pass unnoticed.
+    async sessionBudget(): Promise<bigint> { throw new Error('not used') },
+    async reserve(): Promise<Reservatio> { throw new Error('not used') },
+    async findByTestis(): Promise<Signum | null> { throw new Error('not used') },
+    async ownsAny(): Promise<boolean> { throw new Error('not used') },
+    async transfer(): Promise<Transferatio> { throw new Error('not used') },
+    async createMany(): Promise<Signum[]> { throw new Error('not used') },
   }
   return signorum
 }

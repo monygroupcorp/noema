@@ -40,6 +40,7 @@ function makeDeps(overrides: Partial<ExecuteFlowDeps> = {}): ExecuteFlowDeps {
     modorum: {
       find: async () => modus,
       register: async () => {},
+      update: async () => { throw new Error('not implemented') },
       list: async () => [
         makeModus({ id: 'mod-image-1', nomen: 'Flux Schnell' }),
         makeModus({ id: 'mod-image-2', nomen: 'Flux Dev' }),
@@ -53,6 +54,12 @@ function makeDeps(overrides: Partial<ExecuteFlowDeps> = {}): ExecuteFlowDeps {
       release: async () => {},
       history: async () => [],
       settle: async () => {},
+      sessionBudget: async () => { throw new Error('not implemented') },
+      reserve: async () => { throw new Error('not implemented') },
+      findByTestis: async () => { throw new Error('not implemented') },
+      ownsAny: async () => { throw new Error('not implemented') },
+      transfer: async () => { throw new Error('not implemented') },
+      createMany: async () => { throw new Error('not implemented') },
     },
     actorum: {
       create: async (a) => ({ ...a, inceptum: new Date() }),
@@ -60,6 +67,10 @@ function makeDeps(overrides: Partial<ExecuteFlowDeps> = {}): ExecuteFlowDeps {
       findById: async (_id) => null,
       findByExternusJobId: async (_id) => null,
       findExpired: async () => [],
+      findByCallbackNonce: async () => null,
+      findByNullifier: async () => null,
+      findInFlight: async () => [],
+      findByCompositum: async () => [],
     },
     completor: {
       complete: async (actum, exitus) => ({
@@ -96,6 +107,7 @@ function makeCtx(overrides: Partial<FlowContext> = {}): FlowContext {
     identity: { animaId: 'anima-1' },
     platform: 'telegram',
     platformUserId: 'user-1',
+    platformChatId: 'chat-1',
     ...overrides,
   }
 }
@@ -267,6 +279,10 @@ test('CONFIGURE + form, balance sufficient, async cursor returns AWAITING_COMPLE
       findById: async (_id) => null,
       findByExternusJobId: async (_id) => null,
       findExpired: async () => [],
+      findByCallbackNonce: async () => null,
+      findByNullifier: async () => null,
+      findInFlight: async () => [],
+      findByCompositum: async () => [],
     },
   })
   const flow = new ExecuteFlow(deps)
@@ -296,6 +312,12 @@ test('CONFIGURE + form, balance insufficient returns Detail step with top-up act
       release: async () => {},
       history: async () => [],
       settle: async () => {},
+      sessionBudget: async () => { throw new Error('not implemented') },
+      reserve: async () => { throw new Error('not implemented') },
+      findByTestis: async () => { throw new Error('not implemented') },
+      ownsAny: async () => { throw new Error('not implemented') },
+      transfer: async () => { throw new Error('not implemented') },
+      createMany: async () => { throw new Error('not implemented') },
     },
   })
   const flow = new ExecuteFlow(deps)
@@ -783,6 +805,7 @@ function depsFor(modus: Modus): ExecuteFlowDeps {
     modorum: {
       find: async () => modus,
       register: async () => {},
+      update: async () => { throw new Error('not implemented') },
       list: async () => [],
     },
   })

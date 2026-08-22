@@ -15,10 +15,12 @@ function makeExecEvent(): SignumEvent<'execution_spend'> {
         impetus: 100n,
         signaConsumed: [],
         aditus: {},
-        status: 'completed',
+        status: 'completus',
         inceptum: new Date(),
+        expirat: new Date(Date.now() + 60_000),
       },
       impetus: 100n,
+      baseImpetus: 100n,
     },
   }
 }

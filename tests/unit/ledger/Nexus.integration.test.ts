@@ -29,7 +29,7 @@ test('execution_spend: all three hooks fire and signa are collected', async () =
       actum: {
         id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0',
         impetus: 1000n, signaConsumed: [], aditus: {},
-        status: 'completed', inceptum: new Date(),
+        status: 'completus', inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
       },
       impetus: 1000n,
       baseImpetus: 1000n,
@@ -101,9 +101,10 @@ test('execution_spend with no optional fields produces no signa', async () => {
       actum: {
         id: 'act-bare', modusId: 'mod-1', modusVersiono: '1.0.0',
         impetus: 1000n, signaConsumed: [], aditus: {},
-        status: 'completed', inceptum: new Date(),
+        status: 'completus', inceptum: new Date(), expirat: new Date(Date.now() + 60_000),
       },
       impetus: 1000n,
+      baseImpetus: 1000n,
       // no host, no spell author, no model authors
     },
   })
