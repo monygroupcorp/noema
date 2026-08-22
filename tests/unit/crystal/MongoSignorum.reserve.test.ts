@@ -311,7 +311,7 @@ test('BOUNDED READ: reserve does not materialise the whole pool (~O(k), not O(n)
       return Reflect.get(target, prop, recv)
     },
   }) as Collection
-  const instrumented = new MongoSignorum(counting)
+  const instrumented = new MongoSignorum(counting, client)
 
   // Large pool of uniform 1-point coins so covering amount=5 needs exactly k=5 coins.
   const POOL = 600

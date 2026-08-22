@@ -21,7 +21,8 @@ function makeAzure(states: Record<string, string>, opts: { deallocateStatus?: ()
   const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
-    const body = init?.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : init.body
+    const rawBody = init?.body
+    const body = typeof rawBody === 'string' && rawBody.startsWith('{') ? JSON.parse(rawBody) : rawBody
     calls.push({ method, url, body })
 
     if (url.includes('login.microsoftonline.com')) {

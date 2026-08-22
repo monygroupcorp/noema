@@ -9,7 +9,10 @@ import type { CompositusCursor } from '../../../src/crystal/CompositusCursor.js'
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-function makeActum(over: Partial<Actum>): Actum {
+// `expirat` is required on `Actum` and is the field every case here varies, so it is required
+// on the override rather than defaulted — a default deadline would make the fixture decide the
+// very thing each test is setting.
+function makeActum(over: Partial<Actum> & Pick<Actum, 'expirat'>): Actum {
   return {
     id: 'a',
     modusId: 'm',

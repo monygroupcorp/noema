@@ -43,7 +43,7 @@ test('register then find round-trips; _id is stripped', async () => {
   assert.ok(found)
   assert.equal(found.imageId, 'runpod/pytorch')
   assert.deepEqual(found.intellae, [{ id: 'intella.flux-schnell-fp8-scaled', role: 'unet' }])
-  assert.equal('_id' in (found as Record<string, unknown>), false)
+  assert.equal('_id' in (found as unknown as Record<string, unknown>), false)
 })
 
 test('register upserts per (id, versio); two versions coexist; find without versio is latest', async () => {

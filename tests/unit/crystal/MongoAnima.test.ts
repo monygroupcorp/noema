@@ -12,7 +12,16 @@ let client: MongoClient
 let col: Collection
 let store: MongoAnima
 
-function makeInput(overrides: Partial<Omit<Anima, 'id' | 'natum' | 'mutatum'>> = {}): Omit<Anima, 'id' | 'natum' | 'mutatum'> {
+/**
+ * `affines` is no longer part of the `Anima` contract — it lives on the owner-keyed
+ * Consuetudinum store. `MongoAnima` is a verbatim document mirror, so a row written with
+ * the field still carries it back out, which is what the two `affines` cases below cover.
+ * Typed here as an extra DOCUMENT field so the suite states that plainly rather than
+ * implying `Anima` still declares it.
+ */
+type AnimaRow = Anima & { affines?: Record<string, unknown> }
+
+function makeInput(overrides: Partial<Omit<AnimaRow, 'id' | 'natum' | 'mutatum'>> = {}): Omit<AnimaRow, 'id' | 'natum' | 'mutatum'> {
   return {
     nomen: 'Test Soul',
     affines: {},
@@ -48,7 +57,7 @@ test('create returns anima with id, natum, mutatum', async () => {
 })
 
 test('create sets nomen and affines', async () => {
-  const a = await store.create(makeInput({ nomen: 'Alice', affines: { 'modus-1': { seed: 42 } } }))
+  const a = await store.create(makeInput({ nomen: 'Alice', affines: { 'modus-1': { seed: 42 } } })) as AnimaRow
   assert.equal(a.nomen, 'Alice')
   assert.deepEqual(a.affines, { 'modus-1': { seed: 42 } })
 })
@@ -115,7 +124,13 @@ test('update changes nomen', async () => {
 
 test('update changes affines', async () => {
   const a = await store.create(makeInput())
-  const updated = await store.update(a.id, { affines: { 'modus-x': { steps: 20 } } })
+  // `affines` is not in this store's `update` patch whitelist (it is not an `Anima` field at
+  // all any more), while the store's `$set` still writes a patch verbatim — which is the
+  // behaviour this case covers. Suppressed narrowly rather than dropped: whether the Anima
+  // suite should keep covering a field that has moved to Consuetudinum is a follow-on
+  // decision about the stores, not something a typecheck sweep should settle.
+  // @ts-expect-error — `affines` was re-homed onto the owner-keyed Consuetudinum store.
+  const updated = await store.update(a.id, { affines: { 'modus-x': { steps: 20 } } }) as AnimaRow
   assert.deepEqual(updated.affines, { 'modus-x': { steps: 20 } })
 })
 

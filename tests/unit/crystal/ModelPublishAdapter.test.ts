@@ -7,10 +7,14 @@ import { ModelPublishAdapter, huggingFaceRegistry, civitaiRegistry, slugify, typ
 // PLACEHOLDER: projects account+slug → model URL; real weight upload deferred.
 // =============================================================================
 
-const MODEL: ModelView = {
+// `satisfies` rather than a type annotation: `PublishArtifact.output` is
+// `Record<string, unknown>`, and an interface type (`ModelView`) has no implicit index
+// signature, so an annotated value cannot be passed as one. `satisfies` still checks the
+// fixture against `ModelView` while leaving the inferred object type usable as `output`.
+const MODEL = {
   nomen: 'My Cool LoRA', genus: 'lora', slug: 'my-cool-lora', trigger: 'mcl', familia: 'flux',
   sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }],
-}
+} satisfies ModelView
 
 test('slugify: lowercases and hyphenates to a registry-safe slug', () => {
   assert.equal(slugify('My Cool LoRA!'), 'my-cool-lora')

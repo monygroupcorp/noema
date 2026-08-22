@@ -117,7 +117,7 @@ function createServer(): Promise<{ server: http.Server; url: string }> {
     const app = express()
     app.use(express.json())
     app.use('/v1', createApiRouter({
-      api: api as unknown as ConstructorParameters<typeof createApiRouter>[0]['api'],
+      api: api as unknown as Parameters<typeof createApiRouter>[0]['api'],
       identity: fakeIdentity,
     }))
     const server = app.listen(0, '127.0.0.1', () => {

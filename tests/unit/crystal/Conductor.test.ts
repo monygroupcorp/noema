@@ -105,21 +105,21 @@ test('conducere leases a studio: binds the Modo to the pod + opens a budget tess
 
   assert.ok(handle, 'a handle is returned')
   assert.equal(handle!.studioId, handle!.modo.id, 'studioId IS the modo id')
-  assert.equal(handle!.modo.materiamId, handle!.materia.id, 'modo bound to the materia')
+  assert.equal(handle!.modo.materiamId, handle!.materia!.id, 'modo bound to the materia')
   assert.equal(handle!.modo.status, 'idle', 'studio is warm + resting')
-  assert.equal(handle!.provision?.podId, handle!.materia.externusId)
+  assert.equal(handle!.provision?.podId, handle!.materia!.externusId)
   // The budget tessera is issued against the modo, valor = budget
   const budget = await signorum.sessionBudget(handle!.studioId)
   assert.equal(budget, 5000n, 'tessera budget = the requested budget')
   // The bound modo is persisted
   const persisted = await modos.findById(handle!.studioId)
-  assert.equal(persisted?.materiamId, handle!.materia.id)
+  assert.equal(persisted?.materiamId, handle!.materia!.id)
 })
 
 test('conducere fixes the host-less bug: a Hospitium keyed by the auctor always exists', async () => {
   const { conductor, hospitia } = makeConductor()
   const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
-  const h = await hospitia.findByMateriaId(handle!.materia.id)
+  const h = await hospitia.findByMateriaId(handle!.materia!.id)
   assert.ok(h, 'a Hospitium was paired')
   assert.deepEqual(h!.hostKey, AUCTOR, 'host is the leasing auctor — never host-less')
 })
@@ -131,7 +131,7 @@ test('conducere installs the loadout live onto the parked pod', async () => {
   })
   const handle = await conductor.conducere(AUCTOR, { budget: 1000n, models: ['lora-a', 'lora-b'] })
   assert.equal(installed.length, 1)
-  assert.equal(installed[0].materiaId, handle!.materia.id)
+  assert.equal(installed[0].materiaId, handle!.materia!.id)
   assert.deepEqual(installed[0].ids, ['lora-a', 'lora-b'])
 })
 
@@ -166,7 +166,7 @@ test('find excludes studios whose pod (Materia) is terminated — reports LIVE s
   assert.equal((await conductor.find(AUCTOR)).length, 1, 'live studio is listed')
 
   // Reap the pod (idle reaper / external kill) — the bound Modo stays stale-`idle`.
-  await materiae.update(handle!.materia.id, { status: 'terminated' })
+  await materiae.update(handle!.materia!.id, { status: 'terminated' })
   const live = await conductor.find(AUCTOR)
   assert.equal(live.length, 0, 'a terminated-pod studio is no longer listed, despite the stale Modo')
 })
@@ -176,14 +176,14 @@ test('claudere releases the studio: terminates the pod + closes session/materia/
   const terminated: string[] = []
   const { conductor, materiae, modos, hospitia } = makeConductor({ terminate: async (p) => { terminated.push(p) } })
   const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
-  const podId = handle!.materia.externusId!
+  const podId = handle!.materia!.externusId!
 
   const ok = await conductor.claudere(handle!.studioId, AUCTOR)
   assert.equal(ok, true)
   assert.deepEqual(terminated, [podId], 'the pod was terminated')
   assert.equal((await modos.findById(handle!.studioId))?.status, 'terminated')
-  assert.equal((await materiae.findById(handle!.materia.id))?.status, 'terminated')
-  assert.ok((await hospitia.findByMateriaId(handle!.materia.id))?.terminatum)
+  assert.equal((await materiae.findById(handle!.materia!.id))?.status, 'terminated')
+  assert.ok((await hospitia.findByMateriaId(handle!.materia!.id))?.terminatum)
 })
 
 test('claudere refuses a studio the caller does not host', async () => {

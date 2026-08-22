@@ -44,11 +44,20 @@ class FakeHospitium implements HospitiumStore {
   constructor(private readonly byMateria: Map<string, Hospitium>) {}
   async create(input: Omit<Hospitium, 'id'>): Promise<Hospitium> {
     const h: Hospitium = { id: 'hosp-x', ...input }
+    if (!h.materiaId) throw new Error('FakeHospitium: this double keys by materiaId; create needs one')
     this.byMateria.set(h.materiaId, h)
     return h
   }
   async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
     return this.byMateria.get(materiaId) ?? null
+  }
+  // Studio-binding half of the interface — this suite only exercises pod-keyed host
+  // records, so these are unreached here and throw rather than return a plausible default.
+  async findByModoId(_modoId: string): Promise<Hospitium | null> {
+    throw new Error('FakeHospitium.findByModoId: not implemented for this suite')
+  }
+  async bindMateria(_modoId: string, _materiaId: string): Promise<Hospitium> {
+    throw new Error('FakeHospitium.bindMateria: not implemented for this suite')
   }
   async findActive(): Promise<Hospitium[]> {
     return [...this.byMateria.values()].filter(h => !h.terminatum)
@@ -81,7 +90,7 @@ class MetricsFiringWarmClient implements RunPodClient {
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 const MATERIA: Materia = {
   id: 'materia-warm-1',
-  genus: 'pod',
+  genus: 'runpod',
   externusId: 'pod-warm-1',
   gpu: 'H100-80GB',
   vramGb: 80,
@@ -102,7 +111,7 @@ const MODUS: Modus = {
   aditus: {},
   exitus: {},
   canonica: true,
-  auctor: 'anima-author',
+  auctor: { animaId: 'anima-author' },
   natum: new Date(),
   mutatum: new Date(),
 }
