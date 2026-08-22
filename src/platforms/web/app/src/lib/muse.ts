@@ -213,7 +213,9 @@ export function ignitionBlockReason(flow: Pick<FlowDescription, 'input'>): strin
  * tempting move is to lift those into `pinnedModels`. That would attach a model the
  * operator never chose — `pinnedModelResolver.ts` resolves a bare trigger against the
  * caller's own models, and a dataset can carry triggers from separate decompose passes,
- * so it can attach the wrong one of several. Muse fires with no `pinnedModels`, ever.
+ * so it can attach the wrong one of several. This request carries no `pinnedModels`, ever
+ * — the only models a fired piece pins are the ones the user picked on the nozzle
+ * control, which `firedRunRequest` adds on top of this body.
  * Non-vacuity: lifting a roll's triggers into `pinnedModels` must fail "a mined trigger
  * is never lifted into pinnedModels".
  */
@@ -2296,19 +2298,30 @@ export function pinnedModelsFor(nozzle: NozzleInput): string[] {
 }
 
 /**
- * The run request for ONE stream piece: the drawn prompt carrying the trigger and the
- * standing affix, and the pinned weights the trigger resolves against.
+ * The run request for ONE fired piece: the prompt carrying the trigger and the standing
+ * affix, and the pinned weights the trigger resolves against.
+ *
+ * ONE COMPOSER FOR BOTH PATHS, and the name says so rather than naming the stream. A
+ * piece fired by hand off a rolled card (`Muse.tsx#doFire`) and a piece fired by the
+ * stream loop take the same route and are composed here, not twice: the nozzle is one
+ * control on one screen, and a path that read it while its neighbour did not would make
+ * the model beside the prompt mean two different things.
  *
  * BOTH HALVES OR NEITHER. `ignitionRequest` above stays exactly as it is — a mined
  * fragment's own trigger is still never lifted into `pinnedModels`, because that would
  * attach a model the user never chose. This path pins only what the user picked on the
  * nozzle control.
  *
+ * NOTHING IS RESHAPED WHEN THERE IS NO NOZZLE. With an empty stack and no affix this is
+ * `ignitionRequest(modusId, prompt)` exactly — the same keys and the same prompt string —
+ * so a hand fire with no model chosen sends what it sent before.
+ *
  * Non-vacuity: dropping `pinnedModels` must fail "a piece fired under a LoRA names it in
  * pinnedModels"; pinning only the first entry must fail "a piece fired under two LoRAs
- * names BOTH in pinnedModels".
+ * names BOTH in pinnedModels"; reshaping the empty-nozzle request must fail "a hand-fired
+ * piece with an empty stack sends what it sends today".
  */
-export function streamRunRequest(
+export function firedRunRequest(
   modusId: string,
   prompt: string,
   nozzle: NozzleInput,

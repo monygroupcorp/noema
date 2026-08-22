@@ -146,7 +146,7 @@ import {
   promptWithTrigger,
   promptWithAffix,
   affixSummaryLine,
-  streamRunRequest,
+  firedRunRequest,
   triggerToken,
   loraStack,
   setLoraWeight,
@@ -1551,7 +1551,7 @@ test('a piece fired under a LoRA carries that LoRA\'s trigger word in its prompt
   // The request fired for a stream piece carries it too — this is the string that reaches
   // `loraResolver`, and without the trigger in it the pinned weights are downloaded and
   // never applied.
-  const request = streamRunRequest('flow-t2i', drawn, CHOICE())
+  const request = firedRunRequest('flow-t2i', drawn, CHOICE())
   assert.match(String(request.aditus.prompt), /trigword/)
 
   // The two forms this emits are the resolver's own: a bare trigger fires at the LoRA's
@@ -1574,14 +1574,14 @@ test('a piece fired under a LoRA carries that LoRA\'s trigger word in its prompt
 // ── Proof — the weights are pinned (without them: a trigger naming nothing) ──
 
 test('a piece fired under a LoRA names it in pinnedModels', () => {
-  const request = streamRunRequest('flow-t2i', 'a fox', CHOICE())
+  const request = firedRunRequest('flow-t2i', 'a fox', CHOICE())
   assert.deepEqual(request.pinnedModels, ['lora-1'], 'pinned by intellaId — the unambiguous half of the field')
   assert.equal(request.modusId, 'flow-t2i')
   assert.deepEqual(pinnedModelsFor(null), [])
 
   // No model chosen, nothing pinned — and a mined fragment's own trigger is STILL never
   // lifted into `pinnedModels`. Only what the user picked on the control is pinned.
-  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', null), false)
+  assert.equal('pinnedModels' in firedRunRequest('flow-t2i', 'a fox', null), false)
   assert.equal('pinnedModels' in ignitionRequest('flow-t2i', 'a fox'), false)
 
   // Both halves or neither: the pinned run is also the one carrying the trigger.
@@ -1605,16 +1605,14 @@ test('a fired piece carries the standing prefix and suffix', () => {
   const drawn = 'a fox, a foggy harbor'
   const affix = AFFIX()
 
-  // The STREAM path fires through `streamRunRequest` (`Muse.tsx`'s stream loop).
-  const streamed = streamRunRequest('flow-t2i', drawn, CHOICE(), affix)
+  // The STREAM path fires through `firedRunRequest` (`Muse.tsx`'s stream loop).
+  const streamed = firedRunRequest('flow-t2i', drawn, CHOICE(), affix)
   assert.match(String(streamed.aditus.prompt), /a photograph of/, 'stream: the prefix rides')
   assert.match(String(streamed.aditus.prompt), /shot on film/, 'stream: the suffix rides')
 
-  // The MANUAL path fires through `ignitionRequest` with no nozzle of its own
-  // (`Muse.tsx#doFire`) — the composition function is the same seam, called with no
-  // LoRA, and it still carries the affix.
-  const manualPrompt = promptWithAffix(drawn, null, affix)
-  const manualFired = ignitionRequest('flow-t2i', manualPrompt)
+  // The MANUAL path fires through the same `firedRunRequest` (`Muse.tsx#doFire`), and
+  // still carries the affix when nothing is on the nozzle.
+  const manualFired = firedRunRequest('flow-t2i', drawn, null, affix)
   assert.match(String(manualFired.aditus.prompt), /a photograph of/, 'manual: the prefix rides')
   assert.match(String(manualFired.aditus.prompt), /shot on film/, 'manual: the suffix rides')
 })
@@ -1633,7 +1631,7 @@ test('every LoRA trigger token is still present, exactly once, and still leads t
   assert.equal((composed.match(/othertrig/g) ?? []).length, 1)
 
   // Both halves still reach the actual run request — pinning is untouched by the affix.
-  const request = streamRunRequest('flow-t2i', 'a fox', stack, affix)
+  const request = firedRunRequest('flow-t2i', 'a fox', stack, affix)
   assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2'])
   assert.match(String(request.aditus.prompt), /^trigword, othertrig/)
 })
@@ -1654,8 +1652,8 @@ test('an empty prefix and suffix leave the prompt byte-identical', () => {
   // composition exactly — not one stray comma or space added.
   const stack = CHOICE()
   assert.equal(promptWithAffix('a fox', stack, {}), promptWithTrigger('a fox', stack))
-  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', stack, {}), true)
-  assert.deepEqual(streamRunRequest('flow-t2i', 'a fox', stack, {}), streamRunRequest('flow-t2i', 'a fox', stack))
+  assert.equal('pinnedModels' in firedRunRequest('flow-t2i', 'a fox', stack, {}), true)
+  assert.deepEqual(firedRunRequest('flow-t2i', 'a fox', stack, {}), firedRunRequest('flow-t2i', 'a fox', stack))
 
   // The collapsed nozzle line says nothing extra when nothing is set.
   assert.equal(affixSummaryLine(undefined), undefined)
@@ -1710,7 +1708,7 @@ test('a piece fired under two LoRAs names BOTH in pinnedModels', () => {
   const stack = stacked(card(), SECOND)
   assert.deepEqual(stack.map((c) => c.intellaId), ['lora-1', 'lora-2'], 'the second stacks ON, it does not replace')
 
-  const request = streamRunRequest('flow-t2i', 'a fox', stack)
+  const request = firedRunRequest('flow-t2i', 'a fox', stack)
   assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2'], 'both sets of weights are given to the run')
   assert.deepEqual(pinnedModelsFor(stacked(card(), SECOND, THIRD)), ['lora-1', 'lora-2', 'lora-3'])
 
@@ -1721,7 +1719,7 @@ test('a piece fired under two LoRAs names BOTH in pinnedModels', () => {
   // second code path beside this one.
   assert.deepEqual(pinnedModelsFor(CHOICE()), ['lora-1'])
   assert.deepEqual(pinnedModelsFor([]), [])
-  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', []), false)
+  assert.equal('pinnedModels' in firedRunRequest('flow-t2i', 'a fox', []), false)
 })
 
 // Non-vacuity 2 — every stacked trigger reaches the prompt
@@ -1740,7 +1738,7 @@ test("the prompt carries every stacked LoRA's trigger word", () => {
 
   // Every pinned model has its trigger in the prompt that is fired — the two halves ride
   // together for the whole stack, not just for its first entry.
-  const request = streamRunRequest('flow-t2i', 'a fox', stack)
+  const request = firedRunRequest('flow-t2i', 'a fox', stack)
   for (const entry of stack) {
     assert.ok(request.pinnedModels!.includes(entry.intellaId))
     assert.match(String(request.aditus.prompt), new RegExp(entry.trigger))
@@ -1880,7 +1878,7 @@ test("a stack of four names the cold start; a stack of three doesn't, and the st
 
   // Non-vacuity 3 — a warned stack still fires: nothing about the note touches the run
   // request, and every pinned model still reaches it, cold-start warning or not.
-  const request = streamRunRequest('flow-t2i', 'a fox', four)
+  const request = firedRunRequest('flow-t2i', 'a fox', four)
   assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2', 'lora-3', 'lora-4'], 'a warned stack still fires, in full')
 })
 
@@ -3028,4 +3026,94 @@ test('the header counts the images that are left', () => {
   // The archived images are not counted as uncaptioned work either — they have left the pass.
   assert.equal(uncaptionedCount({ media: archivedTwo, captionsets: [{ id: 'cs-1', captions }] }, 'cs-1'), 0)
   assert.match(captionCoverageLine({ media: archivedTwo, captionsets: [{ id: 'cs-1', captions }] }, 'cs-1'), /all 7 images are captioned/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE HAND-FIRED PIECE CARRIES THE NOZZLE (noema-285)
+//
+// One nozzle control sits above both fire paths, so a piece fired by hand off a rolled
+// card runs under the model that control is holding, exactly as a streamed piece does.
+// `Muse.tsx#doFire` composes its request through `firedRunRequest` — the same composer
+// the stream loop calls — so there is one place the two halves are put together and no
+// second one to drift from it.
+//
+// BOTH HALVES OR NEITHER, per proofs 1 and 2 below: the trigger word in the prompt is
+// what applies the weights, `pinnedModels` is what the run is allowed to load, and either
+// alone is a full-price run that does something other than what the screen says.
+//
+// Proof 3 is the case this must NOT change: with nothing on the nozzle, a hand fire sends
+// the request it sent before — same keys, same prompt string.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Non-vacuity 1 — the trigger reaches the prompt on the manual path
+
+test('a hand-fired piece under a chosen stack carries every trigger token', () => {
+  const edited = 'a fox in a foggy harbor, low sun'
+  const stack = stacked(card(), SECOND)
+
+  const request = firedRunRequest('flow-t2i', edited, stack)
+  const fired = String(request.aditus.prompt)
+
+  for (const entry of stack) {
+    assert.match(fired, new RegExp(entry.trigger), `${entry.trigger} never reached the prompt the resolver reads`)
+    assert.equal((fired.match(new RegExp(entry.trigger, 'g')) ?? []).length, 1, 'each token appears exactly once')
+  }
+  assert.match(fired, /^trigword, othertrig/, 'the tokens lead the prompt, in stack order')
+  assert.match(fired, /a foggy harbor/, 'and the edited prompt is still all there')
+
+  // The hand path composes the same string the stream path does for the same inputs —
+  // one composer, so the model on screen means one thing on both.
+  assert.equal(fired, promptWithAffix(edited, stack, undefined))
+
+  // A standing affix rides alongside it without displacing a token.
+  const withAffix = String(firedRunRequest('flow-t2i', edited, stack, AFFIX()).aditus.prompt)
+  assert.match(withAffix, /^trigword, othertrig/)
+  assert.match(withAffix, /a photograph of/)
+  assert.match(withAffix, /shot on film$/)
+})
+
+// Non-vacuity 2 — the weights are pinned on the manual path
+
+test('a hand-fired piece carries pinnedModels for that stack', () => {
+  const stack = stacked(card(), SECOND, THIRD)
+  const request = firedRunRequest('flow-t2i', 'a fox in a foggy harbor', stack)
+
+  assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2', 'lora-3'], 'every chosen model is given to the run')
+  assert.equal(request.modusId, 'flow-t2i')
+
+  // BOTH HALVES: the pinned run is the one carrying the triggers, entry for entry. A pin
+  // with no trigger downloads weights that are never applied, at full price.
+  for (const entry of stack) {
+    assert.ok(request.pinnedModels!.includes(entry.intellaId))
+    assert.match(String(request.aditus.prompt), new RegExp(entry.trigger))
+  }
+
+  // A single chosen model is a stack of one — the same request, not a second shape.
+  assert.deepEqual(firedRunRequest('flow-t2i', 'a fox', CHOICE()).pinnedModels, ['lora-1'])
+})
+
+// Non-vacuity 3 — with no model chosen, nothing about the request changes
+
+test('a hand-fired piece with an EMPTY stack sends what it sends today', () => {
+  const edited = ' a fox in a foggy harbor, low sun '
+
+  // The request the manual path sent before it read the nozzle: the flow and the prompt,
+  // and nothing else. Every empty spelling of "no model" gives back exactly that.
+  const bare = ignitionRequest('flow-t2i', edited)
+  for (const empty of [null, undefined, [] as LoraChoice[]]) {
+    const request = firedRunRequest('flow-t2i', edited, empty)
+    assert.deepEqual(request, bare, 'an empty nozzle reshaped the request')
+    assert.equal('pinnedModels' in request, false, 'nothing is pinned when nothing was chosen')
+    assert.equal(String(request.aditus.prompt), edited, 'the prompt is byte-identical, whitespace included')
+    assert.deepEqual(Object.keys(request).sort(), ['aditus', 'modusId'])
+  }
+
+  // Still true with an empty affix object beside the empty nozzle.
+  assert.deepEqual(firedRunRequest('flow-t2i', edited, null, {}), bare)
+  assert.deepEqual(firedRunRequest('flow-t2i', edited, [], { prefix: '  ', suffix: '' }), bare)
+
+  // A card with no trigger word cannot be stacked, so it can never turn a hand fire into
+  // a pin with nothing to apply it.
+  assert.deepEqual(stacked(card({ intellaId: 'lora-9', trigger: '  ' })), [])
+  assert.equal('pinnedModels' in firedRunRequest('flow-t2i', edited, stacked(card({ trigger: '' }))), false)
 })
