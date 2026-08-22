@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { RunPodCursor, withCallbackNonce } from '../../../src/crystal/RunPodCursor.js'
 import type { RunPodClient } from '../../../src/crystal/RunPodCursor.js'
-import type { Modus } from '../../../src/types/modus.js'
+import type { Modorum, Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Actorum } from '../../../src/types/cursus.js'
 import type { Materia, MateriaStore } from '../../../src/types/materia.js'
@@ -49,11 +49,12 @@ function makeActum(overrides: Partial<Actum> = {}): Actum {
   }
 }
 
-function makeModorum(modus: Modus | null = makeModus()) {
+function makeModorum(modus: Modus | null = makeModus()): Modorum {
   return {
     find: async (_id: string, _versio?: string) => modus,
     register: async (_m: Modus) => {},
     list: async () => [],
+    update: async () => { throw new Error('update is not exercised by this suite') },
   }
 }
 
@@ -70,6 +71,9 @@ function makeActorum(): Actorum & { updates: Array<{ id: string; patch: unknown 
     findByExternusJobId: async (_id) => null,
     findByCallbackNonce: async (_nonce) => null,
     findExpired: async () => [],
+    findByNullifier: async () => { throw new Error('findByNullifier is not exercised by this suite') },
+    findInFlight: async () => { throw new Error('findInFlight is not exercised by this suite') },
+    findByCompositum: async () => { throw new Error('findByCompositum is not exercised by this suite') },
   }
 }
 
@@ -270,7 +274,7 @@ test('run compiles modus + actum.aditus before submitting', async () => {
   const compile = async (modus: Modus, aditus: Record<string, unknown>) => {
     compiledModus = modus
     compiledAditus = aditus
-    return {}
+    return { hash: 'sha256:abc123', input: { nodes: {} } }
   }
   const cursor = new RunPodCursor(makeClient(), compile, makeModorum(), makeActorum(), BASE_CONFIG)
   await cursor.run(makeActum({ aditus: { prompt: 'a dog', steps: 4 } }))
@@ -302,7 +306,7 @@ test('run throws when client.submit rejects', async () => {
 test('run resolves modus by actum.modusId and modusVersiono', async () => {
   let resolvedId: string | undefined
   let resolvedVersiono: string | undefined
-  const modorum = {
+  const modorum: Modorum = {
     find: async (id: string, versio?: string) => {
       resolvedId = id
       resolvedVersiono = versio
@@ -310,6 +314,7 @@ test('run resolves modus by actum.modusId and modusVersiono', async () => {
     },
     register: async (_m: Modus) => {},
     list: async () => [],
+    update: async () => { throw new Error('update is not exercised by this suite') },
   }
   const cursor = new RunPodCursor(makeClient(), makeCompile(), modorum, makeActorum(), BASE_CONFIG)
   await cursor.run(makeActum({ modusId: 'modus.xyz', modusVersiono: '2.1.0' }))
@@ -342,6 +347,8 @@ function makePraefectus(materia: Materia | null): Praefectus {
     async findById(_id) { return null },
     async update(_id, _patch) { return materia! },
     async findWarm(_spec) { return materia },
+    async findActive() { throw new Error('findActive is not exercised by this suite') },
+    async reapIdle() { throw new Error('reapIdle is not exercised by this suite') },
   }
   return new Praefectus(store)
 }
@@ -392,6 +399,8 @@ function makeHospitia(hostKey: HostKey): HospitiumStore {
     async findByMateriaId(materiaId) { return materiaId === h.materiaId ? h : null },
     async findActive() { return [h] },
     async update(_materiaId, patch) { return { ...h, ...patch } },
+    async findByModoId() { throw new Error('findByModoId is not exercised by this suite') },
+    async bindMateria() { throw new Error('bindMateria is not exercised by this suite') },
   }
 }
 

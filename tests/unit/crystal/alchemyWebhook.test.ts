@@ -20,6 +20,7 @@ const blockingScreen = (addresses: string[]): SanctionsScreen => {
 }
 import type { Signum, Signorum } from '../../../src/types/significandi.js'
 import type { Anima, AnimaStore } from '../../../src/types/anima.js'
+import type { Reditus, ReditusDraft, Redituum } from '../../../src/types/reditus.js'
 
 // ── Constants (same as implementation) ────────────────────────────────────────
 
@@ -93,14 +94,20 @@ function makeSignorum(): Signorum & { issued: Signum[] } {
     async release() {},
     async history() { return [] },
     async settle() {},
+    async sessionBudget() { throw new Error('not implemented') },
+    async reserve() { throw new Error('not implemented') },
+    async findByTestis() { throw new Error('not implemented') },
+    async ownsAny() { throw new Error('not implemented') },
+    async transfer() { throw new Error('not implemented') },
+    async createMany() { throw new Error('not implemented') },
   }
 }
 
-function makeRedituum() {
-  const rows: import('../../../src/types/reditus.js').Reditus[] = []
+function makeRedituum(): Redituum & { rows: Reditus[] } {
+  const rows: Reditus[] = []
   return {
     rows,
-    async record(draft: import('../../../src/types/reditus.js').ReditusDraft) {
+    async record(draft: ReditusDraft) {
       if (typeof draft.usdFmv !== 'bigint' || draft.usdFmv <= 0n) throw new Error('Reditus fail-closed: usdFmv')
       if (!draft.fmvSource || draft.fmvSource.trim() === '') throw new Error('Reditus fail-closed: fmvSource')
       if (draft.depositumId !== undefined) {
@@ -112,6 +119,8 @@ function makeRedituum() {
       return r
     },
     async trailingUsdRevenue() { return rows.reduce((s, r) => s + r.usdFmv, 0n) },
+    async findByChargeRef() { throw new Error('not implemented') },
+    async reverse() { throw new Error('not implemented') },
   }
 }
 
@@ -209,7 +218,6 @@ function makeAnima(custos: string): Anima {
   return {
     id: nextId('ani'),
     nomen: 'Test User',
-    affines: {},
     custos: custos.toLowerCase(),
     natum: new Date(),
     mutatum: new Date(),
