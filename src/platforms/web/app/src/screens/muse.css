@@ -280,6 +280,13 @@
 }
 .muse-lora-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .muse-lora-current { flex: 1 1 200px; min-width: 0; font-size: 12.5px; color: var(--ink, inherit); }
+
+/* ── The standing affix (noema-284) ───────────────────────────────────────────
+   Two fields beside the model, on the same row where room allows: a prefix and a
+   suffix that ride every prompt fired on this nozzle until they are changed. */
+.muse-affix { display: flex; gap: 10px; flex-wrap: wrap; }
+.muse-affix-field { flex: 1 1 180px; min-width: 0; }
+
 .muse-lora-panel { display: flex; flex-direction: column; gap: 8px; }
 .muse-lora-list {
   list-style: none; margin: 0; padding: 0;
