@@ -205,6 +205,18 @@
    money is watchable while a stream rides. It gets room and it does not truncate. */
 .muse-state { flex: 1 1 220px; min-width: 0; color: var(--muted); font-size: 11.5px; }
 
+/* ── The folded banner is one row (noema-286) ────────────────────────────────
+   While a stream rides and the detail is folded away, this row IS the banner, so it may
+   not wrap into a second line. The readout it carries leads with the count and the spend
+   precisely because it is elided here: everything the ellipsis can reach — the workflow,
+   the run mode, the stack count — is one press away, and the price is not. */
+.muse-launcher-row.muse-runbar { flex-wrap: nowrap; align-items: center; }
+.muse-runbar .muse-state {
+  flex: 1 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.muse-banner-press { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+
 .muse-empty-floor { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .linkish {
