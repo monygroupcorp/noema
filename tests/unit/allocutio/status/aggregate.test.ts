@@ -16,9 +16,20 @@ class FakeHospitium implements HospitiumStore {
   private n = 1
   async create(input: Omit<Hospitium, 'id'>): Promise<Hospitium> {
     const h: Hospitium = { id: `h-${this.n++}`, ...input }
+    // This double indexes by materiaId only; a studio record created before its pod parks
+    // has none, and would be silently unfindable.
+    if (!h.materiaId) throw new Error('FakeHospitium.create requires a materiaId')
     this.byMateria.set(h.materiaId, h); return h
   }
   async findByMateriaId(id: string): Promise<Hospitium | null> { return this.byMateria.get(id) ?? null }
+  // Studio-keyed seams: no test here opens a studio, so these throw rather than return a
+  // default that would let a future test pass without a real implementation.
+  async findByModoId(_modoId: string): Promise<Hospitium | null> {
+    throw new Error('FakeHospitium.findByModoId is not exercised by the status aggregator tests')
+  }
+  async bindMateria(_modoId: string, _materiaId: string): Promise<Hospitium> {
+    throw new Error('FakeHospitium.bindMateria is not exercised by the status aggregator tests')
+  }
   async findActive(): Promise<Hospitium[]> { return [...this.byMateria.values()].filter(h => !h.terminatum) }
   async update(id: string, patch: Partial<Pick<Hospitium, 'adminAnimaIds' | 'terminatum' | 'costAccrued' | 'lastBilledAt'>>): Promise<Hospitium> {
     const cur = this.byMateria.get(id); if (!cur) throw new Error('not found')
@@ -75,12 +86,12 @@ test('balance: reads signorum + converts to USD', async () => {
 test('studios: filters Hospitia by hostKey; maps Materia.status → StudioEntry.status', async () => {
   const deps = makeDeps()
   deps.materiae.add({
-    id: 'mat-1', genus: 'pod', externusId: 'p-1', gpu: 'NVIDIA H100', vramGb: 80, ramGb: 200,
+    id: 'mat-1', genus: 'runpod', externusId: 'p-1', gpu: 'NVIDIA H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: 4n, status: 'idle', imageRef: 'noema/flux-v1:abc',
     warmUntil: new Date(Date.now() + 30_000),
   })
   deps.materiae.add({
-    id: 'mat-2', genus: 'pod', externusId: 'p-2', gpu: 'NVIDIA RTX 4090', vramGb: 24, ramGb: 32,
+    id: 'mat-2', genus: 'runpod', externusId: 'p-2', gpu: 'NVIDIA RTX 4090', vramGb: 24, ramGb: 32,
     impetusPerSecond: 1n, status: 'active', imageRef: 'noema/sdxl:1',
   })
   // Alice hosts mat-1; some other anima hosts mat-2.
@@ -98,7 +109,7 @@ test('studios: filters Hospitia by hostKey; maps Materia.status → StudioEntry.
 test('studios: drainOnly → draining status (overrides Materia.status)', async () => {
   const deps = makeDeps()
   deps.materiae.add({
-    id: 'mat-1', genus: 'pod', externusId: 'p-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    id: 'mat-1', genus: 'runpod', externusId: 'p-1', gpu: 'H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: 4n, status: 'idle', drainOnly: true,
   })
   await deps.hospitia.create({ materiaId: 'mat-1', hostKey: ALICE, inceptum: new Date() })
@@ -111,7 +122,7 @@ test('gens: nascens + agens included; completus filtered out', async () => {
   await deps.modorum.register({
     id: 'm.flux', nomen: 'Flux Schnell', genus: 'atomicus', versio: '1.0.0',
     contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
-    auctor: 'anima-author', natum: new Date(), mutatum: new Date(),
+    auctor: { animaId: 'anima-author' }, natum: new Date(), mutatum: new Date(),
   })
   // Three actums: queued, running, completed
   for (const [id, status] of [['a-q', 'nascens'], ['a-r', 'agens'], ['a-d', 'completus']] as const) {
@@ -143,7 +154,7 @@ test('gens: when actumIndex is wired, aggregator pulls user gens from the index'
   await deps.modorum.register({
     id: 'm.flux', nomen: 'Flux', genus: 'atomicus', versio: '1.0.0',
     contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
-    auctor: 'a', natum: new Date(), mutatum: new Date(),
+    auctor: { animaId: 'a' }, natum: new Date(), mutatum: new Date(),
   })
   await deps.actorum.create({
     id: 'act-from-index', modusId: 'm.flux', modusVersiono: '1.0.0',
@@ -170,7 +181,7 @@ test('gens: anonymous (commitment) runs index + show on /status', async () => {
   await deps.modorum.register({
     id: 'm.flux', nomen: 'Flux', genus: 'atomicus', versio: '1.0.0',
     contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
-    auctor: 'a', natum: new Date(), mutatum: new Date(),
+    auctor: { animaId: 'a' }, natum: new Date(), mutatum: new Date(),
   })
   await deps.actorum.create({
     id: 'act-anon', modusId: 'm.flux', modusVersiono: '1.0.0',
@@ -193,7 +204,7 @@ test('gens: anonymous (commitment) runs index + show on /status', async () => {
 test('studios: per-studio earnings sum signa with contextId === materiaId', async () => {
   const deps = makeDeps()
   deps.materiae.add({
-    id: 'mat-1', genus: 'pod', externusId: 'p-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    id: 'mat-1', genus: 'runpod', externusId: 'p-1', gpu: 'H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: 4n, status: 'idle', imageRef: 'noema/flux-v1:abc',
   })
   await deps.hospitia.create({ materiaId: 'mat-1', hostKey: ALICE, inceptum: new Date(), costAccrued: 50n })

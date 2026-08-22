@@ -20,7 +20,9 @@ import { createApiRouter, type Identity } from '../../../../src/allocutio/api/ap
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../../src/types/dataset.js'
 import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
-import type { Actum, Actorum } from '../../../../src/types/cursus.js'
+import type { Actorum } from '../../../../src/types/cursus.js'
+import type { Actum } from '../../../../src/types/actum.js'
+import type { Fragment } from '../../../../src/crystal/muse/taxonomy.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
 
@@ -107,6 +109,11 @@ class MemoryDatasets implements Datasets {
     this.store.set(datasetId, updated)
     return updated
   }
+  // Not reached by any route under test here (the decompose/save path writes it). It throws
+  // rather than returning a default, so a future test that does reach it cannot pass on a lie.
+  async setFragments(_datasetId: string, _mediaId: string, _fragments: Fragment[]): Promise<Dataset | null> {
+    throw new Error('MemoryDatasets.setFragments is not exercised by these routes')
+  }
   async archiveMedia(datasetId: string, mediaId: string): Promise<Dataset | null> {
     return this._setMediaArchivum(datasetId, mediaId, new Date())
   }
@@ -144,6 +151,7 @@ function makeFakeActorum(seed: Actum[]): Actorum {
     async update() { throw new Error('unused') },
     async findById(id: string) { return byId.get(id) ?? null },
     async findByExternusJobId() { return null },
+    async findByCallbackNonce() { throw new Error('unused') },
     async findByNullifier() { return null },
     async findExpired() { return [] },
     async findInFlight() { return [] },
@@ -171,7 +179,7 @@ function createServer(datasets: Datasets, actorum: Actorum): Promise<{ server: h
   return new Promise((resolveP, reject) => {
     const app = express()
     app.use(express.json())
-    app.use('/v1', createApiRouter({ api: api as unknown as ConstructorParameters<typeof createApiRouter>[0]['api'], identity: fakeIdentity }))
+    app.use('/v1', createApiRouter({ api: api as unknown as Parameters<typeof createApiRouter>[0]['api'], identity: fakeIdentity }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolveP({ server, url: `http://127.0.0.1:${addr.port}` })

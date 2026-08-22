@@ -8,7 +8,8 @@ const base: BulletinSnapshot = {
   journal: [], live: null,
   ledger: { genCount: 0, totalCostUsd: 0, avgCostUsd: 0, avgExecMs: 0, hasCost: false, hasExec: false },
   warmTtlMs: WARM_DEFAULT_MS, confirmed: true, ended: false, audience: 'host',
-  activeSubmenu: null, pendingModels: [],
+  everHadPod: false, cancelled: false, canStart: false, starting: false,
+  activeSubmenu: null, pendingModels: [], installing: [],
 }
 const ids = (rows: ReturnType<typeof pickerAffordances>) => rows.flat().map(a => a.id)
 const items = (n: number): PendingModel[] =>
