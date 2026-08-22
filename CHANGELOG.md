@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.14.0](https://github.com/monygroupcorp/noema/compare/v5.13.0...v5.14.0) (2026-08-22)
+
+
+### Features
+
+* **muse:** the nozzle, run shape and standing affix survive a reload ([ddde38d](https://github.com/monygroupcorp/noema/commit/ddde38dff6649c19ce7c31d15279e33b410acc5e))
+
+
+### Bug Fixes
+
+* **muse:** fire a hand-picked prompt under the chosen model ([5793834](https://github.com/monygroupcorp/noema/commit/5793834831468f099ac98300a37a14c419ddfbde))
+* **muse:** fold the run banner to one line while a stream is live ([da47a63](https://github.com/monygroupcorp/noema/commit/da47a63ba249f3a4a4e2801e6cb7b89201a2d5cb))
+
 ## [5.13.0](https://github.com/monygroupcorp/noema/compare/v5.12.0...v5.13.0) (2026-08-22)
 
 
