@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { custodyGlyph } from '../lib/datasets';
+import { custodyGlyph, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
   ARCHIVE_MEANING,
@@ -129,6 +129,12 @@ export function Dataset() {
       return { ...prev, [itemId]: next };
     });
   };
+
+  // Which media items' fragment gardens are open (noema-283). Closed by default; per item,
+  // keyed by media id — opening one does not open the rest. Distinct from `excludedByItem`
+  // above: this press only reveals the chips, it does not exclude a fragment.
+  const [openGardens, setOpenGardens] = useState<Set<string>>(new Set());
+  const toggleGarden = (itemId: string) => setOpenGardens((prev) => toggleGardenId(prev, itemId));
 
   // Decomposing the SELECTED captionset — the rung between a caption pass and the garden
   // above. The pass is synchronous and metered (one chat call per caption), so the action
@@ -365,24 +371,39 @@ export function Dataset() {
                         )}
                       </div>
                       {fragments.length > 0 && (
-                        <div className="pref-chips ds-garden">
-                          {fragments.map((f, i) => {
-                            const on = !excluded.has(i);
-                            const color = categoryColor(f.category);
-                            return (
-                              <button
-                                key={`${f.category}-${i}`}
-                                type="button"
-                                className={`fchip${on ? ' on' : ''}`}
-                                title={`${f.category} · ${f.source}`}
-                                onClick={() => toggleFragment(m.id, i)}
-                              >
-                                <span style={{ background: color, width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
-                                {f.text}
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <>
+                          {/* Opening the garden is a SEPARATE control from a chip press — a
+                              chip press already means something (`toggleFragment` excludes it
+                              from a future build), so opening the list must never also toggle
+                              one. */}
+                          <button
+                            type="button"
+                            className="ds-garden-toggle"
+                            onClick={() => toggleGarden(m.id)}
+                          >
+                            {gardenSummaryLine(fragments.length, excluded.size)} {isGardenOpen(openGardens, m.id) ? '▾' : '▸'}
+                          </button>
+                          {isGardenOpen(openGardens, m.id) && (
+                            <div className="pref-chips ds-garden">
+                              {fragments.map((f, i) => {
+                                const on = !excluded.has(i);
+                                const color = categoryColor(f.category);
+                                return (
+                                  <button
+                                    key={`${f.category}-${i}`}
+                                    type="button"
+                                    className={`fchip${on ? ' on' : ''}`}
+                                    title={`${f.category} · ${f.source}`}
+                                    onClick={() => toggleFragment(m.id, i)}
+                                  >
+                                    <span style={{ background: color, width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
+                                    {f.text}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
                       )}
                     </figure>
                   );
