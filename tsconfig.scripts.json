@@ -1,0 +1,36 @@
+{
+  // Typecheck for the `scripts/` tree. The root tsconfig's `include` is `src/**/*` only and
+  // `tsconfig.tests.json` covers `tests/`, so nothing covered `scripts/`. The runner is `tsx`,
+  // which strips types without checking them, so nothing enforced these files' types.
+  //
+  // `scripts/migrations/` is the directory that mutates stored records — a migration is run once,
+  // against real data, often by someone who did not write it. It gets a compiler.
+  //
+  // ENFORCING over the WHOLE tree — no tranche, no exclusions. `include` is a glob, so a new file
+  // under `scripts/` is covered the moment it is added.
+  //
+  // `module: ES2022` (the root config is CommonJS): these scripts are ES modules. Every one of them
+  // is executed by `tsx` — 22 carry a `#!/usr/bin/env -S npx tsx` shebang and the `package.json`
+  // entries (`gen:api-docs`, `muse:roll`, `refresh:ofac`, `ceremony:finalize`) invoke `npx tsx`.
+  // They use ESM-only syntax: `import`/`export` throughout, `import.meta.url` in six migrations'
+  // `import.meta.url === \`file://${process.argv[1]}\`` entrypoint guards, and no `require`,
+  // `module.exports`, `__dirname` or `__filename` anywhere in the tree. Under `tsx` those guards
+  // evaluate true, i.e. `import.meta` is live at runtime. Declaring the module system honestly is
+  // what clears TS1343 here; it is not silenced with a cast or a suppression.
+  //
+  // `rootDir: "."` overrides the root config's `rootDir: "src"`, which `scripts/` sits outside of.
+  //
+  // src/types/vendor.d.ts is listed explicitly: it carries the ambient module declarations for
+  // dependencies that ship no types, and it is only auto-included when `src/**/*` is in `include`.
+  // The rest of src/ resolves through imports and does not need to be enumerated here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "module": "ES2022"
+  },
+  "include": [
+    "src/types/vendor.d.ts",
+    "scripts/**/*"
+  ]
+}
