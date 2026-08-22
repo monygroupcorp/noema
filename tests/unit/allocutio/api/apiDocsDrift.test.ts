@@ -156,3 +156,109 @@ test('every code the Errors taxonomy can construct is declared in the contract, 
     }
   }
 })
+
+// =============================================================================
+// /v1 mount census — the ratchet on undeclared public surfaces.
+// =============================================================================
+//
+// `API_CONTRACT` describes the routes served by the single `app.use('/v1', ...)`
+// mount. `src/index.ts` also mounts other routers under `/v1` and `/api/v1`;
+// those are not part of the contract, so the generated docs describe a surface
+// smaller than the one that is served.
+//
+// This does NOT declare them — each of those is its own item. It freezes the
+// set: the mounts that exist today are listed in `KNOWN_UNDECLARED`, and the
+// assertions below run in BOTH directions, so a new undeclared mount fails and
+// a list entry that stops being true also fails.
+//
+// `src/index.ts` is read as TEXT — importing it would build the application.
+// The regex sees a conventional `app.use('<path>', ...)` line, which is what a
+// mount looks like when someone adds one; it is a drift guard, not a sandbox.
+// =============================================================================
+
+const indexSourcePath = resolve(repoRoot, 'src/index.ts')
+
+/** `app.use('<path>', …)` where `<path>` is `/v1`, `/api/v1`, or a child of either. */
+const V1_MOUNT_RE = /app\.use\(\s*['"](\/(?:api\/)?v1(?:\/[^'"]*)?)['"]/g
+
+/** Every distinct `/v1`-serving mount path in `src/index.ts`, sorted. */
+function censusV1Mounts(source: string): string[] {
+  const found = new Set<string>()
+  for (const match of source.matchAll(V1_MOUNT_RE)) found.add(match[1])
+  return [...found].sort()
+}
+
+/** The mount that `API_CONTRACT` describes. Its routes are relative to this. */
+const CONTRACT_MOUNT = '/v1'
+
+/** Full paths the contract accounts for: the mount itself, plus each declared route. */
+const declaredMountPaths = new Set<string>([
+  CONTRACT_MOUNT,
+  ...API_CONTRACT.routes.map((route) => CONTRACT_MOUNT + route.path),
+])
+
+// Mounts that serve /v1 traffic but are NOT described by API_CONTRACT.
+// Each is a real gap. Declaring one is its own item — when you do, DELETE it
+// from this list; the test below fails if a stale entry lingers.
+const KNOWN_UNDECLARED = [
+  '/api/v1',
+  '/api/v1/auth',
+  '/api/v1/storage',
+  '/api/v1/x402',
+  '/v1/auth',
+  '/v1/colloquia',
+  '/v1/purses',
+  '/v1/reports',
+  '/v1/sponsorships',
+  '/v1/storage',
+]
+
+test('the /v1 mount census can still read src/index.ts', () => {
+  const mounts = censusV1Mounts(readFileSync(indexSourcePath, 'utf8'))
+  assert.ok(
+    mounts.length > 0,
+    'no `/v1` mount was found in src/index.ts — the census pattern no longer matches how routers are mounted, ' +
+      'so the guard below asserts nothing. Fix V1_MOUNT_RE.',
+  )
+  assert.ok(
+    mounts.includes(CONTRACT_MOUNT),
+    `the contract's own \`app.use('${CONTRACT_MOUNT}', …)\` mount was not found in src/index.ts — ` +
+      'the census pattern is out of date. Fix V1_MOUNT_RE.',
+  )
+})
+
+test('every /v1 mount is either declared in API_CONTRACT or a frozen known gap', () => {
+  const mounts = censusV1Mounts(readFileSync(indexSourcePath, 'utf8'))
+  const allowed = new Set(KNOWN_UNDECLARED)
+  const undeclared = mounts.filter((mount) => !declaredMountPaths.has(mount) && !allowed.has(mount))
+
+  assert.deepEqual(
+    undeclared,
+    [],
+    `src/index.ts mounts ${undeclared.join(', ')} under /v1, and nothing describes it. ` +
+      'A public /v1 surface must be declared in src/allocutio/api/apiContract.ts (then run ' +
+      '`npm run gen:api-docs`), so the generated OpenAPI document and reference cover what is served. ' +
+      'If the mount is deliberately internal and must not be published, add it to KNOWN_UNDECLARED in ' +
+      'this file with a comment saying why.',
+  )
+})
+
+test('the KNOWN_UNDECLARED allowlist has no stale entries', () => {
+  const mounts = new Set(censusV1Mounts(readFileSync(indexSourcePath, 'utf8')))
+
+  const notMounted = KNOWN_UNDECLARED.filter((mount) => !mounts.has(mount))
+  assert.deepEqual(
+    notMounted,
+    [],
+    `KNOWN_UNDECLARED lists ${notMounted.join(', ')}, which src/index.ts no longer mounts. ` +
+      'Delete the entry — the allowlist only holds gaps that still exist.',
+  )
+
+  const nowDeclared = KNOWN_UNDECLARED.filter((mount) => declaredMountPaths.has(mount))
+  assert.deepEqual(
+    nowDeclared,
+    [],
+    `KNOWN_UNDECLARED lists ${nowDeclared.join(', ')}, which API_CONTRACT now declares. ` +
+      'Delete the entry — the gap is closed and the ratchet tightens by one.',
+  )
+})
