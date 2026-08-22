@@ -118,6 +118,10 @@ import {
   stopLabel,
   collapsedControls,
   configSummaryLine,
+  runBanner,
+  nozzleFoldLine,
+  landedPieces,
+  ESTIMATE_NOTE,
   nozzleSummaryLine,
   setControlHand,
   steerDockSummaryLine,
@@ -2305,6 +2309,175 @@ test('a collapsed steer dock still names the floor, and a failure over it', () =
     /the server refused it/,
     'a user mid-stream is spending against a steer they cannot see failed if this is silent',
   )
+})
+
+// ── The banner is ONE line while a stream is live (noema-286) ──────────────
+//
+// Three summary lines, a floor readout, a launch row, a cold-start note and an estimate
+// footnote is a banner the grid has to be scrolled past. The unit these assert in is
+// LINES, deliberately: the defect is HEIGHT, and a test that asserted the presence of a
+// string would pass on every one of the shapes this item exists to rule out.
+
+const STACK3 = [
+  CHOICE({ intellaId: 'lora-1', nomen: 'first-lora', trigger: 'firstword', weight: 0.8 }),
+  CHOICE({ intellaId: 'lora-2', nomen: 'second-lora', trigger: 'secondword' }),
+  CHOICE({ intellaId: 'lora-3', nomen: 'third-lora', trigger: 'thirdword', weight: 0.5 }),
+]
+
+const BANNER = (over: Partial<Parameters<typeof runBanner>[0]> = {}) =>
+  runBanner({
+    phase: 'running',
+    pieces: 1,
+    hand: {},
+    detail: false,
+    config: CFG({ mode: 'batched', cap: 10 }),
+    workflow: 'a workflow',
+    nozzle: STACK3,
+    status: 'running · 1 of 10 pieces · ~120 impetus this stream',
+    floorLine: 'floor 3/5 in the draw',
+    warmup: STACK3,
+    landed: 1,
+    quoted: true,
+    ...over,
+  })
+
+// Non-vacuity 1 — the fold happens at all, and it is measured in lines
+
+test('a running stream renders ONE banner line, not one per control', () => {
+  const folded = BANNER()
+  assert.equal(folded.folded, true)
+  assert.equal(folded.lines.length, 1, 'the pieces are what should fill the screen, not the controls above them')
+  assert.equal(folded.lines[0].id, 'run')
+
+  // and that one line answers all three questions it is allowed to answer
+  const line = folded.lines[0].text
+  assert.match(line, /1 of 10 pieces/, 'how far along')
+  assert.match(line, /impetus/, 'what it is costing')
+  assert.match(line, /a workflow/, 'what is running')
+
+  // nothing else is on the screen
+  for (const id of ['configuration', 'nozzle', 'floor', 'estimate'] as const) {
+    assert.equal(folded.lines.some((l) => l.id === id), false, `${id} is behind the press while a stream rides`)
+  }
+
+  // a hold and a stop-in-flight are live streams too
+  assert.equal(BANNER({ phase: 'holding' }).lines.length, 1)
+  assert.equal(BANNER({ phase: 'stopping' }).lines.length, 1)
+
+  // an idle screen is NOT folded: hiding the only control that starts anything is the
+  // one thing a fresh screen must not do
+  const fresh = BANNER({ phase: 'idle', pieces: 0, landed: 0 })
+  assert.equal(fresh.folded, false)
+  assert.equal(fresh.press, null, 'there is nothing to unfold from a screen that has launched nothing')
+})
+
+test('one press brings the whole banner back', () => {
+  assert.equal(BANNER().press, 'more')
+  const opened = BANNER({ detail: true })
+  assert.equal(opened.press, 'less', 'and the same press folds it again')
+  assert.deepEqual(
+    opened.lines.map((l) => l.id),
+    ['run', 'configuration', 'nozzle', 'floor', 'estimate'],
+    'one press, never two, and never behind a scroll',
+  )
+  assert.equal(opened.lines.find((l) => l.id === 'estimate')!.text, ESTIMATE_NOTE)
+  assert.equal(opened.lines.find((l) => l.id === 'floor')!.text, 'floor 3/5 in the draw')
+
+  // a control the user pinned open is expanded, not a summary line, so it is not here
+  const pinned = BANNER({ detail: true, hand: { nozzle: 'open' } })
+  assert.equal(pinned.lines.some((l) => l.id === 'nozzle'), false, 'a hand that opened a control still keeps it open')
+  assert.equal(pinned.lines.some((l) => l.id === 'configuration'), true)
+})
+
+// Non-vacuity 2 — the stack folds to a count, and the names are ONE press away
+
+test('a three-model stack folds without naming all three', () => {
+  const line = BANNER().lines[0].text
+  for (const choice of STACK3) {
+    assert.equal(line.includes(choice.nomen), false, 'a stack of three named in full is the paragraph this item removes')
+  }
+  assert.match(line, /3 models/, 'the count is what a folded line can carry')
+  assert.match(nozzleFoldLine(STACK3), /^3 models/)
+
+  // the rule this reverses is right at one model, and is kept there
+  assert.match(nozzleFoldLine(CHOICE()), /sample-lora/, 'one model is a clause, and is still named')
+  assert.match(nozzleFoldLine(CHOICE()), /trigword/)
+  assert.match(nozzleFoldLine(null), /base only/)
+})
+
+// ── the noema-284 × noema-286 seam, resolved in seat 2026-08-22 ─────────────
+// The two items were built in parallel against the same three files: 284 put the standing
+// affix into `nozzleSummaryLine`, 286 took ownership of the banner's text away from that
+// call site. Resolving the conflict by taking 286's side alone would have silently dropped
+// the affix from the banner — a standing instruction riding every prompt with nothing on
+// screen admitting it. These two tests are what stop that regressing.
+
+test('a standing affix is admitted on the folded banner', () => {
+  const affix = { prefix: 'in the style of a woodcut', suffix: 'muted palette' }
+  const bare = BANNER().lines.find((l) => l.id === 'run')!.text
+  const withAffix = BANNER({ affix }).lines.find((l) => l.id === 'run')!.text
+
+  assert.equal(bare.includes('standing text'), false, 'no affix, nothing to admit')
+  assert.match(withAffix, /standing text/, 'the fold may hide the WORDS; it may not hide that they exist')
+  // and it is still one line — admitting the affix must not undo the fold this item is for
+  assert.equal(BANNER({ affix }).lines.filter((l) => l.id !== 'warmup').length, 1)
+})
+
+test('the opened banner quotes the standing affix, not just the models', () => {
+  const affix = { prefix: 'in the style of a woodcut', suffix: 'muted palette' }
+  const named = BANNER({ detail: true, affix }).lines.find((l) => l.id === 'nozzle')!
+  assert.match(named.text, /woodcut/, 'one press away, the standing text is quoted in full')
+  assert.match(named.text, /muted palette/)
+  for (const choice of STACK3) {
+    assert.match(named.text, new RegExp(choice.nomen), 'and the models are still named beside it')
+  }
+})
+
+test('one press names all three with their weights', () => {
+  const named = BANNER({ detail: true }).lines.find((l) => l.id === 'nozzle')!
+  for (const choice of STACK3) {
+    assert.match(named.text, new RegExp(choice.nomen), 'a user mid-stream is spending against whatever this names')
+    assert.match(named.text, new RegExp(choice.trigger))
+  }
+  assert.match(named.text, /0\.8/)
+  assert.match(named.text, /0\.5/)
+  assert.match(named.text, /own default weight/, 'an unset weight is a weight, and the line says which one')
+})
+
+// Non-vacuity 3 — the cold-start note is a claim about the FIRST piece
+
+test('the cold-start note is gone once a piece has landed', () => {
+  const cold = BANNER({ landed: 0 })
+  assert.equal(cold.lines.some((l) => l.id === 'warmup'), true, 'the warning is not folded during the wait it explains')
+  assert.match(cold.lines.find((l) => l.id === 'warmup')!.text, /may be slow/)
+
+  const warm = BANNER({ landed: 1 })
+  assert.equal(warm.lines.some((l) => l.id === 'warmup'), false, 'after the first piece it is furniture')
+  assert.equal(warm.lines.length, 1, 'and the banner is one line again the moment it retires')
+
+  // it is a claim about a piece that has COME BACK, not one that has been fired
+  const fired = streamPiece('run-1', 'a prompt', [])
+  assert.equal(landedPieces({ pieces: [fired], pending: [] }), 0)
+  assert.equal(landedPieces({ pieces: [{ ...fired, status: 'ready' }], pending: [] }), 1)
+  assert.equal(landedPieces({ pieces: [{ ...fired, status: 'failed' }], pending: [] }), 1, 'a piece that failed came back')
+  assert.equal(landedPieces({ pieces: [], pending: [{ ...fired, status: 'ready' }] }), 1, 'a frozen grid is still a landed piece')
+})
+
+// Non-vacuity 4 — nothing folds away the control that ends the spend
+
+test('stop is rendered while the banner is folded', () => {
+  for (const phase of ['running', 'holding', 'stopping'] as const) {
+    const b = BANNER({ phase })
+    assert.equal(b.folded, true)
+    assert.equal(b.stop, true, 'the control that ends the spend can never be behind a press')
+  }
+  // the live readout rides the folded line with it, and leads it: the elision falls on
+  // the configuration tail, which is one press away, and never on the price, which is not
+  assert.match(BANNER().lines[0].text, /^running · 1 of 10 pieces · ~120 impetus/)
+
+  // a stream that is over has nothing to stop
+  assert.equal(BANNER({ phase: 'stopped' }).stop, false)
+  assert.equal(BANNER({ phase: 'idle', pieces: 0 }).stop, false)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
