@@ -7,8 +7,12 @@
   // directories are listed with their measured error counts and each is a follow-on item, so the
   // tranche has a written end state and cannot quietly become a permanent exclusion:
   //
-  //   tests/unit/crystal/     174 errors / 33 files  — follow-on item(s) (volume). `Compiler.*`
-  //                                                    is drained and is IN the tranche below.
+  //   tests/unit/crystal/      87 errors / 29 files  — follow-on item (volume); this directory
+  //                                                    is drained in named tranches, not in one pass,
+  //                                                    so the row shrinks per tranche and is removed
+  //                                                    when the last one lands. Already drained and
+  //                                                    IN `include` below: `Compiler.*` (noema-293)
+  //                                                    and the pod/webhook tranche (noema-294).
   //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
   //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
   //
@@ -43,6 +47,10 @@
     "tests/unit/flow/**/*",
     "tests/unit/execution/**/*",
     "tests/unit/crystal/Compiler.*",
+    "tests/unit/crystal/RunPodCursor.*",
+    "tests/unit/crystal/executionWebhook.*",
+    "tests/unit/crystal/webhookRouter.*",
+    "tests/unit/crystal/alchemyWebhook.*",
     "tests/unit/arcanum/**/*",
     "tests/unit/web/**/*"
   ]
