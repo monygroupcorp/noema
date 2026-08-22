@@ -8,6 +8,7 @@ import { ESSENTIA_WAN22_T2V, ESSENTIA_WAN22_I2V } from '../../../src/crystal/see
 import { CANONICAL_FUNDAMENTA } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import type { Intellarum, Intella } from '../../../src/types/intelligendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -49,7 +50,7 @@ test('compile(ESSENTIA_WAN22_T2V) slots the prompt and returns the t2v MoE weigh
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_WAN22_T2V, { prompt: 'a cat surfing' })
 
-  const positive = spec.workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
+  const positive = asComfyUI(spec).workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(positive.class_type, 'CLIPTextEncode')
   assert.equal(positive.inputs.text, 'a cat surfing')
 
@@ -66,14 +67,14 @@ test('compile(ESSENTIA_WAN22_I2V) slots the prompt + image and returns the i2v M
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_WAN22_I2V, { prompt: 'a cat surfing', image: 'https://r2.example/start.png' })
 
-  const positive = spec.workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
+  const positive = asComfyUI(spec).workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(positive.class_type, 'CLIPTextEncode')
   assert.equal(positive.inputs.text, 'a cat surfing')
 
-  assert.ok(spec.mediaInputs, 'spec carries mediaInputs for the start-frame image')
-  const loadImage = spec.workflow.inputTemplate['62'] as { class_type: string; inputs: Record<string, unknown> }
+  assert.ok(asComfyUI(spec).mediaInputs, 'spec carries mediaInputs for the start-frame image')
+  const loadImage = asComfyUI(spec).workflow.inputTemplate['62'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(loadImage.class_type, 'LoadImage')
-  assert.equal(loadImage.inputs.image, spec.mediaInputs![0].destFilename)
+  assert.equal(loadImage.inputs.image, asComfyUI(spec).mediaInputs![0].destFilename)
 
   const modelIds = spec.models.map(m => m.id).sort()
   assert.deepEqual(modelIds, [
