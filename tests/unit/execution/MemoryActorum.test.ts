@@ -11,6 +11,7 @@ function makeActum(overrides: Record<string, unknown> = {}) {
     signaConsumed: [] as string[],
     aditus: {},
     status: 'nascens' as const,
+    expirat: new Date(Date.now() + 60_000),
     ...overrides,
   }
 }
