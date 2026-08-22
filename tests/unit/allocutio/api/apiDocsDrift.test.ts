@@ -13,7 +13,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -260,5 +260,164 @@ test('the KNOWN_UNDECLARED allowlist has no stale entries', () => {
     [],
     `KNOWN_UNDECLARED lists ${nowDeclared.join(', ')}, which API_CONTRACT now declares. ` +
       'Delete the entry — the gap is closed and the ratchet tightens by one.',
+  )
+})
+
+// =============================================================================
+// tests/unit census — the map of what the test typecheck covers.
+// =============================================================================
+//
+// `tsconfig.tests.json` typechecks the directories named in its `include`, and
+// names the ones it does not cover in a DEFERRED block, each with a measured
+// error count and a follow-on item. Those two lists together are a map of
+// `tests/unit/`, and this census asserts the map stays complete and current: a
+// directory in neither list fails here naming itself, and a DEFERRED row naming
+// a directory that no longer exists fails as stale.
+//
+// The census reads the DIRECTORY LISTING, not an error report. A list derived
+// from measured errors describes what failed and cannot describe what is
+// uncovered — a directory at zero errors never appears in one. Reading the
+// listing accounts for every directory, including the quiet ones, on the run
+// after it is created.
+//
+// `tsconfig.tests.json` is read as TEXT: it carries `//` comments, so it is not
+// JSON and `JSON.parse` will not take it. Rather than strip comments from the
+// whole file — which would also have to reason about `//` inside string
+// literals — this takes the slice between `"include": [` and its closing `]`,
+// drops commented-out lines within that slice, and reads the double-quoted
+// string literals that remain. Those entries are path globs, in which `//`
+// never appears, so the slice is unambiguous. If the file is restructured so
+// the slice or the markers cannot be found, the first test below fails rather
+// than the census silently reading an empty list.
+// =============================================================================
+
+const testsTsconfigPath = resolve(repoRoot, 'tsconfig.tests.json')
+const testsUnitPath = resolve(repoRoot, 'tests/unit')
+
+const DEFERRED_BEGIN = 'DEFERRED-BEGIN'
+const DEFERRED_END = 'DEFERRED-END'
+
+/** `tests/unit/<name>` at the head of an `include` entry, however it continues. */
+const INCLUDE_ENTRY_RE = /^tests\/unit\/([^/*"]+)/
+/** `tests/unit/<name>` anywhere in the DEFERRED block. */
+const DEFERRED_ROW_RE = /tests\/unit\/([A-Za-z0-9_.-]+)/g
+
+/** The text between `"include": [` and its closing `]`, or null if not found. */
+function includeSlice(source: string): string | null {
+  const key = source.indexOf('"include"')
+  if (key === -1) return null
+  const open = source.indexOf('[', key)
+  if (open === -1) return null
+  const close = source.indexOf(']', open)
+  if (close === -1) return null
+  return source.slice(open + 1, close)
+}
+
+/** Directory names under tests/unit/ that `include` typechecks, sorted. */
+function censusEnforced(source: string): string[] {
+  const slice = includeSlice(source)
+  if (slice === null) return []
+  const found = new Set<string>()
+  for (const line of slice.split('\n')) {
+    if (line.trim().startsWith('//')) continue
+    for (const literal of line.matchAll(/"([^"]*)"/g)) {
+      const entry = INCLUDE_ENTRY_RE.exec(literal[1])
+      if (entry) found.add(entry[1])
+    }
+  }
+  return [...found].sort()
+}
+
+/** Directory names under tests/unit/ named in the DEFERRED block, sorted. */
+function censusDeferred(source: string): string[] {
+  const begin = source.indexOf(DEFERRED_BEGIN)
+  const end = source.indexOf(DEFERRED_END)
+  if (begin === -1 || end === -1 || end < begin) return []
+  const block = source.slice(begin + DEFERRED_BEGIN.length, end)
+  const found = new Set<string>()
+  for (const match of block.matchAll(DEFERRED_ROW_RE)) found.add(match[1])
+  return [...found].sort()
+}
+
+/** Every directory that exists under tests/unit/, sorted. */
+function listTestDirectories(): string[] {
+  return readdirSync(testsUnitPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+}
+
+test('the tests/unit map in tsconfig.tests.json can still be read', () => {
+  const source = readFileSync(testsTsconfigPath, 'utf8')
+
+  assert.notEqual(
+    includeSlice(source),
+    null,
+    'the `include` array was not found in tsconfig.tests.json — the census below would read an ' +
+      'empty enforced list and assert nothing. Fix includeSlice.',
+  )
+  assert.ok(
+    censusEnforced(source).length > 0,
+    'no `tests/unit/<name>` entry was found in tsconfig.tests.json\'s `include` — the census ' +
+      'pattern no longer matches how directories are listed. Fix INCLUDE_ENTRY_RE.',
+  )
+  assert.ok(
+    source.includes(DEFERRED_BEGIN) && source.includes(DEFERRED_END),
+    `the ${DEFERRED_BEGIN}/${DEFERRED_END} markers were not found in tsconfig.tests.json — the ` +
+      'census cannot tell a deferred directory from an unmapped one without them. Restore the ' +
+      'markers around the deferred list.',
+  )
+  assert.ok(
+    listTestDirectories().length > 0,
+    `no directories were found under ${testsUnitPath} — the census has nothing to check. Fix the path.`,
+  )
+
+  const existing = new Set(listTestDirectories())
+  const notPresent = censusEnforced(source).filter((dir) => !existing.has(dir))
+  assert.deepEqual(
+    notPresent,
+    [],
+    `tsconfig.tests.json's \`include\` names ${notPresent.join(', ')} under tests/unit/, which no ` +
+      'longer exists. Delete the entry — `include` only holds directories that are there.',
+  )
+})
+
+test('every directory under tests/unit is either typechecked or listed as deferred', () => {
+  const source = readFileSync(testsTsconfigPath, 'utf8')
+  const enforced = new Set(censusEnforced(source))
+  const deferred = new Set(censusDeferred(source))
+
+  const unmapped = listTestDirectories().filter((dir) => !enforced.has(dir) && !deferred.has(dir))
+
+  assert.deepEqual(
+    unmapped,
+    [],
+    `tests/unit/ holds ${unmapped.join(', ')}, which tsconfig.tests.json neither typechecks nor ` +
+      'lists as deferred, so nothing states whether it is covered. Measure it: at zero errors, add ' +
+      'it to `include`; otherwise add a row for it to the DEFERRED block with its error count and ' +
+      'open a follow-on item to drain it.',
+  )
+})
+
+test('the deferred list in tsconfig.tests.json has no stale entries', () => {
+  const source = readFileSync(testsTsconfigPath, 'utf8')
+  const deferred = censusDeferred(source)
+  const enforced = new Set(censusEnforced(source))
+  const existing = new Set(listTestDirectories())
+
+  const gone = deferred.filter((dir) => !existing.has(dir))
+  assert.deepEqual(
+    gone,
+    [],
+    `the DEFERRED block lists ${gone.join(', ')}, which no longer exists under tests/unit/. ` +
+      'Delete the row — the deferred list only holds directories that are there.',
+  )
+
+  const alsoEnforced = deferred.filter((dir) => enforced.has(dir))
+  assert.deepEqual(
+    alsoEnforced,
+    [],
+    `the DEFERRED block lists ${alsoEnforced.join(', ')}, which \`include\` already typechecks. ` +
+      'Delete the row — the directory is enforced and the map names each directory once.',
   )
 })
