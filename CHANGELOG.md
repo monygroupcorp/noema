@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.13.0](https://github.com/monygroupcorp/noema/compare/v5.12.0...v5.13.0) (2026-08-22)
+
+
+### Features
+
+* **muse:** let a hand collapse the run controls and steer dock at any time ([a70274d](https://github.com/monygroupcorp/noema/commit/a70274deba7070526aa84b6734b10d5b99e28002))
+
+
+### Bug Fixes
+
+* **web:** put dataset actions before the media grid on a phone ([cd5ba3f](https://github.com/monygroupcorp/noema/commit/cd5ba3ff0610fdd5c9cce99991b086544b38edc8))
+
 ## [5.12.0](https://github.com/monygroupcorp/noema/compare/v5.11.0...v5.12.0) (2026-08-21)
 
 
