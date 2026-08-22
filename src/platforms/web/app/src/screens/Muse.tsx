@@ -94,7 +94,9 @@ import {
   rollCurated,
   savedOf,
   settlePieceResult,
+  setControlHand,
   steerBlockReason,
+  steerDockSummaryLine,
   steerFloor,
   steerQuoteRequest,
   sessionEntry,
@@ -109,7 +111,6 @@ import {
   streamStatusLine,
   t2iFlows,
   terminalOf,
-  toggleControl,
   unreadableRun,
   weightWrites,
   writeLabel,
@@ -128,6 +129,7 @@ import {
   type DismissalState,
   type FloorPill,
   type GestureGate,
+  type ControlHand,
   type HoldState,
   type LoraChoice,
   type MuseControl,
@@ -355,13 +357,17 @@ export function Muse() {
   // The manual path (D3): the roll cards, closed by default. The stream is the front door.
   const [manualOpen, setManualOpen] = useState(false);
 
-  // ── The controls get out of the way (noema-264) ───────────────────────────
-  // Which launcher blocks the user has opened by hand. The collapse in `collapsedControls`
-  // is a default; this list is what overrides it, and only the user's own hand writes to
-  // it — nothing here re-collapses a block while a stream rides.
-  const [expandedByHand, setExpandedByHand] = useState<MuseControl[]>([]);
+  // ── The controls get out of the way, on the user's hand, at any time (noema-264, noema-282) ──
+  // Which controls the user has pinned open or closed by hand. The auto rule in
+  // `collapsedControls` decides everything with no entry here; a pin overrides it in
+  // either direction, at any phase — nothing here re-collapses or re-opens a control
+  // that the user's own hand has not touched.
+  const [hand, setHand] = useState<ControlHand>({});
   const openControl = useCallback((control: MuseControl) => {
-    setExpandedByHand((held) => (held.includes(control) ? held : [...held, control]));
+    setHand((h) => setControlHand(h, control, true));
+  }, []);
+  const closeControl = useCallback((control: MuseControl) => {
+    setHand((h) => setControlHand(h, control, false));
   }, []);
 
   // ── The stream (noema-238) ────────────────────────────────────────────────
@@ -1239,7 +1245,7 @@ export function Muse() {
   // The launcher blocks that are collapsed right now, and the phone question the picker
   // turns on. `matchMedia` rather than a width read: the picker's chrome changes with the
   // viewport, so it has to change back when the viewport does.
-  const controls = collapsedControls({ phase, pieces: stream.pieces.length, expandedByHand });
+  const controls = collapsedControls({ phase, pieces: stream.pieces.length, hand });
   const flowLabel = (flows ?? []).find((f) => f.id === modusId)?.nomen ?? modusId;
   const narrow = useNarrowViewport();
 
@@ -1558,13 +1564,11 @@ export function Muse() {
               </label>
             </fieldset>
           </div>
-          {expandedByHand.includes('configuration') && stream.pieces.length > 0 && (
-            <div className="muse-collapsed-foot">
-              <button type="button" className="linkish" onClick={() => setExpandedByHand((held) => toggleControl(held, 'configuration'))}>
-                done — give the stream the screen
-              </button>
-            </div>
-          )}
+          <div className="muse-collapsed-foot">
+            <button type="button" className="linkish" onClick={() => closeControl('configuration')}>
+              collapse
+            </button>
+          </div>
           </>
           )}
 
@@ -1607,14 +1611,14 @@ export function Muse() {
                   can be pinned. */}
               {loraOpen && !narrow && <div className="muse-lora-panel">{loraPanel}</div>}
 
-              {!loraOpen && expandedByHand.includes('nozzle') && stream.pieces.length > 0 && (
+              {!loraOpen && (
                 <div className="muse-collapsed-foot">
                   <button
                     type="button"
                     className="linkish"
-                    onClick={() => setExpandedByHand((held) => toggleControl(held, 'nozzle'))}
+                    onClick={() => closeControl('nozzle')}
                   >
-                    done — give the stream the screen
+                    collapse
                   </button>
                 </div>
               )}
@@ -1912,7 +1916,27 @@ export function Muse() {
         {/* The dock (V1) and the steer keyboard (S3, S14), in one sticky block at the
             bottom of the viewport. It is reachable while the stream runs, and it sits
             BELOW the grid rather than over it — the newest tile lands at the top, so
-            nothing here covers it. */}
+            nothing here covers it.
+
+            Collapsed, on the user's hand (noema-282), it folds to the same single sticky
+            line every other collapsed control uses — and it stays sticky either way, so
+            it never scrolls out of reach: it is also how the floor sheet is opened. */}
+        {controls.steer ? (
+          <div className="muse-steerdock muse-collapsed">
+            <span className="gc-l">steer</span>
+            <span className="muse-collapsed-line mono">
+              {steerDockSummaryLine({
+                floorLine: session
+                  ? `floor ${floorCounts(session).live}/${floorCounts(session).total} in the draw`
+                  : (sessionError ? 'no session — reactions are off' : 'opening a session…'),
+                failure: steerError,
+              })}
+            </span>
+            <button type="button" className="linkish" onClick={() => openControl('steer')}>
+              steer ↑
+            </button>
+          </div>
+        ) : (
         <div className="muse-steerdock">
           {/* S12's offer, and it is an offer: tapping it PRE-FILLS the instruction and
               does nothing else. No steer is sent, nothing is spent, and the box is left
@@ -1981,7 +2005,13 @@ export function Muse() {
             work, and makes this the session a bare visit comes back to.
           </div>
         )}
+        <div className="muse-collapsed-foot">
+          <button type="button" className="linkish" onClick={() => closeControl('steer')}>
+            collapse
+          </button>
         </div>
+        </div>
+        )}
 
         {/* The consent sheet (S9) — a proposal awaiting a ruling, and a DIFFERENT surface
             from the cutting floor above, which is the standing state. */}
