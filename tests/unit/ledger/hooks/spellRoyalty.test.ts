@@ -14,10 +14,12 @@ function makeEvent(overrides: Partial<SignumEvent<'execution_spend'>['payload']>
         impetus: 1000n,
         signaConsumed: [],
         aditus: {},
-        status: 'completed',
+        status: 'completus',
         inceptum: new Date(),
+        expirat: new Date(Date.now() + 60_000),
       },
       impetus: 1000n,
+      baseImpetus: 1000n,
       ...overrides,
     },
   }
