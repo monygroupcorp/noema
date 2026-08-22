@@ -5,7 +5,7 @@ import { handleExecutionWebhook } from '../../../src/api/webhooks/executionWebho
 import type { ExecutionWebhookDeps, WebhookRequest } from '../../../src/api/webhooks/executionWebhook.js'
 import type { Actum } from '../../../src/types/actum.js'
 import { MemoryModo } from '../../../src/execution/MemoryModo.js'
-import type { Exitus } from '../../../src/types/cursus.js'
+import type { Actorum, Exitus } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
@@ -21,6 +21,7 @@ import type { Intella } from '../../../src/types/intelligendi.js'
 import type { ActumIndex } from '../../../src/types/actumIndex.js'
 import { impetusFor } from '../../../src/ledger/rates.js'
 import type { HospitiumStore } from '../../../src/types/hospitium.js'
+import type { AuctorKey } from '../../../src/flow/types.js'
 
 function makeModorum(modus: Modus): Modorum {
   return {
@@ -93,13 +94,17 @@ function makeCompletor(): CompletorMock {
   return mock
 }
 
-function makeActorum(actum: Actum | null) {
+function makeActorum(actum: Actum | null): Actorum {
   return {
     async create(a: Omit<Actum, 'inceptum'>) { return { ...a, inceptum: new Date() } as Actum },
     async update(_id: string, _patch: Partial<Actum>) { return actum! },
     async findById(_id: string) { return actum },
     async findByExternusJobId(_jobId: string) { return actum },
     async findExpired() { return [] as Actum[] },
+    async findByCallbackNonce() { throw new Error('findByCallbackNonce is not exercised by this suite') },
+    async findByNullifier() { throw new Error('findByNullifier is not exercised by this suite') },
+    async findInFlight() { throw new Error('findInFlight is not exercised by this suite') },
+    async findByCompositum() { throw new Error('findByCompositum is not exercised by this suite') },
   }
 }
 
@@ -391,8 +396,11 @@ function makeFlowRouter() {
     async handleActumComplete(
       actumId: string,
       result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string },
-    ): Promise<void> {
+    ): Promise<AuctorKey | null> {
       calls.push({ actumId, result })
+      // No identity is resolved by this double — the same value the earlier
+      // implementation produced, now stated in the type the dep declares.
+      return null
     },
   }
 }
