@@ -62,9 +62,7 @@ import {
   loraCatalog,
   loraCatalogReason,
   collapsedControls,
-  configSummaryLine,
   loraChoiceLine,
-  loraWarmupNote,
   loraWeight,
   chooseLora,
   setLoraWeight,
@@ -74,7 +72,6 @@ import {
   manualAddRequest,
   mergedExclusions,
   nextPieceDecision,
-  nozzleSummaryLine,
   pieceReadout,
   pieceRecord,
   pieceStageline,
@@ -88,6 +85,8 @@ import {
   recordedPiece,
   rehydrateStream,
   releasePending,
+  runBanner,
+  landedPieces,
   replaceDataset,
   resumePhase,
   rollAt,
@@ -127,6 +126,7 @@ import {
   NO_DISMISSALS,
   TILE_GESTURES,
   type AffixInput,
+  type BannerLineId,
   type DismissalState,
   type FloorPill,
   type GestureGate,
@@ -375,6 +375,12 @@ export function Muse() {
   const closeControl = useCallback((control: MuseControl) => {
     setHand((h) => setControlHand(h, control, false));
   }, []);
+  // ── The banner is ONE line while a stream is live (noema-286) ──
+  // The banner's own hand, one level above the per-control pins: folded, the launcher is
+  // a single row and this is the press that brings the rest back. It is a separate flag
+  // from `hand` deliberately — opening the detail must not un-pin a control the user
+  // closed by hand, and folding again must not re-collapse one they opened.
+  const [detail, setDetail] = useState(false);
 
   // ── The stream (noema-238) ────────────────────────────────────────────────
   // Fired pieces, newest first, plus the ones held back while the grid is frozen.
@@ -1271,6 +1277,28 @@ export function Muse() {
   const flowLabel = (flows ?? []).find((f) => f.id === modusId)?.nomen ?? modusId;
   const narrow = useNarrowViewport();
 
+  // What the banner renders, and how many lines of it (noema-286). Every summary line
+  // below is gated on this list — a line that is not in it is not on the screen — so the
+  // banner's height is decided in one place and gated in `lib/muse.ts`.
+  const banner = runBanner({
+    phase,
+    pieces: stream.pieces.length,
+    hand,
+    detail,
+    config,
+    workflow: flowLabel,
+    nozzle: lora,
+    affix,
+    status: streamStatusLine(phase, stopCause, firedCount, config, quote, hold),
+    floorLine: `${liveFragments} of ${flat.length} fragments in the draw${
+      session ? ` · floor ${floorCounts(session).live}/${floorCounts(session).total}` : ''
+    }`,
+    warmup,
+    landed: landedPieces(stream),
+    quoted: !!quote,
+  });
+  const bannerLine = (id: BannerLineId) => banner.lines.find((l) => l.id === id);
+
   // The picker's BODY, lifted out so the same control can wear two chromes: inline under
   // the nozzle row on a wide viewport, and the house pull-up sheet on a phone, where an
   // inner scroller with its commit actions below it in normal flow puts `use <model>`
@@ -1541,18 +1569,20 @@ export function Muse() {
             button sits beside it for the whole time a stream is riding, so it is
             reachable without scrolling however long the grid below has grown. */}
         <section className="muse-launcher">
-          {/* The configuration collapses once the stream has something on it (noema-264).
+          {/* The configuration collapses once the stream has something on it (noema-264),
+              and while the banner is folded (noema-286) even its summary line is behind
+              the press — the folded run line already carries what is firing.
               What does NOT collapse: the launch/stop control, the price readout and the
               infinite acknowledgement — they sit below this block and stay put. */}
-          {controls.configuration ? (
+          {controls.configuration ? (bannerLine('configuration') && (
             <div className="muse-collapsed">
               <span className="gc-l">run</span>
-              <span className="muse-collapsed-line mono">{configSummaryLine(config, flowLabel)}</span>
+              <span className="muse-collapsed-line mono">{bannerLine('configuration')!.text}</span>
               <button type="button" className="linkish" onClick={() => openControl('configuration')}>
                 change
               </button>
             </div>
-          ) : (
+          )) : (
           <>
           <div className="muse-launcher-row">
             <label className="cc-field"><span>Nozzle</span>
@@ -1602,10 +1632,14 @@ export function Muse() {
           {/* Collapsed, the nozzle is one line — and it is the line that answers "what
               is firing right now", weight included. A summary that says nothing is not a
               summary: the user is mid-stream and spending against whatever it names. */}
-          {controls.nozzle && !loraOpen ? (
+          {controls.nozzle && !loraOpen ? (bannerLine('nozzle') && (
             <div className="muse-lora muse-collapsed">
               <span className="gc-l">Model</span>
-              <span className="muse-collapsed-line mono">{nozzleSummaryLine(lora, affix)}</span>
+              {/* noema-286 owns this line's TEXT now, and noema-284's affix reaches it
+                  through `runBanner`'s own input rather than through a second call to
+                  `nozzleSummaryLine` here — one composer, so the folded line and the
+                  opened line cannot drift apart. */}
+              <span className="muse-collapsed-line mono">{bannerLine('nozzle')!.text}</span>
               <button
                 type="button"
                 className="linkish"
@@ -1614,7 +1648,7 @@ export function Muse() {
                 change
               </button>
             </div>
-          ) : (
+          )) : (
             <div className="muse-lora">
               <div className="muse-lora-row">
                 <span className="gc-l">Model</span>
@@ -1691,17 +1725,24 @@ export function Muse() {
           )}
 
           {/* What is fuelling the launch, in one line. The floor sheet is where it gets
-              edited; this is a readout. */}
-          <div className="muse-launcher-floor gt-sub mono">
-            {liveFragments} of {flat.length} fragments in the draw
-            {session ? ` · floor ${floorCounts(session).live}/${floorCounts(session).total}` : ''}
-            {' · '}
-            <button type="button" className="linkish" disabled={!session} onClick={() => setFloorOpen(true)}>
-              open the floor
-            </button>
-          </div>
+              edited; this is a readout — and a readout is exactly what folds (noema-286).
+              The floor stays reachable while it is folded: the steer dock at the foot of
+              the screen is sticky and carries its own way in. */}
+          {bannerLine('floor') && (
+            <div className="muse-launcher-floor gt-sub mono">
+              {bannerLine('floor')!.text}
+              {' · '}
+              <button type="button" className="linkish" disabled={!session} onClick={() => setFloorOpen(true)}>
+                open the floor
+              </button>
+            </div>
+          )}
 
-          <div className="muse-launcher-row">
+          {/* The row that never folds: the control that starts or ends the spend, the
+              live readout, and — once a stream has begun — the one press that brings the
+              rest of the banner back. Folded, the readout carries what is running and
+              what it is costing, and this row IS the banner. */}
+          <div className={`muse-launcher-row${banner.folded ? ' muse-runbar' : ''}`}>
             {streamLive ? (
               <button type="button" className="btn accent muse-stop" disabled={phase === 'stopping'} onClick={requestStop}>
                 {phase === 'stopping' ? 'stopping after this piece…' : 'stop'}
@@ -1711,13 +1752,24 @@ export function Muse() {
                 {launchLabel(config, quote)}
               </button>
             )}
-            <span className="muse-state mono">{streamStatusLine(phase, stopCause, firedCount, config, quote, hold)}</span>
+            <span className="muse-state mono">{bannerLine('run')!.text}</span>
+            {banner.press && (
+              <button
+                type="button"
+                className="linkish muse-banner-press"
+                aria-expanded={detail}
+                onClick={() => setDetail(banner.press === 'more')}
+              >
+                {banner.press === 'more' ? 'show the rest' : 'fold this away'}
+              </button>
+            )}
           </div>
 
           {/* The pod fetches a newly chosen LoRA's weights before it can make anything
               with them, so the first piece under one can be slow. Said, rather than left
-              to read as a stall. */}
-          {warmup.length > 0 && phase === 'running' && <div className="gt-sub mono">{loraWarmupNote(warmup)}</div>}
+              to read as a stall — and retired the moment a piece lands, because that is
+              the whole claim it makes (noema-286). */}
+          {bannerLine('warmup') && <div className="gt-sub mono">{bannerLine('warmup')!.text}</div>}
 
           {flowLoading && <div className="gt-sub mono">reading inputs…</div>}
           {blockLaunch && !streamLive && (
@@ -1725,11 +1777,8 @@ export function Muse() {
           )}
           {quoteError && <div className="gt-sub mono">{quoteError}</div>}
           {streamError && <div className="gt-sub mono">{streamError}</div>}
-          {quote && (
-            <div className="gt-sub mono">
-              ~ is an estimate: the figure is the run's reservation, and the server prices and charges
-              every piece when it settles.
-            </div>
+          {bannerLine('estimate') && (
+            <div className="gt-sub mono">{bannerLine('estimate')!.text}</div>
           )}
           {flows !== null && flows.length === 0 && (
             <div className="gt-sub mono">no text-to-image workflow is available.</div>
