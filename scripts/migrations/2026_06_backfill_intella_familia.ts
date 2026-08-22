@@ -25,11 +25,22 @@
 //   --prod clears the live-db gate; --dry-run suppresses every write. BOTH are required to read prod.
 // Run (WRITE, prod): …same, minus --dry-run…   (only when intentionally migrating production)
 
-import { MongoClient } from 'mongodb'
+import { MongoClient, type ObjectId } from 'mongodb'
 import { inferFamilia } from '../../src/crystal/inferFamilia.js'
 import { resolveDbTarget } from './_dbTarget.js'
 
 const TAG = '[backfill-familia]'
+
+/** The fields this migration reads off an `intellae` record — the inference inputs plus what it logs. */
+type IntellaDoc = {
+  id?: string
+  genus?: string
+  nomen?: string
+  dest?: string
+  architectura?: string
+  familia?: string
+  tags?: Array<string | { tag?: string }>
+}
 
 async function main(): Promise<void> {
   const uri = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
@@ -38,7 +49,9 @@ async function main(): Promise<void> {
   try {
     const col = client.db(dbName).collection('intellae')
     // Records with no usable familia (absent or empty string).
-    const docs = await col.find({ $or: [{ familia: { $exists: false } }, { familia: '' }] }).toArray()
+    const docs = await col
+      .find<IntellaDoc & { _id: ObjectId }>({ $or: [{ familia: { $exists: false } }, { familia: '' }] })
+      .toArray()
     console.log(`[backfill-familia] ${dbName}.intellae — ${docs.length} record(s) without familia`)
 
     let set = 0

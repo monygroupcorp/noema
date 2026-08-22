@@ -98,6 +98,39 @@ class MemoryIntellarum implements Intellarum {
   async canonical(): Promise<Intellae> {
     return Array.from(this.byId.values()).filter((i) => i.canonica)
   }
+
+  // Trigger resolution over the same in-process catalog. The seed set is entirely
+  // platform-canonical (public), so `ownerKey` selects nothing extra here — it is
+  // accepted and ignored rather than faked, and a public-only result is the honest
+  // answer for this catalog.
+  async findByTrigger(trigger: string, familia: string | string[]): Promise<Intellae> {
+    const wanted = trigger.toLowerCase()
+    return this.loras(familia).filter((i) => i.trigger?.toLowerCase() === wanted)
+  }
+
+  async triggerMap(familia: string | string[]): Promise<Map<string, Intellae>> {
+    const map = new Map<string, Intellae>()
+    for (const i of this.loras(familia)) {
+      const key = i.trigger?.toLowerCase()
+      if (!key) continue
+      const bucket = map.get(key)
+      if (bucket) bucket.push(i)
+      else map.set(key, [i])
+    }
+    return map
+  }
+
+  /** Public LoRAs whose `familia` matches one family, or is a member of a set of accepted families. */
+  private loras(familia: string | string[]): Intella[] {
+    const accepted = Array.isArray(familia) ? familia : [familia]
+    return Array.from(this.byId.values()).filter(
+      (i) =>
+        i.genus === 'lora' &&
+        i.access !== 'private' &&
+        i.familia !== undefined &&
+        accepted.includes(i.familia),
+    )
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -147,8 +180,12 @@ async function buildSeededCrystalApi(): Promise<CrystalApi> {
       new ApiCursor(OPENROUTER_PROVIDER, {
         apiKey: process.env.OPENROUTER_API_KEY,
         http: httpApiTransport,
-        mediaFetcher: async () => {
-          throw new Error('concierge-eval: mediaFetcher should never be called (quote-only harness)')
+        // `MediaFetcher` is an object with a `fetch` method, not a bare function — the
+        // throwing stub has to sit on that method for the never-called contract to hold.
+        mediaFetcher: {
+          async fetch(): Promise<Buffer> {
+            throw new Error('concierge-eval: mediaFetcher should never be called (quote-only harness)')
+          },
         },
       }),
     )

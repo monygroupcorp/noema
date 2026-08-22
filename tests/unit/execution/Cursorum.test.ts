@@ -17,7 +17,8 @@ function makeModus(ministerium: string): Modus {
 function makeRunner(): Cursor {
   return {
     reserve: async () => 100n,
-    run: async () => ({ exitus: {}, impetus: 100n }),
+    // Cursor.run returns a CursorResult — the {kind:'sync'|'async'} envelope, not a bare Exitus.
+    run: async () => ({ kind: 'sync', exitus: { exitus: {}, impetus: 100n } }),
   }
 }
 
