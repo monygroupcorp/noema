@@ -69,7 +69,9 @@ test('MarketplaceAdapter: lists under a stable per-publication handle', async ()
 test('MarketplaceAdapter: is revocable — retract exists and is a no-op', async () => {
   const market = new MarketplaceAdapter({ base: 'https://noema.art/market' })
   assert.equal(typeof market.retract, 'function')
-  await market.retract!({} as never)
+  // `MarketplaceAdapter.retract` takes no argument (the listing handle is derived from the
+  // publication id it minted), so the optional-interface parameter is not passed here.
+  await market.retract!()
 })
 
 test('MarketplaceAdapter: key is configurable (other venues = config, not new classes)', async () => {

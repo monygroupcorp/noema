@@ -61,7 +61,7 @@ test('normalize: legacy TEE { step } body becomes an executing report carrying s
 
 test('normalize: recurses into parallel[] and drops junk fields', () => {
   const p = normalizeProgressus({ phase: 'downloading', junk: 'x', parallel: [{ phase: 'downloading', progress: { done: 1, total: 3, unit: 'bytes' } }] }, at(0))
-  assert.equal((p as Record<string, unknown>).junk, undefined)
+  assert.equal((p as unknown as Record<string, unknown>).junk, undefined)
   assert.equal(p.parallel?.length, 1)
   assert.equal(p.parallel?.[0].progress?.unit, 'bytes')
 })

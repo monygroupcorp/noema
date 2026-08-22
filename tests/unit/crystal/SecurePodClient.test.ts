@@ -148,7 +148,9 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
       return new Response('{}', { status: 200 })
     }
     return new Response('Not found', { status: 404 })
-  }) as unknown as typeof fetch
+  // `typeof globalThis.fetch`, not `typeof fetch`: this binding is itself named `fetch`, so the
+  // unqualified form would be a self-reference in its own initializer.
+  }) as unknown as typeof globalThis.fetch
 
   return { fetch, calls, webhookPayloads }
 }
@@ -156,7 +158,7 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
 function makeClient(
   config: SecurePodConfig,
   ssh: () => SshTransportLike,
-  fetch: typeof fetch,
+  fetch: typeof globalThis.fetch,
   materiae?: ConstructorParameters<typeof SecurePodClient>[3],
   isActumLive?: ConstructorParameters<typeof SecurePodClient>[6],
 ): SecurePodClient {
@@ -692,7 +694,9 @@ test('launchTrainingPod resolves with a pod id while the SSH wait is still pendi
   // wait is still blocked at this point, so nothing has been bootstrapped.
   assert.equal(podId, 'pod-xyz')
   assert.equal(sshSessions, 0, 'the launch must resolve before SSH is even reachable')
-  assert.deepEqual(execs, [], 'no pod-side command can have run yet')
+  // `[] as string[]`: node's `deepEqual` is typed `asserts actual is T`, so a bare `[]` narrows
+  // `execs` to `never[]` for the rest of the test and the later `includes` check stops compiling.
+  assert.deepEqual(execs, [] as string[], 'no pod-side command can have run yet')
 
   await within(detached.promise, 'the detached launch command')
   clearTimeout(gateTimer)

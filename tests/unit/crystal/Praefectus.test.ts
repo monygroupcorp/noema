@@ -40,6 +40,15 @@ function makeStore(materiae: Materia[] = []): MateriaStore {
         return true
       }) ?? null
     },
+    // The rest of the MateriaStore surface. Praefectus is exercised here through
+    // findWarm/findById/update only, so these are unreached and throw rather than
+    // return a plausible default.
+    async findActive(): Promise<Materia[]> {
+      throw new Error('makeStore.findActive: not implemented for this suite')
+    },
+    async reapIdle(): Promise<Materia[]> {
+      throw new Error('makeStore.reapIdle: not implemented for this suite')
+    },
   }
 }
 

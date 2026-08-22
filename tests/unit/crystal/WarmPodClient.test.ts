@@ -46,6 +46,10 @@ function makeMateriaStore(materia: Materia): MateriaStore & { updates: Array<{ i
     async findById(id) { return materia.id === id ? materia : null },
     async update(id, patch) { updates.push({ id, patch }); return { ...materia, ...patch } },
     async findWarm() { return null },
+    // The rest of the MateriaStore surface — unreached by the warm client, so these throw
+    // rather than return a plausible default.
+    async findActive(): Promise<Materia[]> { throw new Error('makeMateriaStore.findActive: not implemented for this suite') },
+    async reapIdle(): Promise<Materia[]> { throw new Error('makeMateriaStore.reapIdle: not implemented for this suite') },
   } as MateriaStore & { updates: Array<{ id: string; patch: unknown }> }
 }
 
@@ -84,7 +88,9 @@ function makeComfyrunnerFetch(externusId: string, opts: {
       return new Response('{}', { status: 200 })
     }
     return new Response('Not found', { status: 404 })
-  }) as unknown as typeof fetch
+  // `typeof globalThis.fetch`, not `typeof fetch`: this binding is itself named `fetch`, so the
+  // unqualified form would be a self-reference in its own initializer.
+  }) as unknown as typeof globalThis.fetch
 
   return { fetch, calls, webhookPayloads }
 }
@@ -191,7 +197,9 @@ test('Materia status: a job failure the pod cannot answer for leaves the Materia
     if (method === 'POST' && url === `${runnerBase}/job`) return new Response('{}', { status: 200 })
     if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) return makeSseStream([{ type: 'error', error: 'kaboom' }])
     return new Response('{}', { status: 200 })
-  }) as unknown as typeof fetch
+  // `typeof globalThis.fetch`, not `typeof fetch`: this binding is itself named `fetch`, so the
+  // unqualified form would be a self-reference in its own initializer.
+  }) as unknown as typeof globalThis.fetch
 
   const client = new WarmPodClient(materia, store, fetch)
   await client.submit({ input: {} })

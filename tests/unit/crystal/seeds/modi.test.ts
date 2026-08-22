@@ -80,7 +80,7 @@ test('the caption modus declares every key its cursor and finalizer read', () =>
   // every pass an extending pass of one hard-coded set.
   assert.equal(MODUS_DATASET_CAPTION.aditus.captionset?.default, undefined)
   // The descriptio is user-facing contract text — it must not still promise a whole-set pass.
-  assert.match(MODUS_DATASET_CAPTION.descriptio, /EXTENDS/)
+  assert.match(MODUS_DATASET_CAPTION.descriptio ?? '', /EXTENDS/)
 })
 
 test('frames-to-video modus is host-side (ministerium ffmpeg, sync, video out)', () => {
@@ -189,7 +189,7 @@ test('the decompose modus declares every key its cursor reads', () => {
   // path. A default of any accepted string would make every decompose the expensive one.
   assert.equal(MODUS_DATASET_DECOMPOSE.aditus.redo?.default, undefined)
   // The descriptio is user-facing contract text — it must say the pass is incremental.
-  assert.match(MODUS_DATASET_DECOMPOSE.descriptio, /INCREMENTAL/)
+  assert.match(MODUS_DATASET_DECOMPOSE.descriptio ?? '', /INCREMENTAL/)
 })
 
 test("the decompose modus' exitus matches what the cursor actually returns", () => {
