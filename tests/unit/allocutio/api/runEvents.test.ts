@@ -16,7 +16,8 @@ test('actum.progressus maps to a non-terminal progress RunEvent carrying the typ
   assert.equal(ev.kind, 'progress')
   assert.equal(ev.terminal, false)        // cost/completion ride actum.complete/fail
   assert.equal(ev.progressus, progressus) // passed through by reference
-  assert.equal(ev.stage, undefined)
+  // `stage` is not part of RunEvent; the check is that no such field rides the frame.
+  assert.equal((ev as unknown as Record<string, unknown>).stage, undefined)
 })
 
 test('actum.progressus without a progressus payload is dropped', () => {

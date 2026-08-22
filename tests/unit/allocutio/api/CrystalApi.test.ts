@@ -56,6 +56,7 @@ function nascens(inceptio: Inceptio): Actum {
     aditus: inceptio.aditus,
     status: 'nascens',
     inceptum: new Date('2026-06-10T00:00:00Z'),
+    expirat: new Date('2026-06-10T01:00:00Z'),
   }
 }
 
@@ -150,6 +151,7 @@ function makeIntella(over: Partial<Intella> = {}): Intella {
     versio: '1.0.0',
     canonica: true,
     familia: 'flux2',
+    natum: new Date('2026-01-01'),
     ...over,
   }
 }
@@ -232,6 +234,7 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       findById: async (id: string) =>
         id === 'act-known' ? completedFor(nascens({ modusId: 'flux-schnell', aditus: {}, by: auctor })) : null,
       findByExternusJobId: async () => null,
+      findByCallbackNonce: async () => null,
       findByNullifier: async () => null,
       findExpired: async () => [],
       findInFlight: async () => [],
@@ -249,23 +252,6 @@ function makeDeps(over: Partial<CrystalApiDeps> = {}): {
       register: async () => {},
       list: async () => fakeFundamenta,
     } as unknown) as CrystalApiDeps['fundamentorum'],
-    intelligendi: ({
-      find: async (id: string) => fakeIntelligentia.find((i) => i.id === id) ?? null,
-      list: async (filter?: { genus?: string; basis?: string; canonica?: boolean }) =>
-        fakeIntelligentia.filter((i) => {
-          if (filter?.genus && i.genus !== filter.genus) return false
-          if (filter?.basis && i.basis !== filter.basis) return false
-          if (filter?.canonica !== undefined && i.canonica !== filter.canonica) return false
-          return true
-        }),
-      search: async (q: string) =>
-        fakeIntelligentia.filter((i) =>
-          i.nomen.toLowerCase().includes(q.toLowerCase()) ||
-          (i.descriptio ?? '').toLowerCase().includes(q.toLowerCase()),
-        ),
-      create: async () => { throw new Error('unused') },
-      update: async () => { throw new Error('unused') },
-    } as unknown) as CrystalApiDeps['intelligendi'],
     intellarum: makeFakeIntellarum(),
     hospitia: ({
       findActive: async () => [],

@@ -16,6 +16,7 @@ import {
   ESSENTIA_QWEN3_VL,
 } from '../../../../src/crystal/seeds/essentiae.js'
 import type { Modus } from '../../../../src/types/modus.js'
+import type { Actum } from '../../../../src/types/actum.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 
 const auctor: AuctorKey = { animaId: 'anima-1' }
@@ -32,7 +33,7 @@ function makeDeps(): CrystalApiDeps {
     modorum: {
       find: async (id: string) => modi[id] ?? null,
       register: async () => {},
-      list: async (filter) =>
+      list: async (filter?: Partial<Pick<Modus, 'genus' | 'canonica' | 'auctor'>>) =>
         Object.values(modi).filter(
           (m) =>
             (filter?.genus === undefined || m.genus === filter.genus) &&
@@ -41,7 +42,7 @@ function makeDeps(): CrystalApiDeps {
       update: async () => { throw new Error('unused') },
     },
     cursorum: { register: () => {}, resolve: () => { throw new Error('unused') } },
-    completor: { complete: async (act) => act, fail: async (act) => act },
+    completor: { complete: async (act: Actum) => act, fail: async (act: Actum) => act },
     actorum: {
       create: async () => { throw new Error('unused') },
       update: async () => { throw new Error('unused') },

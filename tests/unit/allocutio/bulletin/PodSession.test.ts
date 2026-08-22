@@ -165,7 +165,10 @@ test('unqueueModel drops by id; clearPending empties the loadout', () => {
 
 test('picker: categories → mount → results, page/search/base-filter flow + snapshot', () => {
   const s = new PodSession('host-1')
-  assert.equal(s.picker, null, 'no picker by default')
+  // Read into a local: asserting on `s.picker` directly narrows the getter to `null` for the
+  // rest of the test, so every later read of it would be checked as `never`.
+  const initialPicker = s.picker
+  assert.equal(initialPicker, null, 'no picker by default')
 
   s.openSubmenu('mod')
   s.openPicker()

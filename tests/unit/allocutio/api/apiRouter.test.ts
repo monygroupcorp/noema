@@ -15,7 +15,7 @@ import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
 // Fakes
 // ---------------------------------------------------------------------------
 
-const fakeApi: ApiFacade = {
+const fakeApi = {
   async invokeFlow(): Promise<Run> {
     return { id: 'r1', status: 'complete', modusId: 'flux-schnell' }
   },
@@ -91,7 +91,9 @@ const fakeApi: ApiFacade = {
     if (auctor.animaId === 'a1') return { ...base, animaId: 'a1', username: 'alice' }
     return { ...base, animaId: auctor.animaId }
   },
-}
+  // Only the methods these routes reach are provided; every one is signature-checked
+  // against the real facade, and an unreached route would fail loudly at call time.
+} satisfies Partial<ApiFacade>
 
 // Records the opts the router forwarded to provisionStudio.
 let lastProvisionOpts: ProvisionStudioOpts | undefined
@@ -113,7 +115,7 @@ function createServer(): Promise<{ server: http.Server; url: string }> {
   return new Promise((resolve, reject) => {
     const app = express()
     app.use(express.json())
-    app.use('/v1', createApiRouter({ api: fakeApi, identity: fakeIdentity }))
+    app.use('/v1', createApiRouter({ api: fakeApi as unknown as ApiFacade, identity: fakeIdentity }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolve({ server, url: `http://127.0.0.1:${addr.port}` })
@@ -543,7 +545,7 @@ function createGatedServer(opts: { anonPurseEnabled: boolean; bursarium: Bursaru
   return new Promise((resolve, reject) => {
     const app = express()
     app.use(express.json())
-    app.use('/v1', createApiRouter({ api: fakeApi, identity: fakeIdentity, anonPurseEnabled: opts.anonPurseEnabled, bursarium: opts.bursarium }))
+    app.use('/v1', createApiRouter({ api: fakeApi as unknown as ApiFacade, identity: fakeIdentity, anonPurseEnabled: opts.anonPurseEnabled, bursarium: opts.bursarium }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolve({ server, url: `http://127.0.0.1:${addr.port}` })
