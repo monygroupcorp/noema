@@ -101,6 +101,16 @@
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(6px);
 }
+/* Collapsed, on the user's hand (noema-282): the whole dock folds to the same single
+   sticky line every collapsed control uses (`.muse-collapsed`), and stays sticky either
+   way — it never scrolls out of reach, which is also how the floor sheet is opened.
+   Dropped, `.muse-steerdock` still lays the row out as a column instead of a row and
+   the tighter `.muse-collapsed` padding shows through against the border — crowded, but
+   still legible and still reachable. */
+.muse-steerdock.muse-collapsed {
+  flex-direction: row;
+  padding: 8px 10px;
+}
 .muse-dock {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }

@@ -119,7 +119,8 @@ import {
   collapsedControls,
   configSummaryLine,
   nozzleSummaryLine,
-  toggleControl,
+  setControlHand,
+  steerDockSummaryLine,
   streamStatusLine,
   MAX_CONSECUTIVE_ERRORS,
   type LaunchState,
@@ -2091,60 +2092,85 @@ test('a piece whose run has not reached terminal comes back as still generating 
   assert.equal(open.media, null)
 })
 
-// ── The controls get out of the way on a phone (noema-264) ──────────────────
+// ── The controls get out of the way, on the user's hand, at any time (noema-264, noema-282) ──
 //
 // The rule lives in `lib/muse.ts` and not in `Muse.tsx` because that is the only place
 // it can be gated: these tests run from the repo root under `tsx --test`, which has no
 // react. The CSS half of this item is NOT gated by anything here.
 
 const COLLAPSE = (over: Partial<Parameters<typeof collapsedControls>[0]> = {}) =>
-  collapsedControls({ phase: 'running', pieces: 4, expandedByHand: [], ...over })
+  collapsedControls({ phase: 'running', pieces: 4, hand: {}, ...over })
 
 // Non-vacuity 1 — the collapse happens at all
 
-test('a stream with pieces on it collapses the configuration and the nozzle to their summary lines', () => {
+test('a stream with pieces on it collapses the configuration, the nozzle and the steer dock to their summary lines', () => {
   const collapsed = COLLAPSE()
   assert.equal(collapsed.configuration, true)
   assert.equal(collapsed.nozzle, true, 'the grid is what the user scrolled here to see')
+  assert.equal(collapsed.steer, true)
 
   // a stream that has stopped still has its pieces on it, and they are still the reason
   // the controls are not the screen
-  assert.deepEqual(COLLAPSE({ phase: 'stopped' }), { configuration: true, nozzle: true })
-  assert.deepEqual(COLLAPSE({ phase: 'resumed' }), { configuration: true, nozzle: true })
+  assert.deepEqual(COLLAPSE({ phase: 'stopped' }), { configuration: true, nozzle: true, steer: true })
+  assert.deepEqual(COLLAPSE({ phase: 'resumed' }), { configuration: true, nozzle: true, steer: true })
 
   // and a loop riding toward its first piece has already begun, whatever has landed yet
-  assert.deepEqual(COLLAPSE({ phase: 'running', pieces: 0 }), { configuration: true, nozzle: true })
-  assert.deepEqual(COLLAPSE({ phase: 'holding', pieces: 0 }), { configuration: true, nozzle: true })
+  assert.deepEqual(COLLAPSE({ phase: 'running', pieces: 0 }), { configuration: true, nozzle: true, steer: true })
+  assert.deepEqual(COLLAPSE({ phase: 'holding', pieces: 0 }), { configuration: true, nozzle: true, steer: true })
 })
 
 // Non-vacuity 2 — an empty screen keeps the control that starts something
 
-test('a session with nothing on it opens with the configuration expanded', () => {
+test('a session with nothing on it opens with every control expanded', () => {
   const fresh = COLLAPSE({ phase: 'idle', pieces: 0 })
   assert.equal(fresh.configuration, false, 'collapsing an empty screen hides the only control that starts anything')
   assert.equal(fresh.nozzle, false, 'and the model is chosen before the first piece, not after it')
+  assert.equal(fresh.steer, false)
 
   // the same is true of a session reopened with nothing in its ledger
-  assert.deepEqual(COLLAPSE({ phase: 'stopped', pieces: 0 }), { configuration: false, nozzle: false })
+  assert.deepEqual(COLLAPSE({ phase: 'stopped', pieces: 0 }), { configuration: false, nozzle: false, steer: false })
 })
 
-// Non-vacuity 3 — the collapse is a default, never a lock
+// Non-vacuity 3 — the pin overrides the auto rule, in either direction, at any phase
 
-test('expanding a collapsed control keeps it expanded while the stream rides', () => {
-  const opened = COLLAPSE({ expandedByHand: ['nozzle'] })
+test('pinning a control open keeps it expanded while the stream rides', () => {
+  const opened = COLLAPSE({ hand: { nozzle: 'open' } })
   assert.equal(opened.nozzle, false, 'nothing re-collapses a control under the user\'s hand')
   assert.equal(opened.configuration, true, 'and opening one says nothing about the other')
 
   // it stays open across every phase the stream moves through afterwards
   for (const phase of ['running', 'holding', 'stopping', 'stopped'] as const) {
-    assert.equal(collapsedControls({ phase, pieces: 9, expandedByHand: ['nozzle'] }).nozzle, false)
+    assert.equal(collapsedControls({ phase, pieces: 9, hand: { nozzle: 'open' } }).nozzle, false)
   }
 
   // the user's hand is also the only thing that closes it again
-  assert.deepEqual(toggleControl([], 'configuration'), ['configuration'])
-  assert.deepEqual(toggleControl(['configuration'], 'configuration'), [])
-  assert.deepEqual(toggleControl(['nozzle'], 'configuration'), ['nozzle', 'configuration'])
-  assert.equal(COLLAPSE({ expandedByHand: toggleControl(['nozzle'], 'nozzle') }).nozzle, true)
+  assert.deepEqual(setControlHand({}, 'configuration', false), { configuration: 'closed' })
+  assert.deepEqual(setControlHand({ configuration: 'closed' }, 'configuration', true), { configuration: 'open' })
+  assert.deepEqual(setControlHand({ nozzle: 'open' }, 'configuration', false), { nozzle: 'open', configuration: 'closed' })
+  assert.equal(COLLAPSE({ hand: setControlHand({ nozzle: 'open' }, 'nozzle', false) }).nozzle, true)
+})
+
+// Non-vacuity 3b — the pin runs the other way too, before the stream has begun
+
+test('a control can be collapsed by hand with zero pieces fired', () => {
+  // this is the whole complaint: configuring a run is exactly when the banner is
+  // tallest, and exactly when a hand could not fold it before this item
+  const closedEarly = COLLAPSE({ phase: 'idle', pieces: 0, hand: { configuration: 'closed' } })
+  assert.equal(closedEarly.configuration, true, 'the user\'s hand can fold a control the stream has not touched yet')
+  assert.equal(closedEarly.nozzle, false, 'and closing one says nothing about the other')
+
+  // it stays closed across every phase, exactly as an open pin stays open
+  for (const phase of ['idle', 'running', 'stopped'] as const) {
+    assert.equal(collapsedControls({ phase, pieces: 0, hand: { steer: 'closed' } }).steer, true)
+  }
+})
+
+// Non-vacuity 2b — the steer dock collapses and re-opens, both directions
+
+test('the steer dock collapses and re-opens', () => {
+  assert.equal(COLLAPSE({ phase: 'running', pieces: 4, hand: {} }).steer, true, 'a running stream folds the steer dock like the others')
+  assert.equal(COLLAPSE({ phase: 'running', pieces: 4, hand: { steer: 'open' } }).steer, false, 'and the user\'s hand brings it back')
+  assert.equal(COLLAPSE({ phase: 'idle', pieces: 0, hand: { steer: 'closed' } }).steer, true, 'a control that collapses and cannot be re-opened is worse than one that never collapses')
 })
 
 // Non-vacuity 4 — collapsed stays legible
@@ -2165,6 +2191,21 @@ test('a collapsed nozzle still names the model that is loaded and its weight', (
   assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /infinite/)
   assert.match(configSummaryLine(CFG({ mode: 'infinite' }), 'a workflow'), /a workflow/)
   assert.match(configSummaryLine(CFG(), null), /no workflow/)
+})
+
+// Non-vacuity 4b — a collapsed steer dock still says a steer failed
+
+test('a collapsed steer dock still names the floor, and a failure over it', () => {
+  assert.equal(
+    steerDockSummaryLine({ floorLine: 'floor 3/5 in the draw', failure: null }),
+    'floor 3/5 in the draw',
+    'with nothing wrong, the collapsed row is the same line the expanded dock shows',
+  )
+  assert.match(
+    steerDockSummaryLine({ floorLine: 'floor 3/5 in the draw', failure: 'the server refused it' }),
+    /the server refused it/,
+    'a user mid-stream is spending against a steer they cannot see failed if this is silent',
+  )
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
