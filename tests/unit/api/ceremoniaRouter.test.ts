@@ -141,7 +141,10 @@ test('one-per-session: a first contribution succeeds; a second from the SAME coo
   const first = await agent.post('/v1/ceremony/contributions')
     .set('x-based-on', rootHash).set('Content-Type', 'application/octet-stream').send(Buffer.from('C1'))
   assert.equal(first.status, 201)
-  assert.ok(first.headers['set-cookie']?.some((c: string) => c.startsWith('noema-cer-sid=')))
+  // @types/superagent types every header as a single string; Node's http layer still delivers
+  // Set-Cookie as an array before superagent sees it, which is what actually lands here.
+  const setCookie = first.headers['set-cookie'] as unknown as string[] | undefined
+  assert.ok(setCookie?.some((c) => c.startsWith('noema-cer-sid=')))
 
   const head = first.body.headHash
   const second = await agent.post('/v1/ceremony/contributions')

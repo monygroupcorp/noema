@@ -25,14 +25,30 @@ function makeSignum(valor: bigint, id = 'sig-1'): Signum {
   return { id, animaId: 'anima-1', forma: 'eth', valor, auctor: 'test', status: 'valid', natum: new Date() }
 }
 
+/**
+ * A member the fake does not model. It throws rather than returning a plausible default:
+ * a stub that quietly answers `null`/`[]` is a new way for a test to pass while lying.
+ */
+function unmodelled(fake: string, name: string) {
+  return async (): Promise<never> => {
+    throw new Error(`${fake} fake: ${name}() is not modelled`)
+  }
+}
+
 function makeModorum(modus: Modus) {
-  return { find: async () => modus, register: async () => {}, list: async () => [] }
+  return {
+    find: async () => modus,
+    register: async () => {},
+    list: async () => [],
+    update: unmodelled('Modorum', 'update'),
+  }
 }
 
 function makeRunner(reserve: bigint = 100n): Cursor {
   return {
     reserve: async () => reserve,
-    run: async () => ({ exitus: {}, impetus: reserve }),
+    // Cursor.run returns a CursorResult — the {kind:'sync'|'async'} envelope wrapping the Exitus.
+    run: async () => ({ kind: 'sync', exitus: { exitus: {}, impetus: reserve } }),
   }
 }
 
@@ -47,11 +63,18 @@ function makeSignorum(signa: Signa = [makeSignum(500n)]) {
   const locked: string[] = []
   return {
     balance: async () => signa.filter(s => s.status === 'valid').reduce((s, x) => s + x.valor, 0n),
-    issue: async (s: Omit<Signum, 'id' | 'natum' | 'status'>) => ({ ...s, id: 'new', status: 'valid' as const, createdAt: new Date() }),
+    issue: async (s: Omit<Signum, 'id' | 'natum' | 'status'>) => ({ ...s, id: 'new', status: 'valid' as const, natum: new Date() }),
     spend: async () => {},
     lock: async (ids: string[]) => { locked.push(...ids) },
     release: async () => {},
-    history: async () => signa,
+    history: async (_by: { animaId: string } | { commitment: string }) => signa,
+    sessionBudget: unmodelled('Signorum', 'sessionBudget'),
+    reserve: unmodelled('Signorum', 'reserve'),
+    findByTestis: unmodelled('Signorum', 'findByTestis'),
+    ownsAny: unmodelled('Signorum', 'ownsAny'),
+    settle: unmodelled('Signorum', 'settle'),
+    transfer: unmodelled('Signorum', 'transfer'),
+    createMany: unmodelled('Signorum', 'createMany'),
     _locked: locked,
   }
 }
@@ -70,6 +93,9 @@ function makeActa(nullifierMap: Map<string, Actum> = new Map()): Actorum & { rec
     findByExternusJobId: async () => null,
     findByNullifier: async (nullifier) => nullifierMap.get(nullifier) ?? null,
     findExpired: async () => [],
+    findByCallbackNonce: unmodelled('Actorum', 'findByCallbackNonce'),
+    findInFlight: unmodelled('Actorum', 'findInFlight'),
+    findByCompositum: unmodelled('Actorum', 'findByCompositum'),
   }
 }
 
@@ -224,7 +250,12 @@ test('a funded run does not throw', async () => {
 })
 
 test('throws when modus is not found', async () => {
-  const modorum = { find: async () => null, register: async () => {}, list: async () => [] }
+  const modorum = {
+    find: async () => null,
+    register: async () => {},
+    list: async () => [],
+    update: unmodelled('Modorum', 'update'),
+  }
   const inceptor = new ActumInceptor({
     modorum,
     cursorum: makeCursorum(makeRunner()),
