@@ -3,21 +3,35 @@
   // runner (tsx) strips types without checking them, so `implements` clauses on in-memory doubles
   // under tests/ are not enforced by any step. This config makes them enforced.
   //
-  // ENFORCING, over a named tranche. `include` below is the tranche; the remaining test
-  // directories are listed with their measured error counts and each is a follow-on item, so the
-  // tranche has a written end state and cannot quietly become a permanent exclusion:
+  // THE MAP — this file accounts for every directory under tests/unit/, exactly once.
+  //
+  // `include` below is the enforced list. The DEFERRED block is the not-yet-enforced list: one row
+  // per directory, carrying its measured error count, and each row is a follow-on item, so a
+  // deferral has a written end state and cannot quietly become a permanent exclusion.
+  //
+  // The two lists together are the map, and `tests/unit/allocutio/api/apiDocsDrift.test.ts`
+  // asserts it stays complete and current, in both directions: a directory under tests/unit/ that
+  // appears in neither list fails there, naming itself, and a DEFERRED row naming a directory that
+  // no longer exists fails as stale. That guard reads the directory listing, so a directory at zero
+  // errors is accounted for too — a list derived from measured errors can only describe what
+  // failed, never what is uncovered.
+  //
+  // To add a directory: measure it, and if it is at zero errors put it in `include`; otherwise add
+  // a DEFERRED row with the count and open a follow-on item for it.
+  //
+  // DEFERRED rows go between the two markers below, one per line, shaped
+  // `tests/unit/<name>/   <n> errors / <n> files  — <follow-on item>`. The guard parses the region
+  // between the markers, so keep them.
+  //
+  // DEFERRED-BEGIN
+  //   (none — every directory is named in `include` below)
+  // DEFERRED-END
+  //
+  // Outside tests/unit/, so outside the map above and outside that guard:
   //
   //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
   //
-  // The 391 errors / 67 files recorded when this file landed is a HISTORICAL figure (and was
-  // already lower than the first count taken, because `module` is now set below, which settles the
-  // `import.meta` diagnostic tree-wide). Measured now, with every directory in `include` below
-  // drained, `scripts/migrations/` above is the only row left carrying errors. Five test
-  // directories are still outside `include` — tests/unit/{analytics,architecture,lib,migrations,
-  // rag} — and measure 0 errors, so listing them is bookkeeping rather than a fix; it gets its own
-  // item, because every sweep edits this same array and they land one directory at a time.
-  //
-  // tests/unit/arcanum/ and tests/unit/web/ are now in the tranche. Their suites import eight
+  // tests/unit/arcanum/ and tests/unit/web/ are in `include`. Their suites import eight
   // modules from src/platforms/web/app/src/lib, so those files enter this program and are
   // typechecked here under this config's options. They are READ ONLY from here: that package
   // keeps its own tsconfig, its own `tsc --noEmit` and its own test runner, and the root
@@ -46,6 +60,11 @@
     "tests/unit/crystal/**/*",
     "tests/unit/arcanum/**/*",
     "tests/unit/web/**/*",
-    "tests/unit/allocutio/**/*"
+    "tests/unit/allocutio/**/*",
+    "tests/unit/analytics/**/*",
+    "tests/unit/architecture/**/*",
+    "tests/unit/lib/**/*",
+    "tests/unit/migrations/**/*",
+    "tests/unit/rag/**/*"
   ]
 }
