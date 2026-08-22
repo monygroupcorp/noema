@@ -85,6 +85,7 @@
   "devDependencies": {
     "@types/archiver": "^6.0.4",
     "@types/express": "^5.0.6",
+    "@types/supertest": "^7.2.1",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "eventsource": "^2.0.2",
