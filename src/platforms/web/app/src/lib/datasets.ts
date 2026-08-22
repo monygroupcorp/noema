@@ -31,6 +31,33 @@ export interface Dataset {
   trains: number;           // tracked derive links (feeds N trainings)
 }
 
+// noema-283 — the fragment garden under a media item on the dataset detail screen is collapsed
+// by default (a decomposed set can put a dozen chips under every thumbnail). These are pure so
+// the open/closed rule and the summary line are gated without a renderer.
+
+// Whether a media item's garden is open, given the per-item open-id set the screen holds.
+export const isGardenOpen = (openIds: ReadonlySet<string>, mediaId: string): boolean => openIds.has(mediaId);
+
+// A NEW Set with `mediaId` flipped — never mutates `openIds`. Opening one item's garden must
+// not open (or close) any other item's.
+export const toggleGardenId = (openIds: ReadonlySet<string>, mediaId: string): Set<string> => {
+  const next = new Set(openIds);
+  if (next.has(mediaId)) next.delete(mediaId); else next.add(mediaId);
+  return next;
+};
+
+// The closed-state summary line: how many fragments the item carries and, when any are
+// currently excluded (`toggleFragment` in Dataset.tsx — unrelated to garden open/closed and
+// left untouched by this file), how many. Empty string when there is nothing to summarize —
+// the caller only renders this when `fragmentCount > 0`.
+export const gardenSummaryLine = (fragmentCount: number, excludedCount: number): string => {
+  if (fragmentCount <= 0) return '';
+  const noun = `fragment${fragmentCount === 1 ? '' : 's'}`;
+  return excludedCount > 0
+    ? `${fragmentCount} ${noun} · ${excludedCount} excluded`
+    : `${fragmentCount} ${noun}`;
+};
+
 // hemisphere glyph class for a custody value
 export const custodyGlyph = (c: Custody): 'lit' | 'ring' | 'dashed' =>
   c === 'remote' ? 'lit' : c === 'sealed' ? 'ring' : 'dashed';
