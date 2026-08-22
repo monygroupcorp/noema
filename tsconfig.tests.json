@@ -3,15 +3,18 @@
   // runner (tsx) strips types without checking them, so `implements` clauses on in-memory doubles
   // under tests/ are not enforced by any step. This config makes them enforced.
   //
-  // ENFORCING, over a named first tranche. `include` below is the tranche; the remaining test
+  // ENFORCING, over a named tranche. `include` below is the tranche; the remaining test
   // directories are listed with their measured error counts and each is a follow-on item, so the
   // tranche has a written end state and cannot quietly become a permanent exclusion:
   //
-  //   tests/unit/crystal/     251 errors / 46 files  — follow-on item (volume)
+  //   tests/unit/crystal/     174 errors / 33 files  — follow-on item(s) (volume). `Compiler.*`
+  //                                                    is drained and is IN the tranche below.
   //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
-  //   scripts/migrations/       7 errors /  6 files  — not under tests/; its own item
+  //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
   //
-  // Measured against the base commit: 509 errors / 104 files with the whole tree included.
+  // Measured with this config: 391 errors / 67 files with the whole tree included. These counts are
+  // lower than the figures recorded when this file landed because `module` is now set below, which
+  // settles the `import.meta` diagnostic tree-wide.
   //
   // tests/unit/arcanum/ and tests/unit/web/ are now in the tranche. Their suites import eight
   // modules from src/platforms/web/app/src/lib, so those files enter this program and are
@@ -26,7 +29,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    // The root config compiles src/ to CommonJS for `dist/`. The test tree is never emitted — it is
+    // executed by tsx as ES modules and reads `import.meta.url` to locate fixtures — so the test
+    // program is checked as ESM. Module RESOLUTION is inherited from the root config, unchanged.
+    "module": "ESNext"
   },
   "include": [
     "src/types/vendor.d.ts",
@@ -35,6 +42,7 @@
     "tests/unit/api/**/*",
     "tests/unit/flow/**/*",
     "tests/unit/execution/**/*",
+    "tests/unit/crystal/Compiler.*",
     "tests/unit/arcanum/**/*",
     "tests/unit/web/**/*"
   ]
