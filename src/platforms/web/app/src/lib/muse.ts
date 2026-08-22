@@ -2227,6 +2227,68 @@ export function promptWithTrigger(prompt: string, nozzle: NozzleInput): string {
   return body ? `${tokens}, ${body}` : tokens;
 }
 
+/**
+ * A standing instruction that rides EVERY prompt fired on this nozzle, blanket the way
+ * the model choice does — set once, and every piece from then on carries it until it is
+ * changed, unlike a steer, which is sent once and lands on the floor. It is client
+ * state on the same terms as the model choice: it does not survive a reload, and it
+ * never writes the floor, restamps a fragment, or opens a `SteerState`.
+ */
+export interface AffixInput {
+  prefix?: string | null;
+  suffix?: string | null;
+}
+
+function hasAffix(affix: AffixInput | null | undefined): boolean {
+  return !!((affix?.prefix ?? '').trim() || (affix?.suffix ?? '').trim());
+}
+
+/** The affix in words, for the nozzle's own collapsed line — `undefined` when nothing is
+ *  riding, so a bare nozzle summary reads exactly as it did before this item. Abbreviated
+ *  rather than wrapped, the same way the tile readout is (`TILE_READOUT_MAX`). */
+const AFFIX_READOUT_MAX = 28;
+
+export function affixSummaryLine(affix?: AffixInput | null): string | undefined {
+  if (!hasAffix(affix)) return undefined;
+  const prefix = (affix?.prefix ?? '').trim();
+  const suffix = (affix?.suffix ?? '').trim();
+  const parts: string[] = [];
+  if (prefix) parts.push(`prefix “${trim(prefix, AFFIX_READOUT_MAX)}”`);
+  if (suffix) parts.push(`suffix “${trim(suffix, AFFIX_READOUT_MAX)}”`);
+  return parts.join(' · ');
+}
+
+/**
+ * The prompt a piece is actually fired with, the standing affix composed in ON TOP of
+ * `promptWithTrigger`'s own trigger-leading rule — never through it. A LoRA trigger
+ * token always leads the final prompt; the affix composes AROUND that block, never
+ * displacing, duplicating or reordering a trigger. The prefix sits immediately after
+ * the trigger tokens (or leads the prompt when there is no LoRA chosen) and before the
+ * drawn text; the suffix always trails everything, after the drawn text.
+ *
+ * Empty means untouched: with no prefix and no suffix this returns exactly what
+ * `promptWithTrigger` returns, unmodified — so every existing call site is unaffected
+ * until an affix is actually set.
+ *
+ * Non-vacuity: dropping the affix on either the stream or the manual path must fail "a
+ * fired piece carries the standing prefix and suffix"; reverting the empty-affix guard
+ * must fail "an empty prefix and suffix leave the prompt byte-identical"; reverting the
+ * ordering must fail "every LoRA trigger token is still present, exactly once, and
+ * still leads the prompt".
+ */
+export function promptWithAffix(prompt: string, nozzle: NozzleInput, affix?: AffixInput | null): string {
+  if (!hasAffix(affix)) return promptWithTrigger(prompt, nozzle);
+
+  const stack = loraStack(nozzle);
+  const tokens = stack.length > 0 ? stack.map(triggerToken).join(', ') : '';
+  const prefix = (affix?.prefix ?? '').trim();
+  const suffix = (affix?.suffix ?? '').trim();
+  const body = prompt.trim();
+
+  const lead = [tokens, prefix, body].filter((part) => part.length > 0).join(', ');
+  return suffix ? (lead ? `${lead}, ${suffix}` : suffix) : lead;
+}
+
 /** The weights the run is given, by `intellaId` — the unambiguous half of the field's
  *  documented "intellaId or slug", picked once and used consistently. */
 export function pinnedModelsFor(nozzle: NozzleInput): string[] {
@@ -2234,8 +2296,8 @@ export function pinnedModelsFor(nozzle: NozzleInput): string[] {
 }
 
 /**
- * The run request for ONE stream piece: the drawn prompt carrying the trigger, and the
- * pinned weights that trigger resolves against.
+ * The run request for ONE stream piece: the drawn prompt carrying the trigger and the
+ * standing affix, and the pinned weights the trigger resolves against.
  *
  * BOTH HALVES OR NEITHER. `ignitionRequest` above stays exactly as it is — a mined
  * fragment's own trigger is still never lifted into `pinnedModels`, because that would
@@ -2246,8 +2308,13 @@ export function pinnedModelsFor(nozzle: NozzleInput): string[] {
  * pinnedModels"; pinning only the first entry must fail "a piece fired under two LoRAs
  * names BOTH in pinnedModels".
  */
-export function streamRunRequest(modusId: string, prompt: string, nozzle: NozzleInput): RunRequest {
-  const request = ignitionRequest(modusId, promptWithTrigger(prompt, nozzle));
+export function streamRunRequest(
+  modusId: string,
+  prompt: string,
+  nozzle: NozzleInput,
+  affix?: AffixInput | null,
+): RunRequest {
+  const request = ignitionRequest(modusId, promptWithAffix(prompt, nozzle, affix));
   const pinned = pinnedModelsFor(nozzle);
   return pinned.length > 0 ? { ...request, pinnedModels: pinned } : request;
 }
@@ -2397,18 +2464,22 @@ export function setControlHand(hand: ControlHand, control: MuseControl, open: bo
  * the stylesheet's, on text that is already there.
  *
  * Non-vacuity: dropping the weight clause must fail "a collapsed nozzle still names the
- * model that is loaded and its weight".
+ * model that is loaded and its weight"; dropping the affix clause must fail "the
+ * collapsed nozzle line names the standing affix when one is set".
  */
-export function nozzleSummaryLine(nozzle: NozzleInput): string {
+export function nozzleSummaryLine(nozzle: NozzleInput, affix?: AffixInput | null): string {
   const stack = loraStack(nozzle);
-  if (stack.length === 0) return 'no model — the workflow’s own base only';
-  return stack
-    .map((choice) => {
-      const weight = loraWeight(choice.weight);
-      const at = weight == null ? 'its own default weight' : `weight ${weight}`;
-      return `${choice.nomen} · trigger ${choice.trigger} · ${at}`;
-    })
-    .join(' + ');
+  const base = stack.length === 0
+    ? 'no model — the workflow’s own base only'
+    : stack
+      .map((choice) => {
+        const weight = loraWeight(choice.weight);
+        const at = weight == null ? 'its own default weight' : `weight ${weight}`;
+        return `${choice.nomen} · trigger ${choice.trigger} · ${at}`;
+      })
+      .join(' + ');
+  const affixLine = affixSummaryLine(affix);
+  return affixLine ? `${base} · ${affixLine}` : base;
 }
 
 /** The collapsed configuration in one line: what it is firing through, in which run

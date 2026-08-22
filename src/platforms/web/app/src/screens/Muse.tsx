@@ -80,7 +80,7 @@ import {
   pieceStageline,
   decomposeGateReason,
   poolDatasetFragments,
-  promptWithTrigger,
+  promptWithAffix,
   proposalPills,
   reactionOf,
   recordDismissal,
@@ -126,6 +126,7 @@ import {
   LORA_WEIGHT_MIN,
   NO_DISMISSALS,
   TILE_GESTURES,
+  type AffixInput,
   type DismissalState,
   type FloorPill,
   type GestureGate,
@@ -354,6 +355,11 @@ export function Muse() {
   const [weightText, setWeightText] = useState<Record<string, string>>({});
   const [hold, setHoldState] = useState<HoldState | null>(null);
   const [warmup, setWarmup] = useState<LoraChoice[]>([]);
+  // The standing affix (noema-284): set once, beside the model, and every piece from
+  // here carries it — it is client state on the same terms as `lora` above, so it does
+  // not survive a reload. Unlike the nozzle it costs no warm-up, so setting it never
+  // holds the stream and never fires a quote.
+  const [affix, setAffix] = useState<AffixInput>({});
   // The manual path (D3): the roll cards, closed by default. The stream is the front door.
   const [manualOpen, setManualOpen] = useState(false);
 
@@ -748,11 +754,16 @@ export function Muse() {
     }
     setBusy(index);
     try {
-      const { run } = await api.createRun(ignitionRequest(modusId, prompt));
+      // Ever present (noema-284): the standing affix rides a hand-fired piece exactly
+      // as it rides a streamed one. The manual path carries no nozzle of its own today
+      // (see `Muse.tsx:1204`'s stream path), so this composes the affix alone.
+      const firePrompt = promptWithAffix(prompt, null, affix);
+      const { run } = await api.createRun(ignitionRequest(modusId, firePrompt));
       // The piece lands in the stream on this screen. It carries the fragments it was
       // rolled from, because a later roll replaces the report it came out of and the
-      // expanded view still has to name them.
-      setStream((s) => admitPiece(s, streamPiece(run.id, prompt, lineage), frozenRef.current));
+      // expanded view still has to name them. It is recorded with the prompt it actually
+      // fired with, affix included — the expanded readout needs no change to show it.
+      setStream((s) => admitPiece(s, streamPiece(run.id, firePrompt, lineage), frozenRef.current));
       setFired((prev) => ({ ...prev, [index]: {} }));
       // The piece is recorded NOW, with the lineage that produced it: the floor moves and
       // the fragment list is rebuilt, so it is not recoverable later. The ledger holds one
@@ -884,6 +895,9 @@ export function Muse() {
   const holdRef = useRef<HoldState | null>(null);
   const holdWaiters = useRef<Array<() => void>>([]);
   const loraRef = useRef<LoraChoice[]>(lora);
+  // Read at fire time, exactly like `loraRef` above: the affix that reaches a piece is
+  // whatever was set when it fired, not whatever was set when the stream loop started.
+  const affixRef = useRef<AffixInput>(affix);
 
   /** Wake the parked loop without deciding anything for it — it re-reads the hold and
    *  every other refusal itself, so a stop pressed during a hold is still a stop. */
@@ -916,6 +930,11 @@ export function Muse() {
     // release a hold the user has not committed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lora]);
+
+  // The affix costs no warm-up, so — unlike the nozzle above — this sync never touches
+  // the hold. Editing it while a stream rides just changes what the next piece fires
+  // with.
+  useEffect(() => { affixRef.current = affix; }, [affix]);
 
   // The catalog, scoped to the flow's base-model family. Both lists are asked for
   // together: the caller's own imports and trained LoRAs sit beside the public ones.
@@ -1187,11 +1206,14 @@ export function Muse() {
         }
 
         const nozzle = loraRef.current;
-        const firePrompt = promptWithTrigger(draw.prompt, nozzle);
+        // The affix is read at FIRE time too, same as the nozzle just above: a piece
+        // carries whatever standing prefix and suffix were set when it fired.
+        const affixNow = affixRef.current;
+        const firePrompt = promptWithAffix(draw.prompt, nozzle, affixNow);
 
         let runId: string;
         try {
-          const { run } = await api.createRun(streamRunRequest(modus, draw.prompt, nozzle));
+          const { run } = await api.createRun(streamRunRequest(modus, draw.prompt, nozzle, affixNow));
           runId = run.id;
         } catch (e) {
           if (generationRef.current !== gen) return;
@@ -1583,7 +1605,7 @@ export function Muse() {
           {controls.nozzle && !loraOpen ? (
             <div className="muse-lora muse-collapsed">
               <span className="gc-l">Model</span>
-              <span className="muse-collapsed-line mono">{nozzleSummaryLine(lora)}</span>
+              <span className="muse-collapsed-line mono">{nozzleSummaryLine(lora, affix)}</span>
               <button
                 type="button"
                 className="linkish"
@@ -1604,6 +1626,31 @@ export function Muse() {
                 >
                   {loraOpen ? 'cancel' : lora.length > 0 ? 'change models' : 'choose a model'}
                 </button>
+              </div>
+
+              {/* The standing affix (noema-284): beside the model because it is set on
+                  the same terms — client state, no warm-up, no hold, no quote. It is
+                  not a steer, so there is nothing here to commit or cancel: typing
+                  changes what the very next piece fires with. */}
+              <div className="muse-affix">
+                <label className="cc-field muse-affix-field">
+                  <span>Prefix</span>
+                  <input
+                    className="cer-input" type="text"
+                    placeholder="always leads the prompt"
+                    value={affix.prefix ?? ''}
+                    onChange={(e) => setAffix((a) => ({ ...a, prefix: e.target.value }))}
+                  />
+                </label>
+                <label className="cc-field muse-affix-field">
+                  <span>Suffix</span>
+                  <input
+                    className="cer-input" type="text"
+                    placeholder="always trails the prompt"
+                    value={affix.suffix ?? ''}
+                    onChange={(e) => setAffix((a) => ({ ...a, suffix: e.target.value }))}
+                  />
+                </label>
               </div>
 
               {/* Wide: the panel opens in place, as it always has. Narrow: it opens as
