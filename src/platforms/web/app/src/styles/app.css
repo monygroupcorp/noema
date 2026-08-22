@@ -965,13 +965,24 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 /* ── dataset detail (train-dataset-spec.md) ────────────────────────────────── */
 .ds-d-name{display:flex;align-items:center;gap:11px}
 .ds-detail{display:grid;grid-template-columns:1fr 340px;gap:24px;align-items:start}
-@media(max-width:920px){.ds-detail{grid-template-columns:1fr}}
+/* On a phone the actions (caption/decompose/train, in .ds-side) must reach the eye before the
+   media grid does — the DOM keeps set-then-actions (the order a screen reader and a keyboard
+   follow), `order` moves only the visual position. `position:sticky` is dropped at this width:
+   a sticky block at the top of a one-column layout pins the actions over the content instead
+   of beside it. */
+@media(max-width:920px){
+  .ds-detail{grid-template-columns:1fr}
+  .ds-side{order:-1;position:static}
+}
 .ds-imgs-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
 .ds-showing{font-size:11px;color:var(--faint)}
 .ds-imgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 @media(max-width:560px){.ds-imgrid{grid-template-columns:1fr 1fr}}
 .ds-img{margin:0} .ds-img-tile{display:block;height:150px;border-radius:9px;border:1px solid var(--hair)}
 .ds-img figcaption{font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.4}
+/* the fragment garden, collapsed by default per media item (noema-283) — the images stay king */
+.ds-garden-toggle{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 0 0;font-size:10.5px;color:var(--faint);cursor:pointer;font-family:var(--font-mono)}
+.ds-garden-toggle:hover{color:var(--muted)}
 .ds-side{display:flex;flex-direction:column;gap:14px;position:sticky;top:14px}
 .ds-panel{border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:15px}
 .ds-panel-l{font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted);margin-bottom:11px}
