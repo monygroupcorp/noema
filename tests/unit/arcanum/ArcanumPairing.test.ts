@@ -17,7 +17,6 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import * as snarkjs from 'snarkjs'
-import verificationKey from '../../../src/arcanum/circuit/artifacts/verification_key.json' assert { type: 'json' }
 
 // snarkjs/ffjavascript spins up a curve worker-thread pool (bn128) inside
 // exportVerificationKey and never exposes a handle to terminate it — the
@@ -31,6 +30,11 @@ after(() => {
 
 const ARTIFACTS = path.join(process.cwd(), 'src/arcanum/circuit/artifacts')
 const ZKEY_PATH = path.join(ARTIFACTS, 'arcanum_final.zkey')
+const VKEY_PATH = path.join(ARTIFACTS, 'verification_key.json')
+
+// Read the tracked key rather than importing it as a JSON module: the tests program compiles as
+// CommonJS, where a JSON import assertion is not available. Same bytes, same comparison.
+const verificationKey: unknown = JSON.parse(readFileSync(VKEY_PATH, 'utf8'))
 
 test('tracked verification_key.json is derived from the tracked arcanum_final.zkey (pairing integrity)', async () => {
   assert.ok(existsSync(ZKEY_PATH), 'arcanum_final.zkey must be tracked in src/arcanum/circuit/artifacts/')

@@ -869,7 +869,7 @@ test("a batched stream of K fires exactly K pieces and then stops with reason 'c
   // The loop the screen runs, with the awaits taken out: decide, fire, settle, decide.
   for (let guard = 0; guard < 500; guard++) {
     const d = nextPieceDecision(DEC({ mode: 'batched', cap: K, fired }));
-    if (!d.fire) { seen.push(d.stop ?? 'none'); break; }
+    if (!d.fire) { seen.push(('stop' in d ? d.stop : null) ?? 'none'); break; }
     fired += 1;
   }
   assert.equal(fired, K, 'a batch of K fires K pieces — not K-1, not K+1');
@@ -962,7 +962,7 @@ test('consecutive stream draws are different rolls', () => {
   const garden = flattenGarden(buildGarden([
     frag('subject', 'a fox'), frag('subject', 'a heron'), frag('subject', 'a stag'),
     frag('setting', 'a foggy harbor'), frag('setting', 'a salt flat'), frag('setting', 'a rope bridge'),
-    frag('light', 'low sun'), frag('light', 'overcast noon'), frag('light', 'sodium streetlight'),
+    frag('lighting', 'low sun'), frag('lighting', 'overcast noon'), frag('lighting', 'sodium streetlight'),
   ]).garden);
 
   const draws = [0, 1, 2, 3].map((i) => rollAt(garden, new Set<number>(), i));
@@ -3015,7 +3015,7 @@ test('an archived image is not rendered in the set\'s grid', () => {
 test('the header counts the images that are left', () => {
   const captions = Object.fromEntries(['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9']
     .map((id) => [id, `a caption for ${id}`]))
-  const nine = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'].map((id) => ({ id }))
+  const nine: { id: string; archivum?: string }[] = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'].map((id) => ({ id }))
   const archivedTwo = nine.map((m, i) => (i > 6 ? { ...m, archivum: '2026-08-21T00:00:00.000Z' } : m))
 
   // Seven of nine left. The header, the caption quote and the coverage line all say seven —

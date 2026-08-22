@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 // File locations (relative to repo root, resolved from __dirname)
 const ARTIFACTS = path.join(process.cwd(), 'src/arcanum/circuit/artifacts')
@@ -30,7 +30,10 @@ import { MemoryArcanumTree } from '../../../src/arcanum/ArcanumTree.js'
 import { ArcanumVerifier, makeSnarkjsVerifier } from '../../../src/arcanum/ArcanumVerifier.js'
 import { generateNote, generateSpendProof, computeRecipient } from '../../../src/arcanum/prover.js'
 import { computeCommitment } from '../../../src/arcanum/poseidon.js'
-import verificationKey from '../../../src/arcanum/circuit/artifacts/verification_key.json' assert { type: 'json' }
+
+// Read the tracked key rather than importing it as a JSON module: the tests program compiles as
+// CommonJS, where a JSON import assertion is not available. Reached only when the artifacts exist.
+const verificationKey: object = JSON.parse(readFileSync(VKEY_PATH, 'utf8'))
 
 test('real Groth16: generateSpendProof produces a proof that ArcanumVerifier accepts', { timeout: 60_000 }, async () => {
   // 1. Generate a fresh note client-side

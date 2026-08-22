@@ -40,7 +40,7 @@ function makeModus(reserve = 100n): Modus {
 function makeRunner(reserve: bigint): Cursor {
   return {
     reserve: async () => reserve,
-    run: async () => ({ exitus: {}, impetus: reserve }),
+    run: async () => ({ kind: 'sync', exitus: { exitus: {}, impetus: reserve } }),
   }
 }
 
@@ -62,6 +62,12 @@ function makeActa(): Actorum & { records: Actum[] } {
     findByExternusJobId: async () => null,
     findByNullifier: async (n) => records.find(x => x.nullifier === n) ?? null,
     findExpired: async () => [],
+    // The spend flow under test never reaches these three. They throw rather than return a
+    // plausible empty result so a future test that does reach one fails loudly instead of
+    // reading a silent default as an answer.
+    findByCallbackNonce: async () => { throw new Error('makeActa: findByCallbackNonce is not exercised by the arcanum flow') },
+    findInFlight: async () => { throw new Error('makeActa: findInFlight is not exercised by the arcanum flow') },
+    findByCompositum: async () => { throw new Error('makeActa: findByCompositum is not exercised by the arcanum flow') },
   }
 }
 
@@ -84,7 +90,12 @@ async function makeSetup(identifiedBalance = 500n) {
   const modus = makeModus(100n)
   const acta = makeActa()
   const inceptor = new ActumInceptor({
-    modorum: { find: async () => modus, register: async () => {}, list: async () => [] },
+    modorum: {
+      find: async () => modus,
+      register: async () => {},
+      list: async () => [],
+      update: async () => { throw new Error('makeSetup: modorum.update is not exercised by the arcanum flow') },
+    },
     cursorum: makeCursorum(makeRunner(100n)),
     signorum,
     acta,
