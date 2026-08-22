@@ -8,6 +8,7 @@ import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateR
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import type { Fundamentum } from '../../../src/types/fundamentum.js'
 import type { Essentia } from '../../../src/types/essendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 // =============================================================================
 // The i2i image-input primitive (Compiler half). An image/video/audio-typed,
@@ -48,14 +49,14 @@ const makeCompiler = () =>
 test('i2i: an image-typed slot-mapped aditus → a mediaInputs download + the graph slot carries the filename', async () => {
   const { spec } = await makeCompiler().compile(ESS, { image: 'https://r2.example/cat.png?sig=abc' })
 
-  assert.ok(spec.mediaInputs, 'spec carries mediaInputs')
-  assert.equal(spec.mediaInputs!.length, 1)
-  const mi = spec.mediaInputs![0]
+  assert.ok(asComfyUI(spec).mediaInputs, 'spec carries mediaInputs')
+  assert.equal(asComfyUI(spec).mediaInputs!.length, 1)
+  const mi = asComfyUI(spec).mediaInputs![0]
   assert.equal(mi.url, 'https://r2.example/cat.png?sig=abc', 'the full URL is handed to the runner')
   assert.match(mi.destFilename, /^noema_image_[0-9a-f]{16}\.png$/, 'deterministic filename, png ext from the URL path')
 
   // The graph's LoadImage slot now carries the FILENAME, not the URL.
-  const loadImage = spec.workflow.inputTemplate['1'] as { inputs: Record<string, unknown> }
+  const loadImage = asComfyUI(spec).workflow.inputTemplate['1'] as { inputs: Record<string, unknown> }
   assert.equal(loadImage.inputs.image, mi.destFilename, 'LoadImage.image = destFilename (not the URL)')
 })
 
@@ -63,8 +64,8 @@ test('i2i: destFilename is stable across re-compiles regardless of presign query
   const a = await makeCompiler().compile(ESS, { image: 'https://r2.example/cat.png?sig=AAA' })
   const b = await makeCompiler().compile(ESS, { image: 'https://r2.example/cat.png?sig=BBB' })
   assert.equal(
-    a.spec.mediaInputs![0].destFilename,
-    b.spec.mediaInputs![0].destFilename,
+    asComfyUI(a.spec).mediaInputs![0].destFilename,
+    asComfyUI(b.spec).mediaInputs![0].destFilename,
     'query stripped before hashing → stable content-address (hash-stable spec)',
   )
 })
