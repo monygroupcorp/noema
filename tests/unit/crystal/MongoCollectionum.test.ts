@@ -19,6 +19,7 @@ const base = {
   by: { animaId: 'anima-abc' } as { animaId: string },
   concurrentia: 2,
   status: 'nascens' as const,
+  provenanceHash: `sha256:${'0'.repeat(64)}`,
 }
 
 before(async () => {

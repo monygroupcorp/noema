@@ -22,7 +22,9 @@ function fakeModorum(): Pick<Modorum, 'find' | 'register'> & { store: Map<string
 
 function fakeIssuers(): Pick<IssuerStore, 'upsert' | 'findByIssuerId'> {
   return {
-    async upsert() { /* no-op double */ },
+    // Returns the registered issuer, as the store contract does — the seed ignores the value,
+    // but a double that returned nothing would not be implementing the interface it declares.
+    async upsert(issuer) { return { ...issuer, status: issuer.status ?? 'active' } },
     async findByIssuerId() { return null },
   }
 }

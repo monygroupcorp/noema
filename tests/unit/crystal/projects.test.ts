@@ -26,8 +26,8 @@ class MemProvinciarum implements Provinciarum {
     // path is faithfully asserted here too (an E2E-caught quirk: $set:{x:undefined}→null).
     const p: Provincia = { ...this.store.get(id)!, mutatum: new Date() }
     for (const [k, v] of Object.entries(patch)) {
-      if (v === undefined) delete (p as Record<string, unknown>)[k]
-      else (p as Record<string, unknown>)[k] = v
+      if (v === undefined) delete (p as unknown as Record<string, unknown>)[k]
+      else (p as unknown as Record<string, unknown>)[k] = v
     }
     this.store.set(id, p)
     return p

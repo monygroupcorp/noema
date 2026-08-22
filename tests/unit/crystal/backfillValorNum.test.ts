@@ -91,7 +91,7 @@ test('after backfill, reserve selects the smaller coin (not the null-sorted lega
 
   await backfillValorNum(col)
 
-  const store = new MongoSignorum(col)
+  const store = new MongoSignorum(col, client)
   const r = await store.reserve({ animaId: 'mix' }, 5n, 'act-backfill')
   assert.ok(r.ok, 'reserve should cover 5')
   // Correct greedy: take the 5-coin whole, never split the 100000-coin.

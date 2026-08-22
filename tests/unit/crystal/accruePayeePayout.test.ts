@@ -24,7 +24,9 @@ function fakeAnimae(): Pick<AnimaStore, 'findByCustos' | 'create'> {
 const OWNER = '0x' + 'a'.repeat(40)
 const AT = new Date('2026-03-01T00:00:00Z')
 
-function deps(over: Partial<AccruePayeeDeps> = {}): AccruePayeeDeps & { mercedum: MemoryMerces } {
+// `mercedum` is excluded from the overrides: this helper always supplies the in-memory one,
+// and the return type promises that concrete class to the cases that read its internals.
+function deps(over: Partial<Omit<AccruePayeeDeps, 'mercedum'>> = {}): AccruePayeeDeps & { mercedum: MemoryMerces } {
   const mercedum = new MemoryMerces()
   return { mercedum, animae: fakeAnimae(), ...over }
 }

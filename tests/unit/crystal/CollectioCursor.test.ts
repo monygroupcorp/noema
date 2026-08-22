@@ -106,6 +106,20 @@ function makeActorum(): ActorumStub {
     async findExpired() {
       return []
     },
+    // The rest of the Actorum surface. The collectio cursor drives create/update/findById
+    // only, so these are unreached here and throw rather than return a plausible default.
+    async findByCallbackNonce(): Promise<Actum | null> {
+      throw new Error('ActorumStub.findByCallbackNonce: not implemented for this suite')
+    },
+    async findByNullifier(): Promise<Actum | null> {
+      throw new Error('ActorumStub.findByNullifier: not implemented for this suite')
+    },
+    async findInFlight(): Promise<Actum[]> {
+      throw new Error('ActorumStub.findInFlight: not implemented for this suite')
+    },
+    async findByCompositum(): Promise<Actum[]> {
+      throw new Error('ActorumStub.findByCompositum: not implemented for this suite')
+    },
   }
 }
 

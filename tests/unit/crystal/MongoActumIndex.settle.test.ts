@@ -32,9 +32,9 @@ after(async () => {
 function inFlight(over: Partial<ActumIndex> & Pick<ActumIndex, 'actumId'>): ActumIndex {
   return {
     animaId: 'anima-A',
-    actumId: over.actumId,
     modusId: 'modus-x',
     createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    // `actumId` is required on the parameter, so the spread always supplies it.
     ...over,
   }
 }

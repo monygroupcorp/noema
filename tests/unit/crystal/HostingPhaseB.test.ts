@@ -18,11 +18,20 @@ class FakeHospitium implements HospitiumStore {
 
   async create(input: Omit<Hospitium, 'id'>): Promise<Hospitium> {
     const h: Hospitium = { id: `hosp-${this.nextId++}`, ...input }
+    if (!h.materiaId) throw new Error('FakeHospitium: this double keys by materiaId; create needs one')
     this.byMateria.set(h.materiaId, h)
     return h
   }
   async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
     return this.byMateria.get(materiaId) ?? null
+  }
+  // Studio-binding half of the interface — this suite only exercises pod-keyed host
+  // records, so these are unreached here and throw rather than return a plausible default.
+  async findByModoId(_modoId: string): Promise<Hospitium | null> {
+    throw new Error('FakeHospitium.findByModoId: not implemented for this suite')
+  }
+  async bindMateria(_modoId: string, _materiaId: string): Promise<Hospitium> {
+    throw new Error('FakeHospitium.bindMateria: not implemented for this suite')
   }
   async findActive(): Promise<Hospitium[]> {
     return [...this.byMateria.values()].filter(h => !h.terminatum)
