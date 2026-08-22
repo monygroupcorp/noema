@@ -7,7 +7,9 @@ import { WorkflowTemplateRegistry } from '../../../src/crystal/WorkflowTemplateR
 import { ESSENTIA_RUNMAKE_SD15 } from '../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_SD15_COMFYUI } from '../../../src/crystal/seeds/fundamenta.js'
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
+import type { Essentia } from '../../../src/types/essendi.js'
 import type { Intellarum, Intella, Intellae } from '../../../src/types/intelligendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -81,10 +83,10 @@ test('compile(ESSENTIA_RUNMAKE_SD15) slots the prompt into the LoraTextExtractor
   // (node 10), and the positive CLIPTextEncode (node 6) reads its cleaned-text output.
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a cat' })
-  const extractor = spec.workflow.inputTemplate['10'] as { class_type: string; inputs: Record<string, unknown> }
+  const extractor = asComfyUI(spec).workflow.inputTemplate['10'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(extractor.class_type, 'LoraTextExtractor-b1f83aa2')
   assert.equal(extractor.inputs.text, 'a cat')
-  const positive = spec.workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
+  const positive = asComfyUI(spec).workflow.inputTemplate['6'] as { class_type: string; inputs: Record<string, unknown> }
   assert.equal(positive.class_type, 'CLIPTextEncode')
   assert.deepEqual(positive.inputs.text, ['10', 0])
 })
@@ -106,10 +108,10 @@ test('compile(ESSENTIA_RUNMAKE_SD15) includes the SD1.5 checkpoint in spec.model
 test('compile() forwards the sd15 template customNodes (Coziness pack) onto spec.customNodes', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a cat' })
-  assert.ok(Array.isArray(spec.customNodes), 'customNodes is carried onto the spec')
-  assert.equal(spec.customNodes!.length, 1)
-  assert.equal(spec.customNodes![0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
-  assert.equal(spec.customNodes![0].name, 'ComfyUI-Coziness')
+  assert.ok(Array.isArray(asComfyUI(spec).customNodes), 'customNodes is carried onto the spec')
+  assert.equal(asComfyUI(spec).customNodes!.length, 1)
+  assert.equal(asComfyUI(spec).customNodes![0].url, 'https://github.com/skfoo/ComfyUI-Coziness')
+  assert.equal(asComfyUI(spec).customNodes![0].name, 'ComfyUI-Coziness')
 })
 
 test('compile() omits spec.customNodes when the template declares none', async () => {
@@ -145,7 +147,7 @@ test('compile() omits spec.customNodes when the template declares none', async (
     workflowTemplateVersion: '1',
   }
   const { spec } = await compiler.compile(noUrl, { prompt: 'a cat' })
-  assert.equal(spec.customNodes, undefined, 'no customNodes declared → field omitted')
+  assert.equal(asComfyUI(spec).customNodes, undefined, 'no customNodes declared → field omitted')
 })
 
 // ── LoRA familia gating on the sd15 template (Part 2) ─────────────────────────
@@ -159,10 +161,10 @@ test('compile() on sd15 + a familia:sd15 LoRA trigger: applies it + rewrites the
   assert.equal(r.appliedLoras?.length, 1)
   assert.equal(r.appliedLoras?.[0].slug, 'sd15style')
   // <lora:...> tag routed into the LoraTextExtractor (node 10), NOT the CLIPTextEncode directly
-  const node10 = r.spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(r.spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.match(node10.inputs.text as string, /<lora:sd15style:1>/)
   // positive CLIPTextEncode reads the extractor's cleaned-text output
-  const node6 = r.spec.workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
+  const node6 = asComfyUI(r.spec).workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
   assert.deepEqual(node6.inputs.text, ['10', 0])
   // model list gained the LoRA
   assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
@@ -184,21 +186,21 @@ function withPromptAffix(affix: { praefixum?: string; suffixum?: string }): Esse
 test('weave: a prompt Porta suffixum is woven after the user prompt in the slotted text node', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(withPromptAffix({ suffixum: 'watercolor, masterpiece' }), { prompt: 'a fox' })
-  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.equal(node10.inputs.text, 'a fox, watercolor, masterpiece')
 })
 
 test('weave: a prompt Porta praefixum is woven before the user prompt', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(withPromptAffix({ praefixum: 'masterpiece' }), { prompt: 'a fox' })
-  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.equal(node10.inputs.text, 'masterpiece, a fox')
 })
 
 test('weave: no affixes → prompt unchanged (no-op)', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a fox' })
-  const node10 = spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.equal(node10.inputs.text, 'a fox')
 })
 
@@ -212,7 +214,7 @@ test('weave-before-lora: a trigger word inside a suffixum resolves into an appli
 
   assert.equal(r.appliedLoras?.length, 1)
   assert.equal(r.appliedLoras?.[0].slug, 'sd15style')
-  const node10 = r.spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(r.spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.match(node10.inputs.text as string, /<lora:sd15style:1>/)
   assert.ok(r.spec.models.find(m => m.role === 'lora'), 'LoRA in spec.models')
 })
@@ -222,7 +224,7 @@ test('compile() on sd15 does NOT apply a familia:flux LoRA on the same trigger w
   const compiler = compilerWith(intellarum)
   const r = await compiler.compile(ESSENTIA_RUNMAKE_SD15, { prompt: 'a portrait, sdtrigger style' })
   assert.equal(r.appliedLoras, undefined, 'cross-family (flux) LoRA must NOT be offered on an sd15 flow')
-  const node10 = r.spec.workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
+  const node10 = asComfyUI(r.spec).workflow.inputTemplate['10'] as { inputs: Record<string, unknown> }
   assert.equal(node10.inputs.text, 'a portrait, sdtrigger style', 'prompt unchanged')
   assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
 })

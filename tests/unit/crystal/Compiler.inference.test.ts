@@ -49,8 +49,8 @@ test('compile(Qwen3-VL) produces an inference spec (no workflow, runtime vLLM)',
   const { spec } = await makeCompiler().compile(ESSENTIA_QWEN3_VL, { prompt: 'describe this' })
   const inf = asInference(spec)
   assert.equal(inf.runtime, 'vLLM')
-  assert.equal((spec as Record<string, unknown>).workflow, undefined, 'no ComfyUI graph on an LLM spec')
-  assert.equal((spec as Record<string, unknown>).seed, undefined, 'no image seed on an LLM spec')
+  assert.equal((spec as unknown as Record<string, unknown>).workflow, undefined, 'no ComfyUI graph on an LLM spec')
+  assert.equal((spec as unknown as Record<string, unknown>).seed, undefined, 'no image seed on an LLM spec')
   assert.equal(inf.inference.prompt, 'describe this')
 })
 

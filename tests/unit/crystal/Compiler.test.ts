@@ -8,6 +8,7 @@ import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js
 import type { Essentia } from '../../../src/types/essendi.js'
 import type { Fundamentum } from '../../../src/types/fundamentum.js'
 import type { Intellarum, Intella } from '../../../src/types/intelligendi.js'
+import { asComfyUI } from './Compiler.helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -80,14 +81,14 @@ test('compile() embeds prompt into the LoraTextExtractor node via slotMap', asyn
   // the CLIPTextEncodeFlux node (22) reads the extractor's cleaned-text output.
   const compiler = makeCompiler(42)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'a glowing cat' })
-  const node20 = spec.workflow.inputTemplate['20'] as { inputs: Record<string, unknown> }
+  const node20 = asComfyUI(spec).workflow.inputTemplate['20'] as { inputs: Record<string, unknown> }
   assert.equal(node20.inputs.text, 'a glowing cat')
 })
 
 test('compile() embeds width and height into EmptyLatentImage', async () => {
   const compiler = makeCompiler(42)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test', width: 768, height: 512 })
-  const node6 = spec.workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
+  const node6 = asComfyUI(spec).workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
   assert.equal(node6.inputs.width, 768)
   assert.equal(node6.inputs.height, 512)
 })
@@ -95,14 +96,14 @@ test('compile() embeds width and height into EmptyLatentImage', async () => {
 test('compile() embeds steps into KSampler', async () => {
   const compiler = makeCompiler(42)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test', steps: 8 })
-  const node13 = spec.workflow.inputTemplate['13'] as { inputs: Record<string, unknown> }
+  const node13 = asComfyUI(spec).workflow.inputTemplate['13'] as { inputs: Record<string, unknown> }
   assert.equal(node13.inputs.steps, 8)
 })
 
 test('compile() leaves unset optional slots at template defaults', async () => {
   const compiler = makeCompiler(99)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
-  const node6 = spec.workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
+  const node6 = asComfyUI(spec).workflow.inputTemplate['6'] as { inputs: Record<string, unknown> }
   assert.equal(node6.inputs.width, 512)
   assert.equal(node6.inputs.height, 512)
 })
@@ -112,16 +113,16 @@ test('compile() leaves unset optional slots at template defaults', async () => {
 test('compile() uses explicit input_seed when provided', async () => {
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test', input_seed: 12345 })
-  assert.equal(spec.seed, 12345)
-  const node13 = spec.workflow.inputTemplate['13'] as { inputs: Record<string, unknown> }
+  assert.equal(asComfyUI(spec).seed, 12345)
+  const node13 = asComfyUI(spec).workflow.inputTemplate['13'] as { inputs: Record<string, unknown> }
   assert.equal(node13.inputs.seed, 12345)
 })
 
 test('compile() generates random seed when input_seed absent (shuffle strategy)', async () => {
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), undefined, undefined, FUNDS)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test' })
-  assert.equal(typeof spec.seed, 'number')
-  assert.ok(spec.seed >= 0)
+  assert.equal(typeof asComfyUI(spec).seed, 'number')
+  assert.ok(asComfyUI(spec).seed >= 0)
 })
 
 test('compile() uses fixed seedPlaceholder when strategy is fixed', async () => {
@@ -130,13 +131,13 @@ test('compile() uses fixed seedPlaceholder when strategy is fixed', async () => 
   })
   const compiler = makeCompiler()
   const { spec } = await compiler.compile(essentia, { prompt: 'test' })
-  assert.equal(spec.seed, 77777777)
+  assert.equal(asComfyUI(spec).seed, 77777777)
 })
 
 test('compile() seed 0 is treated as explicit (not auto-shuffled)', async () => {
   const compiler = makeCompiler(999)
   const { spec } = await compiler.compile(makeEssentia(), { prompt: 'test', input_seed: 0 })
-  assert.equal(spec.seed, 0)
+  assert.equal(asComfyUI(spec).seed, 0)
 })
 
 // ── compile() — output shape ──────────────────────────────────────────────────
@@ -203,7 +204,7 @@ test('compile() uses increment strategy: baseSeed + pieceIndex', async () => {
     prompt: 'test',
     _genFlags: { baseSeed: 1000, pieceIndex: 7 },
   })
-  assert.equal(spec.seed, 1007)
+  assert.equal(asComfyUI(spec).seed, 1007)
 })
 
 test('compile() throws CompilerError when template not found', async () => {
@@ -382,7 +383,7 @@ test('compile() on loraCapable template + matching trigger: rewrites prompt + ap
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, milady style' })
 
   // Prompt embedded into the CLIP node now contains the <lora:...> tag
-  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  const node22 = asComfyUI(r.spec).workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
   assert.match(node22.inputs.clip_l as string, /<lora:milady-v3:1>/)
 
   // Model list gained the LoRA, sorted next to the unet base
@@ -402,7 +403,7 @@ test('compile() on loraCapable template with no trigger hit: prompt unchanged, n
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait of a cat' })
 
-  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  const node22 = asComfyUI(r.spec).workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
   assert.equal(node22.inputs.clip_l, 'a portrait of a cat')
   assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
   assert.equal(r.appliedLoras, undefined, 'no LoRAs applied → field omitted')
@@ -435,7 +436,7 @@ test('compile() on NOT-loraCapable template: resolver does not run even with mat
     workflowTemplateVersion: '1',
   })
   const r = await compiler.compile(noUrl, { prompt: 'a portrait, milady style' })
-  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  const node22 = asComfyUI(r.spec).workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
   assert.equal(node22.inputs.clip_l, 'a portrait, milady style', 'prompt unchanged')
   assert.equal(r.spec.models.filter(m => m.role === 'lora').length, 0)
 })
@@ -488,7 +489,7 @@ test('compile() does NOT apply a LoRA of a different family even on the same tri
   const compiler = new Compiler(new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, intellarum, FUNDS)
   const r = await compiler.compile(makeLoraEssentia(), { prompt: 'a portrait, fluxtrigger style' })
   assert.equal(r.appliedLoras, undefined, 'cross-family LoRA must NOT be offered')
-  const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+  const node22 = asComfyUI(r.spec).workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
   assert.equal(node22.inputs.clip_l, 'a portrait, fluxtrigger style', 'prompt unchanged')
 })
 
@@ -569,7 +570,7 @@ test('compile() resolves a v2-shape LoRA record from MongoIntella + injects into
     assert.equal(r.appliedLoras?.length, 1)
     assert.equal(r.appliedLoras?.[0].slug, 'milady-v2')
     // Tag injected into the CLIP prompt
-    const node22 = r.spec.workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
+    const node22 = asComfyUI(r.spec).workflow.inputTemplate['22'] as { inputs: Record<string, unknown> }
     assert.match(node22.inputs.clip_l as string, /<lora:milady-v2:1>/)
     // spec.models gained the LoRA entry from the v2 record
     const lora = r.spec.models.find(m => m.role === 'lora')
