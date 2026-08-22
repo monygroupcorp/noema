@@ -24,6 +24,8 @@ import {
   spawnSession,
   updatePiece,
   withSessionDataset,
+  withSetup,
+  normalizeSetup,
   pieceOf,
 } from '../../../src/crystal/muse/session.js'
 
@@ -594,4 +596,87 @@ test('a saved piece is flagged in the ledger without disturbing what else it say
   // records that the media landed, so nothing may clear it as a side effect.
   const laterNote = updatePiece(saved, 'run-1', { reaction: 'note' })
   assert.equal(pieceOf(laterNote, 'run-1')?.saved, true)
+})
+
+// --- The setup: what the session fires its draw through (noema-287) ----------
+//
+// The setup is a field of the PURE session value, not of the persistence envelope
+// (`src/types/museSession.ts` declares the envelope's four fields fixed), so it is
+// mutated the way everything else here is: a function that takes a session and returns
+// a new one. These tests gate the two things the shape refuses.
+
+test('a setup cannot carry an infinite-mode acknowledgement, whatever the caller sends', () => {
+  // THE MONEY PROOF. An infinite-mode acknowledgement is consent for ONE sitting: it is
+  // what stands in for the count that an infinite run does not have. A setup that stored
+  // it would hand a reload a session already agreed to an unbounded spend.
+  const spawned = spawnSession('mother-1', motherFragments())
+  const stored = withSetup(spawned, {
+    modusId: 'flow-t2i',
+    mode: 'infinite',
+    cap: 12,
+    acknowledged: true,
+    collapsed: { nozzle: 'closed' },
+  })
+
+  const setup = stored.setup!
+  assert.equal('acknowledged' in setup, false, 'an acknowledgement must not survive into the stored setup')
+  assert.equal('collapsed' in setup, false, 'fold state is the screen’s and does not belong on the session')
+  assert.deepEqual(Object.keys(setup).sort(), ['cap', 'mode', 'modusId'])
+})
+
+test('a stored stack drops what cannot fire and keeps the order of what can', () => {
+  const spawned = spawnSession('mother-1', motherFragments())
+  const stored = withSetup(spawned, {
+    nozzle: [
+      { intellaId: 'model-a', nomen: 'Model A', trigger: 'atrig', weight: 0.8 },
+      // No trigger word: weights that would be fetched and never applied.
+      { intellaId: 'model-b', nomen: 'Model B', trigger: '   ' },
+      // The same model twice describes a run that does not exist — the compiler de-dupes.
+      { intellaId: 'model-a', nomen: 'Model A again', trigger: 'atrig' },
+      { intellaId: 'model-c', nomen: 'Model C', trigger: 'ctrig' },
+      // A non-finite weight is no weight at all; the entry still fires, at its own default.
+      { intellaId: 'model-d', nomen: 'Model D', trigger: 'dtrig', weight: Number.NaN },
+    ],
+  })
+
+  const nozzle = stored.setup!.nozzle!
+  assert.deepEqual(nozzle.map((e) => e.intellaId), ['model-a', 'model-c', 'model-d'])
+  assert.equal(nozzle[0]!.weight, 0.8)
+  assert.equal('weight' in nozzle[2]!, false, 'a non-finite weight is stored as no weight')
+  assert.equal(nozzle[1]!.nomen, 'Model C', 'the name rides along, so a resume can say which model is gone')
+})
+
+test('a setup is replaced wholesale, and one that names nothing clears it', () => {
+  const spawned = spawnSession('mother-1', motherFragments())
+  const first = withSetup(spawned, {
+    modusId: 'flow-t2i',
+    mode: 'batched',
+    cap: 40,
+    nozzle: [{ intellaId: 'model-a', nomen: 'Model A', trigger: 'atrig' }],
+    prefix: 'a standing lead',
+  })
+  assert.equal(first.setup?.cap, 40)
+
+  // Wholesale: the model the user took off is off, rather than merged forward.
+  const second = withSetup(first, { modusId: 'flow-t2i', mode: 'batched', cap: 40 })
+  assert.equal(second.setup?.nozzle, undefined)
+  assert.equal(second.setup?.prefix, undefined)
+
+  // Cleared reads exactly as never set.
+  const cleared = withSetup(second, {})
+  assert.equal('setup' in cleared, false)
+  assert.equal(withSetup(spawned, {}), spawned, 'clearing a setup that was never there changes nothing')
+
+  // The floor and the ledger are untouched by any of it.
+  assert.deepEqual(second.fragments, spawned.fragments)
+  assert.deepEqual(second.pieces, spawned.pieces)
+})
+
+test('a cap is a whole number of pieces, at least one', () => {
+  assert.equal(normalizeSetup({ cap: 12.7 }).cap, 12)
+  assert.equal(normalizeSetup({ cap: 0 }).cap, 1)
+  assert.equal(normalizeSetup({ cap: -5 }).cap, 1)
+  assert.equal(normalizeSetup({ cap: '12' }).cap, undefined, 'a cap off the wire is a number or it is nothing')
+  assert.equal(normalizeSetup({ mode: 'endless' }).mode, undefined, 'a mode outside the two is no mode')
+  assert.deepEqual(normalizeSetup(null), {})
 })

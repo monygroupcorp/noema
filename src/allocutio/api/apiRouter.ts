@@ -167,6 +167,8 @@ export interface ApiFacade {
   setMuseFragmentEnabled(auctor: AuctorKey, id: string, fragment: unknown, enabled: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   setMuseFragmentWeight(auctor: AuctorKey, id: string, fragment: unknown, weight: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
+  /** Replaces the run setup wholesale. Spends nothing and fires nothing. */
+  setMuseSetup(auctor: AuctorKey, id: string, setup: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm. */
   steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<import('./CrystalApi.js').SteerProposalView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
@@ -1106,6 +1108,25 @@ export function createApiRouter(deps: {
     const auctor = await auth(req)
     const body = (req.body ?? {}) as { category?: unknown; text?: unknown }
     res.status(201).json({ session: await api.addMuseFragment(auctor, String(req.params.id), body) })
+  }))
+
+  // PATCH /v1/data/muse/sessions/:id/setup — what the session fires its draw THROUGH:
+  // the flow, the run shape, the model stack and the standing affix. Stored so that a
+  // reload comes back to the engine the user assembled rather than to the screen's
+  // defaults, which is the same server-side-and-owner-scoped rule the floor already
+  // follows. Replaces the setup wholesale — a setup is one picture of what is about to
+  // fire, and a merge would leave a model on the stack after it was taken off.
+  //
+  // NOTHING IS SPENT and nothing is fired: no run, no quote, no model call. The body
+  // carries DATA ONLY; the owner is `auth(req)` and the session is the path's.
+  //
+  // The infinite-mode acknowledgement is NOT part of a setup and cannot be written
+  // through here — a body carrying one is stored without it, so a resume is never
+  // pre-consented to a run that has no count to stop it.
+  router.patch('/data/muse/sessions/:id/setup', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const session = await api.setMuseSetup(auctor, String(req.params.id), req.body ?? {})
+    res.json({ session })
   }))
 
   // POST /v1/data/muse/sessions/:id/steer — interpret a short instruction against the

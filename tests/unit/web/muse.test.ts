@@ -154,6 +154,11 @@ import {
   nozzleTriggerLabel,
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
+  hydrateSetup,
+  missingNozzleNote,
+  resolveNozzle,
+  setupOf,
+  DEFAULT_STREAM_CONFIG,
   type LoraChoice,
   type AffixInput,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
@@ -181,6 +186,7 @@ import type {
   MuseFloorEntry,
   MusePiece,
   MuseSessionView,
+  MuseSetup,
   MuseSteerProposal,
 } from '../../../src/platforms/web/app/src/lib/api.js'
 
@@ -3116,4 +3122,217 @@ test('a hand-fired piece with an EMPTY stack sends what it sends today', () => {
   // a pin with nothing to apply it.
   assert.deepEqual(stacked(card({ intellaId: 'lora-9', trigger: '  ' })), [])
   assert.equal('pinnedModels' in firedRunRequest('flow-t2i', edited, stacked(card({ trigger: '' }))), false)
+})
+
+// ── The setup comes back with the pieces (noema-287) ────────────────────────
+//
+// The floor and the piece ledger already survived a reload; the ENGINE did not. What is
+// gated here is the round trip — what is written on commit, what is read back on mount,
+// and the two rules that make a restore safe rather than expensive:
+//
+//   HYDRATING IS NOT FIRING. Every function on this path is a pure read. A restored
+//   setup arms the screen and spends nothing; the launch control is still the only
+//   thing that does.
+//
+//   A MODEL THAT IS NO LONGER THERE IS NAMED. A stored stack is re-resolved against the
+//   catalog the chosen flow actually offers, and what does not resolve comes back by
+//   name rather than being quietly dropped — firing under fewer models than the line
+//   claims is a wrong image at full price.
+//
+// Fixtures are invented throughout (`ses-…`, `sample-lora`, `trigword`).
+
+function setupSession(setup: MuseSetup): MuseSessionView {
+  return {
+    id: 'ses-1',
+    owner: 'anima-1',
+    motherDatasetId: 'ds-1',
+    fragments: [],
+    floor: [],
+    pieces: [],
+    setup,
+    natum: '2026-01-01T00:00:00.000Z',
+    mutatum: '2026-01-02T00:00:00.000Z',
+  }
+}
+
+// Non-vacuity 1 — the stack and the run shape come back
+
+test('a session resolved on mount restores its stack and run shape', () => {
+  const first = card()
+  const second = card({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })
+  const offer = [first, second]
+
+  // What a commit writes…
+  const written = setupOf({
+    modusId: 'flow-t2i',
+    config: { mode: 'infinite', cap: 24, acknowledged: true },
+    nozzle: [CHOICE({ weight: 0.8 }), CHOICE({ intellaId: 'lora-2', nomen: 'other-lora', trigger: 'othertrig' })],
+    affix: { prefix: 'a standing lead', suffix: 'a standing trail' },
+  })
+  assert.equal(written.modusId, 'flow-t2i')
+  assert.equal(written.mode, 'infinite')
+  assert.equal(written.cap, 24)
+  assert.deepEqual(written.nozzle?.map((e) => e.intellaId), ['lora-1', 'lora-2'])
+  assert.equal(written.nozzle?.[0]?.weight, 0.8)
+  assert.equal('weight' in written.nozzle![1]!, false, "no weight set means the model's own default")
+
+  // …is what a mount reads back.
+  const restored = hydrateSetup(setupSession(written))
+  assert.equal(restored.modusId, 'flow-t2i')
+  assert.equal(restored.config.mode, 'infinite')
+  assert.equal(restored.config.cap, 24)
+  assert.deepEqual(restored.affix, { prefix: 'a standing lead', suffix: 'a standing trail' })
+
+  const { stack, missing } = resolveNozzle(restored.nozzle, offer, 'base-a')
+  assert.deepEqual(missing, [], 'every model is still on offer, so nothing is missing')
+  assert.deepEqual(stack.map((c) => c.intellaId), ['lora-1', 'lora-2'], 'in the order it was stacked')
+  assert.equal(stack[0]!.weight, 0.8, 'the weight the user set comes back with it')
+  assert.equal(stack[1]!.weight, null, "and an unset weight stays unset rather than inheriting its neighbour's")
+
+  // The restored stack is a working nozzle, not a readout: it composes the same prompt
+  // and pins the same weights a hand-chosen one does.
+  assert.match(promptWithAffix('a fox', stack, restored.affix), /^trigword:0\.8, othertrig, a standing lead, a fox, a standing trail$/)
+  assert.deepEqual(firedRunRequest('flow-t2i', 'a fox', stack, restored.affix).pinnedModels, ['lora-1', 'lora-2'])
+
+  // A session that never committed a setup comes back on the screen's own defaults.
+  const fresh = hydrateSetup(setupSession({}))
+  assert.equal(fresh.modusId, null)
+  assert.deepEqual(fresh.config, DEFAULT_STREAM_CONFIG)
+  assert.deepEqual(fresh.nozzle, [])
+  assert.deepEqual(fresh.affix, {})
+  assert.deepEqual(hydrateSetup(null).config, DEFAULT_STREAM_CONFIG)
+})
+
+// Non-vacuity 3 — THE MONEY PROOF: consent does not survive the sitting that gave it
+
+test('a restored session comes back UNACKNOWLEDGED', () => {
+  // An infinite-mode acknowledgement is what stands in for the count an infinite run
+  // does not have. It is refused in three places, and this is the last of them: the
+  // write does not carry it, the wire type has no field for it, and the read forces it
+  // false whatever arrives — which is what holds for a session written before the other
+  // two existed.
+  const written = setupOf({
+    modusId: 'flow-t2i',
+    config: { mode: 'infinite', cap: 12, acknowledged: true },
+    nozzle: [],
+  })
+  assert.equal('acknowledged' in written, false, 'a commit does not write the acknowledgement')
+
+  const smuggled = setupSession({ mode: 'infinite', cap: 12, acknowledged: true } as MuseSetup)
+  const restored = hydrateSetup(smuggled)
+  assert.equal(restored.config.mode, 'infinite', 'the run shape itself is restored')
+  assert.equal(restored.config.acknowledged, false, 'the consent is not')
+
+  // And the refusal is load-bearing, not cosmetic: the launch control is still shut
+  // until this sitting acknowledges it for itself.
+  const blocked = launchBlockReason({
+    config: restored.config,
+    modusId: 'flow-t2i',
+    flowBlockReason: null,
+    liveFragments: 3,
+    quote: { modusId: 'flow-t2i', impetus: '40' },
+  })
+  assert.match(String(blocked), /stop it/, 'a restored infinite setup cannot launch until it is acknowledged again')
+})
+
+// Non-vacuity 4 — a hydrate is a read
+
+test('hydrating fires no run and no quote', async () => {
+  // Every request this app makes goes through `fetch`. Trapping it is the whole proof:
+  // a hydrate that priced the flow, asked for a run, or read a balance would land here.
+  const real = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async (...args: unknown[]) => {
+    calls += 1
+    throw new Error(`a hydrate must make no request (${String(args[0])})`)
+  }) as typeof fetch
+  try {
+    const written = setupOf({
+      modusId: 'flow-t2i',
+      config: { mode: 'batched', cap: 24, acknowledged: true },
+      nozzle: [CHOICE({ weight: 0.8 })],
+      affix: { prefix: 'a standing lead' },
+    })
+    const restored = hydrateSetup(setupSession(written))
+    const resolved = resolveNozzle(restored.nozzle, [card()], 'base-a')
+    missingNozzleNote(resolved.missing)
+
+    assert.equal(calls, 0, 'restoring a setup made a request')
+    assert.equal(resolved.stack.length, 1, 'and it still restored the setup')
+  } finally {
+    globalThis.fetch = real
+  }
+
+  // Armed, not spending: the restored setup carries no price of its own, and an unpriced
+  // stream has no ceiling, so launch stays shut until the ordinary quote path prices it.
+  const restored = hydrateSetup(setupSession({ modusId: 'flow-t2i', mode: 'batched', cap: 24 }))
+  const unpriced = launchBlockReason({
+    config: restored.config,
+    modusId: restored.modusId,
+    flowBlockReason: null,
+    liveFragments: 3,
+    quote: null,
+  })
+  assert.match(String(unpriced), /pricing/, 'a hydrated setup is priced the way a hand-chosen one is, not by the hydrate')
+})
+
+// Non-vacuity 5 — a model that is gone is named, not dropped
+
+test('a restored stack naming a model that is gone SAYS SO', () => {
+  const present = card()
+  const written = setupOf({
+    modusId: 'flow-t2i',
+    config: { mode: 'batched', cap: 12, acknowledged: false },
+    nozzle: [
+      CHOICE({ weight: 0.8 }),
+      CHOICE({ intellaId: 'lora-gone', nomen: 'deleted-lora', trigger: 'gonetrig' }),
+    ],
+  })
+  const restored = hydrateSetup(setupSession(written))
+
+  // The catalog no longer offers the second model — deleted, or made private since.
+  const { stack, missing } = resolveNozzle(restored.nozzle, [present], 'base-a')
+  assert.deepEqual(stack.map((c) => c.intellaId), ['lora-1'], 'only what is still offered goes on the nozzle')
+  assert.deepEqual(missing, ['deleted-lora'], 'and what is not is handed back BY NAME')
+
+  const note = missingNozzleNote(missing)
+  assert.match(String(note), /deleted-lora/, 'the note names the model')
+  assert.match(String(note), /without it/, 'and says what the next piece will fire without')
+  assert.equal(missingNozzleNote([]), null, 'a stack that came back whole says nothing')
+  assert.match(String(missingNozzleNote(['one-lora', 'other-lora'])), /one-lora, other-lora/)
+
+  // The same refusal the picker makes: a LoRA trained on another base is a paid run that
+  // cannot work, so a restored stack is not a way around it — and it is NAMED, not
+  // dropped, for the same reason.
+  const foreign = card({ intellaId: 'lora-foreign', nomen: 'foreign-lora', basis: 'base-b', trigger: 'ftrig' })
+  const crossBase = resolveNozzle(
+    [{ intellaId: 'lora-foreign', nomen: 'foreign-lora', trigger: 'ftrig' }],
+    [foreign],
+    'base-a',
+  )
+  assert.deepEqual(crossBase.stack, [])
+  assert.deepEqual(crossBase.missing, ['foreign-lora'])
+
+  // A catalog that could not be read restores nothing and names everything, rather than
+  // stacking stored entries on trust.
+  const unread = resolveNozzle(restored.nozzle, [], 'base-a')
+  assert.deepEqual(unread.stack, [])
+  assert.deepEqual(unread.missing, ['sample-lora', 'deleted-lora'])
+})
+
+test('a restored entry is rebuilt from the card the catalog offers now, not from what was stored', () => {
+  // The trigger word and the name are stored so a resume can say what is missing — they
+  // are not what fires. A model re-triggered since the stack was committed fires under
+  // its CURRENT trigger, because the stored one would compose a prompt the resolver no
+  // longer applies anything for.
+  const retriggered = card({ nomen: 'renamed-lora', trigger: 'newtrig' })
+  const { stack } = resolveNozzle(
+    [{ intellaId: 'lora-1', nomen: 'sample-lora', trigger: 'oldtrig', weight: 0.8 }],
+    [retriggered],
+    'base-a',
+  )
+  assert.equal(stack[0]!.trigger, 'newtrig')
+  assert.equal(stack[0]!.nomen, 'renamed-lora')
+  assert.equal(stack[0]!.weight, 0.8, 'the weight is the stored entry\'s — it is the only part that is the user\'s')
+  assert.match(promptWithTrigger('a fox', stack), /^newtrig:0\.8, a fox$/)
 })

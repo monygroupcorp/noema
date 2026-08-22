@@ -1003,3 +1003,118 @@ test('a session whose mother cannot be read still resumes', async () => {
     await closeServer(server)
   }
 })
+
+// ── The setup survives a reload (noema-287) ──────────────────────────────────
+//
+// A session's pieces already came back and its engine did not. The flow, the run shape,
+// the model stack and the standing affix are on the session now, behind one route.
+// These are the seams that route has to get right: it stores what it is given, it is
+// owner-scoped from the resolved caller like every route beside it, and there is one
+// thing it will not store at any price.
+
+test('committing a nozzle persists it against the session', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+    assert.equal(spawned.body.session.setup, undefined, 'a fresh session carries no setup')
+
+    const committed = await request(`${url}/v1/data/muse/sessions/${sessionId}/setup`, {
+      method: 'PATCH',
+      headers: HEADERS,
+      body: {
+        modusId: 'a-t2i-flow',
+        mode: 'batched',
+        cap: 24,
+        nozzle: [
+          { intellaId: 'intella-a', nomen: 'First model', trigger: 'atrig', weight: 0.8 },
+          { intellaId: 'intella-b', nomen: 'Second model', trigger: 'btrig' },
+        ],
+        prefix: 'a standing lead',
+        suffix: 'a standing trail',
+      },
+    })
+    assert.equal(committed.status, 200, JSON.stringify(committed.body))
+
+    // The read is the one that matters: this is what a returning client hydrates from.
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    const setup = resumed.body.session.setup
+    assert.equal(setup.modusId, 'a-t2i-flow')
+    assert.equal(setup.mode, 'batched')
+    assert.equal(setup.cap, 24)
+    assert.equal(setup.prefix, 'a standing lead')
+    assert.equal(setup.suffix, 'a standing trail')
+    assert.deepEqual(
+      setup.nozzle.map((e: any) => [e.intellaId, e.nomen, e.trigger, e.weight]),
+      [['intella-a', 'First model', 'atrig', 0.8], ['intella-b', 'Second model', 'btrig', undefined]],
+      'the stack comes back in the order it was stacked, weights included',
+    )
+
+    // The setup reaches no other part of the session.
+    assert.deepEqual(resumed.body.session.floor, spawned.body.session.floor)
+    assert.deepEqual(resumed.body.session.pieces, [])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a restored session comes back UNACKNOWLEDGED', async () => {
+  // An infinite-mode acknowledgement is consent for ONE sitting — it is what stands in
+  // for the count an infinite run does not have. Storing it would let a reload arrive
+  // already agreed to a spend with no ceiling but the balance, so there is no field for
+  // it and a body that sends one is stored without it.
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    const committed = await request(`${url}/v1/data/muse/sessions/${sessionId}/setup`, {
+      method: 'PATCH',
+      headers: HEADERS,
+      body: { modusId: 'a-t2i-flow', mode: 'infinite', cap: 12, acknowledged: true },
+    })
+    assert.equal(committed.status, 200)
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    const setup = resumed.body.session.setup
+    assert.equal(setup.mode, 'infinite', 'the run shape itself is stored')
+    assert.equal('acknowledged' in setup, false, 'the acknowledgement is not')
+    assert.equal(JSON.stringify(resumed.body.session).includes('acknowledged'), false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a session belonging to another identity cannot have its setup written', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    // The owner is the resolved caller and nothing in the body is a scope value, so a
+    // stranger naming the session — and naming its owner — still reaches nothing.
+    const stranger = await request(`${url}/v1/data/muse/sessions/${sessionId}/setup`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': 'someone-else' },
+      body: { owner: OWNER, animaId: OWNER, modusId: 'a-t2i-flow', mode: 'infinite' },
+    })
+    assert.equal(stranger.status, 404, 'someone else’s session is not found, never forbidden')
+
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.body.session.setup, undefined, 'nothing was written')
+  } finally {
+    await closeServer(server)
+  }
+})
