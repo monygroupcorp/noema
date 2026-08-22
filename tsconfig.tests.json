@@ -14,14 +14,18 @@
   //                                                    IN `include` below: `Compiler.*` (noema-293)
   //                                                    and the pod/webhook tranche (noema-294).
   //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
-  //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
-  //                                                    into the program (separate package, own tsc)
-  //   tests/unit/web/           5 errors /  1 file   — follow-on item; same web-app pull-in
   //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
   //
   // Measured with this config: 391 errors / 67 files with the whole tree included. These counts are
   // lower than the figures recorded when this file landed because `module` is now set below, which
   // settles the `import.meta` diagnostic tree-wide.
+  //
+  // tests/unit/arcanum/ and tests/unit/web/ are now in the tranche. Their suites import eight
+  // modules from src/platforms/web/app/src/lib, so those files enter this program and are
+  // typechecked here under this config's options. They are READ ONLY from here: that package
+  // keeps its own tsconfig, its own `tsc --noEmit` and its own test runner, and the root
+  // tsconfig still excludes it. A type error in one of them is a finding for that package,
+  // not something to fix from this side.
   //
   // src/types/vendor.d.ts is listed explicitly: it carries the ambient module declarations for
   // dependencies that ship no types, and it is only auto-included when `src/**/*` is in `include`.
@@ -46,6 +50,8 @@
     "tests/unit/crystal/RunPodCursor.*",
     "tests/unit/crystal/executionWebhook.*",
     "tests/unit/crystal/webhookRouter.*",
-    "tests/unit/crystal/alchemyWebhook.*"
+    "tests/unit/crystal/alchemyWebhook.*",
+    "tests/unit/arcanum/**/*",
+    "tests/unit/web/**/*"
   ]
 }
