@@ -8,6 +8,7 @@ import {
   type Fragment,
   type FragmentCategory,
   type MuseReaction,
+  type MuseNozzleEntry,
   type MuseSessionView,
   type MuseSteerProposal,
   type ModelCard,
@@ -50,6 +51,7 @@ import {
   gestureBlock,
   gestureBlockLine,
   gestureTitle,
+  hydrateSetup,
   ignitionBlockReason,
   ignitionRequest,
   instructionRemaining,
@@ -70,6 +72,7 @@ import {
   nozzleTriggerLabel,
   manualAddError,
   manualAddRequest,
+  missingNozzleNote,
   mergedExclusions,
   nextPieceDecision,
   pieceReadout,
@@ -88,12 +91,14 @@ import {
   runBanner,
   landedPieces,
   replaceDataset,
+  resolveNozzle,
   resumePhase,
   rollAt,
   rollCurated,
   savedOf,
   settlePieceResult,
   setControlHand,
+  setupOf,
   steerBlockReason,
   steerDockSummaryLine,
   steerFloor,
@@ -114,6 +119,7 @@ import {
   weightWrites,
   writeLabel,
   writesForConfirm,
+  DEFAULT_STREAM_CONFIG,
   EMPTY_STREAM,
   EXPANDED_GESTURES,
   MANUAL_CATEGORIES,
@@ -324,7 +330,7 @@ export function Muse() {
   // Configuration, one launch control, one loop. Nothing here decides anything: the
   // refusal is `launchBlockReason` and the loop's every judgement is
   // `nextPieceDecision`, both pure and both in `lib/muse.ts`.
-  const [config, setConfig] = useState<StreamConfig>({ mode: 'batched', cap: 12, acknowledged: false });
+  const [config, setConfig] = useState<StreamConfig>(DEFAULT_STREAM_CONFIG);
   const [quote, setQuote] = useState<StreamQuote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [phase, setPhase] = useState<StreamPhase>('idle');
@@ -355,6 +361,34 @@ export function Muse() {
   const [weightText, setWeightText] = useState<Record<string, string>>({});
   const [hold, setHoldState] = useState<HoldState | null>(null);
   const [warmup, setWarmup] = useState<LoraChoice[]>([]);
+  // ── The stored stack, waiting for a catalog to be resolved against (noema-287) ──
+  // A resumed session carries the stack it was left on, but a stack is only meaningful
+  // against the catalog the chosen flow actually offers: a model may have been deleted
+  // or made private since, and one trained on another base cannot fire here at all. The
+  // stored entries park here until that catalog is settled, and `restoreNozzle` is the
+  // one place they are put back.
+  const pendingNozzle = useRef<MuseNozzleEntry[] | null>(null);
+  // What the resume could NOT put back, by name. Rendered beside the model line: firing
+  // under fewer models than the stored stack claimed is a wrong image at full price, so
+  // it is said rather than left to be noticed.
+  const [nozzleMissing, setNozzleMissing] = useState<string[]>([]);
+  /**
+   * Put the stored stack back, against a catalog that is now final.
+   *
+   * Called from every place a catalog stops changing — the lists landing, the lists
+   * failing, and a flow that names no base model at all — rather than from an effect
+   * watching them, because "the catalog is settled" is a fact those call sites know and
+   * a set of loading flags can only approximate. It runs once per resume: the entries
+   * are taken out of the ref before they are resolved.
+   */
+  const restoreNozzle = useCallback((offer: readonly ModelCard[], fam: string | null) => {
+    const pending = pendingNozzle.current;
+    if (!pending) return;
+    pendingNozzle.current = null;
+    const { stack, missing } = resolveNozzle(pending, offer, fam);
+    setLora(stack);
+    setNozzleMissing(missing);
+  }, []);
   // The standing affix (noema-284): set once, beside the model, and every piece from
   // here carries it — it is client state on the same terms as `lora` above, so it does
   // not survive a reload. Unlike the nozzle it costs no warm-up, so setting it never
@@ -717,7 +751,9 @@ export function Muse() {
     return () => { live = false; };
   }, []);
 
-  function selectFlow(next: string) {
+  /** `persist` is false for the one caller that is not a choice: the hydrate below,
+   *  which is replaying a flow the session already stored and must not write it back. */
+  function selectFlow(next: string, persist = true) {
     const id_ = next || null;
     setModusId(id_);
     setBlockReason(null);
@@ -732,11 +768,32 @@ export function Muse() {
     setDraft([]);
     setWeightText({});
     setWarmup([]);
-    if (!id_) return;
+    // A hand-chosen flow clears whatever the last one could not restore; the note
+    // belongs to the stack that was resolved, not to the screen.
+    if (persist) setNozzleMissing([]);
+    // The flow is part of the setup, and choosing one is a commit rather than a
+    // keystroke — it is written now, with the stack it just emptied.
+    if (persist) persistSetup({ modusId: id_, nozzle: [] });
+    if (!id_) {
+      // No flow means no catalog will ever load, so a stored stack has nothing left to
+      // resolve against and its entries are named rather than left pending.
+      restoreNozzle([], null);
+      return;
+    }
     setFlowLoading(true);
     api.getFlow(id_)
-      .then((f) => { setBlockReason(ignitionBlockReason(f)); setFamilia(f.familia ?? null); })
-      .catch((e) => setBlockReason(`could not read this workflow's inputs (${e instanceof Error ? e.message : String(e)})`))
+      .then((f) => {
+        setBlockReason(ignitionBlockReason(f));
+        setFamilia(f.familia ?? null);
+        // A flow that names no base model offers no catalog at all (`loraCatalog`
+        // returns an empty list rather than an unscoped one), so the resolve happens
+        // here — the effect below will not run for a familia that never changes.
+        if (!f.familia) restoreNozzle([], null);
+      })
+      .catch((e) => {
+        setBlockReason(`could not read this workflow's inputs (${e instanceof Error ? e.message : String(e)})`);
+        restoreNozzle([], null);
+      })
       .finally(() => setFlowLoading(false));
   }
 
@@ -963,12 +1020,26 @@ export function Muse() {
     ])
       .then(([mine, shared]) => {
         if (!live) return;
-        setOwnModels(mine.models ?? []);
-        setPublicModels(shared.models ?? []);
+        const own = mine.models ?? [];
+        const shown = shared.models ?? [];
+        setOwnModels(own);
+        setPublicModels(shown);
+        // The catalog is final here, so this is where a resumed session's stored stack
+        // is put back — against what is offered NOW, never as it was stored.
+        restoreNozzle(loraCatalog(own, shown, familia), familia);
       })
-      .catch((e) => { if (live) setCatalogError(`couldn't read the model catalog: ${errText(e)}`); })
+      .catch((e) => {
+        if (!live) return;
+        setCatalogError(`couldn't read the model catalog: ${errText(e)}`);
+        // No catalog read means nothing can be resolved against it. The stored entries
+        // are named rather than silently stacked on trust.
+        restoreNozzle([], familia);
+      })
       .finally(() => { if (live) setCatalogLoading(false); });
     return () => { live = false; };
+    // `restoreNozzle` is a stable callback over a ref; listing it would not change when
+    // this runs, and the catalog is keyed by the flow's familia and nothing else.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familia]);
 
   const loraOffer = useMemo(
@@ -1011,6 +1082,12 @@ export function Muse() {
     const changed = nozzleChanged(lora, next);
     setLoraOpen(false);
     setLora(next);
+    // COMMIT is the save point (noema-287): the stack the user just confirmed is what
+    // the session comes back on. `next` is passed explicitly — the ref has not caught up
+    // with the state this call just set.
+    persistSetup({ nozzle: next });
+    // A newly committed stack is the stack, so nothing is outstanding from a resume.
+    setNozzleMissing([]);
     setWarmup(changed ? next : warmup);
     // A committed change stays held until the new nozzle has reached the loop; the effect
     // above releases it. Committing nothing new releases straight away. Adding or removing
@@ -1079,6 +1156,76 @@ export function Muse() {
     // those would cancel the run reads a rebuild still has in flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id]);
+
+  // ── The setup comes back with the pieces (noema-287) ─────────────────────
+  // The floor and the ledger were already durable; the ENGINE was not. The flow, the
+  // run shape, the nozzle stack and the standing affix were plain screen state with
+  // hardcoded initials, so a reload returned to a session with its work intact and its
+  // engine reset. They are on the session now, and this is where they come back.
+  //
+  // A HYDRATE IS A READ, exactly as the rebuild above is: nothing here fires a run,
+  // reserves anything or asks for a price. The restored setup leaves the screen where
+  // choosing it by hand leaves it — armed, priced by the ordinary quote path below, and
+  // spending nothing until launch is pressed. It is skipped outright while a stream is
+  // riding, so a session write landing mid-stream cannot move the nozzle under a piece.
+  //
+  // WHAT IS NOT RESTORED: the infinite-mode acknowledgement, which is consent for one
+  // sitting and has no field on the wire; and the fold state of the controls, which is
+  // this screen's and has no business on the server.
+  const setupHydrated = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || runningRef.current) return;
+    if (setupHydrated.current === session.id) return;
+    setupHydrated.current = session.id;
+
+    const restored = hydrateSetup(session);
+    setConfig(restored.config);
+    setAffix(restored.affix);
+    setNozzleMissing([]);
+    // The stack waits for a catalog: it is resolved against what the chosen flow offers
+    // now, never trusted as it was stored.
+    pendingNozzle.current = restored.nozzle;
+    if (restored.modusId) {
+      // `persist: false` — this is a replay of what the session already holds, not a
+      // choice, and writing it back would restamp the session on every mount.
+      selectFlow(restored.modusId, false);
+    } else {
+      // No flow to restore means no catalog will load, so a stored stack has nothing to
+      // resolve against and its entries are named rather than left pending.
+      restoreNozzle([], null);
+    }
+    // Keyed by the session's IDENTITY: the session object is replaced by every floor
+    // write, reaction and save, and re-running this on each would put the user's live
+    // configuration back to whatever was last written.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
+
+  /**
+   * Write the setup against the session. ON COMMIT, never on a keystroke — a save per
+   * keystroke would write the session on every digit of a cap.
+   *
+   * The caller passes what it just changed, because the state it changed has not
+   * reached its ref yet; everything else is read from the refs, which are the same
+   * fire-time reads the stream loop makes. NOTHING IS SPENT: no run, no quote.
+   */
+  function persistSetup(over: {
+    modusId?: string | null;
+    config?: StreamConfig;
+    nozzle?: LoraChoice[];
+    affix?: AffixInput;
+  }) {
+    const current = sessionRef.current;
+    if (!current) return;
+    const body = setupOf({
+      modusId: over.modusId !== undefined ? over.modusId : modusRef.current,
+      config: over.config ?? configRef.current,
+      nozzle: over.nozzle ?? loraRef.current,
+      affix: over.affix ?? affixRef.current,
+    });
+    api.setMuseSetup(current.id, body)
+      .then(({ session: saved }) => setSession(saved))
+      .catch((e) => setSessionError(`that setup didn't stick: ${errText(e)}`));
+  }
 
   // The configuration-time quote (D2). One quote prices the run: a t2i reservation is
   // evaluated against the run's NUMERIC inputs, and Muse sends only a prompt, so the
@@ -1607,7 +1754,13 @@ export function Muse() {
               <legend className="gc-l">run</legend>
               <label className="muse-mode-opt">
                 <input type="radio" name="muse-mode" checked={config.mode === 'batched'}
-                  onChange={() => setConfig((c) => ({ ...c, mode: 'batched' as StreamMode }))} />
+                  onChange={() => {
+                    // Choosing a mode is a settle point, so the run shape is written here
+                    // rather than on every keystroke of the cap beside it.
+                    const next: StreamConfig = { ...config, mode: 'batched' as StreamMode };
+                    setConfig(next);
+                    persistSetup({ config: next });
+                  }} />
                 batched
               </label>
               <input
@@ -1616,10 +1769,17 @@ export function Muse() {
                 disabled={config.mode !== 'batched'}
                 value={config.cap}
                 onChange={(e) => setConfig((c) => ({ ...c, cap: Math.max(1, Number(e.target.value) || 1) }))}
+                onBlur={() => persistSetup({})}
               />
               <label className="muse-mode-opt">
                 <input type="radio" name="muse-mode" checked={config.mode === 'infinite'}
-                  onChange={() => setConfig((c) => ({ ...c, mode: 'infinite' as StreamMode }))} />
+                  onChange={() => {
+                    // The acknowledgement is NOT written with it: it is consent for this
+                    // sitting, and a stored one would come back pre-consented.
+                    const next: StreamConfig = { ...config, mode: 'infinite' as StreamMode };
+                    setConfig(next);
+                    persistSetup({ config: next });
+                  }} />
                 infinite
               </label>
             </fieldset>
@@ -1670,6 +1830,14 @@ export function Muse() {
                 </button>
               </div>
 
+              {/* A restored stack that could not be put back in full says so, by name
+                  (noema-287). A piece fired under fewer models than the line claims is a
+                  wrong image at full price, so this is stated rather than left to be
+                  inferred from a shorter line. */}
+              {missingNozzleNote(nozzleMissing) && (
+                <div className="gt-sub mono">{missingNozzleNote(nozzleMissing)}</div>
+              )}
+
               {/* The standing affix (noema-284): beside the model because it is set on
                   the same terms — client state, no warm-up, no hold, no quote. It is
                   not a steer, so there is nothing here to commit or cancel: typing
@@ -1682,6 +1850,7 @@ export function Muse() {
                     placeholder="always leads the prompt"
                     value={affix.prefix ?? ''}
                     onChange={(e) => setAffix((a) => ({ ...a, prefix: e.target.value }))}
+                    onBlur={() => persistSetup({})}
                   />
                 </label>
                 <label className="cc-field muse-affix-field">
@@ -1691,6 +1860,7 @@ export function Muse() {
                     placeholder="always trails the prompt"
                     value={affix.suffix ?? ''}
                     onChange={(e) => setAffix((a) => ({ ...a, suffix: e.target.value }))}
+                    onBlur={() => persistSetup({})}
                   />
                 </label>
               </div>

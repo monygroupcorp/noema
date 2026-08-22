@@ -93,6 +93,12 @@ export type MuseSession = {
   floor: SteerState
   /** Every piece the session recorded, in the order it recorded them. */
   pieces: readonly Piece[]
+  /**
+   * What the session fires its draw THROUGH: the flow, the run shape, the model
+   * stack and the standing affix. Absent until a setup is committed. See the
+   * setup section below for what it deliberately cannot hold.
+   */
+  setup?: MuseSetup
 }
 
 /** The floor state every fragment starts on: in the draw, at even odds. */
@@ -279,6 +285,165 @@ export function reconcileFloor(
 export function withSessionDataset(session: MuseSession, datasetId: string): MuseSession {
   if (session.sessionDatasetId) return session
   return { ...session, sessionDatasetId: datasetId }
+}
+
+// --- The setup ---------------------------------------------------------------
+//
+// The floor is what a session draws from; the SETUP is what it fires that draw
+// through. The flow, the run shape, the model stack and the standing affix are all
+// choices the user makes once and works under for the rest of a sitting, and they
+// belong to the session for the same reason the floor does: a session is already a
+// durable, owner-scoped, resumable thing, and a setup held only in one browser would
+// disagree with the session the moment it is opened anywhere else.
+//
+// IT LIVES ON THE PURE SESSION, NOT ON THE ENVELOPE. `src/types/museSession.ts` says
+// the envelope's four fields are persistence's business and do not change; a setup is
+// a domain choice that moves whenever the user moves it, so it is a field of the
+// session value and is mutated the way every other one is — through a function here
+// that takes a session and returns a new one.
+//
+// WHAT IT DELIBERATELY CANNOT HOLD is as load-bearing as what it does. There is no
+// field for the infinite-mode acknowledgement and no field for which controls were
+// folded. The acknowledgement is consent for ONE sitting to run with no count to stop
+// it, so a restored setup that came back pre-consented would let a reload arrive
+// already agreed to an unbounded spend; a fold is view state and has no business on
+// the server. Neither has a key to land in, and `normalizeSetup` reads the fields it
+// defines one at a time rather than spreading what it was handed, so neither can be
+// written by a caller that sends one.
+
+/** How a stream is run: a fixed number of pieces, or until it is stopped. */
+export type MuseRunMode = 'batched' | 'infinite'
+
+/**
+ * One model on the stored stack.
+ *
+ * `nomen` rides alongside the id because it is what a resume has left to say with
+ * when the model itself is gone — deleted, or a private one the catalog no longer
+ * offers. A stack that could name a missing entry only by its id could not tell the
+ * user which of their models it was.
+ *
+ * `weight` is ABSENT for "the model's own default", which is what a bare trigger word
+ * means to the resolver. The weight BAND belongs to the control that offers it, not
+ * to this module, so a finite weight is stored as given and clamped where the band is
+ * defined.
+ */
+export interface MuseNozzleEntry {
+  intellaId: string
+  nomen: string
+  trigger: string
+  weight?: number
+}
+
+/**
+ * The run setup a session comes back with.
+ *
+ * Every field is optional: a setup is assembled one control at a time and a session
+ * may hold only part of one.
+ */
+export interface MuseSetup {
+  /** The flow the session fires at. */
+  modusId?: string
+  /** Batched or infinite. */
+  mode?: MuseRunMode
+  /** Batched only: how many pieces one launch fires. */
+  cap?: number
+  /** The model stack, in the order the user stacked it. */
+  nozzle?: readonly MuseNozzleEntry[]
+  /** The standing instruction that leads every prompt fired on this nozzle. */
+  prefix?: string
+  /** The standing instruction that trails every prompt fired on this nozzle. */
+  suffix?: string
+}
+
+function isRunMode(value: unknown): value is MuseRunMode {
+  return value === 'batched' || value === 'infinite'
+}
+
+/** A trimmed string, or `undefined` for anything that is not one or is empty. */
+function setupText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
+/**
+ * The stack off the wire: entries naming a model and a trigger word, de-duplicated by
+ * `intellaId` with the first occurrence winning.
+ *
+ * Both refusals mirror the picker's own. An entry with no trigger word is weights that
+ * would be fetched and never applied — a paid run with no effect — and a repeated
+ * `intellaId` describes a run that does not exist, because the compiler de-dupes
+ * pinned refs on its own.
+ */
+function setupNozzle(value: unknown): MuseNozzleEntry[] {
+  if (!Array.isArray(value)) return []
+  const out: MuseNozzleEntry[] = []
+  const seen = new Set<string>()
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const entry = raw as Record<string, unknown>
+    const intellaId = setupText(entry.intellaId)
+    const trigger = setupText(entry.trigger)
+    if (!intellaId || !trigger) continue
+    if (seen.has(intellaId)) continue
+    seen.add(intellaId)
+    const weight = entry.weight
+    out.push({
+      intellaId,
+      nomen: setupText(entry.nomen) ?? intellaId,
+      trigger,
+      ...(typeof weight === 'number' && Number.isFinite(weight) ? { weight } : {}),
+    })
+  }
+  return out
+}
+
+/**
+ * A setup as it will be stored: the six fields this module defines, read out of an
+ * untrusted value one at a time.
+ *
+ * Non-vacuity: spreading the input instead of reading its fields must fail "a setup
+ * cannot carry an infinite-mode acknowledgement, whatever the caller sends".
+ */
+export function normalizeSetup(raw: unknown): MuseSetup {
+  const body = (raw ?? {}) as Record<string, unknown>
+  const modusId = setupText(body.modusId)
+  const mode = isRunMode(body.mode) ? body.mode : undefined
+  const cap =
+    typeof body.cap === 'number' && Number.isFinite(body.cap)
+      ? Math.max(1, Math.trunc(body.cap))
+      : undefined
+  const nozzle = setupNozzle(body.nozzle)
+  const prefix = setupText(body.prefix)
+  const suffix = setupText(body.suffix)
+
+  return {
+    ...(modusId ? { modusId } : {}),
+    ...(mode ? { mode } : {}),
+    ...(cap !== undefined ? { cap } : {}),
+    ...(nozzle.length > 0 ? { nozzle } : {}),
+    ...(prefix ? { prefix } : {}),
+    ...(suffix ? { suffix } : {}),
+  }
+}
+
+/**
+ * Replace the session's setup with the normalized form of `raw`.
+ *
+ * WHOLESALE rather than field by field: a setup is one picture of what the screen is
+ * about to fire, and a merge would leave a model on the stack after the user took it
+ * off. A setup that normalizes to nothing removes the field rather than storing an
+ * empty object, so a session that never had one and a session whose setup was cleared
+ * read identically.
+ */
+export function withSetup(session: MuseSession, raw: unknown): MuseSession {
+  const setup = normalizeSetup(raw)
+  if (Object.keys(setup).length === 0) {
+    if (!session.setup) return session
+    const { setup: _cleared, ...rest } = session
+    return rest
+  }
+  return { ...session, setup }
 }
 
 // --- Widening the floor ------------------------------------------------------

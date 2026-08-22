@@ -757,6 +757,16 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/floor/fragments`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify(fragment),
     }).then(j<{ session: MuseSessionView }>),
+  // PATCH …/setup — what the session fires its draw THROUGH: the flow, the run shape,
+  // the model stack and the standing affix. It goes to the server rather than to this
+  // browser for the same reason the floor does — a session is resumable from anywhere,
+  // and a setup held in one browser would disagree with it. Sent on COMMIT, never on a
+  // keystroke. The setup is replaced wholesale. NOTHING IS SPENT: no run, no quote.
+  // The infinite-mode acknowledgement is not part of a setup and is not sent here.
+  setMuseSetup: (id: string, setup: MuseSetup) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/setup`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify(setup),
+    }).then(j<{ session: MuseSessionView }>),
   // POST …/steer — a short instruction against the session's floor in, a PROPOSAL out.
   // NOTHING IS APPLIED by this call: the response is what the consent sheet is rendered
   // from, every pill in it is vetoable, and the floor moves only through the two floor
@@ -1212,6 +1222,29 @@ export interface MusePiece {
   saved: boolean;
   dismissed: boolean;
 }
+/** One model on the session's stored stack. An absent `weight` is the model's own default. */
+export interface MuseNozzleEntry {
+  intellaId: string;
+  nomen: string;
+  trigger: string;
+  weight?: number;
+}
+/**
+ * What the session fires its draw THROUGH — the flow, the run shape, the model stack and
+ * the standing affix. Mirrors `src/crystal/muse/session.ts#MuseSetup`.
+ *
+ * THERE IS NO ACKNOWLEDGEMENT FIELD AND THERE IS NO VIEW STATE, on purpose. An
+ * infinite-mode acknowledgement is consent for one sitting, so it is never sent and never
+ * restored; which controls were folded is this screen's business and not the server's.
+ */
+export interface MuseSetup {
+  modusId?: string;
+  mode?: 'batched' | 'infinite';
+  cap?: number;
+  nozzle?: MuseNozzleEntry[];
+  prefix?: string;
+  suffix?: string;
+}
 export interface MuseSessionView {
   id: string;
   owner: string;
@@ -1221,6 +1254,8 @@ export interface MuseSessionView {
   fragments: Fragment[];
   floor: MuseFloorEntry[];
   pieces: MusePiece[];
+  /** What the session fires its draw through. Absent until a setup is committed. */
+  setup?: MuseSetup;
   natum: string;
   mutatum: string;
 }

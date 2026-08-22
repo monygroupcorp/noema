@@ -29,7 +29,7 @@ import type {
   MuseSessions,
   StoredMuseSession,
 } from '../types/museSession.js'
-import type { MuseSession, Piece } from './muse/session.js'
+import type { MuseSession, MuseSetup, Piece } from './muse/session.js'
 import type { Fragment } from './muse/taxonomy.js'
 
 /** The persisted form of a session's pure value: the floor flattened to entries. */
@@ -40,6 +40,13 @@ interface MuseSessionDoc {
   fragments: Fragment[]
   floor: FloorEntry[]
   pieces: Piece[]
+  /**
+   * What the session fires its draw through — the flow, the run shape, the model
+   * stack, the standing affix. Absent until a setup is committed, and stored as the
+   * pure module normalized it: no acknowledgement and no view state can be in here,
+   * because `normalizeSetup` gives neither a field to land in.
+   */
+  setup?: MuseSetup
 }
 
 /**
@@ -57,6 +64,7 @@ function toDoc(session: MuseSession): MuseSessionDoc {
     fragments: [...session.fragments],
     floor: floorToEntries(session.floor),
     pieces: [...session.pieces],
+    ...(session.setup ? { setup: session.setup } : {}),
   }
 }
 
@@ -67,6 +75,7 @@ function fromDoc(doc: MuseSessionDoc): MuseSession {
     fragments: doc.fragments ?? [],
     floor: floorFromEntries(doc.floor ?? []),
     pieces: doc.pieces ?? [],
+    ...(doc.setup ? { setup: doc.setup } : {}),
   }
 }
 

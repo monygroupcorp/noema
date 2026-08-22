@@ -3615,6 +3615,67 @@ Break a Muse session off a dataset the caller owns. The session copies the datas
             ]
           }
         },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
+          }
+        },
         "natum": {
           "type": "string",
           "format": "date-time"
@@ -3809,6 +3870,67 @@ The caller's own Muse sessions off one dataset, most recently changed first. Thi
               ]
             }
           },
+          "setup": {
+            "type": "object",
+            "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+            "properties": {
+              "modusId": {
+                "type": "string",
+                "description": "FK -> Modus, the flow the session fires at."
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "batched",
+                  "infinite"
+                ],
+                "description": "A fixed number of pieces, or until it is stopped."
+              },
+              "cap": {
+                "type": "number",
+                "description": "Batched only: how many pieces one launch fires. At least 1."
+              },
+              "nozzle": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                  "properties": {
+                    "intellaId": {
+                      "type": "string",
+                      "description": "FK -> Intella, the model itself."
+                    },
+                    "nomen": {
+                      "type": "string",
+                      "description": "The model's name, as it stood when the stack was committed."
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "description": "The trigger word that applies the model."
+                    },
+                    "weight": {
+                      "type": "number",
+                      "description": "An explicit weight. Absent for the model's own default."
+                    }
+                  },
+                  "required": [
+                    "intellaId",
+                    "nomen",
+                    "trigger"
+                  ]
+                },
+                "description": "The model stack, in the order it was stacked."
+              },
+              "prefix": {
+                "type": "string",
+                "description": "The standing instruction that leads every prompt fired on this nozzle."
+              },
+              "suffix": {
+                "type": "string",
+                "description": "The standing instruction that trails every prompt fired on this nozzle."
+              }
+            }
+          },
           "natum": {
             "type": "string",
             "format": "date-time"
@@ -3997,6 +4119,67 @@ A Muse session the caller owns — its floor and its piece ledger. Owner-scoped 
               "saved",
               "dismissed"
             ]
+          }
+        },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
           }
         },
         "natum": {
@@ -4212,6 +4395,67 @@ Turn one fragment off or back on in a session the caller owns. A disabled fragme
               "saved",
               "dismissed"
             ]
+          }
+        },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
           }
         },
         "natum": {
@@ -4430,6 +4674,67 @@ Weight one fragment against its pool-mates in a session the caller owns. The wei
             ]
           }
         },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
+          }
+        },
         "natum": {
           "type": "string",
           "format": "date-time"
@@ -4639,6 +4944,382 @@ Put a fragment the caller wrote on the floor of a session they own, in the draw 
               "saved",
               "dismissed"
             ]
+          }
+        },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
+          }
+        },
+        "natum": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mutatum": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "motherDatasetId",
+        "fragments",
+        "floor",
+        "pieces",
+        "natum",
+        "mutatum"
+      ]
+    }
+  },
+  "required": [
+    "session"
+  ]
+}
+```
+
+### PATCH /v1/data/muse/sessions/:id/setup
+
+Replace the run setup of a session the caller owns — the flow, the run shape, the model stack and the standing affix the session fires its draw through. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. The setup is replaced WHOLESALE: it is one picture of what is about to fire, so a merge would leave a model on the stack after it was taken off, and a body that names nothing clears it. Nothing is spent and nothing is fired — no run, no quote, no model call. The infinite-mode acknowledgement is not part of a setup and cannot be written here: a body carrying one is stored without it, so a resumed session is never already consented to a run with no count to stop it. A session the caller does not own is reported as not found.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+  "properties": {
+    "modusId": {
+      "type": "string",
+      "description": "FK -> Modus, the flow the session fires at."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "batched",
+        "infinite"
+      ],
+      "description": "A fixed number of pieces, or until it is stopped."
+    },
+    "cap": {
+      "type": "number",
+      "description": "Batched only: how many pieces one launch fires. At least 1."
+    },
+    "nozzle": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+        "properties": {
+          "intellaId": {
+            "type": "string",
+            "description": "FK -> Intella, the model itself."
+          },
+          "nomen": {
+            "type": "string",
+            "description": "The model's name, as it stood when the stack was committed."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "The trigger word that applies the model."
+          },
+          "weight": {
+            "type": "number",
+            "description": "An explicit weight. Absent for the model's own default."
+          }
+        },
+        "required": [
+          "intellaId",
+          "nomen",
+          "trigger"
+        ]
+      },
+      "description": "The model stack, in the order it was stacked."
+    },
+    "prefix": {
+      "type": "string",
+      "description": "The standing instruction that leads every prompt fired on this nozzle."
+    },
+    "suffix": {
+      "type": "string",
+      "description": "The standing instruction that trails every prompt fired on this nozzle."
+    }
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "description": "A Muse session: a break-off of a dataset with its own copies of that dataset's fragments, its own floor, and its own piece ledger. The mother dataset is the starter and is never written to by the session.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "FK -> Anima, the owning identity."
+        },
+        "motherDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the dataset the session broke off from."
+        },
+        "sessionDatasetId": {
+          "type": "string",
+          "description": "FK -> Dataset, the session's own dataset — where the pieces saved out of this session land. Absent until the first save mints it."
+        },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A categorized, reusable prompt fragment lifted from a caption.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "Which slot the fragment fills (subject, style, lighting, …)."
+              },
+              "text": {
+                "type": "string",
+                "description": "The fragment itself — a short, prompt-ready phrase."
+              },
+              "source": {
+                "type": "string",
+                "description": "The moodboard entry it came from."
+              },
+              "trigger": {
+                "type": "string",
+                "description": "The model binding for that source (e.g. a LoRA trigger word)."
+              }
+            },
+            "required": [
+              "category",
+              "text",
+              "source",
+              "trigger"
+            ]
+          },
+          "description": "Every fragment on the floor, in display order."
+        },
+        "floor": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A fragment's state on the session floor. The floor is an ARRAY of entries rather than an object keyed by fragment: a fragment identity is `category:text`, which is free text and is not usable as a field name.",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "The fragment's stable identity: its category and its text."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "False takes the fragment out of the draw while leaving it on the floor."
+              },
+              "weight": {
+                "type": "number",
+                "description": "Draw weight against its pool-mates, clamped server-side to the sampler bounds."
+              }
+            },
+            "required": [
+              "key",
+              "enabled",
+              "weight"
+            ]
+          }
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A piece the session produced, with the fragments that produced it.",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "description": "The run that produced the piece."
+              },
+              "rollIndex": {
+                "type": "number",
+                "description": "Which roll of the session this was."
+              },
+              "fragments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A categorized, reusable prompt fragment lifted from a caption.",
+                  "properties": {
+                    "category": {
+                      "type": "string",
+                      "description": "Which slot the fragment fills (subject, style, lighting, …)."
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The fragment itself — a short, prompt-ready phrase."
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The moodboard entry it came from."
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "description": "The model binding for that source (e.g. a LoRA trigger word)."
+                    }
+                  },
+                  "required": [
+                    "category",
+                    "text",
+                    "source",
+                    "trigger"
+                  ]
+                },
+                "description": "The lineage — one fragment per category the roll filled."
+              },
+              "reaction": {
+                "type": "string",
+                "enum": [
+                  "up",
+                  "down",
+                  "note"
+                ],
+                "description": "What the user said about the piece, if anything."
+              },
+              "saved": {
+                "type": "boolean",
+                "description": "Whether the piece has been put back into the set — its media is in the session's own dataset."
+              },
+              "dismissed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "runId",
+              "rollIndex",
+              "fragments",
+              "saved",
+              "dismissed"
+            ]
+          }
+        },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
           }
         },
         "natum": {
@@ -4992,6 +5673,67 @@ Append a piece to the ledger of a session the caller owns, with the fragments th
             ]
           }
         },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
+          }
+        },
         "natum": {
           "type": "string",
           "format": "date-time"
@@ -5204,6 +5946,67 @@ Change what a session the caller owns says about a piece already in its ledger �
             ]
           }
         },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
+          }
+        },
         "natum": {
           "type": "string",
           "format": "date-time"
@@ -5390,6 +6193,67 @@ Put a piece from a session the caller owns back into the set: its media joins th
               "saved",
               "dismissed"
             ]
+          }
+        },
+        "setup": {
+          "type": "object",
+          "description": "What the session fires its draw THROUGH: the flow, the run shape, the model stack and the standing affix. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. Every field is optional — a setup is assembled one control at a time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an acknowledgement is consent for one sitting, so this shape has no field for it and a request body carrying one is stored without it.",
+          "properties": {
+            "modusId": {
+              "type": "string",
+              "description": "FK -> Modus, the flow the session fires at."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "batched",
+                "infinite"
+              ],
+              "description": "A fixed number of pieces, or until it is stopped."
+            },
+            "cap": {
+              "type": "number",
+              "description": "Batched only: how many pieces one launch fires. At least 1."
+            },
+            "nozzle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One model on the stored stack. The name rides alongside the id because it is what a resume has left to say with when the model is no longer offered. An absent weight means the model's own default, which is what a bare trigger word means to the resolver.",
+                "properties": {
+                  "intellaId": {
+                    "type": "string",
+                    "description": "FK -> Intella, the model itself."
+                  },
+                  "nomen": {
+                    "type": "string",
+                    "description": "The model's name, as it stood when the stack was committed."
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "description": "The trigger word that applies the model."
+                  },
+                  "weight": {
+                    "type": "number",
+                    "description": "An explicit weight. Absent for the model's own default."
+                  }
+                },
+                "required": [
+                  "intellaId",
+                  "nomen",
+                  "trigger"
+                ]
+              },
+              "description": "The model stack, in the order it was stacked."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "The standing instruction that leads every prompt fired on this nozzle."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "The standing instruction that trails every prompt fired on this nozzle."
+            }
           }
         },
         "natum": {

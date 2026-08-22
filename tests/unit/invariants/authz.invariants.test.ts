@@ -637,6 +637,15 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
     // A save puts a piece's media into the session's OWN dataset. B naming A's session must
     // be refused at the session, before any dataset is minted in B's name off A's ledger.
     { name: 'saveMusePiece', call: (id) => api.saveMusePiece(B, id, 'run-of-a') },
+    {
+      // The setup is what a session fires its draw THROUGH — the flow, the run shape, the
+      // model stack. B naming A's session must be refused at the session: the body carries
+      // no owner and neither does the route, so an owner sent in it reaches nothing.
+      name: 'setMuseSetup',
+      call: (id) => api.setMuseSetup(B, id, {
+        owner: A.animaId, animaId: A.animaId, modusId: 'flow-of-b', mode: 'infinite', cap: 99,
+      }),
+    },
   ], () => snapshot(museSessions.store))
 
   assert.deepEqual(

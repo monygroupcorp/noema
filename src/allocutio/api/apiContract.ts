@@ -1472,6 +1472,42 @@ const MusePieceSchema: JsonSchema = {
   required: ['runId', 'rollIndex', 'fragments', 'saved', 'dismissed'],
 }
 
+/** One model on a session's stored stack. */
+const MuseNozzleEntrySchema: JsonSchema = {
+  type: 'object',
+  description:
+    'One model on the stored stack. The name rides alongside the id because it is what a resume has ' +
+    "left to say with when the model is no longer offered. An absent weight means the model's own " +
+    'default, which is what a bare trigger word means to the resolver.',
+  properties: {
+    intellaId: { type: 'string', description: 'FK -> Intella, the model itself.' },
+    nomen: { type: 'string', description: "The model's name, as it stood when the stack was committed." },
+    trigger: { type: 'string', description: 'The trigger word that applies the model.' },
+    weight: { type: 'number', description: "An explicit weight. Absent for the model's own default." },
+  },
+  required: ['intellaId', 'nomen', 'trigger'],
+}
+
+/** What a session fires its draw through. */
+const MuseSetupSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'What the session fires its draw THROUGH: the flow, the run shape, the model stack and the ' +
+    'standing affix. Held on the session so a returning client comes back to the engine it assembled ' +
+    'rather than to a default one. Every field is optional — a setup is assembled one control at a ' +
+    'time. It carries NO acknowledgement of the infinite-mode disclosure and no view state: an ' +
+    'acknowledgement is consent for one sitting, so this shape has no field for it and a request body ' +
+    'carrying one is stored without it.',
+  properties: {
+    modusId: { type: 'string', description: 'FK -> Modus, the flow the session fires at.' },
+    mode: { type: 'string', enum: ['batched', 'infinite'], description: 'A fixed number of pieces, or until it is stopped.' },
+    cap: { type: 'number', description: 'Batched only: how many pieces one launch fires. At least 1.' },
+    nozzle: { type: 'array', items: MuseNozzleEntrySchema, description: 'The model stack, in the order it was stacked.' },
+    prefix: { type: 'string', description: 'The standing instruction that leads every prompt fired on this nozzle.' },
+    suffix: { type: 'string', description: 'The standing instruction that trails every prompt fired on this nozzle.' },
+  },
+}
+
 /** A Muse session as this surface returns it. */
 const MuseSessionSchema: JsonSchema = {
   type: 'object',
@@ -1487,6 +1523,7 @@ const MuseSessionSchema: JsonSchema = {
     fragments: { type: 'array', items: MuseFragmentSchema, description: 'Every fragment on the floor, in display order.' },
     floor: { type: 'array', items: MuseFloorEntrySchema },
     pieces: { type: 'array', items: MusePieceSchema },
+    setup: MuseSetupSchema,
     natum: { type: 'string', format: 'date-time' },
     mutatum: { type: 'string', format: 'date-time' },
   },
@@ -2036,6 +2073,15 @@ export const API_CONTRACT: ApiContract = {
       summary: "Put a fragment the caller wrote on the floor of a session they own, in the draw at even odds. This is the un-metered way to widen a floor: a piece is composed from fragments already on the floor, so working with the session reweights it without widening it. Nothing is spent on this call — it reaches no model. A category outside the taxonomy is rejected with 400, and a fragment the floor already holds returns the session unchanged rather than a duplicate.",
       auth: true,
       request: AddMuseFragmentRequestSchema,
+      response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'PATCH',
+      path: '/data/muse/sessions/:id/setup',
+      summary:
+        "Replace the run setup of a session the caller owns — the flow, the run shape, the model stack and the standing affix the session fires its draw through. Held on the session so a returning client comes back to the engine it assembled rather than to a default one. The setup is replaced WHOLESALE: it is one picture of what is about to fire, so a merge would leave a model on the stack after it was taken off, and a body that names nothing clears it. Nothing is spent and nothing is fired — no run, no quote, no model call. The infinite-mode acknowledgement is not part of a setup and cannot be written here: a body carrying one is stored without it, so a resumed session is never already consented to a run with no count to stop it. A session the caller does not own is reported as not found.",
+      auth: true,
+      request: MuseSetupSchema,
       response: MuseSessionEnvelopeSchema,
     },
     {
