@@ -140,6 +140,8 @@ import {
   loraWeight,
   pinnedModelsFor,
   promptWithTrigger,
+  promptWithAffix,
+  affixSummaryLine,
   streamRunRequest,
   triggerToken,
   loraStack,
@@ -149,6 +151,7 @@ import {
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
   type LoraChoice,
+  type AffixInput,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
   entryStampsSession,
@@ -1579,6 +1582,102 @@ test('a piece fired under a LoRA names it in pinnedModels', () => {
 
   // Both halves or neither: the pinned run is also the one carrying the trigger.
   assert.match(String(request.aditus.prompt), /trigword/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE STANDING AFFIX (noema-284) — set once, riding blanket like the model, until
+// changed. Not a steer: no floor write, no quote, and gone on reload.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AFFIX = (over: Partial<AffixInput> = {}): AffixInput => ({
+  prefix: 'a photograph of',
+  suffix: 'shot on film',
+  ...over,
+})
+
+// Non-vacuity 1/2 — both paths carry it
+
+test('a fired piece carries the standing prefix and suffix', () => {
+  const drawn = 'a fox, a foggy harbor'
+  const affix = AFFIX()
+
+  // The STREAM path fires through `streamRunRequest` (`Muse.tsx`'s stream loop).
+  const streamed = streamRunRequest('flow-t2i', drawn, CHOICE(), affix)
+  assert.match(String(streamed.aditus.prompt), /a photograph of/, 'stream: the prefix rides')
+  assert.match(String(streamed.aditus.prompt), /shot on film/, 'stream: the suffix rides')
+
+  // The MANUAL path fires through `ignitionRequest` with no nozzle of its own
+  // (`Muse.tsx#doFire`) — the composition function is the same seam, called with no
+  // LoRA, and it still carries the affix.
+  const manualPrompt = promptWithAffix(drawn, null, affix)
+  const manualFired = ignitionRequest('flow-t2i', manualPrompt)
+  assert.match(String(manualFired.aditus.prompt), /a photograph of/, 'manual: the prefix rides')
+  assert.match(String(manualFired.aditus.prompt), /shot on film/, 'manual: the suffix rides')
+})
+
+// Non-vacuity 3 — the trigger-token invariant survives an affix riding alongside it
+
+test('every LoRA trigger token is still present, exactly once, and still leads the prompt, with an affix riding', () => {
+  const stack = stacked(card(), SECOND)
+  const affix = AFFIX()
+  const composed = promptWithAffix('a fox', stack, affix)
+
+  assert.match(composed, /^trigword, othertrig/, 'the trigger tokens still lead the prompt, ahead of the affix')
+  assert.match(composed, /a photograph of/, 'the prefix rides too, right after the tokens')
+  assert.match(composed, /shot on film$/, 'the suffix trails everything')
+  assert.equal((composed.match(/trigword/g) ?? []).length, 1, 'the trigger appears exactly once')
+  assert.equal((composed.match(/othertrig/g) ?? []).length, 1)
+
+  // Both halves still reach the actual run request — pinning is untouched by the affix.
+  const request = streamRunRequest('flow-t2i', 'a fox', stack, affix)
+  assert.deepEqual(request.pinnedModels, ['lora-1', 'lora-2'])
+  assert.match(String(request.aditus.prompt), /^trigword, othertrig/)
+})
+
+// Non-vacuity 4 — empty means untouched
+
+test('an empty prefix and suffix leave the prompt byte-identical', () => {
+  const drawn = ' a fox,  a foggy harbor '
+  assert.equal(promptWithAffix(drawn, null, undefined), drawn, 'no affix object at all: byte-identical to the input')
+  assert.equal(promptWithAffix(drawn, null, {}), promptWithTrigger(drawn, null))
+  assert.equal(
+    promptWithAffix(drawn, null, { prefix: '  ', suffix: '' }),
+    drawn,
+    'whitespace-only fields count as empty',
+  )
+
+  // With a nozzle chosen, an empty affix matches the pre-existing trigger-only
+  // composition exactly — not one stray comma or space added.
+  const stack = CHOICE()
+  assert.equal(promptWithAffix('a fox', stack, {}), promptWithTrigger('a fox', stack))
+  assert.equal('pinnedModels' in streamRunRequest('flow-t2i', 'a fox', stack, {}), true)
+  assert.deepEqual(streamRunRequest('flow-t2i', 'a fox', stack, {}), streamRunRequest('flow-t2i', 'a fox', stack))
+
+  // The collapsed nozzle line says nothing extra when nothing is set.
+  assert.equal(affixSummaryLine(undefined), undefined)
+  assert.equal(affixSummaryLine({}), undefined)
+  assert.equal(affixSummaryLine({ prefix: '  ', suffix: '  ' }), undefined)
+})
+
+test('the collapsed nozzle line names the standing affix when one is set', () => {
+  const stack = CHOICE()
+  const affix = AFFIX()
+  const line = nozzleSummaryLine(stack, affix)
+  assert.match(line, /trigword/, 'the model is still named')
+  assert.match(line, /prefix/i)
+  assert.match(line, /a photograph of/)
+  assert.match(line, /suffix/i)
+  assert.match(line, /shot on film/)
+
+  // No affix at all: the line reads exactly as it did before this item.
+  assert.equal(nozzleSummaryLine(stack), nozzleSummaryLine(stack, {}))
+  assert.equal(nozzleSummaryLine(stack, undefined), nozzleSummaryLine(stack))
+
+  // A long field is abbreviated on the collapsed line, not dumped in full.
+  const long = AFFIX({ prefix: 'x'.repeat(80) })
+  const longLine = nozzleSummaryLine(stack, long)
+  assert.ok(longLine.length < 200, 'the affix clause is abbreviated, not dumped in full')
+  assert.match(longLine, /…/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
