@@ -45,6 +45,7 @@ import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sod
 import type { Tabula, Tabulae, Tabularum } from '../../../src/types/tabula.js'
 import type { Collectio, Collectiones, Collectionum, CollectioStatus } from '../../../src/types/collectio.js'
 import type { Vestigium } from '../../../src/types/vestigium.js'
+import type { AuctorKey } from '../../../src/flow/types.js'
 import type {
   Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, Datasets,
   DatasetSummaryListPage,
@@ -78,8 +79,8 @@ class MemProvinciarum implements Provinciarum {
   async update(id: string, patch: ProvinciaPatch) {
     const p: Provincia = { ...this.store.get(id)!, mutatum: new Date() }
     for (const [k, v] of Object.entries(patch)) {
-      if (v === undefined) delete (p as Record<string, unknown>)[k]
-      else (p as Record<string, unknown>)[k] = v
+      if (v === undefined) delete (p as unknown as Record<string, unknown>)[k]
+      else (p as unknown as Record<string, unknown>)[k] = v
     }
     this.store.set(id, p)
     return p
@@ -302,8 +303,10 @@ class MemMuseSessions implements MuseSessions {
   }
 }
 
-function ownerToken(k: { animaId: string } | { commitment: string }): string {
-  return 'animaId' in k ? `animaId:${k.animaId}` : `commitment:${k.commitment}`
+function ownerToken(k: AuctorKey): string {
+  return 'animaId' in k ? `animaId:${k.animaId}`
+    : 'commitment' in k ? `commitment:${k.commitment}`
+    : `bursaToken:${k.bursaToken}`
 }
 
 /**

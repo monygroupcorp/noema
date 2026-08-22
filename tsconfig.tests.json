@@ -1,0 +1,35 @@
+{
+  // Typecheck for the test tree. The root tsconfig's `include` is `src/**/*` only, and the test
+  // runner (tsx) strips types without checking them, so `implements` clauses on in-memory doubles
+  // under tests/ are not enforced by any step. This config makes them enforced.
+  //
+  // ENFORCING, over a named first tranche. `include` below is the tranche; the remaining test
+  // directories are listed with their measured error counts and each is a follow-on item, so the
+  // tranche has a written end state and cannot quietly become a permanent exclusion:
+  //
+  //   tests/unit/crystal/     251 errors / 46 files  — follow-on item (volume)
+  //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
+  //   tests/unit/execution/    83 errors /  6 files  — follow-on item (volume)
+  //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
+  //                                                    into the program (separate package, own tsc)
+  //   tests/unit/web/           5 errors /  1 file   — follow-on item; same web-app pull-in
+  //   scripts/migrations/       7 errors /  6 files  — not under tests/; its own item
+  //
+  // Measured against the base commit: 509 errors / 104 files with the whole tree included.
+  //
+  // src/types/vendor.d.ts is listed explicitly: it carries the ambient module declarations for
+  // dependencies that ship no types, and it is only auto-included when `src/**/*` is in `include`.
+  // The rest of src/ resolves through imports and does not need to be enumerated here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "src/types/vendor.d.ts",
+    "tests/unit/ledger/**/*",
+    "tests/unit/invariants/**/*",
+    "tests/unit/api/**/*",
+    "tests/unit/flow/**/*"
+  ]
+}

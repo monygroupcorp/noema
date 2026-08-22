@@ -28,7 +28,7 @@ function makeSpendEvent(impetus: bigint, overrides = {}): SignumEvent<'execution
   return {
     type: 'execution_spend',
     payload: {
-      actum: { id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0', impetus, signaConsumed: [], aditus: {}, status: 'completus' as const, inceptum: new Date() },
+      actum: { id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0', impetus, signaConsumed: [], aditus: {}, status: 'completus' as const, inceptum: new Date(), expirat: new Date(Date.now() + 60_000) },
       impetus,
       baseImpetus: impetus,
       modoHostKey: { animaId: 'anima-host' },

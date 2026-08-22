@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Modus } from '../../../src/types/modus.js'
-import type { Cursor, Exitus } from '../../../src/types/cursus.js'
+import type { Cursor, CursorResult } from '../../../src/types/cursus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Modo } from '../../../src/types/modo.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
@@ -27,8 +27,8 @@ function buildModus(overrides: Partial<Modus> = {}): Modus {
 function fakeCursor(reserve: bigint, run: bigint): Cursor {
   return {
     async reserve() { return reserve },
-    async run(_actum: Actum, _modo?: Modo): Promise<Exitus> {
-      return { exitus: {}, impetus: run }
+    async run(_actum: Actum, _modo?: Modo): Promise<CursorResult> {
+      return { kind: 'sync', exitus: { exitus: {}, impetus: run } }
     },
   }
 }
