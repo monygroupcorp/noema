@@ -204,13 +204,26 @@ test('actumIndex: records the commitment branch for a {commitment} identity (asy
 // actually runs; emission is observed via the bus (emitWideEvent → bus.emit).
 // ---------------------------------------------------------------------------
 
+/** A member this fake does not model — throwing keeps an unreached path from returning a plausible lie. */
+function unreachedActorum(name: string) {
+  return async (): Promise<never> => {
+    throw new Error(`dispatchInceptio test Actorum fake: ${name}() is not modelled`)
+  }
+}
+
 function makeActa(actum: Actum): Actorum {
   let latest = { ...actum }
   return {
     create: async (a) => { latest = { ...a, inceptum: new Date() }; return latest },
     update: async (_id, patch) => { latest = { ...latest, ...patch }; return latest },
     findById: async () => latest,
-  } as unknown as Actorum
+    findByExternusJobId: unreachedActorum('findByExternusJobId'),
+    findByCallbackNonce: unreachedActorum('findByCallbackNonce'),
+    findByNullifier: unreachedActorum('findByNullifier'),
+    findExpired: unreachedActorum('findExpired'),
+    findInFlight: unreachedActorum('findInFlight'),
+    findByCompositum: unreachedActorum('findByCompositum'),
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -47,7 +47,7 @@
 //   --prod clears the live-db gate; --dry-run suppresses every write. BOTH are required to read prod.
 // Run (WRITE, prod): …same, minus --dry-run…   (only when intentionally migrating production)
 
-import { MongoClient } from 'mongodb'
+import { MongoClient, type ObjectId } from 'mongodb'
 import { resolveDbTarget } from './_dbTarget.js'
 
 const TAG = '[publish-klein-collection]'
@@ -147,7 +147,9 @@ async function main(): Promise<void> {
         if (!DRY_RUN) {
           const set: Record<string, unknown> = { canonica: true }
           set[decision.write.accessField] = decision.write.accessValue
-          await col.updateOne({ _id: doc._id }, { $set: set })
+          // `Doc._id` stays shape-agnostic so the pure decision core is testable with plain
+          // literals; the records this query returns carry a driver `ObjectId`.
+          await col.updateOne({ _id: doc._id as ObjectId }, { $set: set })
         }
       }
     }

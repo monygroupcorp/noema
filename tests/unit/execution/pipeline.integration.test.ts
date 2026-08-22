@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Cursor } from '../../../src/types/cursus.js'
-import type { Exitus } from '../../../src/types/cursus.js'
+import type { CursorResult } from '../../../src/types/cursus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Modo } from '../../../src/types/modo.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
@@ -22,8 +22,9 @@ function makeFakeCursor(impetusToCharge: bigint): Cursor {
     async reserve(_modus: Modus, _aditus: Record<string, unknown>) {
       return impetusToCharge
     },
-    async run(_actum: Actum, _modo?: Modo): Promise<Exitus> {
-      return { exitus: { result: 'ok' }, impetus: impetusToCharge }
+    // Cursor.run returns a CursorResult — the {kind:'sync'|'async'} envelope wrapping the Exitus.
+    async run(_actum: Actum, _modo?: Modo): Promise<CursorResult> {
+      return { kind: 'sync', exitus: { exitus: { result: 'ok' }, impetus: impetusToCharge } }
     },
   }
 }
@@ -39,7 +40,7 @@ function buildModus(overrides: Partial<Modus> = {}): Modus {
     exitus: {},
     ministerium: 'test',
     canonica: true,
-    auctor: 'anima-author',
+    auctor: { animaId: 'anima-author' },
     natum: new Date(),
     mutatum: new Date(),
     ...overrides,
@@ -164,7 +165,7 @@ test('fail: actum reaches fractus with error set', async () => {
 test('complete: nexus hooks fire and produce reward signa', async () => {
   const { signorum, modorum, cursorum, nexus, inceptor, completor } = buildPipeline()
 
-  const modus = buildModus({ auctor: 'anima-author' })
+  const modus = buildModus({ auctor: { animaId: 'anima-author' } })
   await modorum.register(modus)
   cursorum.register('test', makeFakeCursor(1000n))
   await signorum.issue({ animaId: 'anima-user', forma: 'minted', valor: 2000n, auctor: 'test' })

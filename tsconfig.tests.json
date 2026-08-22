@@ -9,9 +9,8 @@
   //
   //   tests/unit/crystal/     174 errors / 33 files  — follow-on item(s) (volume). `Compiler.*`
   //                                                    is drained and is IN the tranche below.
-  //   tests/unit/allocutio/   122 errors / 22 files  — follow-on item (volume)
-  //   tests/unit/execution/    83 errors /  6 files  — follow-on item (volume)
-  //   tests/unit/arcanum/       5 errors /  3 files  — follow-on item; pulls src/platforms/web/app
+  //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
+  //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
   //                                                    into the program (separate package, own tsc)
   //   tests/unit/web/           5 errors /  1 file   — follow-on item; same web-app pull-in
   //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
@@ -38,6 +37,7 @@
     "tests/unit/invariants/**/*",
     "tests/unit/api/**/*",
     "tests/unit/flow/**/*",
+    "tests/unit/execution/**/*",
     "tests/unit/crystal/Compiler.*"
   ]
 }

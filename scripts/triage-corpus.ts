@@ -85,9 +85,9 @@ async function main(): Promise<void> {
     } else {
       const limit = Number(arg('--limit') ?? 500)
       const docs = await db.collection(process.env.ACTA_COLLECTION ?? 'acta')
-        .find({ status: 'completus', exitus: { $exists: true } }, { projection: { id: 1 } })
+        .find<{ id: string }>({ status: 'completus', exitus: { $exists: true } }, { projection: { id: 1 } })
         .sort({ inceptum: -1 }).limit(limit).toArray()
-      actumIds = docs.map((d) => String((d as { id: string }).id))
+      actumIds = docs.map((d) => String(d.id))
     }
 
     console.log(`[triage] DB=${DB} model=${modelPath} acta=${actumIds.length} force=${has('--force')}`)
