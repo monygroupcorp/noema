@@ -9,7 +9,6 @@
   //
   //   tests/unit/crystal/     251 errors / 46 files  — follow-on item (volume)
   //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
-  //   tests/unit/execution/    83 errors /  6 files  — follow-on item (volume)
   //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
   //                                                    into the program (separate package, own tsc)
   //   tests/unit/web/           5 errors /  1 file   — follow-on item; same web-app pull-in
@@ -30,6 +29,7 @@
     "tests/unit/ledger/**/*",
     "tests/unit/invariants/**/*",
     "tests/unit/api/**/*",
-    "tests/unit/flow/**/*"
+    "tests/unit/flow/**/*",
+    "tests/unit/execution/**/*"
   ]
 }
