@@ -37,7 +37,7 @@ test('record: round-trips usdFmv (bigint) through Mongo intact', async () => {
   const natum = new Date('2026-01-15T00:00:00Z')
   const rec = await redituum.record({ usdFmv: 250n * USD, fmvSource: 'chainlink@block-21000000', origo: 'crypto', depositumId: 'dep-1', natum })
   const back = await col.findOne({ id: rec.id })
-  assert.equal((back as { usdFmv: string }).usdFmv, (250n * USD).toString())   // stored as string
+  assert.equal((back as unknown as { usdFmv: string }).usdFmv, (250n * USD).toString())   // stored as string
   assert.equal(await redituum.trailingUsdRevenue(new Date('2026-02-01T00:00:00Z')), 250n * USD)  // revived as bigint
 })
 

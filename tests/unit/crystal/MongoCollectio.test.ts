@@ -25,11 +25,16 @@ after(async () => {
 const base = {
   modusId: 'modus-flux',
   aditusBase: { steps: 20 },
-  tractus: [{ porta: 'seed', valores: [1, 2, 3] }],
+  // `Tractus.valores` is `TraitValor[]` — each option is an object carrying `value`.
+  tractus: [{ porta: 'seed', valores: [{ value: 1 }, { value: 2 }, { value: 3 }] }],
   numerus: 3,
   by: { animaId: 'anima-abc' } as { animaId: string },
   concurrentia: 2,
   status: 'nascens' as const,
+  provenanceHash: `sha256:${'0'.repeat(64)}`,
+  // `MongoCollectio.create` takes `reiectae` from the caller (unlike `MongoCollectionum.create`,
+  // which omits it from its input type and seeds it to 0). Supplied here to match this store.
+  reiectae: 0,
 }
 
 test('create returns collectio with id, natum, acta=[], completae=0, fractae=0, impetusTotal=0n', async () => {

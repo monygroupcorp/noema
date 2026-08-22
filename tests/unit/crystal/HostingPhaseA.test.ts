@@ -24,8 +24,17 @@ function memoryHospitia(): HospitiumStore & { all(): Hospitium[] } {
   const map = new Map<string, Hospitium>()
   let n = 0
   return {
-    async create(input) { const h = { ...input, id: `h${++n}` } as Hospitium; map.set(h.materiaId, h); return h },
+    async create(input) {
+      const h = { ...input, id: `h${++n}` } as Hospitium
+      if (!h.materiaId) throw new Error('memoryHospitia: this double keys by materiaId; create needs one')
+      map.set(h.materiaId, h); return h
+    },
     async findByMateriaId(materiaId) { return map.get(materiaId) ?? null },
+    // Studio-binding half of the interface. This suite provisions gen-warm pod records,
+    // which carry a materiaId from creation — unreached here, so these throw rather than
+    // return a plausible default.
+    async findByModoId(_modoId) { throw new Error('memoryHospitia.findByModoId: not implemented for this suite') },
+    async bindMateria(_modoId, _materiaId) { throw new Error('memoryHospitia.bindMateria: not implemented for this suite') },
     async findActive() { return [...map.values()].filter(h => !h.terminatum) },
     async update(materiaId, patch) { const h = { ...map.get(materiaId)!, ...patch }; map.set(materiaId, h); return h },
     all() { return [...map.values()] },

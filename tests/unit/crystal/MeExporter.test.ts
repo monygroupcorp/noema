@@ -66,7 +66,7 @@ before(async () => {
   credenta = new MongoCredentum(credCol)
   provinciae = new MongoProvinciarum(provCol)
   deposita = new MongoDepositum(depCol)
-  signorum = new MongoSignorum(sigCol)
+  signorum = new MongoSignorum(sigCol, client)
 })
 afterEach(async () => { await Promise.all([credCol, provCol, depCol, sigCol].map(c => c.deleteMany({}))) })
 after(async () => {
@@ -82,8 +82,8 @@ async function seedTwoUsers() {
   await provinciae.create({ animaId: A.animaId, nomen: 'A-proj', datasetIds: [], modelIds: [], collectionIds: [] })
   await provinciae.create({ animaId: B.animaId, nomen: 'B-proj', datasetIds: [], modelIds: [], collectionIds: [] })
   // Credit ledger (Signum).
-  await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 111n })
-  await signorum.issue({ animaId: B.animaId, forma: 'minted', valor: 222n })
+  await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 111n, auctor: 'test:seed' })
+  await signorum.issue({ animaId: B.animaId, forma: 'minted', valor: 222n, auctor: 'test:seed' })
   // Deposits — the collection whose finder MUST be list({animaId}), never the unfiltered list().
   await deposita.create({ chainId: 1, transactioHash: '0xA', ab: '0xa', ad: '0xv', valor: 10n, confirmationes: 3, status: 'processatum', animaId: A.animaId })
   await deposita.create({ chainId: 1, transactioHash: '0xB', ab: '0xb', ad: '0xv', valor: 20n, confirmationes: 3, status: 'processatum', animaId: B.animaId })
@@ -126,8 +126,8 @@ test('B\'s export is the mirror — only B\'s rows (no cross-contamination eithe
 test('the platform revenue book (Reditus) is NOT a key in the bundle', async () => {
   const exporter = new MeExporter(inertReads())
   const bundle = await exporter.assemble(A)
-  assert.ok(!('reditus' in (bundle as Record<string, unknown>)), 'Reditus must never appear')
-  assert.ok(!('redituum' in (bundle as Record<string, unknown>)))
+  assert.ok(!('reditus' in (bundle as unknown as Record<string, unknown>)), 'Reditus must never appear')
+  assert.ok(!('redituum' in (bundle as unknown as Record<string, unknown>)))
 })
 
 test('MongoCredentum.findByAnimaId returns the caller\'s own row WITHOUT passwordHash', async () => {

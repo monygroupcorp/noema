@@ -26,11 +26,21 @@ class FakeHospitium implements HospitiumStore {
   private nextId = 1
   async create(input: Omit<Hospitium, 'id'>): Promise<Hospitium> {
     const h: Hospitium = { id: `h-${this.nextId++}`, ...input }
+    if (!h.materiaId) throw new Error('FakeHospitium: this double keys by materiaId; create needs one')
     this.byMateria.set(h.materiaId, h)
     return h
   }
   async findByMateriaId(materiaId: string): Promise<Hospitium | null> {
     return this.byMateria.get(materiaId) ?? null
+  }
+  // Studio-binding half of the interface. This suite drives the billing tick, which
+  // reads host records by materiaId only — these are unreached here, so they throw
+  // rather than return a plausible default.
+  async findByModoId(_modoId: string): Promise<Hospitium | null> {
+    throw new Error('FakeHospitium.findByModoId: not implemented for this suite')
+  }
+  async bindMateria(_modoId: string, _materiaId: string): Promise<Hospitium> {
+    throw new Error('FakeHospitium.bindMateria: not implemented for this suite')
   }
   async findActive(): Promise<Hospitium[]> {
     return [...this.byMateria.values()].filter(h => !h.terminatum)
@@ -85,7 +95,7 @@ function makeDeps(opts: {
   nexus.on('studio_spend', studioSpendHook)
 
   const m: Materia = {
-    id: MATERIA_ID, genus: 'pod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    id: MATERIA_ID, genus: 'runpod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: IMPETUS_PER_SECOND, status: opts.status ?? 'idle',
     ...(opts.costPerHr !== undefined ? { costPerHr: opts.costPerHr } : {}),
   }
@@ -239,7 +249,7 @@ async function makeBudgetDeps(opts: {
   nexus.on('studio_spend', studioSpendHook)
 
   const m: Materia = {
-    id: MATERIA_ID, genus: 'pod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
+    id: MATERIA_ID, genus: 'runpod', externusId: 'pod-1', gpu: 'H100', vramGb: 80, ramGb: 200,
     impetusPerSecond: opts.impetusPerSecond ?? 1n, status: 'idle',
   }
   materiae.add(m)
@@ -252,7 +262,7 @@ async function makeBudgetDeps(opts: {
   await signorum.issue({ forma: 'tessera', valor: opts.budget, auctor: 'system:session', testis: 'tess-1', modoId: modo.id })
 
   const inceptum = new Date(Date.now() - 60_000)
-  await hospitia.create({ id: 'h-1', materiaId: MATERIA_ID, hostKey: { animaId: HOST_ANIMA }, inceptum })
+  await hospitia.create({ materiaId: MATERIA_ID, hostKey: { animaId: HOST_ANIMA }, inceptum })
 
   return { hospitia, materiae, signorum, nexus, modos, modo }
 }
