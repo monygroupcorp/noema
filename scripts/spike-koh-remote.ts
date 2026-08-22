@@ -36,7 +36,8 @@ import { R2Uploader } from '../src/crystal/R2Uploader.js'
 import { MongoIntella } from '../src/crystal/MongoIntella.js'
 import { terminatePod } from '../src/crystal/terminatePod.js'
 import type { Corporum } from '../src/types/corpus.js'
-import type { Actorum, Actum } from '../src/types/actum.js'
+import type { Actum } from '../src/types/actum.js'
+import type { Actorum } from '../src/types/cursus.js'
 
 const PORT = Number(process.env.SPIKE_PORT ?? 7799)
 const STEPS = Number(process.env.SPIKE_STEPS ?? 250)

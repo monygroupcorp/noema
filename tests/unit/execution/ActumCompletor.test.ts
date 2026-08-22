@@ -20,12 +20,23 @@ function makeActum(overrides: Partial<Actum> = {}): Actum {
     id: 'act-1', modusId: 'mod-1', modusVersiono: '1.0.0',
     impetus: 100n, signaConsumed: ['sig-a', 'sig-b'],
     aditus: {}, status: 'nascens', inceptum: new Date(),
+    expirat: new Date(Date.now() + 60_000),
     ...overrides,
   }
 }
 
 function makeRunResult(overrides: Partial<Exitus> = {}): Exitus {
   return { exitus: { url: 'https://example.com/out.png' }, impetus: 80n, duratio: 5000, ...overrides }
+}
+
+/**
+ * A member the fake does not model. It throws rather than returning a plausible default:
+ * a stub that quietly answers `null`/`[]` is a new way for a test to pass while lying.
+ */
+function unmodelled(fake: string, name: string) {
+  return async (): Promise<never> => {
+    throw new Error(`${fake} fake: ${name}() is not modelled`)
+  }
 }
 
 function makeActa(actum: Actum): Actorum & { latest: Actum } {
@@ -35,6 +46,12 @@ function makeActa(actum: Actum): Actorum & { latest: Actum } {
     create: async (a) => { latest = { ...a, inceptum: new Date() }; return latest },
     update: async (_id, patch) => { Object.assign(latest, patch); return latest },
     findById: async () => latest,
+    findByExternusJobId: unmodelled('Actorum', 'findByExternusJobId'),
+    findByCallbackNonce: unmodelled('Actorum', 'findByCallbackNonce'),
+    findByNullifier: unmodelled('Actorum', 'findByNullifier'),
+    findExpired: unmodelled('Actorum', 'findExpired'),
+    findInFlight: unmodelled('Actorum', 'findInFlight'),
+    findByCompositum: unmodelled('Actorum', 'findByCompositum'),
   }
 }
 
@@ -49,6 +66,12 @@ function makeSignorum() {
     release: async (ids: string[]) => { released.push(...ids) },
     history: async () => [],
     settle: async (ids: string[], actualImpetus: bigint, actumId: string) => { settled.push({ ids, actualImpetus, actumId }) },
+    sessionBudget: unmodelled('Signorum', 'sessionBudget'),
+    reserve: unmodelled('Signorum', 'reserve'),
+    findByTestis: unmodelled('Signorum', 'findByTestis'),
+    ownsAny: unmodelled('Signorum', 'ownsAny'),
+    transfer: unmodelled('Signorum', 'transfer'),
+    createMany: unmodelled('Signorum', 'createMany'),
     _released: released,
     _settled: settled,
   }
