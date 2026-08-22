@@ -30,7 +30,10 @@ const db = client.db(DB)
 
 const animae = new MongoAnima(db.collection('animae'))
 const personae = new MongoPersona(db.collection('personae'))
-const signorum = new MongoSignorum(db.collection('signa'))
+// MongoSignorum requires the client as well as the collection: `settle` spans two writes inside a
+// Mongo transaction, which it opens on the client. Constructed without it, that path has nothing to
+// open a session on.
+const signorum = new MongoSignorum(db.collection('signa'), client)
 
 // Reuse an existing 'api' persona for this account if present (idempotent re-run); else mint.
 const existing = await personae.findByExternus('api', ACCOUNT)

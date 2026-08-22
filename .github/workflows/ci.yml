@@ -28,6 +28,7 @@ jobs:
       - run: npm install --legacy-peer-deps
       - run: npm run typecheck         # tsc --noEmit (src/) — was unchecked in CI before
       - run: npm run typecheck:tests   # tsc -p tsconfig.tests.json (test tree — see that file for the tranche)
+      - run: npm run typecheck:scripts # tsc -p tsconfig.scripts.json (scripts/ — whole tree, incl. migrations)
       - run: npm run test:hermetic     # adapter + architecture/boundary + template/install guards (no live DB)
 
   # DB-layer gate — the crystal suite that needs a real Mongo (MongoIntella, MongoModorum,
