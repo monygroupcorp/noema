@@ -87,7 +87,9 @@ import {
   spawnSession,
   updatePiece,
   withSessionDataset,
+  withSetup,
   type MuseSession,
+  type MuseSetup,
   type Piece,
   type PiecePatch,
   type Reaction,
@@ -2127,6 +2129,7 @@ export class CrystalApi {
       fragments: [...stored.session.fragments],
       floor: floorToEntries(stored.session.floor),
       pieces: [...stored.session.pieces],
+      ...(stored.session.setup ? { setup: stored.session.setup } : {}),
       natum: stored.natum,
       mutatum: stored.mutatum,
     }
@@ -2318,6 +2321,34 @@ export class CrystalApi {
       this._assertHeld(session, fragment)
       return setFragmentWeight(session, fragment, weight)
     })
+  }
+
+  /**
+   * Replace the run setup of a session the caller owns.
+   *
+   * The setup is what the session fires its draw THROUGH: the flow, the run shape,
+   * the model stack and the standing affix. It is stored so that a reload comes back
+   * to the same engine the user assembled rather than to the screen's defaults.
+   *
+   * NOTHING IS SPENT HERE and nothing is fired. There is no run, no quote and no
+   * model call behind this method — it normalizes a body and hands the pure module a
+   * new value, exactly as the floor routes do. A restored setup is armed; the launch
+   * control is still the only thing that spends.
+   *
+   * THE OWNER COMES FROM THE RESOLVED CALLER, as it does for every other session
+   * method: `_mutateMuseSession` resolves the session for the authenticated identity
+   * and reports someone else's as not found. Nothing in the body is a scope value.
+   *
+   * WHAT THE BODY CANNOT CARRY: the infinite-mode acknowledgement and any view state.
+   * `normalizeSetup` reads the fields it defines one at a time, so a body carrying
+   * either is stored without it rather than rejected — a reload therefore comes back
+   * un-acknowledged whatever was sent.
+   */
+  async setMuseSetup(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    if (input !== undefined && input !== null && typeof input !== 'object') {
+      throw Errors.inputMalformed('setup must be an object')
+    }
+    return this._mutateMuseSession(auctor, id, (session) => withSetup(session, input))
   }
 
   /**
@@ -3958,6 +3989,13 @@ export interface MuseSessionView {
   floor: FloorEntry[]
   /** Every piece the session recorded, with the lineage that produced it. */
   pieces: Piece[]
+  /**
+   * What the session fires its draw through: the flow, the run shape, the model stack
+   * and the standing affix. Absent until a setup is committed. It never carries the
+   * infinite-mode acknowledgement — that is consent for one sitting and the shape has
+   * no field for it.
+   */
+  setup?: MuseSetup
   natum: Date
   mutatum: Date
 }
