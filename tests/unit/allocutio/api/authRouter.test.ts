@@ -6,10 +6,11 @@ import { createAuthRouter } from '../../../../src/allocutio/api/authRouter.js'
 import { createApiRouter, type ApiFacade } from '../../../../src/allocutio/api/apiRouter.js'
 import { IdentityResolver } from '../../../../src/allocutio/api/IdentityResolver.js'
 import { makeCredentialAcceptors, type AcceptorDeps } from '../../../../src/allocutio/api/apiAcceptors.js'
+import type { Persona, PersonaStore } from '../../../../src/types/persona.js'
 import { MemoryCredentum } from '../../../../src/crystal/MemoryCredentum.js'
 import { MemoryLinkToken } from '../../../../src/crystal/MemoryLinkToken.js'
 import { linkTelegramToAccount, issueTelegramRecoveryCode } from '../../../../src/allocutio/telegram/telegramRecovery.js'
-import { Wallet } from 'ethers'
+import { Wallet, type HDNodeWallet } from 'ethers'
 
 const SECRET = 'test-secret'
 
@@ -17,36 +18,43 @@ const SECRET = 'test-secret'
 // per username, minting one anima per fresh externusId and reusing it thereafter. Personas
 // carry id/genus/externusId/activeAnimaId/animaIds so the wallet + telegram routes
 // (findByAnimaId, linkAnima, switchAnima) work.
-interface FakePersona { id: string; genus: string; externusId: string; activeAnimaId: string; animaIds: string[] }
+type FakePersonaStore = Pick<PersonaStore, 'findByExternus' | 'findOrCreate' | 'findByAnimaId' | 'linkAnima' | 'switchAnima'>
+
 function stores() {
-  const personaByKey = new Map<string, FakePersona>()
+  const personaByKey = new Map<string, Persona>()
   let n = 0
   let pid = 0
   const created: string[] = []
   const byId = () => new Map([...personaByKey.values()].map(p => [p.id, p]))
-  const personae: AcceptorDeps['personae'] & {
-    findByAnimaId: (a: string) => Promise<unknown>
-    linkAnima: (id: string, a: string) => Promise<unknown>
-    switchAnima: (id: string, a: string) => Promise<unknown>
-  } = {
+  const personae: AcceptorDeps['personae'] & FakePersonaStore = {
     async findByExternus(genus, ext) {
-      return (personaByKey.get(`${genus}\0${ext}`) ?? null) as never
+      return personaByKey.get(`${genus}\0${ext}`) ?? null
     },
     async findOrCreate(genus, ext, defaults) {
       const existing = personaByKey.get(`${genus}\0${ext}`)
-      if (existing) return existing as never
-      const p: FakePersona = { id: `p${++pid}`, genus, externusId: ext, activeAnimaId: defaults!.animaId, animaIds: [defaults!.animaId] }
+      if (existing) return existing
+      const now = new Date()
+      const p: Persona = {
+        id: `p${++pid}`,
+        genus,
+        externusId: ext,
+        activeAnimaId: defaults!.animaId,
+        animaIds: [defaults!.animaId],
+        status: 'active',
+        natum: now,
+        visum: now,
+      }
       personaByKey.set(`${genus}\0${ext}`, p)
-      return p as never
+      return p
     },
     async findByAnimaId(animaId) {
-      return [...personaByKey.values()].filter(p => p.animaIds.includes(animaId)) as never
+      return [...personaByKey.values()].filter(p => p.animaIds.includes(animaId))
     },
     async linkAnima(id, animaId) {
-      const p = byId().get(id)!; if (!p.animaIds.includes(animaId)) p.animaIds.push(animaId); return p as never
+      const p = byId().get(id)!; if (!p.animaIds.includes(animaId)) p.animaIds.push(animaId); return p
     },
     async switchAnima(id, animaId) {
-      const p = byId().get(id)!; p.activeAnimaId = animaId; return p as never
+      const p = byId().get(id)!; p.activeAnimaId = animaId; return p
     },
   }
   const animae: AcceptorDeps['animae'] = {
@@ -155,7 +163,7 @@ async function signUp(app: express.Express, username: string) {
 }
 
 // Run the full challenge→sign dance for `wallet` and return { challengeToken, signature }.
-async function proveWallet(app: express.Express, wallet: Wallet) {
+async function proveWallet(app: express.Express, wallet: HDNodeWallet) {
   const ch = await request(app).post('/v1/auth/wallet/challenge').send({ address: wallet.address })
   assert.equal(ch.status, 200)
   const signature = await wallet.signMessage(ch.body.statement)
@@ -308,7 +316,16 @@ test('wallet signup: a unique-index collision on the bind resolves to the WINNER
   // Simulate the true race: a concurrent signup won the (genus:'web', address) insert between
   // our read and our write, so findOrCreate throws E11000. The endpoint MUST re-read and issue a
   // session for the winner's anima — NOT the orphan anima it minted on the losing path.
-  const winner: FakePersona = { id: 'pw', genus: 'web', externusId: '0xwinner', activeAnimaId: 'anima-winner', animaIds: ['anima-winner'] }
+  const winner: Persona = {
+    id: 'pw',
+    genus: 'web',
+    externusId: '0xwinner',
+    activeAnimaId: 'anima-winner',
+    animaIds: ['anima-winner'],
+    status: 'active',
+    natum: new Date(),
+    visum: new Date(),
+  }
   let reads = 0
   const created: string[] = []
   const personae = {

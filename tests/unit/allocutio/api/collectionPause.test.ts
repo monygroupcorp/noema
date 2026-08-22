@@ -86,6 +86,12 @@ function makeActorum(): Actorum {
     async findExpired() {
       return []
     },
+    // Seams the pause/resume path never reaches: they throw rather than return a default
+    // that would let a later test pass without a real implementation.
+    async findByCallbackNonce() { throw new Error('unused') },
+    async findByNullifier() { throw new Error('unused') },
+    async findInFlight() { throw new Error('unused') },
+    async findByCompositum() { throw new Error('unused') },
     store,
   } as Actorum & { store: Map<string, Actum> }
 }

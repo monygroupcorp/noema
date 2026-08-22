@@ -8,7 +8,6 @@
   // tranche has a written end state and cannot quietly become a permanent exclusion:
   //
   //   tests/unit/crystal/     251 errors / 46 files  — follow-on item (volume)
-  //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
   //   tests/unit/execution/    83 errors /  6 files  — follow-on item (volume)
   //   tests/unit/arcanum/       7 errors /  3 files  — follow-on item; pulls src/platforms/web/app
   //                                                    into the program (separate package, own tsc)
@@ -23,6 +22,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    // The test runner loads these files as ES modules, so `import.meta` is legal at runtime.
+    // The root config compiles src/ to CommonJS, where it is not — checking tests under that
+    // setting reports an error the runtime does not have.
+    "module": "ES2022",
     "rootDir": "."
   },
   "include": [
@@ -30,6 +33,7 @@
     "tests/unit/ledger/**/*",
     "tests/unit/invariants/**/*",
     "tests/unit/api/**/*",
-    "tests/unit/flow/**/*"
+    "tests/unit/flow/**/*",
+    "tests/unit/allocutio/**/*"
   ]
 }

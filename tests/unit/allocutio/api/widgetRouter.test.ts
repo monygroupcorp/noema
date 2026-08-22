@@ -100,7 +100,7 @@ test('login: sessionAuth flips data-session on (enables the sign-in step)', asyn
 test('interactive: agent with no callable modus falls back to the read-only gallery', async () => {
   const a = app({
     legati: { findByAgentId: async () => legatus({}), listByCollection: async () => [] },  // no workspaceModusId
-    modorum: { find: async () => MODUS },
+    modorum: { find: async () => MODUS, list: async () => [] },   // no authored modi in this fixture
     quoteImpetus: async () => 1000n,
     x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0xReceiver' },
     feed: async () => [imgItem('https://cdn.test/a.png')],

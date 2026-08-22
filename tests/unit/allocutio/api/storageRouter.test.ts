@@ -110,7 +110,7 @@ const ANON: Bursa = { id: 'anon-token', credits: 500n, createdAt: new Date() }
 function bursariumOf(...rows: Bursa[]): Bursarum {
   const byId = new Map(rows.map((b) => [b.id, b]))
   return {
-    async findByToken(token) { return byId.get(token) ?? null },
+    async findByToken(token: string) { return byId.get(token) ?? null },
   } as unknown as Bursarum
 }
 

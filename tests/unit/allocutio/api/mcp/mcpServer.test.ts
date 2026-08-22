@@ -88,6 +88,12 @@ async function makeClient(auctorArg?: AuctorKey | null) {
 // Tests
 // ---------------------------------------------------------------------------
 
+// The MCP SDK types a tool result's `content` as `unknown` (the wire schema is open).
+// Every read here wants the same shape, so it is narrowed in one place.
+function textBlocks(result: unknown): Array<{ type: string; text: string }> {
+  return (result as { content: Array<{ type: string; text: string }> }).content
+}
+
 test('listTools returns all 16 tool names', async () => {
   const { client } = await makeClient()
   const { tools } = await client.listTools()
@@ -99,7 +105,7 @@ test('list_flows tool returns the flow catalog', async () => {
   const { client } = await makeClient()
   const result = await client.callTool({ name: 'list_flows', arguments: {} })
   assert.ok(Array.isArray(result.content))
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   const parsed = JSON.parse(text)
   assert.ok(Array.isArray(parsed.flows))
   assert.equal(parsed.flows.length, 2)
@@ -109,7 +115,7 @@ test('list_flows tool returns the flow catalog', async () => {
 test('describe_flow tool returns flow schema', async () => {
   const { client } = await makeClient()
   const result = await client.callTool({ name: 'describe_flow', arguments: { id: 'flux-schnell' } })
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   const parsed = JSON.parse(text)
   assert.equal(parsed.id, 'flux-schnell')
   assert.ok(parsed.input)
@@ -118,7 +124,7 @@ test('describe_flow tool returns flow schema', async () => {
 test('run_flow tool returns run handle when authenticated', async () => {
   const { client } = await makeClient(auctor)
   const result = await client.callTool({ name: 'run_flow', arguments: { modusId: 'flux-schnell', aditus: { prompt: 'test' } } })
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   const parsed = JSON.parse(text)
   assert.equal(parsed.run.id, 'run-42')
 })
@@ -127,7 +133,7 @@ test('run_flow tool returns auth.missing when no auctor', async () => {
   const { client } = await makeClient(null)
   const result = await client.callTool({ name: 'run_flow', arguments: { modusId: 'flux-schnell' } })
   assert.equal(result.isError, true)
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   assert.ok(text.includes('auth.missing'))
 })
 
@@ -142,7 +148,7 @@ test('collect tool starts a collection when authenticated', async () => {
       aditusBase: { _basePrompt: 'a {{color}} cat' },
     },
   })
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   const parsed = JSON.parse(text)
   assert.equal(parsed.collection.id, 'coll-7')
   assert.equal(parsed.collection.total, 4)
@@ -152,7 +158,7 @@ test('collect tool returns auth.missing when no auctor', async () => {
   const { client } = await makeClient(null)
   const result = await client.callTool({ name: 'collect', arguments: { modusId: 'flux-schnell', total: 1, tractus: [] } })
   assert.equal(result.isError, true)
-  const text = (result.content[0] as { type: string; text: string }).text
+  const text = textBlocks(result)[0].text
   assert.ok(text.includes('auth.missing'))
 })
 
@@ -161,7 +167,7 @@ test('crystal://flows resource returns the flow catalog', async () => {
   const result = await client.readResource({ uri: 'crystal://flows' })
   assert.ok(Array.isArray(result.contents))
   assert.equal(result.contents[0].uri, 'crystal://flows')
-  const parsed = JSON.parse(result.contents[0].text as string)
+  const parsed = JSON.parse((result.contents[0] as { text: string }).text)
   assert.ok(Array.isArray(parsed))
   assert.equal(parsed.length, 2)
 })

@@ -57,7 +57,8 @@ import type {
 } from '../../../../src/types/museSession.js'
 import type { MuseSession } from '../../../../src/crystal/muse/session.js'
 import { fragmentKey, type Fragment } from '../../../../src/crystal/muse/taxonomy.js'
-import type { Actum, Actorum } from '../../../../src/types/cursus.js'
+import type { Actorum } from '../../../../src/types/cursus.js'
+import type { Actum } from '../../../../src/types/actum.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
 import { MuseSteerCursor } from '../../../../src/crystal/MuseSteerCursor.js'
@@ -271,7 +272,7 @@ function createServer(
     const app = express()
     app.use(express.json())
     app.use('/v1', createApiRouter({
-      api: api as unknown as ConstructorParameters<typeof createApiRouter>[0]['api'],
+      api: api as unknown as Parameters<typeof createApiRouter>[0]['api'],
       identity: fakeIdentity,
     }))
     const server = app.listen(0, '127.0.0.1', () => {
