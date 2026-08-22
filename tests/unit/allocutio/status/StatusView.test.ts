@@ -75,6 +75,7 @@ test('YOUR STUDIOS: idle studio with warm window + bulletin link', () => {
     ...empty,
     studios: [{
       studioId: 'mat-1',
+      materiaId: 'mat-1',
       label: 'flux-v1 on H100',
       status: 'idle',
       warmRemainingMs: 38_000,

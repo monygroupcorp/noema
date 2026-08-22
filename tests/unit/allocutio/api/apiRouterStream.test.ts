@@ -22,7 +22,9 @@ const fakeRun: Run = {
   modusVersion: '1.0.0',
 }
 
-function makeFakeApi(): ApiFacade {
+// Only the methods the streaming routes reach are provided. `satisfies Partial<ApiFacade>`
+// signature-checks each of them against the real facade.
+function makeFakeApi() {
   return {
     async invokeFlow(): Promise<Run> { return fakeRun },
     async getRun(_auctor: AuctorKey, id: string): Promise<Run> {
@@ -31,7 +33,7 @@ function makeFakeApi(): ApiFacade {
     },
     async listFlows(): Promise<unknown[]> { return [] },
     async describeFlow(): Promise<unknown> { return {} },
-  }
+  } satisfies Partial<ApiFacade>
 }
 
 const fakeIdentity: Identity = {
@@ -53,7 +55,7 @@ function makeServer(withHub: boolean): Promise<{
       : undefined
     const app = express()
     app.use(express.json())
-    app.use('/v1', createApiRouter({ api: makeFakeApi(), identity: fakeIdentity, hub }))
+    app.use('/v1', createApiRouter({ api: makeFakeApi() as unknown as ApiFacade, identity: fakeIdentity, hub }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolve({ server, url: `http://127.0.0.1:${addr.port}`, bus })

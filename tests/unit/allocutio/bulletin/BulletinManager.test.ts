@@ -709,7 +709,7 @@ test('/arm Start provisions a warm studio without a gen, then hides Start', asyn
   const provisioned: Array<{ models: unknown[] }> = []
   const m = new BulletinManager({
     sink: s.sink, ...armDeps(),
-    startStudio: async (_c: number, opts: { models: unknown[] }) => {
+    startStudio: async (_hostUserId: string, opts: { models: unknown[] }) => {
       provisioned.push(opts)
       return { podId: 'studio-1', gpuType: 'RTX 4090', costPerHr: 0.69, provisionMs: 20_000 }
     },

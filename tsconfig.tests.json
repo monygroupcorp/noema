@@ -13,7 +13,6 @@
   //                                                    when the last one lands. Already drained and
   //                                                    IN `include` below: `Compiler.*` (noema-293)
   //                                                    and the pod/webhook tranche (noema-294).
-  //   tests/unit/allocutio/   133 errors / 29 files  — follow-on item (volume)
   //   scripts/migrations/       2 errors /  2 files  — not under tests/; its own item
   //
   // Measured with this config: 391 errors / 67 files with the whole tree included. These counts are
@@ -52,6 +51,7 @@
     "tests/unit/crystal/webhookRouter.*",
     "tests/unit/crystal/alchemyWebhook.*",
     "tests/unit/arcanum/**/*",
-    "tests/unit/web/**/*"
+    "tests/unit/web/**/*",
+    "tests/unit/allocutio/**/*"
   ]
 }

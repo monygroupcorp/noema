@@ -56,7 +56,7 @@ function createServer(tabulae: MemoryTabula, modorum: Modorum): Promise<{ server
   return new Promise((resolveP, reject) => {
     const app = express()
     app.use(express.json())
-    app.use('/v1', createApiRouter({ api: api as unknown as ConstructorParameters<typeof createApiRouter>[0]['api'], identity: fakeIdentity }))
+    app.use('/v1', createApiRouter({ api: api as unknown as Parameters<typeof createApiRouter>[0]['api'], identity: fakeIdentity }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolveP({ server, url: `http://127.0.0.1:${addr.port}` })

@@ -32,6 +32,7 @@ function makeFakeApi(): ApiFacade {
         custody: 'ours',
         status: 'pending',
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       }
     },
   } as unknown as ApiFacade

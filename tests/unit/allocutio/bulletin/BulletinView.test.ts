@@ -165,14 +165,14 @@ test('list stage renders item buttons + nav/back + base filter, with the mount h
 test('arm wizard renders the image step then the config step, taking over the body', () => {
   const image = BulletinView.render({
     ...base, confirmed: true,
-    arm: { step: 'image', images: ['runpod/pytorch:2.4.0-cuda12.4'], configs: [] },
+    arm: { step: 'image', presets: [], images: ['runpod/pytorch:2.4.0-cuda12.4'], configs: [] },
   })
   assert.match(image.text, /pick an image/)
   assert.ok(cb(image.keyboard).includes('bul:arm.image:0') && cb(image.keyboard).includes('bul:arm.back'))
 
   const config = BulletinView.render({
     ...base, confirmed: true,
-    arm: { step: 'config', images: ['x'], image: 'runpod/pytorch:2.4.0-cuda12.4', configs: ['ComfyUI'] },
+    arm: { step: 'config', presets: [], images: ['x'], image: 'runpod/pytorch:2.4.0-cuda12.4', configs: ['ComfyUI'] },
   })
   assert.match(config.text, /Image: runpod\/pytorch:2\.4\.0-cuda12\.4/)
   assert.match(config.text, /Pick a runtime/)

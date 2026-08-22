@@ -6,29 +6,12 @@ import { fakeStageToProgressus } from '../../../src/crystal/FakeRunPodClient.js'
 import type {
   FlowContext, Step, Resolution, PrimitiveEvent, Intent, Platform, AuctorKey
 } from '../../../src/flow/types.js'
+import type { TelegramUpdate } from '../../../src/allocutio/telegram/telegramTypes.js'
+import type { WideEvent } from '../../../src/lib/wide.js'
 
 // =============================================================================
 // Mock types
 // =============================================================================
-
-interface TelegramUpdate {
-  update_id: number
-  message?: {
-    message_id: number
-    from?: { id: number; username?: string; first_name?: string }
-    chat: { id: number; type: string }
-    text?: string
-    date: number
-    photo?: Array<{ file_id: string; width: number; height: number }>
-    reply_to_message?: { message_id: number; from?: { id: number; username?: string } }
-  }
-  callback_query?: {
-    id: string
-    from: { id: number; username?: string; first_name?: string }
-    message?: { message_id: number; chat: { id: number } }
-    data?: string
-  }
-}
 
 // =============================================================================
 // Mock builders
@@ -75,6 +58,11 @@ function makeSender() {
     sendVideo: async (chatId: number, url: string, extra?: unknown) => {
       videos.push({ chatId, url, extra })
       return { message_id: 300 + videos.length }
+    },
+    // Document delivery is not exercised here; it throws rather than recording silently,
+    // so a test that starts routing documents has to add a real recorder.
+    sendDocument: async (): Promise<{ message_id: number }> => {
+      throw new Error('makeSender.sendDocument is not exercised by these tests')
     },
     sendMediaGroup: async (chatId: number, media: unknown[]) => {
       mediaGroups.push({ chatId, media })
@@ -1018,7 +1006,7 @@ test('actum.complete applies the warm window but sends NO concierge message', as
   await new Promise(r => setImmediate(r))
 
   sender.sent.length = 0
-  bus.emit('actum.complete', { actumId: 'actum-c', durationMs: 13000, coldStart: false, costUsd: 0.01, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'actum-c', durationMs: 13000, coldStart: false, costUsd: 0.01, podId: 'pod-1' } as unknown as WideEvent)
   await new Promise(r => setTimeout(r, 150))
 
   assert.equal(sender.sent.length, 0, 'should not send a "Done in" concierge message')
@@ -1256,7 +1244,7 @@ test('actum.complete tallies the gen into the bulletin totals', async () => {
   emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'RTX 4090', costPerHr: 0.69 })
   await new Promise(r => setImmediate(r))
   sender.edited.length = 0
-  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.09, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, coldStart: true, costUsd: 0.09, podId: 'pod-1' } as unknown as WideEvent)
   await new Promise(r => setImmediate(r))
   const txt = sender.edited.map(m => m.text).join('\n')
   assert.match(txt, /1 gen/, 'bulletin shows the session gen count')
@@ -1271,7 +1259,7 @@ test('cold-start journal: silent hunt, committed Found/Prepared lines, live line
   )
   await new Promise(r => setImmediate(r))
 
-  const textAfter = async (stage: string, info?: object) => {
+  const textAfter = async (stage: string, info?: Record<string, unknown>) => {
     sender.sent.length = 0; sender.edited.length = 0
     emitStage('a1', stage, info)
     await new Promise(r => setImmediate(r))
@@ -1329,7 +1317,7 @@ test('per-gen average falls across gens and the idle nudge shows marginal cost',
   await allocutio.receive(bulCb(123, 'bul:confirm'))  // confirm → idle nudge, not setup prompt
   await new Promise(r => setImmediate(r))
 
-  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, costUsd: 0.08, podId: 'pod-1' } as unknown as WideEvent)
   await new Promise(r => setImmediate(r))
   const txt = sender.edited.at(-1)!.text
   assert.match(txt, /1 gen · exec ~12s avg · \$0\.080 ea · \$0\.08 total/, 'stat line with falling per-gen average')
@@ -1344,7 +1332,7 @@ test('GPU + rate live in the Found journal line; no vendor noise or location', a
   emitStage('a1', 'provisioning')
   emitStage('a1', 'pod-locked', { podId: 'pod-1', gpuType: 'NVIDIA GeForce RTX 4090', region: 'EU-RO-1', costPerHr: 0.69, phaseMs: 30_000 })
   await new Promise(r => setImmediate(r))
-  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as Parameters<typeof bus.emit>[1])
+  bus.emit('actum.complete', { actumId: 'a1', durationMs: 12000, executionMs: 12000, coldStart: true, costUsd: 0.08, podId: 'pod-1' } as unknown as WideEvent)
   await new Promise(r => setImmediate(r))
 
   const txt = [...sender.sent.map(s => s.text), ...sender.edited.map(e => e.text)].join('\n---\n')

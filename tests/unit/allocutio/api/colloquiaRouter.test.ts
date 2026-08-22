@@ -12,7 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
-import request from 'supertest'
+import request, { type Response } from 'supertest'
 
 import {
   createColloquiaRouter,
@@ -379,8 +379,8 @@ test('two concurrent POSTs with the SAME turnKey charge the caller exactly once 
 
   // Fire both turns with the SAME turnKey; the `.then` forces supertest to dispatch immediately
   // (it starts the request lazily otherwise) so both are in flight before we await the barrier.
-  const p1 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r) => r)
-  const p2 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r) => r)
+  const p1 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r: Response) => r)
+  const p2 = request(app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 'race', message: 'hi' }).then((r: Response) => r)
   await bothInFlight
   releaseLLM()
   const [r1, r2] = await Promise.all([p1, p2])
