@@ -106,7 +106,7 @@ import {
   filterSessionHistory,
   streamColumns,
   streamPiece,
-  streamRunRequest,
+  firedRunRequest,
   streamStatusLine,
   t2iFlows,
   terminalOf,
@@ -761,10 +761,18 @@ export function Muse() {
     setBusy(index);
     try {
       // Ever present (noema-284): the standing affix rides a hand-fired piece exactly
-      // as it rides a streamed one. The manual path carries no nozzle of its own today
-      // (see `Muse.tsx:1204`'s stream path), so this composes the affix alone.
-      const firePrompt = promptWithAffix(prompt, null, affix);
-      const { run } = await api.createRun(ignitionRequest(modusId, firePrompt));
+      // as it rides a streamed one. So does the nozzle (noema-285) — the model chosen on
+      // the control above this panel is the model a hand fire runs under, composed by the
+      // same `firedRunRequest` the stream loop uses so the two paths cannot drift.
+      //
+      // BOTH HALVES, as everywhere else: the trigger word in the prompt and the weights in
+      // `pinnedModels`, because either alone is a full-price no-op. With nothing on the
+      // nozzle this is byte for byte the request the manual path sent before.
+      //
+      // The nozzle is read HERE, at fire time, exactly as the stream loop reads it — the
+      // piece carries the model that was standing when the button was pressed.
+      const firePrompt = promptWithAffix(prompt, lora, affix);
+      const { run } = await api.createRun(firedRunRequest(modusId, prompt, lora, affix));
       // The piece lands in the stream on this screen. It carries the fragments it was
       // rolled from, because a later roll replaces the report it came out of and the
       // expanded view still has to name them. It is recorded with the prompt it actually
@@ -1219,7 +1227,7 @@ export function Muse() {
 
         let runId: string;
         try {
-          const { run } = await api.createRun(streamRunRequest(modus, draw.prompt, nozzle, affixNow));
+          const { run } = await api.createRun(firedRunRequest(modus, draw.prompt, nozzle, affixNow));
           runId = run.id;
         } catch (e) {
           if (generationRef.current !== gen) return;
