@@ -78,14 +78,48 @@ test('a caption pass does not clone ai-toolkit', async () => {
   const recipe = setup.join('\n')
   assert.ok(!/git clone|ai-toolkit|submodule|requirements\.txt/.test(recipe),
     'the caption bootstrap clones nothing and installs no toolkit requirements')
-  assert.ok(!/force-reinstall|torch==/.test(recipe),
-    'the base image already carries the matched framework build — no reinstall')
   assert.ok(!/apt-get/.test(recipe), 'no system libraries: they exist for a dependency captioning does not have')
-  assert.equal(setup.length, 1, 'one dependency install is the whole bootstrap')
-  assert.match(setup[0], /transformers/)
-  assert.match(setup[0], /boto3/)
+  assert.match(recipe, /transformers/)
+  assert.match(recipe, /boto3/)
   assert.equal(script, 'captioner', 'the pod runs the caption script, not the trainer')
   assert.deepEqual(setup, CAPTION_POD_SETUP)
+})
+
+// THE ITEM (noema-299). The base image ships torch and NOT torchvision, and the vision-language
+// processor imports torchvision unconditionally — so every caption pod died at processor load,
+// nine seconds in, from the day this arm shipped. Measured in prod 2026-08-23 on actums
+// 09215bd4-3fe7-4290-bc04-e74e82770724 and 40d16919-0069-49b3-bc85-10053086aa31.
+test('the caption bootstrap installs a torchvision matched to the image’s torch', async () => {
+  const provisioner = new FakeProvisioner()
+  await launcher(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }]), provisioner).launch(spec)
+  const recipe = provisioner.calls[0].setup.join('\n')
+
+  assert.match(recipe, /torchvision==/, 'torchvision is installed, and at a pinned version')
+  assert.match(recipe, /download\.pytorch\.org\/whl\/cu128/,
+    'from the CUDA-matched wheel index — plain PyPI serves a build made for a different torch')
+
+  // The property the whole item exists to protect: the pod's torch is the image's torch,
+  // before and after. An unpinned or dependency-resolving install can replace it silently,
+  // turning a clean startup failure into an intermittent runtime one on an hourly-billed pod.
+  const torchvisionStep = provisioner.calls[0].setup.find(s => s.includes('torchvision'))
+  assert.ok(torchvisionStep, 'a torchvision step exists')
+  assert.match(torchvisionStep!, /--no-deps/,
+    'torchvision installs --no-deps so pip cannot pull torch in behind it')
+  assert.ok(!/(^|\s)torch(==|\s|$)/.test(recipe.replace(/torchvision\S*/g, '')),
+    'torch itself is never an install target — the image supplies it')
+})
+
+// THE ITEM (noema-299). Unpinned `--upgrade` meant every pod installed whatever was newest on
+// PyPI at boot against a fixed torch: a release could break every caption pod at once with no
+// commit of ours attached, and the failure would not be reproducible from this repo.
+test('the caption runtime is pinned, not floated', async () => {
+  const provisioner = new FakeProvisioner()
+  await launcher(dataset([{ id: 'media-1', url: 'https://r2.example/a.png' }]), provisioner).launch(spec)
+  const recipe = provisioner.calls[0].setup.join('\n')
+
+  assert.ok(!/--upgrade/.test(recipe), 'nothing is installed at whatever-is-latest')
+  assert.match(recipe, /transformers==\d+\.\d+/, 'transformers carries an exact version')
+  assert.match(recipe, /accelerate[><=]/, 'accelerate carries a version constraint')
 })
 
 test('the env carries the captioner’s model, prompt and token bound — and no toolkit config', async () => {
