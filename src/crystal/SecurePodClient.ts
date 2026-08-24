@@ -79,6 +79,28 @@ export const PROVISION_BUDGET_MS = 45 * 60 * 1000  // 45 minutes
  *  the commands together can no longer outlast the budget. */
 const BOOTSTRAP_CMD_TIMEOUT_MS = 20 * 60 * 1000  // 20 minutes
 
+/**
+ * How long a pod that has reported `RUNNING` may go on reporting no public IP before it is
+ * abandoned for a fresh one.
+ *
+ * A direct public IP is not guaranteed on every host; when one is assigned it is present at or
+ * shortly after the pod reaches `RUNNING`. A pod that has been `RUNNING` without one for this
+ * long is reporting an answer rather than making us wait for it, and the remaining wall-clock of
+ * `sshReadyTimeoutMs` buys nothing on that machine — another attempt on a fresh pod is what the
+ * run needs. This window starts only once `RUNNING` is observed, so a pod that is legitimately
+ * slow to boot still gets the full `sshReadyTimeoutMs` deadline.
+ */
+export const SSH_IPLESS_BAILOUT_MS = 2 * 60 * 1000  // 2 minutes
+
+/** Marker on the error thrown when a pod is abandoned for reporting `RUNNING` with no public IP,
+ *  so callers (and logs) can tell it apart from the overall SSH-readiness timeout. */
+export interface IplessHostError extends Error { iplessHost: true }
+
+/** True when `err` is the ip-less-host bailout rather than the generic SSH-readiness timeout. */
+export function isIplessHostError(err: unknown): err is IplessHostError {
+  return err instanceof Error && (err as { iplessHost?: boolean }).iplessHost === true
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -202,6 +224,9 @@ export interface SecurePodConfig {
   sshInfoTimeoutMs?: number      // default: 10_000 — per-request timeout for each SSH status poll GET
   sshReadyTimeoutMs?: number     // default: 10 min  — overall deadline for SSH to become reachable
   sshPollIntervalMs?: number     // default: 8000
+  /** How long a RUNNING pod may report no public IP before it is abandoned for a fresh one.
+   *  Default: SSH_IPLESS_BAILOUT_MS. */
+  sshIplessBailoutMs?: number
   comfyReadyTimeoutMs?: number   // default: 5 min
   comfyPollIntervalMs?: number   // default: 2000
   jobTimeoutMs?: number          // default: 15 min
@@ -669,25 +694,45 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
 
     // Provision with retries — SECURE for attempts 1-2, COMMUNITY/any-GPU on the last (mirrors submit).
+    // An attempt covers acquiring the pod AND reaching SSH-readiness on it: a machine that never
+    // becomes reachable is a spent attempt like a provision that never returned a pod, and the next
+    // attempt starts from a fresh pod under the same cloud-type rules.
     const maxAttempts = this.config.podRetries ?? 3
     let podId: string | undefined
+    let sshInfo: SshInfo | undefined
     let lastErr: Error | undefined
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const isFallback = attempt >= maxAttempts
+      // Liveness gate before spending a pod on a later attempt — the same guard the gen path's
+      // retry loop uses, so a run that has already gone terminal stops costing machines.
+      if (attempt > 1 && !(await this._actumStillLive())) {
+        log.warn('studio provision aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
+        throw lastErr ?? new Error('pod provision aborted — actum already terminal')
+      }
+      let attemptPodId: string
       try {
-        podId = await this._provisionPod(imageName, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
-        break
+        attemptPodId = await this._provisionPod(imageName, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
       } catch (err) {
         lastErr = err as Error
         log.warn(`studio provision attempt ${attempt}/${maxAttempts} failed`, { error: lastErr.message })
+        continue
+      }
+      signal('provisioning')
+      try {
+        sshInfo = await this._waitForSsh(attemptPodId)
+        podId = attemptPodId
+        break
+      } catch (err) {
+        lastErr = err as Error
+        log.warn(`studio pod ${attemptPodId} never became SSH-ready (attempt ${attempt}/${maxAttempts})`,
+          { error: lastErr.message, iplessHost: isIplessHostError(lastErr) })
+        await this._terminatePod(attemptPodId).catch(() => {})   // don't leak the abandoned pod
       }
     }
-    if (!podId) throw lastErr ?? new Error('pod provision failed')
+    if (!podId || !sshInfo) throw lastErr ?? new Error('pod provision failed')
 
     let ssh: SshTransportLike | null = null
     try {
-      signal('provisioning')
-      const sshInfo = await this._waitForSsh(podId)
       signal('pod-locked', { gpuType: sshInfo.gpuType, region: sshInfo.region, costPerHr: sshInfo.costPerHr, podId })
       ssh = await this._waitForSshd(sshInfo)
       signal('bootstrapping')
@@ -768,15 +813,35 @@ export class SecurePodClient implements RunPodClient, Procurator {
     return data.id
   }
 
+  /**
+   * Poll RunPod until the pod is SSH-reachable, or until it is clear this pod will not become
+   * so. Two ways to give up, each naming itself: the overall `sshReadyTimeoutMs` deadline, and
+   * the ip-less bailout — a pod that has been `RUNNING` without a public IP for
+   * `sshIplessBailoutMs` is abandoned there and then, so the caller's remaining attempts are
+   * spent on a fresh pod instead of on this one's clock.
+   */
   private async _waitForSsh(podId: string): Promise<SshInfo> {
     const timeoutMs = this.config.sshReadyTimeoutMs ?? 10 * 60 * 1000
     const pollMs = this.config.sshPollIntervalMs ?? 8000
-    const deadline = Date.now() + timeoutMs
+    const iplessBailoutMs = this.config.sshIplessBailoutMs ?? SSH_IPLESS_BAILOUT_MS
+    const startedAt = Date.now()
+    const deadline = startedAt + timeoutMs
     let pollCount = 0
     // Last-seen observation carried out of the loop so a give-up can name what it saw,
     // instead of discarding everything the polling learned.
     let lastObservation: SshPollObservation | undefined
     let lastError: string | undefined
+    // When the pod first reported RUNNING with no public IP. Cleared whenever an IP appears or
+    // the pod is not RUNNING, so the window measures an uninterrupted ip-less RUNNING stretch.
+    let iplessSince: number | undefined
+    /** One line per abandoned pod — what was seen, for how long, and why we stopped. */
+    const abandon = (reason: string): void => {
+      log.warn('abandoning pod', {
+        podId, reason, polls: pollCount, elapsedMs: Date.now() - startedAt,
+        desiredStatus: lastObservation?.desiredStatus, publicIp: lastObservation?.publicIp,
+        port22: lastObservation?.port22,
+      })
+    }
     while (Date.now() < deadline) {
       pollCount++
       const result = await this._getSshInfo(podId)
@@ -796,11 +861,30 @@ export class SecurePodClient implements RunPodClient, Procurator {
       if (result.observation) {
         lastObservation = result.observation
         lastError = undefined
+        // The ip-less window only runs while the pod is RUNNING and reporting no public IP.
+        if (result.observation.desiredStatus === 'RUNNING' && !result.observation.publicIp) {
+          iplessSince ??= Date.now()
+          const iplessMs = Date.now() - iplessSince
+          if (iplessMs >= iplessBailoutMs) {
+            abandon('ip-less host')
+            const err = new Error(
+              `Pod ${podId} abandoned after ${iplessMs}ms as an ip-less host — ` +
+              `RUNNING with no publicIp across ${pollCount} polls ` +
+              `(port22=${result.observation.port22 ?? '<absent>'}); ` +
+              `retrying on a fresh pod rather than waiting out the ${timeoutMs}ms SSH deadline`,
+            ) as IplessHostError
+            err.iplessHost = true
+            throw err
+          }
+        } else {
+          iplessSince = undefined
+        }
       } else {
         lastError = result.error
       }
       await sleep(pollMs)
     }
+    abandon('ssh not ready within deadline')
     if (lastObservation) {
       throw new Error(
         `Pod ${podId} SSH not ready within ${timeoutMs}ms — last seen after ${pollCount} polls:\n` +
