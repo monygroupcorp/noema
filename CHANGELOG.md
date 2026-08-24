@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.14.1](https://github.com/monygroupcorp/noema/compare/v5.14.0...v5.14.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **crystal:** give the caption pod a torchvision matched to its torch ([51450f6](https://github.com/monygroupcorp/noema/commit/51450f65a9cfa3c91947432912a15cdc3b0b530a))
+
 ## [5.14.0](https://github.com/monygroupcorp/noema/compare/v5.13.0...v5.14.0) (2026-08-22)
 
 
