@@ -119,11 +119,9 @@ export function deriveImportContentRating(
 
 export class ModelImporter {
   private readonly now: () => Date
-  private readonly previewPrefix: string
 
   constructor(private readonly deps: ModelImporterDeps) {
     this.now = deps.now ?? (() => new Date())
-    this.previewPrefix = deps.previewPrefix ?? 'model-previews'
   }
 
   /**
@@ -167,7 +165,7 @@ export class ModelImporter {
       // the import. Skipping rehostPreviews is what holds the real invariant — no unscanned bytes
       // reach our bucket. The scan itself stays unconditional so the verdict is still billed/cached.
       if (verdict.ok) {
-        samples = await this.rehostPreviews(id, samples)
+        samples = await rehostPreviews(id, samples, this.deps)
       } else {
         log.warn('preview scan did not pass; previews stay origin-referenced (not re-hosted)', {
           id,
@@ -226,30 +224,37 @@ export class ModelImporter {
     return intella
   }
 
-  /**
-   * Re-host scanned preview images into our bucket so what we display == what we scanned (and we
-   * don't hot-link a swappable third-party URL). Best-effort per image: a fetch/upload failure
-   * falls back to the origin URL — a preview must never sink an import. A no-op (returns the
-   * origin samples) when no store/fetcher is wired.
-   */
-  private async rehostPreviews(
-    id: string,
-    samples: Array<{ url: string; prompt?: string }>,
-  ): Promise<Array<{ url: string; prompt?: string }>> {
-    const { store, fetcher } = this.deps
-    if (!store || !fetcher) return samples
-    return Promise.all(samples.map(async (s, i) => {
-      try {
-        const bytes = await fetcher.fetch(s.url)
-        const ext = previewExt(s.url)
-        const hosted = await store.put(`${this.previewPrefix}/${id}/${String(i).padStart(3, '0')}${ext}`, bytes, contentTypeFor(ext))
-        return { url: hosted, ...(s.prompt ? { prompt: s.prompt } : {}) }
-      } catch (err) {
-        log.warn('preview re-host failed, keeping origin url', { id, url: s.url, error: String(err) })
-        return s
-      }
-    }))
-  }
+}
+
+/**
+ * Re-host scanned preview images into our bucket so what we display == what we scanned (and we
+ * don't hot-link a swappable third-party URL). Best-effort per image: a fetch/upload failure
+ * falls back to the origin URL — a preview must never sink an import. A no-op (returns the
+ * origin samples) when no store/fetcher is wired.
+ *
+ * Exported standalone (not just a `ModelImporter` private method) so another scan-then-store
+ * caller — the legacy-preview rescan migration — reuses this EXACT logic rather than
+ * reimplementing it and drifting apart from the import path.
+ */
+export async function rehostPreviews(
+  id: string,
+  samples: Array<{ url: string; prompt?: string }>,
+  deps: Pick<ModelImporterDeps, 'store' | 'fetcher' | 'previewPrefix'>,
+): Promise<Array<{ url: string; prompt?: string }>> {
+  const { store, fetcher } = deps
+  if (!store || !fetcher) return samples
+  const previewPrefix = deps.previewPrefix ?? 'model-previews'
+  return Promise.all(samples.map(async (s, i) => {
+    try {
+      const bytes = await fetcher.fetch(s.url)
+      const ext = previewExt(s.url)
+      const hosted = await store.put(`${previewPrefix}/${id}/${String(i).padStart(3, '0')}${ext}`, bytes, contentTypeFor(ext))
+      return { url: hosted, ...(s.prompt ? { prompt: s.prompt } : {}) }
+    } catch (err) {
+      log.warn('preview re-host failed, keeping origin url', { id, url: s.url, error: String(err) })
+      return s
+    }
+  }))
 }
 
 /** The image extension of a preview URL (defaults to .jpg when absent/unknown). */
