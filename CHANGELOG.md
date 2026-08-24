@@ -1,5 +1,27 @@
 # Changelog
 
+## [5.15.0](https://github.com/monygroupcorp/noema/compare/v5.14.1...v5.15.0) (2026-08-24)
+
+
+### Features
+
+* **crystal:** rescan+rehost legacy-imported preview media ([7a1aae5](https://github.com/monygroupcorp/noema/commit/7a1aae5608b7816db561fa1f4bf5a2f5598139fb))
+* **crystal:** rescan+rehost legacy-imported preview media ([2fbaf77](https://github.com/monygroupcorp/noema/commit/2fbaf77502261eb77e22ba22a254ee8cbe319f0a))
+* **muse:** promote a Muse session into a draft collection ([c181826](https://github.com/monygroupcorp/noema/commit/c181826455467dc1289d98fac57ca1b93e32e3bf))
+* **muse:** promote a Muse session into a draft collection ([a0ce560](https://github.com/monygroupcorp/noema/commit/a0ce5605ff58a09f5b1ee48fbbd361da45c44a92))
+
+
+### Bug Fixes
+
+* **crystal:** abandon a pod that stays RUNNING without a public IP and retry on a fresh one ([40d97ee](https://github.com/monygroupcorp/noema/commit/40d97eea5b804730346188b2ec22dcc423e16520))
+* **crystal:** bound a detached caption pod that is locked and then never reports ([145488f](https://github.com/monygroupcorp/noema/commit/145488fe815309d95a4317efbf03d2bfe88783a4))
+* **crystal:** bound a detached caption pod that is locked and then never reports ([e93f828](https://github.com/monygroupcorp/noema/commit/e93f8282bd2582770cbde57b14c993cb436fc9a0))
+* **crystal:** scope a fired collection's flow change to its funder ([e114ed9](https://github.com/monygroupcorp/noema/commit/e114ed9f9b1ac886bff84b56394b384e2c4fced7))
+* **crystal:** scope a fired collection's flow change to its funder ([6091a17](https://github.com/monygroupcorp/noema/commit/6091a17645f948ee4b3243f90e4b03f3fbf240c0))
+* **migrations:** load private compliance via variable-path dynamic import ([8f5f935](https://github.com/monygroupcorp/noema/commit/8f5f935773f67f4c08283b8eda9881624a488bc7))
+* **site:** align privacy claims with the published privacy policy ([b07573b](https://github.com/monygroupcorp/noema/commit/b07573b96d5d73bdab27980b879f9bfb9ebf7b5b))
+* **site:** align privacy claims with the published privacy policy ([0fcaa0d](https://github.com/monygroupcorp/noema/commit/0fcaa0d2462ad7cb80291a898a4d34deaad26115))
+
 ## [5.14.1](https://github.com/monygroupcorp/noema/compare/v5.14.0...v5.14.1) (2026-08-24)
 
 
