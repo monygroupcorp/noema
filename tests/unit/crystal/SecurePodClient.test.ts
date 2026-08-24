@@ -833,3 +833,173 @@ test('a launch with no phase hook behaves exactly as before', async () => {
   assert.equal(podId, 'pod-xyz')
   assert.equal(terminateSpy.calls.length, 0)
 })
+
+// ── ip-less hosts and the SSH-readiness attempt (noema-305) ────────────────────
+//
+// A public IP is not assigned on every host. When one is coming it is there at or shortly after
+// the pod reports RUNNING, so a pod that stays RUNNING without one is an answer, not a wait — and
+// waiting out `sshReadyTimeoutMs` on it spends the run's whole cold-start budget on a machine that
+// will never be reachable. These pin both halves of the behaviour: the pod is abandoned at the
+// ip-less window, and reaching SSH-readiness is part of an attempt, so the next attempt gets a
+// fresh pod.
+
+type PodBehaviour =
+  | { kind: 'healthy' }
+  | { kind: 'ipless' }                              // RUNNING forever, never a publicIp
+  | { kind: 'slowThenHealthy'; runningAfterCalls: number }   // STARTING for a while, then healthy
+
+/** Fetch mock that hands out a NEW pod id per provision POST and drives each pod's status polls
+ *  from its own behaviour, so a test can say "first machine is ip-less, the next one is fine".
+ *  The last behaviour in the list applies to every further pod. */
+function makeMultiPodFetchMock(
+  behaviours: PodBehaviour[],
+  opts: { webhookPayloads?: unknown[] } = {},
+): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[]; provisionCount: () => number } {
+  const calls: FetchCall[] = []
+  const webhookPayloads = opts.webhookPayloads ?? []
+  const behaviourOf = new Map<string, PodBehaviour>()
+  const statusPolls = new Map<string, number>()
+  let provisioned = 0
+
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    calls.push({ url, method, body: init?.body as string | undefined })
+
+    if (method === 'POST' && url === 'https://rest.runpod.io/v1/pods') {
+      const behaviour = behaviours[Math.min(provisioned, behaviours.length - 1)]
+      provisioned++
+      const podId = `pod-${provisioned}`
+      behaviourOf.set(podId, behaviour)
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+
+    const status = /\/v1\/pods\/(pod-\d+)$/.exec(url)
+    if (method === 'GET' && status) {
+      const podId = status[1]
+      const polls = (statusPolls.get(podId) ?? 0) + 1
+      statusPolls.set(podId, polls)
+      const behaviour = behaviourOf.get(podId) ?? { kind: 'healthy' as const }
+      if (behaviour.kind === 'ipless') {
+        // The shape of an ip-less host: the pod is up, but no direct address ever appears.
+        return new Response(JSON.stringify({ desiredStatus: 'RUNNING', portMappings: {} }), { status: 200 })
+      }
+      if (behaviour.kind === 'slowThenHealthy' && polls < behaviour.runningAfterCalls) {
+        return new Response(JSON.stringify({ desiredStatus: 'STARTING' }), { status: 200 })
+      }
+      return new Response(JSON.stringify({
+        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 12345, '8080': 18080 },
+      }), { status: 200 })
+    }
+
+    const runner = /^https:\/\/(pod-\d+)-8080\.proxy\.runpod\.net(\/.*)$/.exec(url)
+    if (runner) {
+      const routePath = runner[2]
+      if (routePath === '/health') return new Response('{"status":"ready"}', { status: 200 })
+      if (method === 'POST' && routePath === '/job') return new Response('{}', { status: 200 })
+      if (routePath.startsWith('/job/')) return makeSseStream([{ type: 'complete' }])
+    }
+
+    if (method === 'POST') {
+      webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response('{}', { status: 200 })
+    }
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof globalThis.fetch
+
+  return { fetch: fetchFn, calls, webhookPayloads, provisionCount: () => provisioned }
+}
+
+/** Config for the ip-less tests: a bailout window far below the overall SSH deadline, so a run
+ *  that waits out the deadline instead of bailing is visibly slower than the assertions allow. */
+function makeIplessConfig(overrides: Partial<SecurePodConfig> = {}): SecurePodConfig {
+  return makeConfig({
+    sshReadyTimeoutMs: 3000,
+    sshPollIntervalMs: 5,
+    sshIplessBailoutMs: 40,
+    ...overrides,
+  })
+}
+
+function provisionPosts(calls: FetchCall[]): FetchCall[] {
+  return calls.filter(c => c.method === 'POST' && c.url === 'https://rest.runpod.io/v1/pods')
+}
+
+test('ip-less host: the pod is abandoned at the window and the job runs on a fresh pod', async () => {
+  const { fetch, calls, provisionCount } = makeMultiPodFetchMock([{ kind: 'ipless' }, { kind: 'healthy' }])
+  const retryPod = deferred<string>()
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch)
+
+  await client.submit({ input: {}, onPodActive: async (podId) => { retryPod.resolve(podId) } })
+
+  // Bounded well under `sshReadyTimeoutMs`: without the ip-less window the first pod is still
+  // being polled when this bound expires and no second pod exists yet.
+  const second = await within(retryPod.promise, 'the fresh pod after the ip-less bailout', 1000)
+  assert.equal(second, 'pod-2', 'the run moved to a freshly provisioned pod')
+  await new Promise(r => setTimeout(r, 100))
+
+  assert.equal(provisionCount(), 2, 'exactly one re-provision')
+  const jobPosts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/job'))
+  assert.equal(jobPosts.length, 1, 'the job was submitted on the healthy pod')
+  assert.ok(jobPosts[0].url.includes('pod-2'), 'submitted to the fresh pod, not the abandoned one')
+  assert.ok(terminateSpy.calls.some(c => c.podId === 'pod-1'), 'the abandoned pod is not left running')
+})
+
+test('ip-less host: every attempt ip-less fails the run with the ip-less reason, and no pod is left running', async () => {
+  const webhookPayloads: unknown[] = []
+  const { fetch, calls } = makeMultiPodFetchMock([{ kind: 'ipless' }], { webhookPayloads })
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch)
+
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 600))
+
+  assert.equal(provisionPosts(calls).length, 3, 'all three attempts were spent, each on a fresh pod')
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  // The reason has to be distinguishable from the generic deadline, in the webhook and the log —
+  // "this host never had an address" and "this pod was slow" call for different responses.
+  assert.match(failed!.error ?? '', /ip-less host/)
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId).sort(), ['pod-1', 'pod-2', 'pod-3'])
+})
+
+test('ip-less window starts at RUNNING: a pod that is slow to boot keeps the full SSH deadline', async () => {
+  // Six polls at 5ms of STARTING is far longer than the 40ms ip-less window would allow if the
+  // window ran from the first not-ready poll rather than from RUNNING.
+  const { fetch, calls, provisionCount } = makeMultiPodFetchMock([{ kind: 'slowThenHealthy', runningAfterCalls: 12 }])
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch)
+
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 400))
+
+  assert.equal(provisionCount(), 1, 'a slow boot is not an ip-less host — no re-provision')
+  const jobPosts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/job'))
+  assert.equal(jobPosts.length, 1, 'the job ran on the pod once it came up')
+})
+
+test('ip-less host: no fresh pod is provisioned for an actum that has already gone terminal', async () => {
+  const { fetch, calls } = makeMultiPodFetchMock([{ kind: 'ipless' }, { kind: 'healthy' }])
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch, undefined, async () => false)
+
+  await withTrace(makeTraceContext({ actumId: 'act-terminal' }), () => client.submit({ input: {} }))
+  await new Promise(r => setTimeout(r, 400))
+
+  assert.equal(provisionPosts(calls).length, 1, 'the liveness gate stops the retry before a pod is spent')
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-1'], 'the abandoned pod is still cleaned up')
+})
+
+test('provisionStudio: an ip-less pod costs one attempt, not the studio', async () => {
+  const { fetch, provisionCount } = makeMultiPodFetchMock([{ kind: 'ipless' }, { kind: 'healthy' }])
+  const store = makeWarmMateriaStore()
+  const client = makeClient(makeIplessConfig({ keepWarm: true }), () => makeSshTransport(), fetch, store as never)
+
+  const startedAt = Date.now()
+  const res = await client.provisionStudio({ runtime: 'ComfyUI' })
+  const elapsedMs = Date.now() - startedAt
+
+  assert.ok(res, 'the studio is provisioned on the next machine')
+  assert.equal(res!.podId, 'pod-2')
+  // The abandoned machine costs the ip-less window, not the whole SSH deadline.
+  assert.ok(elapsedMs < 3000, `the ip-less pod was waited out for the full deadline (${elapsedMs}ms)`)
+  assert.equal(provisionCount(), 2)
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-1'], 'only the abandoned pod is terminated')
+  assert.equal(store.createCalls.length, 1, 'the warm Materia is parked on the healthy pod')
+})
