@@ -16,7 +16,7 @@
 
 Credits work across every modality — text generation, image generation, video, and audio. You buy once, spend anywhere. Credits don't expire. Bigger packs give you a better rate — roughly 208 to 270 credits per dollar depending on the pack you choose, cheapest pack to biggest.
 
-Anonymity here is a property of how you fund. Pay by card and it's identified; fund from a fresh or shielded on-chain wallet and there's no identity behind the address — the strongest privacy available today. An unlinkable ZK bearer purse on top is coming soon (see below).
+Anonymity here is a property of how you fund. Pay by card and it's identified; fund from a fresh or shielded on-chain wallet and there's no identity behind the address. An unlinkable ZK bearer purse on top is coming soon (see below).
 
 ---
 
@@ -72,7 +72,7 @@ Anonymity here is a property of how you fund. Pay by card and it's identified; f
 
 ## Private spending
 
-Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the address has no identity behind it — the strongest privacy available today, and it works right now. On top of that, an unlinkable ZK bearer purse — spends cryptographically unlinkable to what you funded — is coming soon: it unlocks after the trusted-setup ceremony. Direct-to-commitment deposits, where we never see the funding wallet, are also on the roadmap.
+Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the address has no identity behind it, and that works right now. On top of that, an unlinkable ZK bearer purse — spends cryptographically unlinkable to what you funded — is coming soon: it unlocks after the trusted-setup ceremony. Direct-to-commitment deposits, where we never see the funding wallet, are also on the roadmap.
 
 ---
 

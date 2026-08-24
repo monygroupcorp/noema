@@ -198,10 +198,10 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   // NOEMA banner + CTA up top — a static brand asset (does not touch the model's
   // own sample/widget thumbnails); turns each card into a noema.art landing page.
   const body: string[] = [
-    `<p align="center"><a href="https://noema.art"><img src="${NOEMA_BANNER}" alt="NOEMA — run this model privately at noema.art" width="100%"></a></p>`, '',
+    `<p align="center"><a href="https://noema.art"><img src="${NOEMA_BANNER}" alt="NOEMA — run this model anonymously at noema.art" width="100%"></a></p>`, '',
     `# ${model.nomen}`, '',
-    '> **NOEMA** — privacy-by-construction generative studio.  ',
-    '> Run this model privately at **[noema.art](https://noema.art)** · no email · pay anonymously.', '',
+    '> **NOEMA** — open-source generative studio.  ',
+    '> Run this model at **[noema.art](https://noema.art)** · no email · pay anonymously.', '',
   ]
   body.push(model.description?.trim() || `A LoRA for ${facts.displayBase}.`, '')
   if (trigger) body.push(`**Trigger word:** \`${trigger}\``)
@@ -256,8 +256,8 @@ export function renderModelCard(model: ModelView, repoId?: string): string {
   }
   body.push(
     '## About', '',
-    '**NOEMA** is a privacy-by-construction generative studio. Run this model — and the rest of the catalogue — privately at **[noema.art](https://noema.art)**: no email to start, pay anonymously, go fully private anytime.', '',
-    '<sub>NOEMA · a complete studio, completely private · <a href="https://noema.art">noema.art</a></sub>', '',
+    '**NOEMA** is an open-source generative studio. Run this model — and the rest of the catalogue — at **[noema.art](https://noema.art)**: no email to start, pay anonymously, nothing retained after a request.', '',
+    '<sub>NOEMA · a complete studio · anonymous to fund, anonymous to make · <a href="https://noema.art">noema.art</a></sub>', '',
   )
 
   return [...fm, ...body].join('\n')

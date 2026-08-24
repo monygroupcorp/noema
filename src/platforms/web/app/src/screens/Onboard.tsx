@@ -51,7 +51,7 @@ export function Onboard() {
           </>
         ) : (
           <>
-            <h1 className="auth-display">Make anything.<br />We never have to see it.</h1>
+            <h1 className="auth-display">Make anything.<br />Anonymously.</h1>
             <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
           </>
         )}
