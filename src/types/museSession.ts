@@ -81,6 +81,52 @@ export interface StoredMuseSession {
   natum: Date
   /** "mutatum" = changed — when the session was last written. */
   mutatum: Date
+  /**
+   * "versio" = version — the write counter a `save` compares against.
+   *
+   * Optional because a record written before this field existed does not carry
+   * one, and no backfill mints it: ABSENT MEANS 0, everywhere. The first save of
+   * such a record matches on the field being absent, and stamps 1, so a session
+   * joins the versioned line the first time it is written rather than through a
+   * migration.
+   *
+   * An integer rather than `mutatum`: two writes landing in the same millisecond
+   * carry the same timestamp, and a compare-and-swap on a value that can repeat
+   * is a compare-and-swap that can pass when it should not.
+   */
+  versio?: number
+}
+
+/**
+ * A save whose expected version did not match the stored one — another writer
+ * changed the session between this caller's read and its write.
+ *
+ * A TYPED refusal rather than a replace, because the replace is wholesale: the
+ * losing write carries a session value computed from a stale read, so landing it
+ * would drop whatever the winning write added. The caller's move is to re-read,
+ * re-apply its pure mutator to the fresh session, and save again — see
+ * `CrystalApi._saveMuseSession`, which is the single place that does it.
+ */
+export class MuseSessionVersionConflict extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly expected: number,
+  ) {
+    super(`Muse session '${sessionId}' changed since it was read (expected version ${expected})`)
+    this.name = 'MuseSessionVersionConflict'
+  }
+}
+
+/**
+ * Recognise a version conflict without relying on `instanceof` alone, so a store
+ * reached through a second module instance still reads as a conflict rather than
+ * as an unknown failure the caller would surface as an internal error.
+ */
+export function isMuseSessionVersionConflict(err: unknown): err is MuseSessionVersionConflict {
+  return (
+    err instanceof MuseSessionVersionConflict ||
+    (err instanceof Error && err.name === 'MuseSessionVersionConflict')
+  )
 }
 
 /** What a caller hands the store to spawn a session: the owner and the pure value. */
@@ -124,8 +170,21 @@ export interface MuseSessions {
   /**
    * Replace the stored session's pure value and bump `mutatum`. Returns null when
    * the id names no session — one is never created implicitly.
+   *
+   * COMPARE-AND-SWAP, NOT A BARE REPLACE. `expectedVersio` is the `versio` the
+   * caller read (absent reads as 0); the write lands only if the stored version is
+   * still that one, and stamps `expectedVersio + 1`. A mismatch throws
+   * `MuseSessionVersionConflict` rather than replacing.
+   *
+   * The reason is the wholesale replace itself: every mutation is read → pure-mutate
+   * → replace, so two mutations that overlap both compute a whole session from their
+   * own read and the second to land carries no trace of the first. Muse is worked
+   * rapid-fire — rolls stream in while the floor is being steered — so overlapping
+   * mutations are the normal case rather than an exotic one, and a piece that a
+   * concurrent floor change replaced would be absent from the ledger while the
+   * client had already displayed it.
    */
-  save(id: string, session: MuseSession): Promise<StoredMuseSession | null>
+  save(id: string, session: MuseSession, expectedVersio: number): Promise<StoredMuseSession | null>
 }
 
 /** The fragment identity a floor operation names, as a caller supplies it. */
