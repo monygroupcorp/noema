@@ -1003,3 +1003,124 @@ test('provisionStudio: an ip-less pod costs one attempt, not the studio', async 
   assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-1'], 'only the abandoned pod is terminated')
   assert.equal(store.createCalls.length, 1, 'the warm Materia is parked on the healthy pod')
 })
+
+// ── the detached launch and unreachable hosts (noema-308) ─────────────────────
+//
+// The detached launch resolves at the pod id and does the SSH wait in the background, so reaching
+// SSH-readiness on the machine it was handed used to be the whole of its chance: one host that
+// never became reachable ended the run. These pin the same attempt loop the gen and studio paths
+// run — a fresh pod for a machine that will not answer — plus the two things that loop owes the
+// rest of the system: the recorded handle follows the machine, and the failure a run ends on
+// accounts for every pod it spent.
+
+/** A transport whose `exec` settles `detached` once the nohup launch command runs — the point at
+ *  which the pod owns the job and the background phase is done. */
+function makeDetachedSpyTransport(detached: { resolve: (v: void) => void }): SshTransportLike & { execCalls: string[] } {
+  return makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  }) as SshTransportLike & { execCalls: string[] }
+}
+
+test('training launch: an ip-less host is abandoned and the job is launched on a fresh pod', async () => {
+  const { fetch, calls, provisionCount } = makeMultiPodFetchMock([{ kind: 'ipless' }, { kind: 'healthy' }])
+  const detached = deferred<void>()
+  const execs: string[] = []
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      execs.push(cmd)
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const stamps: string[] = []
+  const failure: unknown[] = []
+  const client = makeClient(makeIplessConfig(), () => ssh, fetch)
+
+  const { podId } = await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPodId: async (id) => { stamps.push(id) },
+    onLaunchFailed: async (err) => { failure.push(err) },
+  })
+  assert.equal(podId, 'pod-1', 'the launch resolves on the pod it first acquired')
+
+  await within(detached.promise, 'the detached launch on the fresh pod')
+
+  assert.equal(provisionCount(), 2, 'exactly one re-provision')
+  assert.deepEqual(failure, [], 'the launch did not fail')
+  // The handle has to follow the machine: the reaper, the status posts and the completion webhook
+  // all key off it, and the abandoned pod is gone.
+  assert.deepEqual(stamps, ['pod-1', 'pod-2'], 'the recorded handle was moved to the fresh pod')
+  const launch = execs.find(c => c.includes('nohup'))
+  // The env is shell-quoted on its way onto the command line, so match the value, not a literal.
+  assert.match(launch ?? '', /RUNPOD_POD_ID='?pod-2'?\s/, `the pod runs as pod-2, got: ${launch}`)
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-1'], 'the abandoned pod is not left running')
+  assert.equal(provisionPosts(calls).length, 2)
+})
+
+test('training launch: every attempt ip-less ends on an attempts-exhausted error naming each abandoned pod', async () => {
+  const { fetch, calls } = makeMultiPodFetchMock([{ kind: 'ipless' }])
+  const failure = deferred<unknown>()
+  const stamps: string[] = []
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch)
+
+  await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPodId: async (id) => { stamps.push(id) },
+    onLaunchFailed: async (err) => { failure.resolve(err) },
+  })
+  const err = await within(failure.promise, 'the exhausted-attempts failure', 2000) as Error
+
+  assert.equal(provisionPosts(calls).length, 3, 'all three attempts were spent, each on a fresh pod')
+  assert.match(err.message, /exhausted 3 attempts/i, 'the run ends on "the attempts ran out"')
+  for (const pod of ['pod-1', 'pod-2', 'pod-3']) {
+    assert.ok(err.message.includes(pod), `the terminal error must name ${pod}, got: ${err.message}`)
+  }
+  assert.match(err.message, /ip-less host/, 'the reason each machine was abandoned survives')
+  // A single attempt's bailout promises another pod. That text is true of an attempt and false of
+  // a run that has none left, so it must never be what the run terminates on.
+  assert.doesNotMatch(err.message, /retrying on a fresh pod/,
+    'a single-attempt bailout message must not surface as the terminal error')
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId).sort(), ['pod-1', 'pod-2', 'pod-3'],
+    'no abandoned pod is left running')
+  assert.deepEqual(stamps, ['pod-1', 'pod-2', 'pod-3'], 'each machine was recorded while it was the live one')
+})
+
+test('training launch: no fresh pod is provisioned for a run that has already gone terminal', async () => {
+  const { fetch, calls } = makeMultiPodFetchMock([{ kind: 'ipless' }, { kind: 'healthy' }])
+  const failure = deferred<unknown>()
+  const stamps: string[] = []
+  const client = makeClient(makeIplessConfig(), () => makeSshTransport(), fetch, undefined, async () => false)
+
+  await withTrace(makeTraceContext({ actumId: 'act-terminal' }), () => client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPodId: async (id) => { stamps.push(id) },
+    onLaunchFailed: async (err) => { failure.resolve(err) },
+  }))
+  const err = await within(failure.promise, 'the aborted-launch failure') as Error
+
+  assert.equal(provisionPosts(calls).length, 1, 'the liveness gate stops the retry before a pod is spent')
+  assert.match(err.message, /already terminal/i)
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-1'], 'the abandoned pod is still cleaned up')
+  assert.deepEqual(stamps, ['pod-1'], 'no handle was moved to a pod that was never provisioned')
+})
+
+test('training launch: a healthy first pod is launched on directly, with no extra provision', async () => {
+  const { fetch, calls, provisionCount } = makeMultiPodFetchMock([{ kind: 'healthy' }])
+  const detached = deferred<void>()
+  const stamps: string[] = []
+  const client = makeClient(makeIplessConfig(), () => makeDetachedSpyTransport(detached), fetch)
+
+  await client.launchTrainingPod({
+    image: 'runpod/pytorch:2.4.0', env: {}, setup: ['pip install -r'],
+    onPodId: async (id) => { stamps.push(id) },
+  })
+  await within(detached.promise, 'the detached launch command')
+
+  assert.equal(provisionCount(), 1, 'a reachable machine costs one attempt')
+  assert.deepEqual(stamps, ['pod-1'], 'the handle is stamped once')
+  assert.equal(provisionPosts(calls).length, 1)
+  assert.equal(terminateSpy.calls.length, 0, 'a launch that bootstrapped is not terminated')
+})
