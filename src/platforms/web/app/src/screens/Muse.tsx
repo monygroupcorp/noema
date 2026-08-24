@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import {
   api,
@@ -81,6 +81,9 @@ import {
   decomposeGateReason,
   poolDatasetFragments,
   promptWithAffix,
+  promoteBlockReason,
+  promoteLabel,
+  promotedCollectionPath,
   proposalPills,
   reactionOf,
   recordDismissal,
@@ -281,6 +284,7 @@ function errText(e: unknown): string {
 
 export function Muse() {
   const { id } = useParams();
+  const navigate = useNavigate();
   // The session this visit names, if it names one. Absent = the bare resume door.
   const [searchParams] = useSearchParams();
   const sessionParam = searchParams.get(SESSION_PARAM);
@@ -498,6 +502,10 @@ export function Muse() {
   const [floorBusy, setFloorBusy] = useState<string | null>(null);
   const [reacting, setReacting] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  // Promotion (noema-307): in flight, and what to say if it did not land. It writes
+  // nothing to the session, so a failure leaves the sitting exactly as it was.
+  const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   // ── The steer keyboard and the consent sheet (noema-261) ──────────────────
   // The instruction, its price, the proposal it came back with, and the vetoes on that
@@ -591,6 +599,30 @@ export function Muse() {
       setSessionError(`that piece didn't go back into the set: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSaving(null);
+    }
+  }
+
+  // Promote — the garden becomes the bedrock of a collection. ONE CALL and no dialog, the
+  // way the ↓ save is one call: the name is derived server-side, the enabled floor becomes
+  // the trait grid and the session's flow, affix and stacked trigger words become the base
+  // prompt. NOTHING IS SPENT — what comes back is a DRAFT, and the supply, review policy
+  // and DNA rule a session cannot supply are set in the funnel this lands in, where firing
+  // is what enforces completeness.
+  //
+  // THE SESSION IS NOT WRITTEN, here or on the server, so this does not end the sitting:
+  // the stream keeps running, the floor is untouched, and a session can be promoted more
+  // than once. `setSession` is deliberately not called — there is no new session state.
+  async function promote() {
+    if (!session || promoting) return;
+    setPromoting(true);
+    setPromoteError(null);
+    try {
+      const { collection } = await api.promoteMuseSession(session.id);
+      navigate(promotedCollectionPath(collection.id));
+    } catch (e) {
+      setPromoteError(`that didn't become a collection: ${errText(e)}`);
+    } finally {
+      setPromoting(false);
     }
   }
 
@@ -1915,6 +1947,30 @@ export function Muse() {
               </button>
             </div>
           )}
+
+          {/* The way out of transience (noema-307). Muse is collection mode played
+              transiently; this is the one press that makes it durable — the floor as it
+              stands becomes the collection's traits, and the flow, the affix and the
+              stacked trigger words become the base prompt it expands. It sits beside the
+              floor readout because the floor is what it promotes.
+
+              NOTHING IS SPENT: what it makes is a DRAFT, and the supply this session
+              cannot supply is asked for in the funnel it opens. It is offered while a
+              stream is running — it writes nothing to the session — so taking it never
+              costs the user a stream they are already paying for. */}
+          <div className="muse-launcher-promote gt-sub mono">
+            <button
+              type="button"
+              className="btn ghost sm"
+              disabled={!!promoteBlockReason(session) || promoting}
+              title={promoteBlockReason(session) ?? 'the floor becomes a collection’s traits — nothing is spent, and this session is unchanged'}
+              onClick={() => void promote()}
+            >
+              {promoting ? 'making the collection…' : promoteLabel(session)}
+            </button>
+            <span>a draft — you set the supply next, and nothing is spent until you fire it</span>
+          </div>
+          {promoteError && <div className="gt-sub mono">{promoteError}</div>}
 
           {/* The row that never folds: the control that starts or ends the spend, the
               live readout, and — once a stream has begun — the one press that brings the

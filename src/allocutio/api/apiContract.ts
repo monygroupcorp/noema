@@ -1707,6 +1707,20 @@ const UpdateMusePieceRequestSchema: JsonSchema = {
   },
 }
 
+/** The request body for `POST /v1/data/muse/sessions/:id/promote`. */
+const PromoteMuseSessionRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Promote a Muse session into a draft collection. The body carries at most a name, and ' +
+    'a name is a label: the flow, the trait grid, the standing prompt and the funding ' +
+    'identity are all derived server-side from the session the caller owns, so no field ' +
+    'here names an owner, a team, or any part of the grid. Omit the name and one is derived ' +
+    "from the session's mother dataset.",
+  properties: {
+    nomen: { type: 'string', description: 'Optional display name for the new collection.' },
+  },
+}
+
 const CogsReportSchema: JsonSchema = {
   type: 'object',
   description: 'Admin COGS report: trailing-window rollup of per-job costUsd off wide_events — the read-only pair to the revenue report.',
@@ -2116,6 +2130,15 @@ export const API_CONTRACT: ApiContract = {
         "Put a piece from a session the caller owns back into the set: its media joins the session's own dataset, carrying the lineage that produced it as that media item's fragments. The session's dataset is created by the first save and appended to by every save after it; the mother dataset is never written. No job runs and nothing is spent — a generated piece was composed from fragments, so its recorded lineage is already its tagging. The request body is empty: the media is resolved server-side from the run the piece names, which must be the caller's own completed run. A save reweights the floor rather than widening it — the session's fragment list is unchanged. A session the caller does not own is reported as not found, as is a run the session's ledger holds no piece for.",
       auth: true,
       response: MuseSessionEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions/:id/promote',
+      summary:
+        "Promote a Muse session the caller owns into a DRAFT collection: the fragments still in the draw become the collection's trait grid, one axis per category, and the session's flow, standing affix and stacked model trigger words become the base prompt the grid expands. A fragment turned off on the cutting floor is not carried across — darkening it is the curation. The session itself is read and never written, so it is unchanged by the promotion and may be promoted again. NOTHING IS SPENT: a draft is not dispatched, and the supply, review policy and DNA rule a session cannot supply are set in the collection funnel, where firing enforces completeness. Trait rarity is left unset so the default spread applies. The request body carries at most a name; every reference the new collection holds is derived server-side from the session. A session the caller does not own is reported as not found.",
+      auth: true,
+      request: PromoteMuseSessionRequestSchema,
+      response: CollectionEnvelopeSchema,
     },
     {
       method: 'GET',

@@ -602,7 +602,7 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Dataset by id', 
 // ── BY ID: Muse session (owner resolved in _museSession) ─────────────────────
 
 test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by id', async () => {
-  const { api, datasets, museSessions } = makeApi()
+  const { api, collectiones, datasets, museSessions } = makeApi()
   const mother = await seedDataset(api, datasets)
   const spawned = await api.spawnMuseSession(A, mother.id)
   assert.equal(spawned.floor.length, FRAGMENTS.length, 'the session spawned with the mother\'s floor')
@@ -641,6 +641,14 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
     // be refused at the session, before any dataset is minted in B's name off A's ledger.
     { name: 'saveMusePiece', call: (id) => api.saveMusePiece(B, id, 'run-of-a') },
     {
+      // A promotion turns a session into a durable collection: A's flow, A's standing prompt
+      // and the floor A curated, minted as a record funded by whoever asked. B naming A's
+      // session must be refused AT THE SESSION, before any collection exists — otherwise
+      // material A only ever played with privately becomes a record in B's name.
+      name: 'promoteMuseSession',
+      call: (id) => api.promoteMuseSession(B, id, { nomen: 'taken by B' }),
+    },
+    {
       // The setup is what a session fires its draw THROUGH — the flow, the run shape, the
       // model stack. B naming A's session must be refused at the session: the body carries
       // no owner and neither does the route, so an owner sent in it reaches nothing.
@@ -654,6 +662,10 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
   assert.deepEqual(
     [...datasets.store.values()].map((d) => d.id), [mother.id],
     'a rejected save minted a dataset — B\'s call reached the dataset store',
+  )
+  assert.equal(
+    collectiones.store.size, 0,
+    'a rejected promotion minted a collection — B\'s call reached the collection store',
   )
 
   const own = await api.getMuseSession(A, session.id)

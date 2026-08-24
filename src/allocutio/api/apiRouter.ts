@@ -174,6 +174,7 @@ export interface ApiFacade {
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<import('./CrystalApi.js').MuseSessionView>
+  promoteMuseSession(auctor: AuctorKey, id: string, input?: unknown): Promise<Collection>
   publish(auctor: AuctorKey, opts: PublishOpts): Promise<Edition>
   getEdition(auctor: AuctorKey, id: string): Promise<Edition>
   feed(filter?: FeedFilter): Promise<FeedItem[]>
@@ -1171,6 +1172,24 @@ export function createApiRouter(deps: {
     const auctor = await auth(req)
     const session = await api.saveMusePiece(auctor, String(req.params.id), String(req.params.runId))
     res.status(201).json({ session })
+  }))
+
+  // POST /v1/data/muse/sessions/:id/promote — the session becomes a DRAFT collection: its
+  // enabled floor becomes the trait grid, its flow and its standing affix and model triggers
+  // become the base the grid expands. The session is read and never written, so it survives
+  // the promotion unchanged. NOTHING IS SPENT: a draft is not dispatched, and the supply,
+  // review policy and DNA rule the session cannot supply are finished in the collection
+  // funnel, where firing enforces completeness.
+  //
+  // The body carries at most a `nomen`, and a name is a label. Every reference the new
+  // collection holds — its flow, its grid, its funding identity — is derived server-side
+  // from the session the authenticated caller owns; nothing in the body can name an owner,
+  // a team or a grid.
+  router.post('/data/muse/sessions/:id/promote', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { nomen?: unknown }
+    const collection = await api.promoteMuseSession(auctor, String(req.params.id), { nomen: body.nomen })
+    res.status(201).json({ collection })
   }))
 
   // GET /v1/me — the caller's account settings: appearance + generation defaults + bindings.
