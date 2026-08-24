@@ -5,6 +5,7 @@ import type { Modus } from '../types/modus.js'
 import type { Datasets } from '../types/dataset.js'
 import { uncoveredMedia } from './datasetManifest.js'
 import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
+import { FIRST_HEARTBEAT_DEADLINE_MS } from './expiryReaper.js'
 
 // =============================================================================
 // DatasetCaptionCursor — batch dataset captioning on a provisioned, billed pod
@@ -85,6 +86,16 @@ export interface DatasetCaptionCursorDeps {
   actorum: Pick<Actorum, 'update'>
   /** Reservation cap in pod-seconds (1 impetus pt ≈ 1 SECURE-second) — default `DEFAULT_MAX_CAPTION_SECONDS`. */
   maxCaptionSeconds?: number
+  /**
+   * How long the caption pod has to say its first word once the host has locked a machine for
+   * it — default `FIRST_HEARTBEAT_DEADLINE_MS`. Stamped onto the actum at dispatch, enforced by
+   * the first-heartbeat sweep in `expiryReaper`.
+   *
+   * The knob exists because the right value is a property of THIS pod's startup — a caption pod
+   * installs a small runtime and then loads one vision-language model — and a deployment that
+   * moves either should be able to move the window with it rather than editing the reaper.
+   */
+  firstHeartbeatDeadlineMs?: number
 }
 
 /**
@@ -155,9 +166,13 @@ export class DatasetCaptionCursor implements Cursor {
    * when the modus declares a fixed price, and a price read as a duration would hand a flat-priced
    * caption modus a deadline of a few seconds.
    *
-   * The cost of the number: the actum's `expirat` is what releases its locked reserve, so a caption
-   * run that dies silently holds the payer's credits locked for this long before the reaper frees
+   * The cost of the number: the actum's `expirat` is what releases its locked reserve, so a run
+   * that stops reporting holds the payer's credits locked for this long before the reaper frees
    * them (clamped by MAX_TERMINUS_MS). Nothing is charged — a reaped run is failed, not settled.
+   *
+   * This is the OUTER bound only. A pod that is locked and then never speaks at all is caught far
+   * sooner by the first-heartbeat deadline (`firstHeartbeatDeadlineMs`, armed in `run()`), which
+   * is what keeps a pod that dies in its first second off this clock.
    */
   async terminus(_modus: Modus, _aditus: Record<string, unknown>): Promise<number> {
     return PROVISION_BUDGET_MS + (this.deps.maxCaptionSeconds ?? DEFAULT_MAX_CAPTION_SECONDS) * 1000
@@ -193,10 +208,18 @@ export class DatasetCaptionCursor implements Cursor {
     // pod is bootstrapped — the launch resolves at provisioning and does the rest in the
     // background, so "after launch resolves" is no longer early enough on its own. A launcher that
     // does not call the hook still gets the stamp, below, exactly as before.
+    //
+    // `firstHeartbeatDeadlineMs` rides in the same patch — this is a DETACHED pod, whose only
+    // channel back is its own status posts, so the run opts into the first-heartbeat deadline
+    // that bounds a pod which is locked and then never speaks. It has to be on the actum before
+    // the pod lock, because the lock report is what starts the clock.
+    const firstHeartbeatDeadlineMs = this.deps.firstHeartbeatDeadlineMs ?? FIRST_HEARTBEAT_DEADLINE_MS
     let stamped = false
     const stamp = async (externusJobId: string): Promise<void> => {
       stamped = true
-      await this.deps.actorum.update(actum.id, { externusJobId, callbackNonce, oneshotPod: true, status: 'agens' })
+      await this.deps.actorum.update(actum.id, {
+        externusJobId, callbackNonce, oneshotPod: true, status: 'agens', firstHeartbeatDeadlineMs,
+      })
     }
 
     const { externusJobId } = await this.deps.launcher.launch({
