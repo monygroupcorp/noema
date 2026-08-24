@@ -866,7 +866,8 @@ export class CrystalApi {
    *  - while `status === 'draft'`, every field is writable;
    *  - once fired, `tractus` and `numerus` are frozen — a patch carrying either is refused, even
    *    if the sent value happens to equal the stored one (the wire cannot express "unchanged");
-   *  - once fired, `modusId` is still writable. Changing it is forward-only: `CollectioCursor`
+   *  - once fired, `modusId` is still writable, but by the funder alone — the flow directs what
+   *    the collection's `by` pays for. Changing it is forward-only: `CollectioCursor`
    *    re-reads the collection on every dispatch tick, so a later dispatch expands the new flow,
    *    while already-dispatched `acta` keep the `aditus` they were created with. Provenance is
    *    re-derived so the content-address matches whatever the collection now points at.
@@ -886,6 +887,14 @@ export class CrystalApi {
       // traits/supply, or that carries nothing to change at all, is refused.
       if (changingTraitsOrSupply || !changingFlow) {
         throw Errors.inputMalformed('a collection’s traits and supply are frozen once it is fired')
+      }
+      // A fired collection keeps dispatching: `CollectioCursor` re-reads `modusId` on every tick,
+      // so a post-fire flow change directs pieces that are funded by the collection's `by`. That
+      // makes it a spend-directing write, gated exactly like `fireCollection` and
+      // `extendCollection` — the funder only. Draft-mode team editing is unaffected: this branch
+      // is reached only once the collection has been fired.
+      if (!this._isFunder(auctor, c)) {
+        throw Errors.authForbidden('only the collection funder can change a fired collection’s flow')
       }
     }
 
