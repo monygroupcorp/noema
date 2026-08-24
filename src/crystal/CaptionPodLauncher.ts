@@ -24,8 +24,17 @@ import { DEFAULT_AITK_IMAGE, type TrainingPodProvisioner } from './RemoteAitkLau
 // A CAPTION PASS CARRIES A CAPTION RUNTIME. It loads one vision-language model and runs a
 // bounded forward pass per media item; it does not train, so it needs neither a training
 // toolkit nor the system libraries and pinned framework stack that toolkit's dependency tree
-// requires. The bootstrap below is one dependency install onto a base image that already
-// carries the matched framework build, and the pod script is this arm's own.
+// requires. The bootstrap below installs that runtime onto the base image, and the pod script
+// is this arm's own.
+//
+// WHAT THE BASE IMAGE CARRIES IS TORCH, NOT A FRAMEWORK STACK. This comment previously said the
+// image "already carries the matched framework build", and the bootstrap was written to that
+// belief: it installed no framework at all. The image ships torch 2.9.1+cu128 and no
+// torchvision, which the vision-language processor imports unconditionally — so the caption arm
+// failed at processor load on every run from the day it shipped (2026-08-21) until this fix,
+// nine seconds into each pod, having captioned nothing. The old toolkit bootstrap had been
+// carrying torchvision incidentally, as a side effect of the framework reinstall this arm
+// deliberately dropped. State what the image provides; never infer it from what used to work.
 //
 // CONFIG RIDES AS ENVIRONMENT VARIABLES. The captioner takes its model, prompt and token bound
 // straight off the env this launcher emits — there is no config file format between the two
@@ -44,11 +53,37 @@ export const DEFAULT_CAPTION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct'
  *  training arm's pod dir: nothing on this pod is shared with a training run. */
 export const POD_CAPTION_DIR = '/caption'
 
-/** Bootstrap for a caption pod. The base image already carries the matched framework build, so
- *  this is the caption runtime and the uploader and nothing else: no repository clone, no
- *  submodules, no toolkit requirements tree, no framework reinstall. */
+/** The wheel index carrying builds matched to the base image's CUDA. Plain PyPI serves a
+ *  torchvision built against a different torch, and installing that displaces the image's
+ *  CUDA-matched build. */
+export const POD_TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cu128'
+
+/** The torchvision release paired with the base image's torch 2.9.1+cu128. The image ships torch
+ *  and NOT torchvision, and the Qwen3-VL processor imports torchvision unconditionally even though
+ *  this arm only ever hands it stills — so without this a pod dies at processor load, before
+ *  reading a single image. Bump in lockstep with the image's torch, never alone. */
+export const POD_TORCHVISION_PIN = 'torchvision==0.24.1'
+
+/** The captioner's Python runtime, pinned. Unpinned, every pod installed whatever was newest on
+ *  PyPI at boot against a fixed torch — so a release could break every caption pod at once with no
+ *  change on our side, and the failure would not be reproducible from this repo. There is already
+ *  a floor (`captioner.py` passes the newer `dtype=` kwarg, which older releases do not accept),
+ *  so the version wants walling on both sides rather than on neither. */
+export const POD_TRANSFORMERS_PIN = 'transformers==5.15.1'
+export const POD_ACCELERATE_PIN = 'accelerate>=1.14,<2'
+
+/** Bootstrap for a caption pod: the caption runtime and the uploader and nothing else — no
+ *  repository clone, no submodules, no toolkit requirements tree.
+ *
+ *  Two commands, and the split is load-bearing. torchvision installs `--no-deps` from the CUDA
+ *  index so pip cannot pull torch in behind it: torchvision declares an exact torch, and letting
+ *  pip resolve that is how an already-satisfied requirement still gets reinstalled from a
+ *  different index. Its remaining deps are numpy (on the torch image already) and pillow (the
+ *  second command). The property this protects is that the pod's torch version and CUDA build are
+ *  the same after the bootstrap as before it. */
 export const CAPTION_POD_SETUP: string[] = [
-  'pip install --break-system-packages -q --upgrade transformers accelerate pillow boto3',
+  `pip install --break-system-packages -q --no-deps --index-url ${POD_TORCH_INDEX_URL} ${POD_TORCHVISION_PIN}`,
+  `pip install --break-system-packages -q ${POD_TRANSFORMERS_PIN} "${POD_ACCELERATE_PIN}" pillow boto3`,
 ]
 
 export interface CaptionPodLauncherDeps {
