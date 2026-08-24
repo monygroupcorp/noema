@@ -15,6 +15,7 @@ import type { Cursor, CursorResult } from '../../../src/types/cursus.js'
 import type { Modus } from '../../../src/types/modus.js'
 import { PROVISION_BUDGET_MS } from '../../../src/crystal/SecurePodClient.js'
 import { DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
+import { FIRST_HEARTBEAT_DEADLINE_MS } from '../../../src/crystal/expiryReaper.js'
 
 class FakeLauncher implements CaptionLauncher {
   launched: CaptionLaunchSpec[] = []
@@ -254,4 +255,40 @@ test('run: the captionset the run was given is handed to the launcher', async ()
   // And a pass given none carries none — the launcher's fresh-set path is chosen by absence.
   await cursor.run(actum({ dataset: 'ds-1' }))
   assert.equal('captionsetId' in launcher.launched[1], false)
+})
+
+// ── The first-heartbeat deadline is armed at dispatch ────────────────────────
+//
+// A caption pod is detached: once it is launched, its own status posts are the only channel back.
+// The run therefore opts into the short deadline that bounds a pod which is locked to a machine
+// and then never speaks — and it has to be on the actum BEFORE the pod lock, because the lock
+// report is what starts that clock.
+
+test('run: arms the first-heartbeat deadline in the same patch as the job handle', async () => {
+  const launcher = new FakeLauncher()
+  const actorum = new FakeActorum()
+  await new DatasetCaptionCursor({ launcher, actorum, datasets: new FakeDatasets() }).run(actum({ dataset: 'ds-1' }))
+
+  assert.equal(actorum.patches.length, 1, 'one patch — the deadline cannot land after the pod lock')
+  assert.equal(actorum.patches[0].firstHeartbeatDeadlineMs, FIRST_HEARTBEAT_DEADLINE_MS)
+})
+
+test('run: a deployment-configured window overrides the default', async () => {
+  const launcher = new FakeLauncher()
+  const actorum = new FakeActorum()
+  await new DatasetCaptionCursor({
+    launcher, actorum, datasets: new FakeDatasets(), firstHeartbeatDeadlineMs: 4 * 60_000,
+  }).run(actum({ dataset: 'ds-1' }))
+
+  assert.equal(actorum.patches[0].firstHeartbeatDeadlineMs, 4 * 60_000)
+})
+
+test('the first-heartbeat window is a small fraction of the run terminus it backstops', async () => {
+  const terminus = await new DatasetCaptionCursor({
+    launcher: new FakeLauncher(), actorum: new FakeActorum(), datasets: new FakeDatasets(),
+  }).terminus(modus(), {})
+  assert.ok(
+    FIRST_HEARTBEAT_DEADLINE_MS * 4 < terminus,
+    'a deadline near the terminus would not bound a silent pod any sooner than the terminus does',
+  )
 })

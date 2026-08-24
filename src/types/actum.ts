@@ -191,6 +191,38 @@ export interface Actum {
    */
   resumeCheckpoint?: { url: string; step: number }
 
+  // ── First-heartbeat deadline (host liveness for a detached pod) ─────────
+  /**
+   * Opt-in first-heartbeat window in milliseconds, written at dispatch by a cursor that launches
+   * a DETACHED pod — one whose only channel back to us is `POST /runner/status`.
+   *
+   * Present → once the host has locked a machine for this run (`podLockedAt`), the pod has this
+   * long to say its first word. Absent → the run carries no first-heartbeat deadline and is
+   * bounded only by `expirat`. That is where every run whose runner is parsed IN-PROCESS stays:
+   * for those the host, not the pod, is the reporter, so pod silence means nothing.
+   *
+   * OPT-IN RATHER THAN GLOBAL because the window is only meaningful next to the work the host
+   * does between locking a machine and the pod's first word. A caption pod installs a small
+   * runtime; other detached rails clone a repository and install a large dependency tree, which
+   * is legitimately slower than a window short enough to be useful here.
+   */
+  firstHeartbeatDeadlineMs?: number
+
+  /**
+   * When the host locked a machine for this run — SSH reachable, no pod-side work started yet.
+   * The START of the first-heartbeat clock: later than dispatch (which includes the queue wait)
+   * and earlier than the host's own handover report.
+   */
+  podLockedAt?: Date
+
+  /**
+   * When the pod first reported for itself over `POST /runner/status`. Its presence DISARMS the
+   * first-heartbeat deadline — from here on the run is bounded by `expirat` again. Host-side
+   * phase reports never set it: the deadline exists to catch a pod that cannot speak, so only
+   * the pod's own voice clears it.
+   */
+  firstPodReportAt?: Date
+
   /**
    * SHA-256 content address of the CompiledSpec that was submitted.
    * "sha256:<hex>" — links this execution to its exact deployment bundle.

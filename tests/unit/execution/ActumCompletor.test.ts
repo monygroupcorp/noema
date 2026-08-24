@@ -10,6 +10,7 @@ import type { Intella, Intellarum } from '../../../src/types/intelligendi.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { WARM_SURCHARGE_IMPETUS } from '../../../src/ledger/rates.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
+import { bus } from '../../../src/lib/bus.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -536,4 +537,61 @@ test('double-completion is rejected before any index write', async () => {
   )
 
   assert.equal(createCalls, 0)
+})
+
+// ---------------------------------------------------------------------------
+// The failure record: what survives, and who can see it
+//
+// The sweeps in `expiryReaper` fail runs on a timer, outside any dispatch — no trace context, and
+// a reason that describes the sweep rather than the run. Both of those used to cost the record
+// something: a more specific cause was overwritten, and the wide event that a failure-rate
+// measurement counts was not emitted at all.
+// ---------------------------------------------------------------------------
+
+test('fail keeps a cause already on the record instead of overwriting it with a general one', async () => {
+  const actum = makeActum({ status: 'agens' })
+  const acta = makeActa(actum)
+  // A specific cause was recorded while the run was still live.
+  await acta.update(actum.id, { error: 'processor load failed: no module named torchvision' })
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum() })
+
+  await completor.fail(actum, 'Actum expired — pod never reported back')
+
+  assert.equal(acta.latest.status, 'fractus')
+  assert.equal(acta.latest.error, 'processor load failed: no module named torchvision')
+})
+
+test('fail stamps the given reason when nothing more specific is on the record', async () => {
+  const actum = makeActum({ status: 'agens' })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum() })
+
+  await completor.fail(actum, 'Actum expired — pod never reported back')
+
+  assert.equal(acta.latest.error, 'Actum expired — pod never reported back')
+})
+
+test('fail emits its wide event with no trace context — a swept run still reaches the failure count', async () => {
+  const actum = makeActum({ id: 'act-swept', status: 'agens', impetus: 1800n })
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum() })
+
+  const seen: Array<Record<string, unknown>> = []
+  const onFail = (e: unknown) => { seen.push(e as Record<string, unknown>) }
+  bus.on('actum.fail', onFail)
+  try {
+    // Deliberately NOT inside withTrace — this is the reaper's situation.
+    await completor.fail(actum, 'Pod never reported in')
+  } finally {
+    bus.off('actum.fail', onFail)
+  }
+
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].actumId, 'act-swept')
+  assert.equal(seen[0].status, 'failed')
+  assert.equal(seen[0].errorCode, 'Pod never reported in')
+  // Release-only, so the whole reservation is refunded and nothing is charged.
+  assert.equal(seen[0].reservation, '1800')
+  assert.equal(seen[0].impetus, '0')
+  assert.equal(seen[0].refund, '1800')
 })
