@@ -95,6 +95,7 @@ import {
   type Reaction,
 } from '../../crystal/muse/session.js'
 import { MAX_INSTRUCTION_CHARS, type SteerProposal } from '../../crystal/muse/steer.js'
+import { promotionFrom } from './musePromote.js'
 import { MODUS_MUSE_STEER } from '../../crystal/seeds/modi.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
@@ -2584,6 +2585,58 @@ export class CrystalApi {
         }
         throw err
       }
+    })
+  }
+
+  /**
+   * Promote a session into a DRAFT collection: the garden the user played their way
+   * into becomes the grid a durable collection expands.
+   *
+   * A session already IS a collection, worked transiently — a floor of decomposed
+   * fragments, a nozzle, a standing affix and a flow. Promotion carries that across
+   * whole (`musePromote.ts` holds the mapping, pure and asserted field by field) so the
+   * work of curating the floor is not repeated in a second authoring surface.
+   *
+   * IT PRODUCES A DRAFT, WHICH IS THE WHOLE OF WHY IT NEEDS NO NEW FORM. A draft may
+   * name no supply, no review policy and no DNA rule; those are finished in the
+   * collection funnel the draft lands in, and `fireCollection` is where completeness is
+   * enforced. NOTHING IS SPENT HERE: a draft is not dispatched, and firing it later goes
+   * through the gates it already went through.
+   *
+   * THE SESSION IS NEVER MUTATED. Promotion reads it — the floor, the setup and nothing
+   * else — so a session can be promoted more than once and still be the session it was.
+   *
+   * EVERY REFERENCE IS RESOLVED SERVER-SIDE. `_museSession` resolves the session for the
+   * authenticated caller and reports a stranger's as not found; the flow, the grid and
+   * the standing prompt come off that session; and `by` (with any team overlay) is
+   * `collect`'s own resolution from the same caller. The body reaches exactly one field,
+   * `nomen`, which is a label. There is no scope value a caller could send.
+   */
+  async promoteMuseSession(auctor: AuctorKey, id: string, input?: unknown): Promise<Collection> {
+    const body = (input ?? {}) as { nomen?: unknown }
+    const asked = typeof body.nomen === 'string' ? body.nomen.trim() : ''
+
+    const stored = await this._museSession(auctor, id)
+    // The mother is read with the caller's own ownership, the way a save reads it: it is
+    // where a derived name comes from, and a mother the caller cannot read is the same
+    // 404 there as here.
+    const mother = await this.getDataset(auctor, stored.session.motherDatasetId)
+    const promotion = promotionFrom(stored.session, {
+      sessionId: stored.id,
+      nomen: asked || this._sessionDatasetName(mother.name, stored.id),
+    })
+
+    // Named field by field rather than spread: a promotion carries a name, a note, a
+    // flow, a supply and a grid, and nothing that arrives alongside them can become a
+    // `teamId`, an `owners` split or a `by`.
+    return this.collect(auctor, {
+      draft: true,
+      nomen: promotion.nomen,
+      descriptio: promotion.descriptio,
+      ...(promotion.modusId !== undefined ? { modusId: promotion.modusId } : {}),
+      ...(promotion.total !== undefined ? { total: promotion.total } : {}),
+      tractus: promotion.tractus,
+      aditusBase: promotion.aditusBase,
     })
   }
 

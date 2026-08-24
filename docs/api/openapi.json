@@ -7558,6 +7558,236 @@
         ]
       }
     },
+    "/data/muse/sessions/{id}/promote": {
+      "post": {
+        "summary": "Promote a Muse session the caller owns into a DRAFT collection: the fragments still in the draw become the collection's trait grid, one axis per category, and the session's flow, standing affix and stacked model trigger words become the base prompt the grid expands. A fragment turned off on the cutting floor is not carried across — darkening it is the curation. The session itself is read and never written, so it is unchanged by the promotion and may be promoted again. NOTHING IS SPENT: a draft is not dispatched, and the supply, review policy and DNA rule a session cannot supply are set in the collection funnel, where firing enforces completeness. Trait rarity is left unset so the default spread applies. The request body carries at most a name; every reference the new collection holds is derived server-side from the session. A session the caller does not own is reported as not found.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collection": {
+                      "type": "object",
+                      "description": "The public projection of a Collectio (a generated collection / batch). JSON-safe and stable.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "nomen": {
+                          "type": "string",
+                          "description": "The collection display name."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "pending",
+                            "running",
+                            "complete",
+                            "cancelled"
+                          ],
+                          "description": "The collection lifecycle status. `draft` = authored but not yet fired (tractus still editable)."
+                        },
+                        "modusId": {
+                          "type": "string",
+                          "description": "The flow (modus) expanded across the grid."
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Target piece count (the size of the run)."
+                        },
+                        "provenanceHash": {
+                          "type": "string",
+                          "description": "Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash."
+                        },
+                        "tractus": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "One axis of variation — the aditus port to vary and its options.",
+                            "properties": {
+                              "porta": {
+                                "type": "string",
+                                "description": "The aditus port key this axis varies (e.g. background, outfit)."
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "Human-facing category label (falls back to porta)."
+                              },
+                              "valores": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One option within a trait axis.",
+                                  "properties": {
+                                    "value": {
+                                      "description": "The aditus value injected when this option is selected."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "description": "Human-facing display name (falls back to String(value))."
+                                    },
+                                    "rarity": {
+                                      "type": "number",
+                                      "description": "Probability weight for weighted-random selection (default 0.5; higher = more common)."
+                                    },
+                                    "promptFragment": {
+                                      "type": "string",
+                                      "description": "Text woven into the assembled prompt when this option wins."
+                                    },
+                                    "excludes": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Labels in OTHER axes this option blocks."
+                                    },
+                                    "tags": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "description": "Theme tags for group-level mutual exclusion."
+                                    }
+                                  },
+                                  "required": [
+                                    "value"
+                                  ]
+                                },
+                                "description": "The options for this axis."
+                              }
+                            },
+                            "required": [
+                              "porta",
+                              "valores"
+                            ]
+                          },
+                          "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+                        },
+                        "reviewEnabled": {
+                          "type": "boolean",
+                          "description": "Whether each piece is held for review before it counts."
+                        },
+                        "paused": {
+                          "type": "boolean",
+                          "description": "Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart."
+                        },
+                        "owners": {
+                          "type": "array",
+                          "description": "Per-artifact ownership split (team-owned collections only) — weights sum to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "animaId": {
+                                "type": "string"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "animaId",
+                              "weight"
+                            ]
+                          }
+                        },
+                        "completed": {
+                          "type": "number",
+                          "description": "Pieces completed so far (approved, when review is on)."
+                        },
+                        "failed": {
+                          "type": "number",
+                          "description": "Pieces that failed to generate so far."
+                        },
+                        "rejected": {
+                          "type": "number",
+                          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+                        },
+                        "cost": {
+                          "type": "string",
+                          "description": "Total impetus across completed pieces, serialised as a string."
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the collection started."
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it finished (or was cancelled)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "modusId",
+                        "total",
+                        "provenanceHash",
+                        "completed",
+                        "failed",
+                        "rejected"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "collection"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Promote a Muse session into a draft collection. The body carries at most a name, and a name is a label: the flow, the trait grid, the standing prompt and the funding identity are all derived server-side from the session the caller owns, so no field here names an owner, a team, or any part of the grid. Omit the name and one is derived from the session's mother dataset.",
+                "properties": {
+                  "nomen": {
+                    "type": "string",
+                    "description": "Optional display name for the new collection."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/me": {
       "get": {
         "summary": "The caller's owner-keyed account settings — presentation skin (Profile), cross-cutting generation defaults (Preferences), and verb→flow bindings. Anon-capable (keyed by AuctorKey).",
