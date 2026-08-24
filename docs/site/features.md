@@ -39,9 +39,9 @@
 
 ### 4. Video Generation
 
-**Headline:** Frame by frame. Private.
+**Headline:** Frame by frame. Nothing retained.
 
-**Body:** Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone.
+**Body:** Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We don't retain your prompt or output after the request completes, and we never train on them.
 
 **CTA:** Generate video →
 
@@ -49,9 +49,9 @@
 
 ### 5. Audio and Music
 
-**Headline:** Sound, privately produced.
+**Headline:** Sound, nothing retained.
 
-**Body:** Music generation, text-to-speech, and audio processing. Describe what you want; get a private output. No audio retention, no training on your productions.
+**Body:** Music generation, text-to-speech, and audio processing. Describe what you want; get a finished output. No audio retention, no training on your productions.
 
 **CTA:** Make audio →
 
