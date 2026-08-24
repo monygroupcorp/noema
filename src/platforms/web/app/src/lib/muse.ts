@@ -1330,6 +1330,49 @@ export function floorCounts(view: MuseSessionView): { live: number; total: numbe
   return { live, total: view.fragments.length };
 }
 
+// ── Promotion: the garden becomes a collection (noema-307) ──────────────────
+//
+// Muse IS collection mode, played transiently. Promotion is the one gesture that says
+// so: the floor as it stands becomes a collection's trait grid, and the session's engine
+// — its flow, its standing affix, its stacked trigger words — becomes the base that grid
+// expands. The mapping itself is the SERVER's (`api/musePromote.ts`), asserted there
+// field by field; what lives here is only what the screen needs in order to decide
+// whether to offer the gesture and where to go afterwards.
+//
+// It is offered while a stream is running. Promotion writes nothing to the session and
+// spends nothing — it reads the floor and mints a draft — so there is no reason to make
+// the user stop a stream they are paying for in order to take it.
+
+/**
+ * Why the promote gesture is refused, or `null` when it is available.
+ *
+ * The one refusal is an empty draw. A collection expands a grid, and a grid with no axis
+ * has nothing to expand — the same completeness `fireCollection` enforces, said here
+ * before a draft is minted rather than after it. A THIN floor is not refused: one axis
+ * with one option is a collection of one repeated look, which is a choice and not an
+ * error.
+ */
+export function promoteBlockReason(view: MuseSessionView | null | undefined): string | null {
+  if (!view) return 'this sitting has no session yet';
+  if (floorCounts(view).live <= 0) return 'nothing is in the draw — a collection needs at least one fragment';
+  return null;
+}
+
+/** What the promote control says, given the floor behind it. Counted, because the count
+ *  is the claim it makes: these are the fragments that become the collection's traits. */
+export function promoteLabel(view: MuseSessionView | null | undefined): string {
+  const live = view ? floorCounts(view).live : 0;
+  return live === 1
+    ? 'make a collection from this fragment'
+    : `make a collection from these ${live} fragments`;
+}
+
+/** Where a promotion lands: the new draft's own trait garden, which is the first screen of
+ *  the funnel that finishes what a session cannot supply — supply, review, DNA. */
+export function promotedCollectionPath(collectionId: string): string {
+  return `/collections/${encodeURIComponent(collectionId)}/garden`;
+}
+
 /** What tapping a floor pill writes: the same fragment, with its enabled flag flipped.
  *  Disable is reversible (S8) — the tap that darkens a pill is the tap that brings it
  *  back, and it is the same call in both directions. */

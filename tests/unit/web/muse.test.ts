@@ -13,6 +13,9 @@ import {
   ignitionRequest,
   lineageOf,
   poolDatasetFragments,
+  promoteBlockReason,
+  promoteLabel,
+  promotedCollectionPath,
   recordedPiece,
   rehydrateStream,
   releasePending,
@@ -3336,3 +3339,48 @@ test('a restored entry is rebuilt from the card the catalog offers now, not from
   assert.equal(stack[0]!.weight, 0.8, 'the weight is the stored entry\'s — it is the only part that is the user\'s')
   assert.match(promptWithTrigger('a fox', stack), /^newtrig:0\.8, a fox$/)
 })
+
+// ── Promotion: the gesture that makes the sitting durable (noema-307) ────────
+//
+// The mapping itself is the server's (`api/musePromote.ts`, asserted field by field in
+// tests/unit/allocutio/api/musePromote.test.ts). What the screen owns is only whether to
+// offer the gesture, what it claims when it does, and where it lands afterwards.
+
+test('promoteBlockReason: an empty draw is the one refusal, and a thin floor is not one', () => {
+  const fox = frag('subject', 'a fox');
+  const harbor = frag('setting', 'a foggy harbor');
+
+  assert.equal(promoteBlockReason(session([fox, harbor])), null, 'a live floor may be promoted');
+
+  // One fragment is a collection of one repeated look — a choice, not an error.
+  assert.equal(promoteBlockReason(session([fox])), null);
+
+  // Nothing in the draw has no axis to expand, which is the same completeness firing
+  // enforces — said before a draft is minted rather than after it.
+  const dark = session([fox, harbor], {
+    floor: [entry(fox, { enabled: false }), entry(harbor, { enabled: false })],
+  });
+  assert.ok(promoteBlockReason(dark), 'a floor with nothing left in the draw is refused');
+
+  assert.ok(promoteBlockReason(null), 'and a sitting with no session yet has nothing to promote');
+});
+
+test('promoteLabel: the control counts the fragments it is claiming to promote', () => {
+  const fox = frag('subject', 'a fox');
+  const harbor = frag('setting', 'a foggy harbor');
+
+  assert.match(promoteLabel(session([fox, harbor])), /\b2\b/);
+  assert.equal(promoteLabel(session([fox])), 'make a collection from this fragment',
+    'one fragment is said in the singular rather than as "1 fragments"');
+
+  // The count is the LIVE floor, not the pool: a darkened fragment is not promoted and
+  // must not be counted as though it were.
+  const half = session([fox, harbor], { floor: [entry(fox), entry(harbor, { enabled: false })] });
+  assert.match(promoteLabel(half), /\bthis fragment\b/);
+});
+
+test('promotedCollectionPath: a promotion lands in the new draft\'s own garden', () => {
+  assert.equal(promotedCollectionPath('col-1'), '/collections/col-1/garden');
+  assert.equal(promotedCollectionPath('a b/c'), '/collections/a%20b%2Fc/garden',
+    'the id is encoded — an unescaped one would walk out of the route');
+});
