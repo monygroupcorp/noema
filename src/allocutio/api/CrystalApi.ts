@@ -68,7 +68,7 @@ import { coverageOver, liveMedia } from '../../types/dataset.js'
 import type {
   Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets, IngestMediaInput,
 } from '../../types/dataset.js'
-import { floorToEntries } from '../../types/museSession.js'
+import { floorToEntries, isMuseSessionVersionConflict } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
 import {
@@ -383,6 +383,17 @@ const ADULT_CONTENT_RATINGS: ReadonlySet<IntellaContentRating> = new Set<Intella
  *  degrade, they do not error. */
 export type CatalogSort = 'newest' | 'name' | 'genus'
 const CATALOG_SORTS: ReadonlySet<string> = new Set<string>(['newest', 'name', 'genus'])
+
+/**
+ * How many times a Muse session write re-reads and re-applies before giving up.
+ *
+ * Three, because the contention this absorbs is two writes overlapping — a roll
+ * landing while the floor is being steered — and each retry starts from a read
+ * taken after the previous winner landed. A caller that loses three in a row is
+ * up against sustained write pressure, which is a retryable answer to give back
+ * rather than a loop to keep spinning.
+ */
+const MUSE_SESSION_SAVE_ATTEMPTS = 3
 
 /** Normalise an untrusted `sort` value to a supported ordering. */
 export function normalizeCatalogSort(sort: string | undefined): CatalogSort {
@@ -2162,6 +2173,62 @@ export class CrystalApi {
     return stored
   }
 
+  /**
+   * Persist a pure mutator against a session, re-applying it if the session moved.
+   *
+   * THE ONE PLACE A SESSION IS WRITTEN, and the reason every mutator on this
+   * surface is a pure function rather than an in-place edit. The store's `save`
+   * replaces the session wholesale under a version match, so a write computed
+   * from a read that is no longer current is refused rather than landed. What
+   * makes that recoverable instead of an error the user sees is that the mutator
+   * can simply be run again: it takes a session and returns a new one, so on a
+   * conflict this re-reads the session as it now stands and applies the SAME
+   * mutator to THAT value. The retried write therefore carries both changes —
+   * the concurrent writer's and this caller's — where a bare replace would have
+   * carried only the later one.
+   *
+   * Bounded rather than unbounded: a session under genuinely continuous write
+   * pressure should surface a retryable conflict to the caller, not spin. The
+   * mutator is a pure function of the session, so re-running it is free of side
+   * effects — any validation it performs (a fragment must be held, a run must be
+   * in the ledger) is re-checked against the fresh session, which is the correct
+   * answer rather than a cached one.
+   */
+  private async _saveMuseSession(
+    stored: StoredMuseSession,
+    mutate: (session: MuseSession) => MuseSession,
+  ): Promise<StoredMuseSession> {
+    const store = this._museSessionsStore()
+    const notFound = () => new ApiError('not_found.muse_session', `Muse session '${stored.id}' not found`, 404)
+
+    let current = stored
+    for (let attempt = 0; attempt < MUSE_SESSION_SAVE_ATTEMPTS; attempt++) {
+      const next = mutate(current.session)
+      try {
+        const saved = await store.save(current.id, next, current.versio ?? 0)
+        if (!saved) throw notFound()
+        return saved
+      } catch (err) {
+        if (!isMuseSessionVersionConflict(err)) throw err
+        // Re-read and go again. The owner is re-checked because the session this
+        // caller was cleared for is the one it must still be writing to.
+        const fresh = await store.find(current.id)
+        if (!fresh || fresh.owner !== stored.owner) throw notFound()
+        current = fresh
+      }
+    }
+    // Every attempt lost. 409 rather than 500: nothing is wrong with the request and the
+    // stored session is intact — the contention is other writes to the same session, so
+    // the same call sent again is expected to land. Constructed here rather than in the
+    // `Errors` taxonomy, as the other codes this surface raises are.
+    throw new ApiError(
+      'conflict.muse_session',
+      `Muse session '${stored.id}' is being changed concurrently`,
+      409,
+      { retryable: true },
+    )
+  }
+
   /** Apply a pure mutator to a session the caller owns and persist the result. */
   private async _mutateMuseSession(
     auctor: AuctorKey,
@@ -2169,10 +2236,7 @@ export class CrystalApi {
     mutate: (session: MuseSession) => MuseSession,
   ): Promise<MuseSessionView> {
     const stored = await this._museSession(auctor, id)
-    const next = mutate(stored.session)
-    const saved = await this._museSessionsStore().save(id, next)
-    if (!saved) throw new ApiError('not_found.muse_session', `Muse session '${id}' not found`, 404)
-    return this._museSessionView(saved)
+    return this._museSessionView(await this._saveMuseSession(stored, mutate))
   }
 
   /** A `{ category, text }` pair off the wire, validated into a fragment identity. */
@@ -2250,7 +2314,17 @@ export class CrystalApi {
   ): Promise<StoredMuseSession> {
     const next = reconcileFloor(stored.session, pooled)
     if (next === stored.session) return stored
-    return (await this._museSessionsStore().save(stored.id, next)) ?? stored
+    try {
+      return await this._saveMuseSession(stored, (session) => reconcileFloor(session, pooled))
+    } catch (err) {
+      // A resume declines rather than fails. The merge only ever WIDENS a floor and
+      // is recomputed on the next read, so a session that was being written
+      // concurrently is returned as it was read; the fragments it is missing are
+      // merged in the next time it is resumed. This mirrors `_motherPool` returning
+      // null rather than raising when the mother cannot be read.
+      if (err instanceof ApiError) return stored
+      throw err
+    }
   }
 
   /**

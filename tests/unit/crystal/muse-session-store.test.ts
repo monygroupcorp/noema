@@ -23,6 +23,11 @@
 //   3. A SESSION SURVIVES A STORE ROUND-TRIP WITH ITS FLOOR AND LEDGER INTACT.
 //      The floor comes back as a Map the sampler can read, keyed by fragment
 //      identity, and the piece ledger keeps its lineage.
+//
+//   4. TWO OVERLAPPING WRITES CANNOT LOSE ONE ANOTHER. A save replaces the
+//      stored session wholesale, so what keeps a piece and a concurrent floor
+//      change from eating each other is the version match on the write. Proven
+//      against the real driver because the match is a query, not a value.
 // =============================================================================
 
 import { test, before, after, afterEach } from 'node:test'
@@ -37,6 +42,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/Crys
 import { createApiRouter, type Identity } from '../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../src/allocutio/api/errors.js'
 import { fragmentKey, type Fragment } from '../../../src/crystal/muse/taxonomy.js'
+import { isMuseSessionVersionConflict } from '../../../src/types/museSession.js'
 import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight, withSessionDataset } from '../../../src/crystal/muse/session.js'
 import type { Piece } from '../../../src/crystal/muse/session.js'
 import type { Dataset } from '../../../src/types/dataset.js'
@@ -218,7 +224,7 @@ test('a session carries the id of its own dataset through a store round-trip', a
     'and none is invented for it on the way through the store')
 
   const named = withSessionDataset(spawned, 'dataset-of-the-session')
-  const saved = await sessions.save(created.id, named)
+  const saved = await sessions.save(created.id, named, created.versio ?? 0)
   assert.equal(saved?.session.sessionDatasetId, 'dataset-of-the-session')
 
   const read = await sessions.find(created.id)
@@ -237,16 +243,110 @@ test('a save replaces the stored session and bumps mutatum; an unknown id is nev
   const created = await sessions.create({ owner: 'anima-1', session: spawnSession('dataset-1', FRAGMENTS) })
   const next = setFragmentEnabled(created.session, { category: 'style', text: 'ink.wash' }, false)
 
-  const saved = await sessions.save(created.id, next)
+  const saved = await sessions.save(created.id, next, created.versio ?? 0)
   assert.ok(saved)
   assert.ok(saved.mutatum.getTime() >= created.mutatum.getTime())
+  assert.equal(saved.versio, 1, 'a save stamps the next version')
 
   const read = await sessions.find(created.id)
   assert.equal(read?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, false)
 
-  assert.equal(await sessions.save('id-that-does-not-exist', next), null)
+  assert.equal(await sessions.save('id-that-does-not-exist', next, 0), null)
   assert.equal(await sessions.find('id-that-does-not-exist'), null)
   assert.equal(await sessionsCol.countDocuments({}), 1)
+})
+
+// ── PROOF 4: two overlapping writes cannot lose one another (noema-309) ──────
+//
+// A save replaces the stored session WHOLESALE, so the discipline that keeps two
+// overlapping mutations from eating each other is the version match on the write
+// — not anything in the pure module, which never sees the store. These are the
+// tests that hold it. They are non-vacuous in the strict sense: delete the
+// version match from `MongoMuseSession.save`'s filter and the first one fails on
+// the assertion that both writes survived.
+
+test('a save from a stale read is refused, and re-applying the mutator keeps BOTH writes', async () => {
+  const created = await sessions.create({ owner: 'anima-1', session: spawnSession('dataset-1', FRAGMENTS) })
+
+  // Two callers read the same session — the interleaving that produces a lost
+  // update. In production these are two concurrent requests: a piece landing
+  // while the floor is being steered.
+  const readA = await sessions.find(created.id)
+  const readB = await sessions.find(created.id)
+  assert.ok(readA && readB)
+
+  // A lands first: it records a piece.
+  const withPiece = recordPiece(readA.session, {
+    runId: 'run-a', rollIndex: 0, fragments: [FRAGMENTS[0]!],
+  })
+  const landed = await sessions.save(readA.id, withPiece, readA.versio ?? 0)
+  assert.ok(landed)
+
+  // B now tries to write a floor change computed from its OWN, now-stale read.
+  // Under a bare replace this write lands and the piece is gone.
+  const staleFloor = setFragmentEnabled(readB.session, { category: 'style', text: 'ink.wash' }, false)
+  await assert.rejects(
+    () => sessions.save(readB.id, staleFloor, readB.versio ?? 0),
+    (err: unknown) => isMuseSessionVersionConflict(err),
+    'a stale-version save is refused, not landed',
+  )
+
+  // Nothing of B's landed: the refusal writes nothing at all.
+  const afterRefusal = await sessions.find(created.id)
+  assert.equal(afterRefusal?.session.pieces.length, 1)
+  assert.equal(
+    afterRefusal?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, true,
+    'the refused write left the floor as the winner wrote it',
+  )
+
+  // B re-reads and re-applies its own mutator to the FRESH session — the recovery
+  // the API layer performs automatically.
+  const fresh = await sessions.find(created.id)
+  assert.ok(fresh)
+  const merged = setFragmentEnabled(fresh.session, { category: 'style', text: 'ink.wash' }, false)
+  const second = await sessions.save(fresh.id, merged, fresh.versio ?? 0)
+  assert.ok(second)
+
+  // BOTH writes are in the final document. This is the assertion the version
+  // match exists for.
+  const final = await sessions.find(created.id)
+  assert.equal(final?.session.pieces.length, 1, "A's piece survived B's write")
+  assert.equal(final?.session.pieces[0]?.runId, 'run-a')
+  assert.equal(
+    final?.session.floor.get(fragmentKey({ category: 'style', text: 'ink.wash' }))?.enabled, false,
+    "B's floor change survived too",
+  )
+  assert.equal(final?.versio, 2, 'two landed writes, two version bumps')
+})
+
+test('a document written before versio existed saves on its first attempt and is versioned from then on', async () => {
+  // The compatibility path, and the reason this change needs no backfill. The
+  // document is inserted WITHOUT the field, exactly as an earlier write left it.
+  const spawned = spawnSession('dataset-1', FRAGMENTS)
+  const now = new Date()
+  await sessionsCol.insertOne({
+    id: 'session-without-a-version',
+    owner: 'anima-1',
+    session: { motherDatasetId: 'dataset-1', fragments: [...spawned.fragments], floor: [], pieces: [] },
+    natum: now,
+    mutatum: now,
+  })
+
+  const read = await sessions.find('session-without-a-version')
+  assert.ok(read)
+  assert.equal(read.versio, 0, 'an absent version reads as 0')
+
+  const next = setFragmentWeight(read.session, { category: 'subject', text: 'a lantern-keeper' }, 4)
+  const saved = await sessions.save(read.id, next, read.versio ?? 0)
+  assert.ok(saved, 'the first save of a pre-versio document lands')
+  assert.equal(saved.versio, 1)
+
+  // And the CAS is live from that point — a second write from the same stale read
+  // is refused.
+  await assert.rejects(
+    () => sessions.save(read.id, next, read.versio ?? 0),
+    (err: unknown) => isMuseSessionVersionConflict(err),
+  )
 })
 
 // ── PROOF 2: the mother stays pure ───────────────────────────────────────────
