@@ -293,6 +293,14 @@ function shellQuote(v: string): string {
   return `'${v.replace(/'/g, `'\\''`)}'`
 }
 
+/** Name every machine a launch gave up on, each with why — so the failure a run ends on accounts
+ *  for the pods it spent rather than for the last one only. `none` when a launch abandoned no pod
+ *  (every attempt failed at provisioning). */
+function describeAbandonedPods(abandoned: ReadonlyArray<{ podId: string; reason: string }>): string {
+  if (abandoned.length === 0) return 'none'
+  return abandoned.map(a => `${a.podId} (${a.reason})`).join(', ')
+}
+
 // ---------------------------------------------------------------------------
 // SecurePodClient
 // ---------------------------------------------------------------------------
@@ -539,7 +547,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
     setup: string[]
     /** Pod script to upload and launch — default `'trainer'`. */
     script?: DetachedPodScript
-    /** Awaited after provisioning and BEFORE any pod-side work is started. */
+    /**
+     * Awaited after provisioning and BEFORE any pod-side work is started. Called AGAIN with the
+     * new pod id whenever a machine that never became SSH-reachable is replaced by a fresh one,
+     * so the recorded handle always names the pod the launch is actually on.
+     */
     onPodId?: (podId: string) => Promise<void>
     /** Called when the background SSH/bootstrap phase fails, after the pod has been terminated. */
     onLaunchFailed?: (err: unknown) => Promise<void>
@@ -554,7 +566,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const maxAttempts = this.config.podRetries ?? 3
     let podId: string | undefined
     let lastErr: Error | undefined
+    // How many attempts acquiring the FIRST machine cost. An attempt covers acquiring a pod and
+    // reaching SSH-readiness on it, and the second half runs in the background continuation — so
+    // the count is carried across rather than restarted there.
+    let attemptsSpent = 0
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attemptsSpent = attempt
       const isFallback = attempt >= maxAttempts
       try {
         podId = await this._provisionPod(opts.image, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
@@ -577,35 +594,46 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
     // Deliberately unawaited, and therefore given its own terminal `.catch`: a background
     // rejection must never escape as an unhandled rejection.
-    void this._finishTrainingPodLaunch(podId, opts, provisionDeadline)
+    void this._finishTrainingPodLaunch(podId, opts, provisionDeadline, attemptsSpent)
       .catch(err => log.error('training pod launch continuation failed', { podId, error: String(err) }))
 
     return { podId }
   }
 
   /**
-   * The background half of `launchTrainingPod`: wait for SSH, bootstrap, launch detached, close.
+   * The background half of `launchTrainingPod`: acquire an SSH-reachable machine (re-provisioning
+   * when one never becomes reachable), bootstrap it, launch detached, close.
    *
-   * On failure there is no caller left to rethrow to, so this closes SSH, terminates the pod
-   * (nothing else will — this is the only exit for a pod whose job never started) and hands the
-   * real error to `onLaunchFailed`. The wiring points that sink at the same failure path the
+   * On failure there is no caller left to rethrow to, so this closes SSH, terminates the pod it was
+   * holding (nothing else will — this is the only exit for a pod whose job never started) and hands
+   * the real error to `onLaunchFailed`. The wiring points that sink at the same failure path the
    * deadline reaper uses, which re-reads the run and no-ops on one already finished; that is why
    * a second guard against a reaper race is deliberately not added here.
    */
   private async _finishTrainingPodLaunch(
-    podId: string,
+    firstPodId: string,
     opts: {
+      image: string
       env: Record<string, string>
       setup: string[]
       script?: DetachedPodScript
+      onPodId?: (podId: string) => Promise<void>
       onLaunchFailed?: (err: unknown) => Promise<void>
       onPhase?: (progressus: Omit<Progressus, 'at'>) => void
     },
     provisionDeadline: number,
+    attemptsSpent: number,
   ): Promise<void> {
     let ssh: SshTransportLike | null = null
+    // The pod this launch is holding. It stays undefined while acquisition is in progress, because
+    // every machine acquisition abandons is terminated there and then — so a failure to acquire has
+    // nothing left to clean up here, and terminating `firstPodId` again would be a second call on a
+    // pod that is already gone.
+    let holdingPodId: string | undefined
     try {
-      const sshInfo = await this._waitForSsh(podId)
+      const acquired = await this._acquireSshReadyTrainingPod(firstPodId, opts, attemptsSpent)
+      holdingPodId = acquired.podId
+      const { podId, sshInfo } = acquired
       log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
       opts.onPhase?.(coldStartProgressus('pod-locked', {
         podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr,
@@ -618,10 +646,89 @@ export class SecurePodClient implements RunPodClient, Procurator {
       ssh = null
     } catch (err) {
       await ssh?.close().catch(() => {})
-      await this._terminatePod(podId).catch(() => {})   // don't leak a pod whose job never started
-      log.warn('training pod launch failed after provisioning', { podId, error: (err as Error).message })
+      if (holdingPodId) await this._terminatePod(holdingPodId).catch(() => {})
+      log.warn('training pod launch failed after provisioning',
+        { podId: holdingPodId ?? firstPodId, error: (err as Error).message })
       await opts.onLaunchFailed?.(err)
     }
+  }
+
+  /**
+   * Acquire a machine this launch can actually reach: wait for SSH on the pod already provisioned,
+   * and when that pod never becomes reachable — an ip-less host abandoned at its window, or the
+   * overall SSH deadline — abandon it and spend a remaining attempt on a FRESH pod, under the same
+   * cloud-type ladder as the first (SECURE until the last attempt, then COMMUNITY/any GPU). This
+   * is the loop the gen and studio paths already run; the detached launch reaches it here.
+   *
+   * Two things this owes the rest of the system:
+   *  - **The recorded handle follows the machine.** `onPodId` is called again with each fresh pod
+   *    id, so the reaper, the status posts and the completion webhook all name the pod that is
+   *    running rather than one that was abandoned. It is awaited before any pod-side work starts
+   *    on the new machine, exactly as it is for the first.
+   *  - **Every abandoned pod is terminated as it is abandoned**, and named in the failure this
+   *    throws when the attempts run out. That terminal error says the attempts were exhausted; a
+   *    single attempt's bailout — which speaks of retrying on a fresh pod — is never what a run
+   *    ends on.
+   *
+   * The liveness gate runs before each re-provision: a run that has already gone terminal stops
+   * costing machines.
+   */
+  private async _acquireSshReadyTrainingPod(
+    firstPodId: string,
+    opts: { image: string; onPodId?: (podId: string) => Promise<void> },
+    attemptsSpent: number,
+  ): Promise<{ podId: string; sshInfo: SshInfo }> {
+    const maxAttempts = this.config.podRetries ?? 3
+    const abandoned: Array<{ podId: string; reason: string }> = []
+    let podId: string | undefined = firstPodId
+    let lastErr: Error | undefined
+
+    for (let attempt = Math.max(attemptsSpent, 1); attempt <= maxAttempts; attempt++) {
+      if (podId === undefined) {
+        if (!(await this._actumStillLive())) {
+          log.warn('training pod re-provision aborted — actum already terminal',
+            { actumId: getTrace()?.actumId, attempt })
+          throw new Error(
+            `Training pod launch aborted before attempt ${attempt}/${maxAttempts} — the run is ` +
+            `already terminal; abandoned ${describeAbandonedPods(abandoned)}`,
+          )
+        }
+        const isFallback = attempt >= maxAttempts
+        try {
+          podId = await this._provisionPod(opts.image, isFallback ? 'COMMUNITY' : undefined, isFallback ? null : undefined)
+        } catch (err) {
+          lastErr = err as Error
+          log.warn(`training pod provision attempt ${attempt}/${maxAttempts} failed`, { error: lastErr.message })
+          continue
+        }
+        // The handle names the machine the run is on — updated before anything pod-side starts.
+        // A stamp that fails leaves a pod nothing is tracking, so it is terminated here rather
+        // than left to the caller, which has long since been answered.
+        try {
+          await opts.onPodId?.(podId)
+        } catch (stampErr) {
+          await this._terminatePod(podId).catch(() => {})
+          throw stampErr
+        }
+      }
+      try {
+        return { podId, sshInfo: await this._waitForSsh(podId) }
+      } catch (err) {
+        lastErr = err as Error
+        const reason = isIplessHostError(lastErr) ? 'ip-less host' : 'ssh not ready within deadline'
+        abandoned.push({ podId, reason })
+        log.warn(`training pod ${podId} never became SSH-ready (attempt ${attempt}/${maxAttempts})`,
+          { podId, reason, error: lastErr.message, iplessHost: isIplessHostError(lastErr) })
+        await this._terminatePod(podId).catch(() => {})   // don't leak the abandoned pod
+        podId = undefined
+      }
+    }
+
+    if (abandoned.length === 0) throw lastErr ?? new Error('training pod provision failed')
+    throw new Error(
+      `Training pod launch exhausted ${maxAttempts} attempts without reaching an SSH-reachable ` +
+      `host — abandoned ${describeAbandonedPods(abandoned)}`,
+    )
   }
 
   /**
