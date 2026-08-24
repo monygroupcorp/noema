@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startExpiryReaper, recoverExpiredActa, EXPIRED_ERROR } from '../../../src/crystal/expiryReaper.js'
+import {
+  startExpiryReaper, recoverExpiredActa, recoverSilentPods, isPodLockedReport,
+  EXPIRED_ERROR, SILENT_POD_ERROR, FIRST_HEARTBEAT_DEADLINE_MS,
+} from '../../../src/crystal/expiryReaper.js'
+import { coldStartProgressus } from '../../../src/execution/progressus.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import type { Actum } from '../../../src/types/actum.js'
@@ -39,6 +43,12 @@ class FakeActorum implements Partial<Actorum> {
     const now = Date.now()
     return [...this.store.values()].filter(a =>
       (a.status === 'nascens' || a.status === 'agens') && a.expirat !== undefined && a.expirat.getTime() <= now)
+  }
+  /** The REAL findInFlight predicate — status ∈ {nascens,agens} AND a pod handle is held. The
+   *  first-heartbeat sweep narrows this set, so the fake must not hand it a wider one. */
+  async findInFlight(): Promise<Actum[]> {
+    return [...this.store.values()].filter(a =>
+      (a.status === 'nascens' || a.status === 'agens') && a.externusJobId != null)
   }
   async findById(id: string): Promise<Actum | null> { return this.store.get(id) ?? null }
   async update(id: string, patch: Partial<Actum>): Promise<Actum> {
@@ -209,4 +219,170 @@ test('a reaped actum charges the payer nothing and returns every locked signum',
     assert.equal(sig.status, 'valid', `signum ${id} must be released, not settled`)
     assert.equal(sig.actumId, undefined)
   }
+})
+
+// ---------------------------------------------------------------------------
+// The first-heartbeat deadline
+//
+// After the host launches a detached pod it stops watching, so a pod that dies before its first
+// status post leaves nothing to observe: the run stays `agens` until `expirat`, holding the
+// payer's reservation locked and a GPU billed for the whole of it. These pin the shorter window
+// that bounds it — including, deliberately, every case it must NOT fire in.
+// ---------------------------------------------------------------------------
+
+/** A run that opted into the deadline, was locked to a machine `lockedMsAgo` ago, and has an
+ *  `expirat` far enough out that the expiry sweep is not what would catch it. */
+function silentRun(over: Partial<Actum> & { lockedMsAgo: number }): Actum {
+  const { lockedMsAgo, ...rest } = over
+  return makeActum({
+    id: 'silent-1',
+    status: 'agens',
+    externusJobId: 'pod-abc',
+    expirat: new Date(Date.now() + 75 * 60_000),
+    firstHeartbeatDeadlineMs: FIRST_HEARTBEAT_DEADLINE_MS,
+    podLockedAt: new Date(Date.now() - lockedMsAgo),
+    ...rest,
+  })
+}
+
+function reaperFor(acta: Actum[]): { actorum: FakeActorum; deps: Parameters<typeof recoverSilentPods>[0]; signorum: MemorySignorum } {
+  const signorum = new MemorySignorum()
+  const actorum = new FakeActorum(acta)
+  const completor = new ActumCompletor({ acta: actorum as unknown as Actorum, signorum })
+  return {
+    actorum, signorum,
+    deps: { actorum: actorum as unknown as Actorum, completor, compositusCursor: recordingCompositus() },
+  }
+}
+
+test('isPodLockedReport recognises the pod lock and nothing on either side of it', () => {
+  // The clock starts at the POD LOCK. The acquisition attempt before it holds no pod identity,
+  // and the handover report after it is a different phase — neither may start the clock.
+  const locked = coldStartProgressus('pod-locked', { podId: 'pod-abc', gpuType: 'RTX 4090', costPerHr: 0.44 })!
+  assert.equal(isPodLockedReport(locked), true)
+  assert.equal(isPodLockedReport(coldStartProgressus('provisioning')!), false)
+  assert.equal(isPodLockedReport({ phase: 'provisioning', target: 'pod' }), false)
+  assert.equal(isPodLockedReport({ phase: 'loading' }), false)          // the host's handover
+  assert.equal(isPodLockedReport({ phase: 'loading', pod: { podId: 'pod-abc' } }), false)
+})
+
+test('recoverSilentPods fails a pod that was locked and never reported in — full release, no charge', async () => {
+  const { actorum, deps, signorum } = reaperFor([])
+  const s1 = await signorum.issue({ animaId: 'u1', forma: 'eth', valor: 1800n, auctor: 'test' })
+  const balanceBefore = await signorum.balance({ animaId: 'u1' })
+  await signorum.lock([s1.id], 'silent-1')
+  actorum.store.set('silent-1', silentRun({
+    lockedMsAgo: FIRST_HEARTBEAT_DEADLINE_MS + 1000,
+    signaConsumed: [s1.id],
+    progressus: [{ phase: 'installing', message: 'preparing the pod', at: new Date(Date.now() - 9 * 60_000) }],
+  }))
+
+  assert.equal(await recoverSilentPods(deps), 1)
+
+  const after = await actorum.findById('silent-1')
+  assert.equal(after?.status, 'fractus')
+  assert.match(after!.error!, /^Pod never reported in/)
+  // The run's own last report is carried into the error — pod-side logs die with the pod, so
+  // this is the only surviving account of where it got to.
+  assert.match(after!.error!, /last report: installing — preparing the pod/)
+  // Release-only: the payer is charged nothing and every locked signum comes back.
+  assert.equal(await signorum.balance({ animaId: 'u1' }), balanceBefore)
+  const sig = (await signorum.history({ animaId: 'u1' })).find(s => s.id === s1.id)!
+  assert.equal(sig.status, 'valid')
+  assert.equal(sig.actumId, undefined)
+})
+
+test('recoverSilentPods leaves a run whose pod HAS reported alone', async () => {
+  const { actorum, deps } = reaperFor([silentRun({
+    lockedMsAgo: 60 * 60_000,
+    firstPodReportAt: new Date(Date.now() - 59 * 60_000),
+  })])
+  assert.equal(await recoverSilentPods(deps), 0)
+  assert.equal((await actorum.findById('silent-1'))?.status, 'agens')
+})
+
+test('recoverSilentPods leaves a run still inside its window alone', async () => {
+  const { actorum, deps } = reaperFor([silentRun({ lockedMsAgo: FIRST_HEARTBEAT_DEADLINE_MS - 60_000 })])
+  assert.equal(await recoverSilentPods(deps), 0)
+  assert.equal((await actorum.findById('silent-1'))?.status, 'agens')
+})
+
+test('recoverSilentPods never touches a run that did not opt in', async () => {
+  // Opt-in is what keeps the deadline off runs whose runner is parsed in-process (the host, not
+  // the pod, is the reporter there) and off rails whose host-side bootstrap is legitimately
+  // longer than this window.
+  const unarmed = silentRun({ lockedMsAgo: 10 * 60 * 60_000 })
+  delete unarmed.firstHeartbeatDeadlineMs
+  const { actorum, deps } = reaperFor([unarmed])
+  assert.equal(await recoverSilentPods(deps), 0)
+  assert.equal((await actorum.findById('silent-1'))?.status, 'agens')
+})
+
+test('the clock starts at the pod lock, not at dispatch — an unlocked run is never swept', async () => {
+  // A run can sit in the provisioning queue for a long time before a machine is ours. That wait
+  // is not the pod's to answer for, so with no pod lock recorded the deadline has not started —
+  // however old the run itself is.
+  const queued = silentRun({ lockedMsAgo: 0, inceptum: new Date(Date.now() - 10 * 60 * 60_000) })
+  delete queued.podLockedAt
+  const { actorum, deps } = reaperFor([queued])
+  assert.equal(await recoverSilentPods(deps), 0)
+  assert.equal((await actorum.findById('silent-1'))?.status, 'agens')
+})
+
+test('the window is per-run overridable — a shorter one fires where the default would not', async () => {
+  const { actorum, deps } = reaperFor([silentRun({ lockedMsAgo: 90_000, firstHeartbeatDeadlineMs: 60_000 })])
+  assert.equal(await recoverSilentPods(deps), 1)
+  assert.equal((await actorum.findById('silent-1'))?.status, 'fractus')
+})
+
+test('the default window is 10 minutes — far inside the run terminus it backstops', () => {
+  assert.equal(FIRST_HEARTBEAT_DEADLINE_MS, 10 * 60 * 1000)
+})
+
+test('recoverSilentPods notifies the compositus parent of the step failure', async () => {
+  const compositus = recordingCompositus()
+  const signorum = new MemorySignorum()
+  const actorum = new FakeActorum([silentRun({
+    id: 'child-2', lockedMsAgo: FIRST_HEARTBEAT_DEADLINE_MS + 1, compositum: { parentId: 'parent-7', ordine: 1 },
+  })])
+  const completor = new ActumCompletor({ acta: actorum as unknown as Actorum, signorum })
+  await recoverSilentPods({ actorum: actorum as unknown as Actorum, completor, compositusCursor: compositus })
+  assert.deepEqual(compositus.calls, [{ parentId: 'parent-7', childId: 'child-2', success: false }])
+})
+
+test('startExpiryReaper sweeps silent pods on the same tick as expired acta', async () => {
+  const { actorum, deps } = reaperFor([
+    silentRun({ lockedMsAgo: FIRST_HEARTBEAT_DEADLINE_MS + 1 }),
+    makeActum({ id: 'expired-2', status: 'agens', expirat: new Date(Date.now() - 1000) }),
+  ])
+  const stop = startExpiryReaper(deps, 30)
+  await wait(120)
+  stop()
+  assert.equal((await actorum.findById('silent-1'))?.status, 'fractus')
+  assert.equal((await actorum.findById('expired-2'))?.status, 'fractus')
+})
+
+test('a reaped run carries its last report into acta.error; a run with no timeline keeps the bare reason', async () => {
+  const at = new Date(Date.now() - 5 * 60_000)
+  const { actorum, deps } = reaperFor([
+    makeActum({
+      id: 'with-timeline', status: 'agens', expirat: new Date(Date.now() - 1000),
+      progressus: [{ phase: 'downloading', target: 'model', message: 'pulling weights', at }],
+    }),
+    makeActum({ id: 'no-timeline', status: 'agens', expirat: new Date(Date.now() - 1000) }),
+  ])
+
+  await recoverExpiredActa(deps)
+
+  const detailed = await actorum.findById('with-timeline')
+  assert.equal(
+    detailed?.error,
+    `${EXPIRED_ERROR} (last report: downloading/model — pulling weights at ${at.toISOString()})`,
+  )
+  // Nothing to add → the canonical reason is stamped verbatim, as it always was.
+  assert.equal((await actorum.findById('no-timeline'))?.error, EXPIRED_ERROR)
+})
+
+test('SILENT_POD_ERROR and EXPIRED_ERROR are distinct causes', () => {
+  assert.notEqual(SILENT_POD_ERROR, EXPIRED_ERROR)
 })

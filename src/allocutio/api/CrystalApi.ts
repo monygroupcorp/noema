@@ -108,6 +108,7 @@ import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/Ve
 import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
 import type { CsamReviewReporter } from '../../crystal/CsamReviewReporter.js'
 import { allMediaUrls } from '../../crystal/BucketAdapter.js'
+import { isPodLockedReport } from '../../crystal/expiryReaper.js'
 import { makeLogger } from '../../lib/logger.js'
 import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
 import { permissivePromptGuard } from '../../crystal/PromptGuard.js'
@@ -3890,7 +3891,7 @@ export class CrystalApi {
       return { continue: true }
     }
 
-    await this._persistAndEmit(actum, progressus)
+    await this._persistAndEmit(actum, progressus, 'pod')
 
     // A settled Actum tells the runner to bail — there is nothing left for it to report against.
     return { continue: !isSettled(actum) }
@@ -3905,7 +3906,7 @@ export class CrystalApi {
   async recordProgressus(actumId: string, progressus: Progressus): Promise<void> {
     const actum = await this.deps.actorum.findById(actumId)
     if (!actum) return
-    await this._persistAndEmit(actum, progressus)
+    await this._persistAndEmit(actum, progressus, 'host')
   }
 
   /**
@@ -3913,8 +3914,17 @@ export class CrystalApi {
    * terminals only, never per-tick progress; §7), roll up `phaseDurations` on a terminal,
    * and emit the typed `actum.progressus` bus event. Shared by the HTTP sink
    * (`reportProgressus`) and the in-process recorder (`recordProgressus`).
+   *
+   * `source` says WHO is reporting, which the timeline itself cannot: a `pod` report arrived
+   * over `POST /runner/status` (the pod speaking for itself), a `host` report was raised in this
+   * process on the run's behalf. The first-heartbeat deadline is armed and disarmed off exactly
+   * that distinction — see `Actum.podLockedAt` / `Actum.firstPodReportAt`.
    */
-  private async _persistAndEmit(actum: Actum, progressus: Progressus): Promise<void> {
+  private async _persistAndEmit(
+    actum: Actum,
+    progressus: Progressus,
+    source: 'pod' | 'host',
+  ): Promise<void> {
     // A run that has settled is finished, and a report that arrives afterwards must not be able to
     // put it back in flight. Status posts and the completion webhook travel on separate connections,
     // so an in-flight progress frame can land after settlement; applying it would append an
@@ -3927,7 +3937,8 @@ export class CrystalApi {
     // so reports for one Actum never race. If a runner ever fans out concurrent posts,
     // switch the append to an atomic $push.
     const last = actum.progressus?.at(-1)
-    const patch: Partial<Pick<Actum, 'progressus' | 'phaseDurations' | 'resumeCheckpoint'>> = {}
+    const patch: Partial<Pick<Actum,
+      'progressus' | 'phaseDurations' | 'resumeCheckpoint' | 'podLockedAt' | 'firstPodReportAt'>> = {}
     if (shouldPersist(last, progressus)) {
       const timeline = [...(actum.progressus ?? []), progressus]
       patch.progressus = timeline
@@ -3938,6 +3949,22 @@ export class CrystalApi {
     // The rescued-checkpoint anchor is captured ALWAYS — even when the report itself is a
     // per-tick `executing` the timeline coalesces away — so the resume anchor survives a hard kill.
     if (progressus.checkpoint?.url) patch.resumeCheckpoint = progressus.checkpoint
+
+    // ── First-heartbeat deadline: arm on the pod lock, disarm on the pod's first word ──
+    // Both stamps are captured regardless of coalescing — the clock is a property of the run,
+    // not of whether this particular report earned a place on the timeline.
+    if (source === 'pod') {
+      // The pod has spoken for itself. Recorded once, on the first post: the field's presence is
+      // what takes the run out of the first-heartbeat sweep, and its value is when that happened.
+      if (!actum.firstPodReportAt) patch.firstPodReportAt = progressus.at
+    } else if (
+      actum.firstHeartbeatDeadlineMs !== undefined &&   // only a run whose cursor armed one
+      !actum.podLockedAt &&                             // first lock only — a retry never restarts the clock forward
+      isPodLockedReport(progressus)
+    ) {
+      patch.podLockedAt = progressus.at
+    }
+
     if (Object.keys(patch).length > 0) await this.deps.actorum.update(actum.id, patch)
     bus.emit('actum.progressus', { actumId: actum.id, progressus })
   }

@@ -7,7 +7,7 @@ import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Intellarum } from '../types/intelligendi.js'
 import { impetusFor } from '../ledger/rates.js'
 import { makeLogger } from '../lib/logger.js'
-import { getTrace } from '../lib/trace.js'
+import { getTrace, makeTraceContext } from '../lib/trace.js'
 import { buildWideEvent, emitWideEvent } from '../lib/wide.js'
 import { shouldFlush, flushBuffer } from '../lib/buffer.js'
 import { createVestigiumFromActum } from './hooks/vestigiumHook.js'
@@ -229,24 +229,36 @@ export class ActumCompletor {
       await signorum.release(actum.signaConsumed)
     }
 
+    // Preserve a cause that is already on the record. `error` reaches here from whichever path
+    // observed the failure, and a sweep's own reason is the most general of them — it describes
+    // the sweep rather than the run. A specific cause recorded earlier is the better account of
+    // what happened, so it stands and the caller's reason is dropped.
+    const recorded = current?.error?.trim()
+    const finalError = recorded ? recorded : error
+
     const failed = await acta.update(actum.id, {
       status: 'fractus',
-      error,
+      error: finalError,
       completum: new Date(),
     })
 
     log.warn('actum failed', {
       actumId:  actum.id,
       modusId:  actum.modusId,
-      error,
+      error:    finalError,
     })
 
+    // A failure is emitted as a wide event even with no trace context to emit it under. The
+    // sweeps run on a timer, outside any dispatch, so a run failed by one has no ambient trace —
+    // and a failure-rate measurement that silently omits exactly the runs nobody was watching is
+    // the wrong measurement. Absent a real context, a minimal one is synthesised: it carries no
+    // identity or per-stage timing, which those fields' optionality already allows for, and the
+    // economics and pod telemetry come off the actum regardless.
     const ctx = getTrace()
-    if (ctx) {
-      const wide = buildWideEvent(failed, ctx, 'failed', undefined, error)
-      emitWideEvent(wide)
-      flushBuffer(ctx, 'actum-failed')
-    }
+    const wide = buildWideEvent(failed, ctx ?? makeTraceContext({ actumId: actum.id }), 'failed', undefined, finalError)
+    emitWideEvent(wide)
+    // The buffer is the trace's own accumulated log lines — there is nothing to flush without one.
+    if (ctx) flushBuffer(ctx, 'actum-failed')
 
     return failed
   }
