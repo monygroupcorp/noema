@@ -59,7 +59,7 @@ export class MongoActorum implements Actorum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'callbackNonce' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations'>>
+    patch: Partial<Pick<Actum, 'status' | 'exitus' | 'error' | 'completum' | 'duratio' | 'impetus' | 'materiamId' | 'signaConsumed' | 'expirat' | 'externusJobId' | 'callbackNonce' | 'oneshotPod' | 'resumeCheckpoint' | 'deploymentHash' | 'executio' | 'progressus' | 'phaseDurations' | 'firstHeartbeatDeadlineMs' | 'podLockedAt' | 'firstPodReportAt'>>
   ): Promise<Actum> {
     const { impetus, executio, ...rest } = patch
     const $set: Record<string, unknown> = { ...rest }

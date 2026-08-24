@@ -308,3 +308,85 @@ test('reportProgressus: an unknown actumId returns continue but fans out nothing
   }
   assert.equal(emitted, 0)
 })
+
+// ── The first-heartbeat clock: armed on the pod lock, stopped by the pod's own voice ─────────
+//
+// The sink is where the two ends of that clock are observable, because it is the one place that
+// knows WHO is reporting: `reportProgressus` is the pod's channel (`POST /runner/status`),
+// `recordProgressus` is the host reporting on the run's behalf. The deadline exists to catch a
+// pod that cannot speak, so only the pod's own posts may stop it.
+
+const podLocked = (): Progressus => ({
+  ...coldStartProgressus('pod-locked', { podId: 'pod-abc', gpuType: 'RTX 4090', costPerHr: 0.44 })!,
+  at: at(1000),
+})
+
+test('the pod lock starts the clock on a run that armed a first-heartbeat deadline', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum({ firstHeartbeatDeadlineMs: 600_000 }))
+
+  await api.recordProgressus('act-1', podLocked())
+
+  const after = await actorum.findById('act-1')
+  assert.equal(after?.podLockedAt?.getTime(), at(1000).getTime())
+  assert.equal(after?.firstPodReportAt, undefined)
+})
+
+test('a run that armed no deadline is never stamped with a pod lock', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum())
+
+  await api.recordProgressus('act-1', podLocked())
+
+  assert.equal((await actorum.findById('act-1'))?.podLockedAt, undefined)
+})
+
+test('the clock starts at the pod lock, not at the host handover that follows it', async () => {
+  // `installing`/`loading` are the host saying it is building the pod and has started the job on
+  // it. Neither is the pod speaking, and neither may move the clock the pod is being timed by.
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum({ firstHeartbeatDeadlineMs: 600_000 }))
+
+  await api.recordProgressus('act-1', { phase: 'provisioning', target: 'pod', message: 'acquiring a GPU pod', at: at(0) })
+  assert.equal((await actorum.findById('act-1'))?.podLockedAt, undefined, 'the acquisition attempt is not a lock')
+
+  await api.recordProgressus('act-1', podLocked())
+  await api.recordProgressus('act-1', { phase: 'installing', message: 'preparing the pod', at: at(2000) })
+  await api.recordProgressus('act-1', { phase: 'loading', message: 'starting the job on the pod', at: at(3000) })
+
+  const after = await actorum.findById('act-1')
+  assert.equal(after?.podLockedAt?.getTime(), at(1000).getTime(), 'the clock stays pinned to the lock')
+  assert.equal(after?.firstPodReportAt, undefined, 'no host report is a heartbeat')
+})
+
+test('a second pod lock does not move the clock forward', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum({ firstHeartbeatDeadlineMs: 600_000 }))
+
+  await api.recordProgressus('act-1', podLocked())
+  await api.recordProgressus('act-1', { ...podLocked(), at: at(400_000) })
+
+  assert.equal((await actorum.findById('act-1'))?.podLockedAt?.getTime(), at(1000).getTime())
+})
+
+test("the pod's first status post stops the clock, and only the first one is recorded", async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum({ firstHeartbeatDeadlineMs: 600_000 }))
+  await api.recordProgressus('act-1', podLocked())
+
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'downloading', target: 'model', at: at(5000) } })
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(9000) } })
+
+  const after = await actorum.findById('act-1')
+  assert.equal(after?.firstPodReportAt?.getTime(), at(5000).getTime())
+  assert.equal(after?.podLockedAt?.getTime(), at(1000).getTime(), 'the lock stamp is left as it was')
+})
+
+test('a pod report stops the clock even on a run that armed no deadline (the stamp is plain telemetry)', async () => {
+  const { actorum, api } = await makeApi()
+  await actorum.create(makeActum())
+
+  await api.reportProgressus({ actumId: 'act-1', progressus: { phase: 'executing', at: at(7000) } })
+
+  assert.equal((await actorum.findById('act-1'))?.firstPodReportAt?.getTime(), at(7000).getTime())
+})
