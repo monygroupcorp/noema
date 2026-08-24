@@ -22,7 +22,7 @@
 import { Collection } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 
-import { floorFromEntries, floorToEntries } from '../types/museSession.js'
+import { floorFromEntries, floorToEntries, MuseSessionVersionConflict } from '../types/museSession.js'
 import type {
   CreateMuseSessionInput,
   FloorEntry,
@@ -86,6 +86,7 @@ function fromRecord(raw: Record<string, unknown>): StoredMuseSession {
     session: MuseSessionDoc
     natum: Date
     mutatum: Date
+    versio?: unknown
   }
   return {
     id: record.id,
@@ -93,6 +94,7 @@ function fromRecord(raw: Record<string, unknown>): StoredMuseSession {
     session: fromDoc(record.session),
     natum: record.natum,
     mutatum: record.mutatum,
+    versio: typeof record.versio === 'number' ? record.versio : 0,
   }
 }
 
@@ -108,8 +110,9 @@ export class MongoMuseSession implements MuseSessions {
       session: toDoc(input.session),
       natum: now,
       mutatum: now,
+      versio: 0,
     })
-    return { id, owner: input.owner, session: input.session, natum: now, mutatum: now }
+    return { id, owner: input.owner, session: input.session, natum: now, mutatum: now, versio: 0 }
   }
 
   async find(id: string): Promise<StoredMuseSession | null> {
@@ -136,7 +139,7 @@ export class MongoMuseSession implements MuseSessions {
   }
 
   /**
-   * Replace the stored pure value wholesale and bump `mutatum`.
+   * Replace the stored pure value wholesale, under a compare-and-swap on `versio`.
    *
    * Wholesale rather than field-by-field because the pure module returns a whole
    * new session per mutation and is the only thing allowed to compute one: a
@@ -144,15 +147,39 @@ export class MongoMuseSession implements MuseSessions {
    * touched, which is a second copy of the domain rules and the place the two
    * would drift apart. An unknown id returns null — a session is never created
    * by a save.
+   *
+   * BECAUSE THE REPLACE IS WHOLESALE, THE VERSION MATCH IS WHAT MAKES IT SAFE.
+   * Every mutation is read → pure-mutate → replace. Two of them overlapping means
+   * two whole sessions computed from two reads of the same document, and the
+   * second to land would carry no trace of the first — a piece recorded by one
+   * and a floor change made by the other cannot both survive a bare replace. The
+   * update therefore matches on the version the caller read and stamps the next
+   * one; a mismatch throws `MuseSessionVersionConflict` and writes nothing, which
+   * is what lets the caller re-read and re-apply instead of losing a write.
+   *
+   * VERSION 0 ALSO MATCHES A DOCUMENT WITH NO `versio` AT ALL. Records written
+   * before the field existed carry none, and absent reads as 0 (`fromRecord`), so
+   * they save on their first attempt and are versioned from then on. No backfill
+   * and no migration.
    */
-  async save(id: string, session: MuseSession): Promise<StoredMuseSession | null> {
+  async save(id: string, session: MuseSession, expectedVersio: number): Promise<StoredMuseSession | null> {
     const mutatum = new Date()
+    const versionMatch =
+      expectedVersio === 0
+        ? { $or: [{ versio: 0 }, { versio: { $exists: false } }] }
+        : { versio: expectedVersio }
     const result = await this.col.findOneAndUpdate(
-      { id },
-      { $set: { session: toDoc(session), mutatum } },
+      { id, ...versionMatch },
+      { $set: { session: toDoc(session), mutatum, versio: expectedVersio + 1 } },
       { returnDocument: 'after' },
     )
-    if (!result) return null
-    return fromRecord(result as unknown as Record<string, unknown>)
+    if (result) return fromRecord(result as unknown as Record<string, unknown>)
+
+    // No match: either the id names no session, or the version moved under us.
+    // The two are different answers — null is "there is nothing here", a conflict
+    // is "there is something here and it is newer than what you read".
+    const present = await this.col.findOne({ id }, { projection: { _id: 1 } })
+    if (!present) return null
+    throw new MuseSessionVersionConflict(id, expectedVersio)
   }
 }
