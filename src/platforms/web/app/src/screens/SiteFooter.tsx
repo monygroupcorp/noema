@@ -8,7 +8,7 @@ export function SiteFooter() {
       <div className="inner">
         <div>
           <div className="brand"><span className="dot" />noema</div>
-          <div className="tag">Make anything. We never have to see it. Open-source, privacy-by-construction generative media.</div>
+          <div className="tag">Make anything, anonymously. Open-source generative media — no prompt or output retention, no training on your work.</div>
         </div>
         <div className="col">
           <h3>Product</h3>

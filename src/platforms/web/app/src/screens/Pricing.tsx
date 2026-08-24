@@ -114,7 +114,7 @@ export function Pricing() {
         <h2>Private spending</h2>
         <p>
           Anonymity depends on how you fund. Fund from a fresh or shielded on-chain wallet and the
-          address has no identity behind it — the strongest privacy available today. Then mint a ZK
+          address has no identity behind it. Then mint a ZK
           purse from your balance: its spends are cryptographically unlinkable to what you funded.
           Minting a purse needs a signed-in account, so it's an unlinkable spend layer on top of an
           identified balance — strongest when you fund from a shielded wallet. Direct-to-commitment
