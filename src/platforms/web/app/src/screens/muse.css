@@ -180,6 +180,11 @@
 .muse-launcher-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
 .muse-launcher-floor { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 
+/* Promotion (noema-307) — the durable exit, laid out like the floor readout above it
+   because it speaks about the same object: the control, then the sentence saying what
+   pressing it makes and what it does not cost. */
+.muse-launcher-promote { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
 .muse-mode {
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
   border: 1px solid var(--hair-soft); border-radius: 10px; padding: 6px 10px; margin: 0;

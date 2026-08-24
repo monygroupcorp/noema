@@ -798,6 +798,17 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/pieces/${encodeURIComponent(runId)}/save`, {
       method: 'POST', headers: authHeaders(),
     }).then(j<{ session: MuseSessionView }>),
+  // POST …/promote — the session becomes a DRAFT collection: the floor still in the draw
+  // becomes the trait grid, and the flow, the standing affix and the stacked trigger words
+  // become the base prompt that grid expands. NOTHING IS SPENT — a draft is not dispatched,
+  // and the supply and rules a session does not carry are set in the collection funnel this
+  // returns into. The session is not written, so promoting does not end or alter the sitting.
+  // The body carries at most a name: the grid, the flow and the funding identity are all
+  // resolved server-side from the session and are never sent from here.
+  promoteMuseSession: (id: string, nomen?: string) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/promote`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(nomen ? { nomen } : {}),
+    }).then(j<{ collection: Collection }>),
 
   // For a cost estimate before dispatching, use `quote` above (`POST /v1/runs/quote`).
   // Signed upload (R2). Returns a presigned PUT url + the permanent public url.
