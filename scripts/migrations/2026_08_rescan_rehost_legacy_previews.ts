@@ -89,8 +89,12 @@ async function buildRealModerationGate(): Promise<ModerationGate> {
     configureModerationGate(deps: { fetcher: typeof httpMediaFetcher; log: Console }): Promise<ModerationGate | null>
   }
   let compliance: PrivateCompliance | null = null
+  // Variable path on purpose: src/private/ is gitignored (injected at deploy), and tsc resolves a
+  // LITERAL dynamic-import path — reddening typecheck in any checkout without the module (CI).
+  // Same convention as scripts/triage-corpus.ts.
+  const privateCompliancePath = '../../src/private/compliance/index.js'
   try {
-    compliance = (await import('../../src/private/compliance/index.js')) as unknown as PrivateCompliance
+    compliance = (await import(privateCompliancePath)) as unknown as PrivateCompliance
   } catch {
     console.warn(`${TAG} private compliance module not present — falling back to the same deny/permissive/manual precedence src/index.ts uses.`)
   }
