@@ -55,7 +55,9 @@ import type {
 import type {
   CreateMuseSessionInput, MuseSessions, StoredMuseSession,
 } from '../../../../src/types/museSession.js'
+import { MuseSessionVersionConflict } from '../../../../src/types/museSession.js'
 import type { MuseSession } from '../../../../src/crystal/muse/session.js'
+import { setFragmentEnabled, setFragmentWeight } from '../../../../src/crystal/muse/session.js'
 import { fragmentKey, type Fragment } from '../../../../src/crystal/muse/taxonomy.js'
 import type { Actorum } from '../../../../src/types/cursus.js'
 import type { Actum } from '../../../../src/types/actum.js'
@@ -197,15 +199,28 @@ class MemoryDatasets implements Datasets {
   }
 }
 
-/** The whole `MuseSessions` surface, in memory. */
+/**
+ * The whole `MuseSessions` surface, in memory — including the version match.
+ *
+ * The CAS is modelled here rather than stubbed away because the retry it drives
+ * lives in `CrystalApi`, not in the store: a double that accepted any version
+ * would make every test of that retry vacuous. `beforeSave` is the seam the
+ * concurrency tests write through — it runs after the caller has read and
+ * mutated but before the write is attempted, which is exactly the window a
+ * competing request lands in.
+ */
 class MemoryMuseSessions implements MuseSessions {
   store = new Map<string, StoredMuseSession>()
+  /** Writes attempted, conflicted ones included — how a test counts retries. */
+  saveAttempts: number[] = []
+  /** Runs in the read-mutate-write gap; a test uses it to land a competing write. */
+  beforeSave: (() => Promise<void> | void) | null = null
   private seq = 0
 
   async create(input: CreateMuseSessionInput): Promise<StoredMuseSession> {
     const now = new Date()
     const full: StoredMuseSession = {
-      id: `sess-${++this.seq}`, owner: input.owner, session: input.session, natum: now, mutatum: now,
+      id: `sess-${++this.seq}`, owner: input.owner, session: input.session, natum: now, mutatum: now, versio: 0,
     }
     this.store.set(full.id, full)
     return full
@@ -216,10 +231,14 @@ class MemoryMuseSessions implements MuseSessions {
       .filter((s) => s.owner === owner && s.session.motherDatasetId === motherDatasetId)
       .sort((a, b) => b.mutatum.getTime() - a.mutatum.getTime())
   }
-  async save(id: string, session: MuseSession): Promise<StoredMuseSession | null> {
+  async save(id: string, session: MuseSession, expectedVersio: number): Promise<StoredMuseSession | null> {
+    const hook = this.beforeSave
+    if (hook) await hook()
+    this.saveAttempts.push(expectedVersio)
     const stored = this.store.get(id)
     if (!stored) return null
-    const next: StoredMuseSession = { ...stored, session, mutatum: new Date() }
+    if ((stored.versio ?? 0) !== expectedVersio) throw new MuseSessionVersionConflict(id, expectedVersio)
+    const next: StoredMuseSession = { ...stored, session, mutatum: new Date(), versio: expectedVersio + 1 }
     this.store.set(id, next)
     return next
   }
@@ -1115,6 +1134,144 @@ test('a session belonging to another identity cannot have its setup written', as
 
     const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
     assert.equal(resumed.body.session.setup, undefined, 'nothing was written')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── Overlapping writes: the read-mutate-save loop (noema-309) ────────────────
+//
+// Every mutation on this surface is read → pure-mutate → replace, and the
+// replace is wholesale. Two of them overlapping is the ordinary case in Muse —
+// rolls stream in while the floor is being steered — so the store refuses a
+// write computed from a read that is no longer current, and `CrystalApi`
+// re-reads and re-applies the SAME pure mutator to the fresh session. These
+// tests drive that through the real route.
+
+/**
+ * Land a write from another caller, straight into the store.
+ *
+ * Written into the map rather than through `save` so it cannot re-enter the
+ * `beforeSave` hook that schedules it. It bumps the version exactly as a real
+ * write would, which is what the caller under test then collides with.
+ */
+function landCompetingWrite(
+  sessions: MemoryMuseSessions,
+  id: string,
+  mutate: (session: MuseSession) => MuseSession,
+): void {
+  const stored = sessions.store.get(id)
+  if (!stored) throw new Error(`no session '${id}' to write against`)
+  sessions.store.set(id, {
+    ...stored,
+    session: mutate(stored.session),
+    mutatum: new Date(),
+    versio: (stored.versio ?? 0) + 1,
+  })
+}
+
+test('a mutation that collides with a concurrent write is re-applied to the fresh session, and both survive', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+
+  const { server, url } = await createServer(
+    datasets, sessions, readOnlyActorum([completedRun('run-1', 'https://example.invalid/piece-1.png')]),
+  )
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    const sessionId: string = spawned.body.session.id
+
+    // A floor change lands in the gap between this request's read and its write —
+    // the interleaving that loses a piece under a bare replace.
+    sessions.saveAttempts = []
+    sessions.beforeSave = () => {
+      sessions.beforeSave = null
+      landCompetingWrite(sessions, sessionId, (session) =>
+        setFragmentEnabled(session, { category: 'style', text: 'ink wash' }, false))
+    }
+
+    const recorded = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] },
+    })
+    assert.equal(recorded.status, 201, `the piece is recorded, not refused: ${JSON.stringify(recorded.body)}`)
+
+    // The write was attempted twice: once against the version it read, once
+    // against the version the competing write left behind.
+    assert.deepEqual(sessions.saveAttempts, [0, 1], 'the losing attempt was retried against the fresh version')
+
+    // BOTH changes are in the stored session. The retried write carries the
+    // concurrent writer's floor change because the mutator was re-applied to the
+    // FRESH session rather than re-sent from the stale read.
+    const stored = sessions.store.get(sessionId)
+    assert.ok(stored)
+    assert.equal(stored.session.pieces.length, 1, 'the piece survived')
+    assert.equal(stored.session.pieces[0]?.runId, 'run-1')
+    assert.equal(
+      stored.session.floor.get(fragmentKey({ category: 'style', text: 'ink wash' }))?.enabled, false,
+      'and so did the concurrent floor change',
+    )
+
+    // The response describes that same merged state — the caller is not told a
+    // version of the session that was never stored.
+    const floorInBody = (recorded.body.session.floor as Array<{ key: string; enabled: boolean }>)
+      .find((entry) => entry.key === fragmentKey({ category: 'style', text: 'ink wash' }))
+    assert.equal(floorInBody?.enabled, false)
+    assert.equal(recorded.body.session.pieces.length, 1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a mutation that loses every attempt is refused as a retryable conflict, and writes nothing', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+
+  const { server, url } = await createServer(
+    datasets, sessions, readOnlyActorum([completedRun('run-1', 'https://example.invalid/piece-1.png')]),
+  )
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    // A competing write lands before EVERY attempt: the caller can never win.
+    let weight = 2
+    sessions.saveAttempts = []
+    sessions.beforeSave = () => {
+      const w = weight++
+      landCompetingWrite(sessions, sessionId, (session) =>
+        setFragmentWeight(session, { category: 'lighting', text: 'dusk glow' }, w))
+    }
+
+    const recorded = await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: { runId: 'run-1', rollIndex: 0, fragments: [{ category: 'subject', text: 'a lantern-keeper' }] },
+    })
+
+    assert.equal(recorded.status, 409, `sustained contention is a conflict, not a 500: ${JSON.stringify(recorded.body)}`)
+    assert.equal(recorded.body.error.code, 'conflict.muse_session')
+    assert.equal(recorded.body.error.retryable, true)
+    assert.equal(sessions.saveAttempts.length, 3, 'bounded — it does not spin')
+
+    // The session is exactly what the last write that DID land left: consistent,
+    // and carrying nothing of the refused caller's.
+    const stored = sessions.store.get(sessionId)
+    assert.ok(stored)
+    assert.equal(stored.session.pieces.length, 0, 'the refused mutation wrote nothing')
+    assert.equal(
+      stored.session.floor.get(fragmentKey({ category: 'lighting', text: 'dusk glow' }))?.weight,
+      weight - 1,
+      'and the last landed write is intact',
+    )
   } finally {
     await closeServer(server)
   }
