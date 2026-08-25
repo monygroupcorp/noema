@@ -35,7 +35,13 @@ function makeModus(id: string, over: Partial<Modus> = {}): Modus {
     genus: 'atomicus',
     versio: '1.0.0',
     contentHash: `sha256:${id}`,
-    aditus: { prompt: { type: 'text', required: true } },
+    // Declares the ports these tests actually submit. The run-submit boundary refuses a key the
+    // resolved modus does not declare, so a double that under-declares would refuse its own
+    // fixture; `model` is an optional port on the live modi that accept one.
+    aditus: {
+      prompt: { type: 'text', required: true },
+      model: { type: 'text', required: false },
+    },
     exitus: { image: { type: 'image' } },
     ministerium: 'fake',
     canonica: true,
