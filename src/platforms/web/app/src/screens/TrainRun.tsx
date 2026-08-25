@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Run } from '../lib/api';
+import { api, type Run, type RunOrder } from '../lib/api';
 
 // Training run monitor (train-run-spec.md, render noema-train-run.png) — "watch it learn".
 //
@@ -18,7 +18,7 @@ const POLL_MS = 4000;
 // A training run is one ATTEMPT at a standing order. When the order is still live — an attempt
 // running, or another one scheduled — this screen follows the order, not the attempt: a failed
 // attempt inside a live order is not a failure the user has to do anything about, so it is not
-// worded as one. Copy below is a draft pending sign-off; the mechanism does not depend on it.
+// worded as one.
 function whenLabel(iso: string | undefined, nowMs: number): string {
   if (!iso) return 'shortly';
   const at = Date.parse(iso);
@@ -38,6 +38,34 @@ function elapsed(from: string | undefined, nowMs: number): string | null {
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// The order-state notice for this screen. 'attempting' (an attempt is currently running) and
+// 'scheduled' (between attempts, the next one armed) are distinct order states with distinct
+// copy: an attempt in flight is progress, not a failure, so it never carries the between-attempts
+// retry language. Any other order/run state falls through to 'other', whose chip mirrors the
+// run's own status exactly as before.
+export interface TrainRunNotice {
+  mode: 'attempting' | 'scheduled' | 'other';
+  chip: string;
+  copy: string | null;
+}
+
+export function trainRunNotice(order: RunOrder | undefined, run: Run): TrainRunNotice {
+  if (order?.state === 'attempting') {
+    return { mode: 'attempting', chip: 'getting a machine', copy: 'getting a machine\u2026' };
+  }
+  if (order?.state === 'scheduled') {
+    const until = order.until ? new Date(order.until).toLocaleString() : 'later today';
+    return {
+      mode: 'scheduled',
+      chip: 'scheduled',
+      copy: `No machine this attempt. Retries run hourly until ${until}. Attempts that don't start aren't charged. The finished training lands on your shelf.`,
+    };
+  }
+  const failed = run.status === 'failed';
+  const done = run.status === 'complete';
+  return { mode: 'other', chip: failed ? 'failed' : done ? 'finished' : run.status, copy: null };
 }
 
 export function TrainRun() {
@@ -87,9 +115,10 @@ export function TrainRun() {
   }
 
   const order = run.order;
+  const notice = trainRunNotice(order, run);
   // "Waiting" = the request is still alive, whatever this one attempt did. It suppresses the
   // failure wording entirely: nothing has been charged and nothing is asked of the user.
-  const waiting = order?.state === 'scheduled' || order?.state === 'attempting';
+  const waiting = notice.mode === 'scheduled' || notice.mode === 'attempting';
   const dayExhausted = order?.state === 'stopped' && order.reason === 'exhausted';
   const done = run.status === 'complete';
   const failed = run.status === 'failed' && !waiting;
@@ -121,7 +150,7 @@ export function TrainRun() {
           <div className="right">
             <span className="tr-status">
               <span className={`rdot ${failed || dayExhausted ? 'amber' : 'good'}`} />{' '}
-              {waiting ? 'scheduled' : failed ? 'failed' : done ? 'finished' : run.status}
+              {notice.chip}
             </span>
           </div>
         </div>
@@ -142,14 +171,12 @@ export function TrainRun() {
           </div>
         </div>
 
-        {waiting && (
+        {notice.mode === 'attempting' && (
+          <p className="tr-note">{notice.copy}</p>
+        )}
+        {notice.mode === 'scheduled' && (
           <div className="tr-note">
-            <p>
-              Our compute provider couldn&rsquo;t give us a working machine just now — that&rsquo;s on us, not
-              you. Your training is scheduled: we&rsquo;ll keep trying every hour for the rest of the day, and
-              it will appear on your shelf when it lands. Nothing has been charged for the attempts that
-              didn&rsquo;t start.
-            </p>
+            <p>{notice.copy}</p>
             <p className="sub mono">
               attempt {order?.attempts} · next {whenLabel(order?.nextAttemptAt, now)}
               {order?.until ? ` · until ${new Date(order.until).toLocaleString()}` : ''}
