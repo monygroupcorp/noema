@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { buildWideEvent, emitWideEvent } from '../../../src/lib/wide.js'
 import { makeTraceContext } from '../../../src/lib/trace.js'
 import { bus } from '../../../src/lib/bus.js'
+import { classifyError } from '../../../src/lib/classifyError.js'
 import type { Actum, ActumExecutio } from '../../../src/types/actum.js'
 import type { Exitus } from '../../../src/types/cursus.js'
 import type { WideEvent } from '../../../src/lib/wide.js'
@@ -222,5 +223,28 @@ test('emitWideEvent emits on the actum.fail channel for failures', () => {
   bus.removeListener('actum.fail', listener)
 
   assert.equal(failEvents.length, 1)
-  assert.equal(failEvents[0].errorCode, 'OOM')
+  assert.equal(failEvents[0].errorCode, classifyError('OOM'))
+  assert.equal(failEvents[0].message, 'OOM')
+})
+
+// ---------------------------------------------------------------------------
+// errorCode is a classified value grouping failures fairly; the full raw text
+// (which is what makes a single incident diagnosable) is preserved in `message`.
+// ---------------------------------------------------------------------------
+
+test('buildWideEvent classifies errorCode through classifyError and keeps the raw text in message', () => {
+  const raw = 'processor load failed: no module named torchvision\nSee https://example.invalid/install for details'
+  const wide = buildWideEvent(makeActum(), makeTraceContext(), 'failed', undefined, raw)
+
+  assert.equal(wide.errorCode, classifyError(raw))
+  assert.equal(wide.message, raw)
+  // The raw text is exactly what a real diagnosis needs — it must not be truncated or dropped.
+  assert.ok(wide.message!.includes('torchvision'))
+})
+
+test('buildWideEvent leaves errorCode and message unset on a completed actum', () => {
+  const wide = buildWideEvent(makeActum(), makeTraceContext(), 'completed', makeExitus())
+
+  assert.equal(wide.errorCode, undefined)
+  assert.equal(wide.message, undefined)
 })

@@ -14,18 +14,20 @@ export function createWebhookRouter(deps: WebhookRouterDeps): Router {
 
   const handle = (nonce?: string) => async (req: Request, res: Response): Promise<void> => {
     const body = req.body as Record<string, unknown> | undefined
-    const actumId = (body as { id?: unknown; actumId?: unknown } | undefined)?.id ?? (body as { actumId?: unknown } | undefined)?.actumId
+    // `id` is RunPod's own field, naming the POD — not the actum. Keep the wire field as-is;
+    // only the local name and the log field below should say what this value actually is.
+    const podId = (body as { id?: unknown; actumId?: unknown } | undefined)?.id ?? (body as { actumId?: unknown } | undefined)?.actumId
 
     await withTrace(makeTraceContext({ platform: 'api' }), async () => {
-      if (actumId) {
+      if (podId) {
         log.info('webhook received', {
-          actumId: actumId as string,
-          status:  (body as { status?: unknown } | undefined)?.status as string | undefined,
+          podId: podId as string,
+          status: (body as { status?: unknown } | undefined)?.status as string | undefined,
         })
         const ctx = getTrace()
         if (ctx) ctx.webhookMs = Date.now() - ctx.startTs
       } else {
-        log.warn('webhook: unknown actumId', { raw: body })
+        log.warn('webhook: unknown podId', { raw: body })
       }
 
       const result = await handleExecutionWebhook({
