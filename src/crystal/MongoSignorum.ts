@@ -1,7 +1,8 @@
 import { Collection, MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
+import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus } from '../types/significandi.js'
 import { transferVia } from '../ledger/transfer.js'
+import { RESERVE_CHANGE_AUCTOR } from '../ledger/MemorySignorum.js'
 
 function toDoc(s: Partial<Signum>): Record<string, unknown> {
   const { valor, ...rest } = s
@@ -24,6 +25,39 @@ function fromDoc(doc: Record<string, unknown>): Signum {
 function identityQuery(by: { animaId: string } | { commitment: string }): Record<string, unknown> {
   if ('animaId' in by) return { animaId: by.animaId }
   return { testis: by.commitment, forma: 'arcanum' }
+}
+
+/**
+ * Can a note's identity be carried onto a split child? Mirrors `settle`'s refund-identity
+ * selection: an arcanum note is identified by its `testis` commitment, an identified note by
+ * `animaId`. A note satisfying neither is left locked whole rather than split into children with
+ * no owner. Kept in step with MemorySignorum's private `splittable`.
+ */
+function splittable(doc: Record<string, unknown>): boolean {
+  return doc.forma === 'arcanum' ? typeof doc.testis === 'string' : typeof doc.animaId === 'string'
+}
+
+/**
+ * One half of a split note, as a ready-to-insert doc. Provenance follows `settle`'s delta mint
+ * exactly: arcanum keeps `testis`, identified keeps `animaId` + `forma`. The locked half is
+ * inserted ALREADY locked to the reservation, so it is never briefly spendable.
+ */
+function splitChildDoc(
+  parent: Record<string, unknown>,
+  valor: bigint,
+  status: SignumStatus,
+  actumId?: string,
+): Record<string, unknown> {
+  const base = parent.forma === 'arcanum'
+    ? { forma: 'arcanum' as SignumForma, valor, auctor: RESERVE_CHANGE_AUCTOR, testis: parent.testis as string }
+    : { animaId: parent.animaId as string, forma: parent.forma as SignumForma, valor, auctor: RESERVE_CHANGE_AUCTOR }
+  return toDoc({
+    ...base,
+    id: uuidv4(),
+    natum: new Date(),
+    status,
+    ...(actumId !== undefined ? { actumId } : {}),
+  } as Signum)
 }
 
 export class MongoSignorum implements Signorum {
@@ -78,6 +112,7 @@ export class MongoSignorum implements Signorum {
 
     const idq = identityQuery(by)
     let lockedIds: string[] = []
+    let lockedDocs: Record<string, unknown>[] = []
     let lockedTotal = 0n
 
     // Bounded retry: each successful grab consumes finite valid signa, so the loop terminates;
@@ -127,6 +162,7 @@ export class MongoSignorum implements Signorum {
 
       // Re-read everything we now own under this actumId (may be fewer than `pick` if contended).
       const won = await this.col.find({ actumId, status: 'locked' }).toArray()
+      lockedDocs = won as unknown as Record<string, unknown>[]
       lockedIds = won.map(d => d.id as string)
       lockedTotal = won.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
     }
@@ -142,7 +178,112 @@ export class MongoSignorum implements Signorum {
       return { ok: false, available: lockedTotal }
     }
 
-    return { ok: true, signaIds: lockedIds, locked: lockedTotal }
+    // ── change at reserve time (contract documented on MemorySignorum.reserve) ──
+    // Walk the notes this call locked, smallest-first: those fully consumed by the cover stay
+    // locked whole; the one that pushes coverage past `amount` is split into a locked child for
+    // the exact shortfall and a spendable child for the remainder, and is itself consumed into
+    // the ledger's terminal status. `lockedDocs` is the re-read the loop already performed, so
+    // this costs no extra round trip. The re-read is unordered — order is imposed here.
+    const ascending = [...lockedDocs].sort((a, b) => {
+      const av = BigInt(a.valor as string)
+      const bv = BigInt(b.valor as string)
+      return av < bv ? -1 : av > bv ? 1 : 0
+    })
+
+    const keepIds: string[] = []
+    const excessIds: string[] = []
+    let parent: Record<string, unknown> | null = null
+    let shortfall = 0n
+    let running = 0n
+    for (const d of ascending) {
+      const valor = BigInt(d.valor as string)
+      if (running >= amount) {
+        // Contention can leave this call holding a note the final cover no longer needs
+        // (an earlier pick was stolen, a later fresh pick over-covered). Return it to spendable.
+        excessIds.push(d.id as string)
+        continue
+      }
+      const need = amount - running
+      if (need >= valor || !splittable(d)) {
+        keepIds.push(d.id as string)
+        running += valor
+        continue
+      }
+      parent = d
+      shortfall = need
+      running += need
+    }
+
+    if (!parent && excessIds.length === 0) {
+      return { ok: true, signaIds: lockedIds, locked: lockedTotal }   // exact cover — nothing to split
+    }
+
+    // Both children are constructed — ids included — OUTSIDE the transaction, the same
+    // idempotency discipline `settle` uses for its overshoot refund: a transient retry re-runs
+    // against a rolled-back attempt and re-inserts the SAME ids, never a second pair.
+    const childDocs: Record<string, unknown>[] = []
+    let lockedChildId: string | null = null
+    if (parent) {
+      const parentValor = BigInt(parent.valor as string)
+      const lockedChild = splitChildDoc(parent, shortfall, 'locked', actumId)
+      childDocs.push(lockedChild, splitChildDoc(parent, parentValor - shortfall, 'valid'))
+      lockedChildId = lockedChild.id as string
+    }
+
+    // Atomicity, exactly as in `settle`: mint the children, consume the parent, and drop any
+    // excess in ONE transaction. Children-first ordering plus all-or-nothing commit means no
+    // crash point can leave value minted without its parent consumed, or a parent consumed
+    // without its children — the two windows this split would otherwise open.
+    const session = this.client.startSession()
+    try {
+      await session.withTransaction(async () => {
+        if (childDocs.length > 0) {
+          await this.col.insertMany(childDocs, { session })
+        }
+        if (parent) {
+          const consumed = await this.col.updateOne(
+            { id: parent.id as string, status: 'locked', actumId },
+            { $set: { status: 'spent', expensum: new Date(), actumId } },
+            { session },
+          )
+          // The parent must still be the locked note this reservation selected. Anything else
+          // means the ledger moved underneath us — abort rather than mint against it.
+          if (consumed.matchedCount !== 1) throw new Error('split parent is no longer locked by this reservation')
+        }
+        if (excessIds.length > 0) {
+          await this.col.updateMany(
+            { id: { $in: excessIds }, status: 'locked', actumId },
+            { $set: { status: 'valid' }, $unset: { actumId: '' } },
+            { session },
+          )
+        }
+      })
+    } catch {
+      // The split is all-or-nothing, so an abort leaves precisely the reservation the pre-split
+      // path would have produced: whole notes locked, `locked >= amount`, no orphan children.
+      // Return that rather than throwing — the notes are already locked under this actumId, and a
+      // throw would strand them with no ids for the caller to release or settle.
+      //
+      // Re-read what this actum still holds instead of trusting the pre-split view: a commit
+      // whose outcome the driver could not confirm may in fact have landed, and stale ids would
+      // leave a locked child with no id to release or settle. Whatever survives either still
+      // covers the ceiling, or it fails closed exactly like any other shortfall.
+      const held = await this.col.find({ actumId, status: 'locked' }).toArray()
+      const heldIds = held.map(d => d.id as string)
+      const heldTotal = held.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
+      if (heldTotal >= amount) return { ok: true, signaIds: heldIds, locked: heldTotal }
+      if (heldIds.length > 0) {
+        await this.col.updateMany(
+          { id: { $in: heldIds }, status: 'locked', actumId },
+          { $set: { status: 'valid' }, $unset: { actumId: '' } },
+        )
+      }
+      return { ok: false, available: heldTotal }
+    } finally {
+      await session.endSession()
+    }
+
+    return { ok: true, signaIds: lockedChildId ? [...keepIds, lockedChildId] : keepIds, locked: running }
   }
 
   transfer(

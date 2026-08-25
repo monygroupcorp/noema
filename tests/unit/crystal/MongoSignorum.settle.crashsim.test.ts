@@ -103,6 +103,96 @@ test('crash between spend and refund leaves the ledger consistent — spend roll
   assert.equal(balance, 300n, 'full value must be recoverable after the crash — none lost')
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// noema-306 — the SPLIT crash windows, same gate shape as settle's above.
+//
+// `reserve` splits an over-covering note into two children and consumes the parent. Left
+// non-atomic that opens two windows: children minted while the parent stays spendable (value
+// created), or the parent consumed with the children never minted (value destroyed). The split
+// runs inside the same single-identity transaction discipline `settle` uses, so a crash at either
+// point rolls the whole split back and the reservation degrades to the pre-split shape — whole
+// notes locked, `locked >= amount`, nothing minted, nothing lost.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Throws on the collection method named, standing in for a process kill at that write. */
+function crashOn(col: Collection, method: 'insertMany' | 'updateOne'): { col: Collection; arm: () => void } {
+  let armed = false
+  const facade = new Proxy(col, {
+    get(target, prop, receiver) {
+      if (prop === method) {
+        return (...args: unknown[]) => {
+          if (armed) throw new Error(`injected crash: process killed at ${method}`)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (target as any)[method](...args)
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return { col: facade as Collection, arm: () => { armed = true } }
+}
+
+test('crash while minting the split children: nothing is minted, the reservation still covers, no value lost', async () => {
+  const seed = new MongoSignorum(realCol, client)
+  const big = await seed.issue(makeSignum({ valor: 1000n }))
+
+  const { col: crashing, arm } = crashOn(realCol, 'insertMany')
+  const signorum = new MongoSignorum(crashing, client)
+  arm()
+
+  const r = await signorum.reserve({ animaId: 'anima-crash' }, 250n, 'actum-split-a')
+  assert.ok(r.ok, 'a legitimate reservation still succeeds — the split refines the hold, it is not the debit')
+  assert.equal(r.locked, 1000n, 'degrades to the pre-split shape: the note is held whole')
+
+  const history = await signorum.history({ animaId: 'anima-crash' })
+  assert.equal(history.length, 1, 'no orphan children — the split rolled back whole')
+  assert.equal(history[0].id, big.id)
+  assert.equal(history[0].status, 'locked', 'the parent was never consumed')
+
+  // Recoverable end-to-end: releasing the reservation restores the full value, none created.
+  await signorum.release(r.signaIds)
+  assert.equal(await signorum.balance({ animaId: 'anima-crash' }), 1000n)
+
+  // Non-vacuity: the injected crash is what suppressed the split, not an absent implementation.
+  // The identical reserve on an unarmed collection does split.
+  const clean = new MongoSignorum(realCol, client)
+  const r2 = await clean.reserve({ animaId: 'anima-crash' }, 250n, 'actum-split-a2')
+  assert.ok(r2.ok)
+  assert.equal(r2.locked, 250n)
+  assert.equal(await realCol.countDocuments({ auctor: 'reserve:change' }), 2)
+})
+
+test('crash while consuming the split parent: the children roll back with it, no double-spend', async () => {
+  const seed = new MongoSignorum(realCol, client)
+  const big = await seed.issue(makeSignum({ valor: 1000n }))
+
+  const { col: crashing, arm } = crashOn(realCol, 'updateOne')
+  const signorum = new MongoSignorum(crashing, client)
+  arm()
+
+  const r = await signorum.reserve({ animaId: 'anima-crash' }, 250n, 'actum-split-b')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 1000n)
+
+  // The inverse window: children must NOT survive a parent that was never consumed, or the
+  // identity would hold both the parent's value and its two halves.
+  const history = await signorum.history({ animaId: 'anima-crash' })
+  assert.equal(history.length, 1, 'the children rolled back with the parent')
+  assert.equal(history[0].id, big.id)
+  assert.equal(history[0].status, 'locked')
+
+  await signorum.release(r.signaIds)
+  assert.equal(await signorum.balance({ animaId: 'anima-crash' }), 1000n)
+
+  // Non-vacuity: the same reserve on an unarmed collection does split.
+  const clean = new MongoSignorum(realCol, client)
+  const r2 = await clean.reserve({ animaId: 'anima-crash' }, 250n, 'actum-split-b2')
+  assert.ok(r2.ok)
+  assert.equal(r2.locked, 250n)
+  assert.equal(await realCol.countDocuments({ auctor: 'reserve:change' }), 2)
+})
+
 test('crash on an exact-settle (no overshoot) never fires — single spend write, nothing to lose', async () => {
   // When actualImpetus == total there is no refund insert, so the crash arming is a no-op and the
   // spend commits cleanly. Guards that the txn wrapper does not regress the common no-refund path.

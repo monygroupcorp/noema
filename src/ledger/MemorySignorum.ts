@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma } from '../types/significandi.js'
+import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus } from '../types/significandi.js'
 import { transferVia } from './transfer.js'
+
+/**
+ * Auctor stamped on BOTH halves of a note split at reserve time — the register that names the
+ * operation, mirroring `settle:delta` on the overshoot refund. MongoSignorum uses the same value.
+ */
+export const RESERVE_CHANGE_AUCTOR = 'reserve:change'
 
 export class MemorySignorum implements Signorum {
   private readonly store = new Map<string, Signum>()
@@ -106,7 +112,77 @@ export class MemorySignorum implements Signorum {
       return { ok: false, available: covered }
     }
 
-    return { ok: true, signaIds: selected, locked: covered }
+    // ── change at reserve time ────────────────────────────────────────────────
+    // A reservation holds exactly `amount`, never a whole note that happens to be larger.
+    // Walk the notes this call locked, smallest-first: those fully consumed by the cover stay
+    // locked whole; the one that pushes coverage past `amount` is SPLIT — consumed into the
+    // ledger's terminal status ('spent', the same terminal write `settle` performs) and replaced
+    // by two fresh mints, one locked into this reservation for the exact shortfall and one
+    // immediately spendable for the remainder. No valor is ever mutated in place, so the ledger
+    // stays append-only: the parent's face value is exactly the sum of its two children.
+    const ascending = selected
+      .map(id => this.store.get(id)!)
+      .sort((a, b) => (a.valor < b.valor ? -1 : a.valor > b.valor ? 1 : 0))
+
+    const signaIds: string[] = []
+    let running = 0n
+    for (const s of ascending) {
+      if (running >= amount) {
+        // The cover no longer needs this note — return it to spendable rather than hold it.
+        this.store.set(s.id, { ...s, status: 'valid', actumId: undefined })
+        continue
+      }
+      const shortfall = amount - running
+      if (shortfall >= s.valor) {          // fully consumed by the cover — stays locked whole
+        signaIds.push(s.id)
+        running += s.valor
+        continue
+      }
+      if (!this.splittable(s)) {           // provenance cannot be carried — leave it locked whole
+        signaIds.push(s.id)
+        running += s.valor
+        continue
+      }
+      const lockedChild = this.mintSplitChild(s, shortfall, 'locked', actumId)
+      this.mintSplitChild(s, s.valor - shortfall, 'valid')
+      this.store.set(s.id, { ...s, status: 'spent', actumId, expensum: new Date() })
+      signaIds.push(lockedChild.id)
+      running += shortfall
+    }
+
+    return { ok: true, signaIds, locked: running }
+  }
+
+  /**
+   * Can a note's identity be carried onto a split child? Mirrors `settle`'s refund-identity
+   * selection: an arcanum note is identified by its `testis` commitment, an identified note by
+   * `animaId`. Selection already guarantees one of the two holds; a note that satisfies neither
+   * is left locked whole rather than split into children with no owner.
+   */
+  private splittable(s: Signum): boolean {
+    return s.forma === 'arcanum' ? typeof s.testis === 'string' : typeof s.animaId === 'string'
+  }
+
+  /**
+   * Mint one half of a split note. Synchronous by design (no `await` between the two children and
+   * the parent's consumption) so a concurrent caller can never observe a locked child as
+   * spendable, nor a parent consumed without its children present. Provenance follows `settle`'s
+   * delta mint exactly: arcanum keeps `testis`, identified keeps `animaId` + `forma`. The privacy
+   * invariants `issue()` enforces hold by construction — the parent already passed them.
+   */
+  private mintSplitChild(parent: Signum, valor: bigint, status: SignumStatus, actumId?: string): Signum {
+    const base = parent.forma === 'arcanum'
+      ? { forma: 'arcanum' as SignumForma, valor, auctor: RESERVE_CHANGE_AUCTOR, testis: parent.testis }
+      : { animaId: parent.animaId, forma: parent.forma, valor, auctor: RESERVE_CHANGE_AUCTOR }
+    const child: Signum = {
+      ...base,
+      id: randomUUID(),
+      natum: new Date(),
+      status,
+      ...(actumId !== undefined ? { actumId } : {}),
+    }
+    this.store.set(child.id, child)
+    return child
   }
 
   transfer(
