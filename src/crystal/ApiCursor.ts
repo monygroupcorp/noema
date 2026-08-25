@@ -106,18 +106,22 @@ export class ApiCursor implements Cursor {
   // ── image generation ─────────────────────────────────────────────────────
   private async runImage(aditus: Record<string, unknown>, reserved: bigint): Promise<CursorResult> {
     const spec = this.capability('image')
-    const n = aditus.n !== undefined ? Number(aditus.n) : 1
 
+    // The generation rail reads only DECLARED ports. No modus declares `n` or `model` on this
+    // rail, so neither is read from the aditus: the request is pinned to one image at the
+    // capability's default model, and metering charges exactly that one image. Both levers are
+    // driven by the provider spec rather than by caller input; declaring either as a real
+    // priced port is a separate decision. (`runImageEdit` keeps its DECLARED `model` port.)
     const body: Record<string, unknown> = {
-      model: String(aditus.model ?? spec.defaultModel),
+      model: spec.defaultModel,
       prompt: String(aditus.prompt ?? ''),
-      n,
+      n: 1,
     }
     if (aditus.size !== undefined) body.size = String(aditus.size)
     if (aditus.quality !== undefined) body.quality = String(aditus.quality)
 
     const res = await this.deps.http.postJson(this.url(spec), this.deps.apiKey, body)
-    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImages(n), reserved))
+    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImages(1), reserved))
   }
 
   // ── image editing (OpenAI images.edit — multipart) ───────────────────────
