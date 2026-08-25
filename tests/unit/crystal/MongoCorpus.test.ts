@@ -40,6 +40,26 @@ test('find returns the corpus', async () => {
   assert.equal(found?.nomen, 'Test')
 })
 
+test('findOwned returns the corpus to its auctor', async () => {
+  const c = await store.create({ nomen: 'Mine', genus: 'imagines', auctor: 'anima-a', exemplaria: [], numerus: 0, status: 'nascens' })
+  assert.equal((await store.findOwned(c.id, 'anima-a'))?.id, c.id)
+})
+
+test('findOwned returns null to anyone else — the predicate is in the query', async () => {
+  const c = await store.create({ nomen: 'Mine', genus: 'imagines', auctor: 'anima-a', exemplaria: [], numerus: 0, status: 'nascens' })
+  assert.equal(await store.findOwned(c.id, 'anima-b'), null)
+  assert.equal(await store.findOwned('nope', 'anima-a'), null, 'and null for an id that names nothing')
+})
+
+test('findOwned admits a record whose access kind is public, in either shape', async () => {
+  const flat = await store.create({ nomen: 'Flat', genus: 'imagines', auctor: 'anima-a', exemplaria: [], numerus: 0, status: 'nascens' })
+  const union = await store.create({ nomen: 'Union', genus: 'imagines', auctor: 'anima-a', exemplaria: [], numerus: 0, status: 'nascens' })
+  await col.updateOne({ id: flat.id }, { $set: { access: 'public' } })
+  await col.updateOne({ id: union.id }, { $set: { access: { kind: 'public' } } })
+  assert.equal((await store.findOwned(flat.id, 'anima-b'))?.id, flat.id)
+  assert.equal((await store.findOwned(union.id, 'anima-b'))?.id, union.id)
+})
+
 test('list returns all when no filter', async () => {
   await store.create({ nomen: 'A', genus: 'imagines', auctor: 'anima-a', exemplaria: [], numerus: 0, status: 'nascens' })
   await store.create({ nomen: 'B', genus: 'textus', auctor: 'anima-b', exemplaria: [], numerus: 0, status: 'nascens' })

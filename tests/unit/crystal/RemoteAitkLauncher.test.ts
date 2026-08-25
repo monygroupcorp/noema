@@ -116,6 +116,7 @@ test('launch: resolves a corpusId via the store (dataset ref, not just inline)',
     status: 'validatus', natum: new Date(0), mutatum: new Date(0) }
   const corpora: Corporum = {
     async find(id) { return id === 'c1' ? corpus : null },
+    async findOwned(id, auctor) { return id === 'c1' && auctor === corpus.auctor ? corpus : null },
     async list() { return [] as Corpora }, async create() { throw new Error('x') }, async update() { throw new Error('x') },
   }
   const launcher = new RemoteAitkLauncher({

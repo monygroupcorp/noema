@@ -1,5 +1,6 @@
 import type { Modus } from '../../types/modus.js'
 import { hashModus } from '../hashModus.js'
+import { lintOwnedDeclarations } from '../../execution/ownedResources.js'
 
 // =============================================================================
 // Canonical Third-Party Tool Modi
@@ -267,7 +268,12 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
   // never author a config. Captions are optional (.txt beside the images); when absent the
   // caption arm (Slice D) fills them in upstream.
   aditus: {
-    dataset:       { type: 'text', required: true,  description: 'Image folder to train on (with optional .txt captions)' },
+    // A CORPUS reference, or an inline image manifest. Declared owned so the run entry point
+    // resolves the reference for the calling anima before a pod is provisioned: the resolved
+    // manifest is what gets staged onto the pod, so this port decides whose images the run
+    // reads. An inline manifest is the caller's own input and names no stored record — the
+    // check passes it through.
+    dataset:       { type: 'text', required: true,  owned: { genus: 'corpus' }, description: 'Image folder to train on (with optional .txt captions)' },
     triggerWord:   { type: 'text', required: true,  description: 'The LoRA trigger word — becomes its trigger, and its slug unless `slug` overrides' },
     slug:          { type: 'text', required: false, description: 'Published repo name + dest stem, when it must differ from the trigger (e.g. a `<name>-klein` backlog repo whose /make trigger stays the original word)' },
     samplePrompts: { type: 'text', required: false, description: 'JSON array of end-of-run sample prompts for the card gallery (`[trigger]` substituted) — pass dataset-caption-derived prompts to preview what the LoRA actually learned; defaults to a generic framing set' },
@@ -328,12 +334,17 @@ export const MODUS_DATASET_CAPTION: Modus = make({
   // The user-facing contract: a DATASET id plus optional captioner knobs. The modus synthesises
   // the ai-toolkit caption yaml (buildAitkCaptionConfig) — users never author a config.
   aditus: {
-    dataset:        { type: 'text', required: true,  description: 'Id of the dataset to caption' },
+    // Declared owned: the pass writes a captionset ONTO the dataset this names, so the
+    // reference decides whose dataset gains content the caller chose.
+    dataset:        { type: 'text', required: true,  owned: { genus: 'dataset' }, description: 'Id of the dataset to caption' },
     // The EXTEND port. Declared because the cursor and the finalizer both read it: present, the
     // pass stages only the media this captionset does not cover and the harvest is written back
     // into it; absent, the pass captions the whole working set and mints a fresh captionset.
     // Typed 'text' because that is what both readers parse — a trimmed captionset id string.
-    captionset:     { type: 'text', required: false, description: 'Id of the captionset on that dataset to EXTEND — only the images it does not already cover are captioned. Absent: caption the whole working set into a fresh captionset.' },
+    // A sub-resource of the dataset above (`parens: 'dataset'`): the id is checked against the
+    // captionsets that dataset actually carries, so a captionset id cannot ride in from
+    // somewhere else beside a dataset the caller does own.
+    captionset:     { type: 'text', required: false, owned: { genus: 'captionset', parens: 'dataset' }, description: 'Id of the captionset on that dataset to EXTEND — only the images it does not already cover are captioned. Absent: caption the whole working set into a fresh captionset.' },
     name:           { type: 'text', required: false, description: 'Display name for the resulting captionset (defaults to a generated one)' },
     captionPrompt:  { type: 'text', required: false, description: 'Instruction handed to the captioner (defaults to the training-caption prompt)' },
     maxNewTokens:   { type: 'int',  required: false, description: 'Caption length cap in tokens (captioner default when absent)' },
@@ -377,8 +388,12 @@ export const MODUS_DATASET_DECOMPOSE: Modus = make({
   verbum: 'describe',
 
   aditus: {
-    dataset:    { type: 'text', required: true,  description: 'Id of the dataset whose media items the fragments land on' },
-    captionset: { type: 'text', required: true,  description: 'Id of the captionset on that dataset to decompose' },
+    // Both declared owned, for the reason the caption modus states: the pass READS the
+    // captions on this dataset and WRITES fragments back onto its media items, so the pair
+    // decides whose content the run reads and whose record it changes. The captionset is a
+    // sub-resource of the dataset port beside it (`parens: 'dataset'`).
+    dataset:    { type: 'text', required: true,  owned: { genus: 'dataset' }, description: 'Id of the dataset whose media items the fragments land on' },
+    captionset: { type: 'text', required: true,  owned: { genus: 'captionset', parens: 'dataset' }, description: 'Id of the captionset on that dataset to decompose' },
     // The whole-set rebuild opt-in. Declared because the cursor reads it, and typed 'text' to
     // match what the cursor already parses: `isRedo` accepts a real `true` or one of the strings
     // a form control produces for it ('true' | '1' | 'yes', case- and space-insensitive), and
@@ -464,3 +479,11 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_DATASET_DECOMPOSE,
   MODUS_MUSE_STEER,
 ]
+
+// A modus whose aditus carries a resource-shaped port must say what that port references
+// (`Porta.owned`), because that declaration is what the run entry point resolves against the
+// calling anima before anything is reserved or dispatched. Undeclared, the port would reach a
+// cursor unscoped — a cursor has no caller to check it against (an Actum is identity-blind).
+// Checked HERE, at definition time, so the answer arrives when the seed is written rather
+// than on the first run that names a record.
+lintOwnedDeclarations(CANONICAL_MODI)
