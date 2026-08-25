@@ -62,7 +62,15 @@ export type OwnedRef =
 /** A single named port (input or output) on a modus */
 export interface Porta {
   // "porta" = gate/door in Latin — an opening in the modus boundary
-  type: string          // canonical type name: 'text' | 'image' | 'video' | 'audio' | '3d' | 'int' | 'float'
+  // Canonical type name: 'text' | 'image' | 'video' | 'audio' | '3d' | 'int' | 'float' | 'bool'.
+  // Left as a bare `string` rather than a union so a new provider can name a type the core does
+  // not know yet; `validateAditus` passes an unrecognised type through untouched.
+  //
+  // 'bool' exists because the coercion a port gets is decided by this name, and a boolean port
+  // declared 'text' would be coerced with `String(value)` — turning `false` into the truthy
+  // string `"false"` and inverting any `!== false` opt-out the cursor reads it with. A boolean
+  // port must say 'bool' to survive validation as a boolean.
+  type: string
   required?: boolean
   default?: unknown
   label?: string        // short display name shown on the canvas port

@@ -2,7 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Forma } from '../../../src/types/modus.js'
 import { validateAditus } from '../../../src/execution/validateAditus.js'
-import { MODUS_DATASET_CAPTION, MODUS_DATASET_DECOMPOSE } from '../../../src/crystal/seeds/modi.js'
+import {
+  MODUS_AITOOLKIT_TRAINING,
+  MODUS_DATASET_CAPTION,
+  MODUS_DATASET_DECOMPOSE,
+  MODUS_OPENROUTER_CHAT,
+} from '../../../src/crystal/seeds/modi.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -283,4 +288,90 @@ test('validateAditus: an absent optional port with no default is omitted, not de
   // some other pass's set.
   const out = validateAditus(MODUS_DATASET_CAPTION.aditus, { dataset: 'dataset-alpha' })
   assert.deepEqual(Object.keys(out), ['dataset'])
+})
+
+// ---------------------------------------------------------------------------
+// 'bool' — the type a default-on opt-out needs to survive validation
+// ---------------------------------------------------------------------------
+
+test("validateAditus: a 'bool' port carries a real boolean through unchanged", () => {
+  const s = schema({ flag: { type: 'bool', required: false } })
+  assert.equal(validateAditus(s, { flag: false }).flag, false)
+  assert.equal(validateAditus(s, { flag: true }).flag, true)
+})
+
+test("validateAditus: a 'bool' port maps the form strings 'true'/'false' onto booleans", () => {
+  const s = schema({ flag: { type: 'bool', required: false } })
+  for (const raw of ['false', 'FALSE', ' false ']) {
+    assert.equal(validateAditus(s, { flag: raw }).flag, false, `"${raw}" should read as off`)
+  }
+  for (const raw of ['true', 'TRUE', ' true ']) {
+    assert.equal(validateAditus(s, { flag: raw }).flag, true, `"${raw}" should read as on`)
+  }
+})
+
+test("validateAditus: a 'bool' port rejects a value it cannot read rather than guessing", () => {
+  const s = schema({ flag: { type: 'bool', required: false } })
+  assert.throws(() => validateAditus(s, { flag: 'maybe' }), /must be a boolean/)
+  assert.throws(() => validateAditus(s, { flag: '' }), /must be a boolean/)
+})
+
+test("validateAditus: 'bool' is what keeps a `!== false` opt-out expressible, and 'text' is not", () => {
+  // The reason the type exists, pinned as an inequality rather than a comment. A cursor reads a
+  // default-on port as `value !== false`; coerced by the 'text' arm, `false` becomes the string
+  // 'false', which is `!== false` and so reads as ON — the opt-out validates and is inverted.
+  const asText = validateAditus(schema({ flag: { type: 'text' } }), { flag: false }).flag
+  const asBool = validateAditus(schema({ flag: { type: 'bool' } }), { flag: false }).flag
+  assert.equal(asText !== false, true, "'text' turns an opt-out into an opt-in")
+  assert.equal(asBool !== false, false, "'bool' preserves the opt-out")
+})
+
+// ---------------------------------------------------------------------------
+// The seeded ports this repairs, exercised through the real modi
+// ---------------------------------------------------------------------------
+
+test('validateAditus: the training caption opt-out survives as a boolean false', () => {
+  const out = validateAditus(MODUS_AITOOLKIT_TRAINING.aditus, {
+    dataset: 'corpus-alpha',
+    triggerWord: 'trigword',
+    baseModel: 'base-preset',
+    steps: 100,
+    autocaption: false,
+  })
+  // Exactly what `RemoteAitoolkitTrainingCursor` reads.
+  assert.equal(out.autocaption, false)
+  assert.equal(out.autocaption !== false, false, 'the opt-out must still read as off at the cursor')
+})
+
+test('validateAditus: an absent training caption opt-out leaves the port off the aditus (default on)', () => {
+  const out = validateAditus(MODUS_AITOOLKIT_TRAINING.aditus, {
+    dataset: 'corpus-alpha',
+    triggerWord: 'trigword',
+    baseModel: 'base-preset',
+    steps: 100,
+  })
+  // Optional with no default → omitted, and `undefined !== false` is the default-on reading.
+  assert.equal('autocaption' in out, false)
+})
+
+test('validateAditus: a chat modus carries its conversation history through as an array', () => {
+  const messages = [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: 'second' },
+    { role: 'user', content: 'third' },
+  ]
+  const out = validateAditus(MODUS_OPENROUTER_CHAT.aditus, { prompt: 'third', messages })
+  // `ApiCursor.runChat` gates on `Array.isArray`, so the Array must survive intact.
+  assert.deepEqual(out.messages, messages)
+  assert.equal(Array.isArray(out.messages), true)
+})
+
+test('validateAditus: the caption modus carries the run knobs its cursor reads', () => {
+  const out = validateAditus(MODUS_DATASET_CAPTION.aditus, {
+    dataset: 'dataset-alpha',
+    gpuId: 1,
+    jobId: 'job-alpha',
+  })
+  assert.equal(out.gpuId, '1')
+  assert.equal(out.jobId, 'job-alpha')
 })

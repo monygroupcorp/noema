@@ -6,6 +6,7 @@ import {
   MODUS_DALLE_III,
   MODUS_GPT_IMAGE_EDIT,
   MODUS_OPENROUTER_CHAT,
+  MODUS_VENICE_CHAT,
   MODUS_LAYER_COMPOSITE,
   MODUS_FRAMES_TO_VIDEO,
   MODUS_AITOOLKIT_TRAINING,
@@ -237,4 +238,66 @@ test('muse-steer modus is a canon steer job on its OWN ministerium (sync, usage-
   assert.equal('session' in MODUS_MUSE_STEER.aditus, false)
   assert.deepEqual(Object.keys(MODUS_MUSE_STEER.exitus).sort(), ['additions', 'dropped', 'eliminations'])
   assert.ok(MODUS_MUSE_STEER.contentHash.length > 0)
+})
+
+// ---------------------------------------------------------------------------
+// Declared-vs-consumed: a port a cursor reads must be a port the modus declares
+// ---------------------------------------------------------------------------
+//
+// `validateAditus` builds its result by iterating the SCHEMA, so a key the modus does not declare
+// is not copied forward. An undeclared-but-consumed port therefore works only on the routes that
+// skip that validation, and stops working the moment one of them starts validating. These tests
+// pin the declaration for every such port found by a sweep of the `aditus.` reads across the
+// cursors, so the boundary can be closed without taking working behaviour with it.
+
+test('the training modus declares the caption opt-out its remote cursor reads', () => {
+  const porta = MODUS_AITOOLKIT_TRAINING.aditus.autocaption
+  assert.ok(porta, 'autocaption must be a declared port')
+  assert.equal(porta.required, false)
+  // Optional with NO default: `RemoteAitoolkitTrainingCursor` reads `aditus.autocaption !== false`,
+  // so absent means on. A default here would write the flag into every run's aditus.
+  assert.equal(porta.default, undefined)
+  // 'bool', not 'text'. A 'text' declaration is coerced with `String(value)`, which maps `false` to
+  // the string 'false' — and 'false' `!== false`, so the opt-out would validate and read as ON.
+  assert.equal(porta.type, 'bool')
+})
+
+test('the chat modi declare the conversation-history port their shared cursor reads', () => {
+  // All three reach the one `ApiCursor.runChat`, which gates on `Array.isArray(aditus.messages)`
+  // and otherwise builds a single turn from `prompt`. `ExecuteFlow.enter` routes on the same key.
+  for (const m of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_VENICE_CHAT]) {
+    const porta = m.aditus.messages
+    assert.ok(porta, `${m.id} must declare messages`)
+    assert.equal(porta.required, false, `${m.id}: messages is optional — prompt is the single-turn path`)
+    assert.equal(porta.default, undefined, `${m.id}: a default history would prepend itself to every run`)
+    // 'text' is the one declared type whose coercion passes an Array through untouched.
+    assert.equal(porta.type, 'text', `${m.id}: messages must stay Array-transparent`)
+  }
+})
+
+test('the caption modus declares the run knobs its cursor reads', () => {
+  // `DatasetCaptionCursor` reads both, exactly as the training cursor reads its own pair.
+  for (const k of ['gpuId', 'jobId']) {
+    const porta = MODUS_DATASET_CAPTION.aditus[k]
+    assert.ok(porta, `${k} must be a declared port on the caption modus`)
+    assert.equal(porta.type, 'text', `${k} is read as a string`)
+    assert.equal(porta.required, false, `${k} has a cursor-side fallback`)
+    assert.equal(porta.default, undefined, `${k} must stay absent when unsupplied`)
+  }
+})
+
+test('declaring the consumed ports did not disturb the ports that were already declared', () => {
+  // The rule this item works under: it ADDS reality-matching declarations and removes or renames
+  // nothing. Pinned as the exact key set of each modus whose aditus this touched.
+  assert.deepEqual(Object.keys(MODUS_CHATGPT.aditus).sort(),
+    ['__capability', 'messages', 'model', 'prompt', 'temperature'])
+  assert.deepEqual(Object.keys(MODUS_OPENROUTER_CHAT.aditus).sort(),
+    ['__capability', 'messages', 'model', 'prompt', 'temperature'])
+  assert.deepEqual(Object.keys(MODUS_VENICE_CHAT.aditus).sort(),
+    ['__capability', 'messages', 'model', 'prompt', 'temperature'])
+  assert.deepEqual(Object.keys(MODUS_DATASET_CAPTION.aditus).sort(),
+    ['captionPrompt', 'captionset', 'dataset', 'gpuId', 'jobId', 'maxNewTokens', 'name'])
+  // The training modus keeps the internal escape hatch OUT of its schema — the assertion above
+  // in this file, restated here so the sweep is not read as licence to declare it.
+  assert.equal('configPath' in MODUS_AITOOLKIT_TRAINING.aditus, false)
 })
