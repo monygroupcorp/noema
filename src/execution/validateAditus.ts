@@ -9,7 +9,7 @@ const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'document'])
  * - Strips keys not declared in schema
  * - Throws on missing required fields (no default)
  * - Applies defaults for absent fields that have one
- * - Coerces values to declared types (text, int, float, media)
+ * - Coerces values to declared types (text, int, float, bool, media)
  * - Passes through unknown types as-is (future-proof)
  * - Omits optional absent fields with no default (no undefined pollution)
  * - Special case: text fields with Array values pass through as-is (messages[])
@@ -66,6 +66,24 @@ function coerce(key: string, type: string, value: unknown): unknown {
         throw new Error(`aditus: field "${key}" must be a float, got "${String(value)}"`)
       }
       return n
+    }
+
+    case 'bool': {
+      // A boolean port must reach the cursor as a real boolean. Cursors read these ports with an
+      // identity check (`aditus.flag !== false`, the default-on opt-out shape), so a coercion
+      // that yields a non-boolean inverts the port's meaning: the 'text' arm above would map
+      // `false` to the string 'false', which is `!== false` and therefore reads as ON.
+      //
+      // Accepted: a real boolean, or the exact strings 'true' / 'false' (trimmed,
+      // case-insensitive) that an HTML form or a query string produces for one. Anything else is
+      // rejected rather than guessed, the same way 'int' rejects a non-number — a boolean port
+      // that quietly reads an unrecognised value as `true` is the outcome this case exists to
+      // prevent.
+      if (typeof value === 'boolean') return value
+      const s = String(value).trim().toLowerCase()
+      if (s === 'true') return true
+      if (s === 'false') return false
+      throw new Error(`aditus: field "${key}" must be a boolean, got "${String(value)}"`)
     }
 
     default: {
