@@ -12541,6 +12541,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.slug_taken` | 409 | no |
 | `conflict.run_in_flight` | 409 | yes |
 | `conflict.nothing_to_decompose` | 409 | no |
+| `conflict.muse_session` | 409 | yes |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
 | `secret.required` | 422 | no |

@@ -15623,6 +15623,11 @@
       "retryable": false
     },
     {
+      "code": "conflict.muse_session",
+      "httpStatus": 409,
+      "retryable": true
+    },
+    {
       "code": "license.restricted",
       "httpStatus": 403
     },
