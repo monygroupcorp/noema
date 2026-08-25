@@ -7,6 +7,8 @@ import {
   settlePieceResult,
   buildGarden,
   canFireOne,
+  chipStates,
+  chipToggle,
   curatedFragments,
   flattenGarden,
   ignitionBlockReason,
@@ -64,6 +66,7 @@ import {
   dismissFromStream,
   floorCounts,
   floorDisabledIndices,
+  floorHolds,
   floorSheet,
   floorToggle,
   gestureBlock,
@@ -663,6 +666,78 @@ test('floorSheet: a disabled fragment is still shown, dark, and can be tapped ba
     assert.ok(!roll.fragments.some((f) => f.text === 'a cat'), 'a fragment the steer turned off is not drawn')
   }
   assert.deepEqual([...floorDisabledIndices(flat, null)], [], 'with no session nothing is off the floor')
+})
+
+// noema-320 — the garden chip is a floor write, and its checked-ness is read back off
+// the floor. One curation channel: what a chip does, a pill can undo, a promotion carries.
+
+test('chipToggle: unchecking a garden chip writes the floor, and the write names the fragment', () => {
+  const fox = frag('subject', 'a fox')
+  const cat = frag('subject', 'a cat')
+  const harbor = frag('setting', 'a foggy harbor')
+  const flat = [fox, cat, harbor]
+  const s = session(flat, { floor: [entry(fox), entry(cat, { enabled: false }), entry(harbor)] })
+
+  // an enabled chip's tap turns the fragment OFF, by identity and not by position
+  assert.deepEqual(chipToggle(flat, 0, s), { fragment: { category: 'subject', text: 'a fox' }, enabled: false })
+  // and it is the same call in both directions — a dark chip's tap brings it back (S8)
+  assert.deepEqual(chipToggle(flat, 1, s), { fragment: { category: 'subject', text: 'a cat' }, enabled: true })
+
+  // nothing to write when there is no session yet, or off the end of the garden
+  assert.equal(chipToggle(flat, 0, null), null, 'the screen spawns a session before a chip can write one')
+  assert.equal(chipToggle(flat, 9, s), null)
+})
+
+test('chipStates: chip checked-ness is DERIVED from the session floor, not held beside it', () => {
+  const fox = frag('subject', 'a fox')
+  const cat = frag('subject', 'a cat')
+  const flat = [fox, cat]
+  const s = session(flat, { floor: [entry(fox), entry(cat, { enabled: false })] })
+
+  assert.deepEqual(chipStates(flat, s), [true, false],
+    'the chip a steer, a pill or another visit darkened comes back dark — the screen holds no second answer')
+  assert.deepEqual(chipStates(flat, session(flat)), [true, true])
+  assert.deepEqual(chipStates(flat, null), [true, true], 'with no session nothing is out of the draw yet')
+
+  // and the same floor is what a roll draws against, so chip and roll can never disagree
+  assert.deepEqual([...floorDisabledIndices(flat, s)], [1])
+})
+
+test('chipToggle: one fragment pooled from several media items is one floor key, so its chips move together', () => {
+  // the garden pools EVERY item's fragments, so the same phrase can occupy several
+  // positions; the floor is keyed by `category:text`, so all of them are one fact
+  const foxA = frag('subject', 'a fox', 'moodboard-1')
+  const foxB = frag('subject', 'a fox', 'moodboard-2')
+  const cat = frag('subject', 'a cat')
+  const flat = [foxA, cat, foxB]
+  const s = session([foxA, cat], { floor: [entry(foxA), entry(cat)] })
+
+  const write = chipToggle(flat, 0, s)!
+  assert.deepEqual(write, { fragment: { category: 'subject', text: 'a fox' }, enabled: false })
+
+  const after = session([foxA, cat], { floor: [entry(foxA, { enabled: false }), entry(cat)] })
+  assert.deepEqual(chipStates(flat, after), [false, true, false],
+    'both positions of the same fragment are dark — darkening IS the curation, and it is per fragment')
+})
+
+test('floorHolds: a chip whose key the floor does not carry is detected rather than lost', () => {
+  const fox = frag('subject', 'a fox')
+  const newcomer = frag('style', 'chiaroscuro')
+  const s = session([fox], { floor: [entry(fox)] })
+
+  assert.equal(floorHolds(s, fox), true)
+  assert.equal(floorHolds(s, newcomer), false,
+    'a write against a key the floor does not hold leaves the session unchanged, so the caller re-reads and retries')
+  assert.equal(floorHolds(null, fox), false)
+
+  // the key is normalized the way the floor writes it, so case and padding still match
+  assert.equal(floorHolds(s, { category: 'subject', text: '  A Fox ' }), true)
+
+  // after the reconciling re-read the fragment is on the floor and the write lands
+  const reconciled = session([fox, newcomer], { floor: [entry(fox), entry(newcomer)] })
+  assert.equal(floorHolds(reconciled, newcomer), true)
+  assert.deepEqual(chipToggle([fox, newcomer], 1, reconciled),
+    { fragment: { category: 'style', text: 'chiaroscuro' }, enabled: false })
 })
 
 // Non-vacuity 3 — the floor is server-held, so it is still there after a reload
