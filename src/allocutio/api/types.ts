@@ -42,6 +42,49 @@ export interface Run {
   pinnedModels?: ModelRef[]
   /** OWNER-SCOPED: the cast-time modus version (plain-named). Present only when populated. */
   modusVersion?: string
+  /** The standing order this run belongs to, when it has one (training runs). */
+  order?: RunOrder
+}
+
+/**
+ * RunOrder — the public projection of a standing order (Mandatum): what the user ASKED FOR,
+ * as distinct from any one attempt at it.
+ *
+ * A training run that fails on infrastructure is not the end of the request — the order keeps
+ * asking, hourly, until it lands or the day runs out. This shape is how a client learns that
+ * without reading a failure sentence: `state` says where the request stands, `reason` says why
+ * a stopped one stopped, and the counts and times say what is left.
+ */
+export interface RunOrder {
+  /** The order identifier. */
+  id: string
+  /**
+   * Where the request stands.
+   *   'attempting' — an attempt is running right now.
+   *   'scheduled'  — the last attempt failed on infrastructure; another one is queued.
+   *   'fulfilled'  — an attempt succeeded; nothing is outstanding.
+   *   'stopped'    — it ended without succeeding (see `reason`).
+   *   'cancelled'  — the holder cancelled it.
+   */
+  state: 'attempting' | 'scheduled' | 'fulfilled' | 'stopped' | 'cancelled'
+  /**
+   * Why a terminal order ended.
+   *   'fulfilled' — a run succeeded.
+   *   'failed'    — it stopped on a real answer; asking again could not have helped.
+   *   'exhausted' — the day (or the attempt allowance) ran out without a success.
+   *   'cancelled' — the holder ended it.
+   */
+  reason?: 'fulfilled' | 'failed' | 'exhausted' | 'cancelled'
+  /** How many attempts have been made, the first one included. */
+  attempts: number
+  /** How many attempts the order may still make. */
+  attemptsRemaining: number
+  /** When the next attempt is due, ISO-8601. Absent once the order is terminal. */
+  nextAttemptAt?: string
+  /** When the order stops trying regardless of what remains, ISO-8601. */
+  until?: string
+  /** The most recent attempt's run id — the run to watch right now. */
+  latestRunId?: string
 }
 
 /**

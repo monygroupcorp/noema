@@ -13,8 +13,10 @@ import type { Editio } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
 import type { Provincia } from '../../types/provincia.js'
 import type { ActumIndex } from '../../types/actumIndex.js'
+import type { Mandatum } from '../../types/mandatum.js'
 import { IMPETUS_USD_RATE } from '../../ledger/rates.js'
-import type { Run, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun } from './types.js'
+import { classifyError } from '../../lib/classifyError.js'
+import type { Run, RunOrder, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -45,7 +47,11 @@ export function toRun(actum: Actum): Run {
   if (actum.status === 'fractus') {
     run.failure = {
       code: 'run.execution_error',
-      message: actum.error ?? 'run failed',
+      // Classified copy, not the raw internal text. The stored `error` is an operator
+      // artefact — pod ids, elapsed milliseconds, the recovery the platform was already
+      // attempting — and it reads as a stack trace wherever it is surfaced. `classifyError`
+      // is the same mapping the chat surfaces use, so one failure says one thing everywhere.
+      message: classifyError(actum.error ?? 'run failed'),
     }
   }
 
@@ -76,6 +82,45 @@ export function toRunDetail(actum: Actum): Run {
   if (actum.modusVersiono !== undefined) run.modusVersion = actum.modusVersiono
 
   return run
+}
+
+/** Terminal `MandatumCausa` → the public `reason`, and the state that goes with it. */
+const CAUSA_MAP = {
+  impletum: { state: 'fulfilled', reason: 'fulfilled' },
+  defectus: { state: 'stopped', reason: 'failed' },
+  consumptum: { state: 'stopped', reason: 'exhausted' },
+  revocatum: { state: 'cancelled', reason: 'cancelled' },
+} as const
+
+/**
+ * Project a Mandatum onto its public RunOrder shape — the standing order behind a run.
+ *
+ * The state is DERIVED from the stored fields rather than stored twice: an order still
+ * holding an attempt (`pendens`) is attempting, a live order between attempts is scheduled,
+ * and a terminal one reads its reason off `causa`. That keeps the durable record minimal and
+ * makes the public vocabulary something we can change without a migration.
+ *
+ * A terminal order reports no `nextAttemptAt` even if a stale one is stored — nothing is
+ * coming, and a time in that field would say otherwise. Pure.
+ */
+export function toRunOrder(m: Mandatum): RunOrder {
+  const terminal = m.status === 'exhaustus' || m.status === 'revocatum'
+  const mapped = m.causa ? CAUSA_MAP[m.causa] : undefined
+  const maxRuns = m.schedula?.maxRuns
+  const out: RunOrder = {
+    id: m.id,
+    state: terminal
+      ? (mapped?.state ?? 'stopped')
+      : m.pendens ? 'attempting' : 'scheduled',
+    attempts: m.ignitions,
+    attemptsRemaining: terminal ? 0 : Math.max(0, (maxRuns ?? m.ignitions) - m.ignitions),
+  }
+  if (terminal && mapped) out.reason = mapped.reason
+  if (!terminal && m.proximum !== undefined) out.nextAttemptAt = new Date(m.proximum).toISOString()
+  if (m.finis !== undefined) out.until = new Date(m.finis).toISOString()
+  const latest = m.acta[m.acta.length - 1]
+  if (latest !== undefined) out.latestRunId = latest
+  return out
 }
 
 /**

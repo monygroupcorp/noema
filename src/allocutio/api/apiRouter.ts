@@ -16,7 +16,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+import type { Run, RunOrder, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
@@ -97,6 +97,10 @@ export interface ApiFacade {
     opts?: InvokeOpts,
   ): Promise<Run>
   getRun(auctor: AuctorKey, id: string): Promise<Run>
+  /** The standing order behind a run, or null when it has none. */
+  getRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null>
+  /** Cancel that order. Idempotent; null when the run has no order. */
+  revokeRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null>
   listRuns(auctor: AuctorKey, opts: import('./CrystalApi.js').ListRunsOpts): Promise<RunsPage>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
@@ -513,6 +517,26 @@ export function createApiRouter(deps: {
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ run: await api.getRun(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // GET /v1/runs/:id/order — the standing order behind a run (owner-scoped through the run).
+  // `{ order: null }` when there is none, which is every run that is not a training run.
+  router.get(
+    '/runs/:id/order',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ order: await api.getRunOrder(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // POST /v1/runs/:id/order/revoke — cancel that order. The owner comes from the resolved
+  // caller and never from the body: a run id is an address, not a capability.
+  router.post(
+    '/runs/:id/order/revoke',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ order: await api.revokeRunOrder(auctor, String(req.params.id)) })
     }),
   )
 
