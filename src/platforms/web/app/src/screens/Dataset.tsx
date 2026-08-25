@@ -99,6 +99,16 @@ export { categoryColor, curatedFragments };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// noema-319 — the caption a tile shows is the ACTIVE captionset's, keyed by media id. Sparse by
+// design (`DatasetCaptionset.captions` — see lib/api.ts): a captionset written before the field
+// existed, or a media item this pass has not reached yet, carries no entry, which is a valid
+// "nothing here yet" state rather than an error. Pure and standalone so the grid's read and the
+// test below exercise the same rule.
+export function captionFor(dataset: Pick<DatasetT, 'captionsets'>, activeSetId: string, mediaId: string): string | null {
+  const set = dataset.captionsets.find((cs) => cs.id === activeSetId);
+  return set?.captions?.[mediaId] ?? null;
+}
+
 export function Dataset() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -359,6 +369,10 @@ export function Dataset() {
                     <figure key={m.id} className="ds-img">
                       <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
                       <figcaption className="mono">{m.source === 'upload' ? 'uploaded' : 'from a generation'}</figcaption>
+                      {/* noema-319 — the active captionset's caption, read-only here. Editing
+                          stays on the caption screen; this is just so a caption is visible at
+                          all without leaving the grid. */}
+                      <p className="ds-img-caption mono">{captionFor(working, active, m.id) ?? 'no caption yet'}</p>
                       {/* Removing ONE image, against the grid it leaves. Asks once; the second
                           press does it and the undo appears above. */}
                       <div className="ds-img-actions">
@@ -447,6 +461,15 @@ export function Dataset() {
                   to={active ? `/datasets/${d.id}/caption?captionset=${encodeURIComponent(active)}` : `/datasets/${d.id}/caption`}>
                   {active ? 'caption the uncaptioned →' : 'run a caption job'}
                 </Link>
+                {/* noema-319 — a door to LOOK, separate from the door that launches a pass. The
+                    caption-pass link above reads as billed work; this one just opens the same
+                    screen's view/edit surface on the set already selected here. */}
+                {active && (
+                  <Link className="btn ghost sm mono"
+                    to={`/datasets/${d.id}/caption?captionset=${encodeURIComponent(active)}`}>
+                    view / edit captions
+                  </Link>
+                )}
                 {canOfferDecompose(working) && (
                   <button className="btn ghost sm" type="button"
                     disabled={!decomposeArmed}
