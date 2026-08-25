@@ -27,15 +27,17 @@ test('reserve: covers the amount, locks selected signa, returns their total', as
   assert.equal(await s.balance({ animaId: 'a' }), 900n - r.locked)
 })
 
-test('reserve: greedy smallest-first minimises overshoot', async () => {
+test('reserve: greedy smallest-first, and the reservation holds exactly the amount', async () => {
   const s = new MemorySignorum()
   await issue(s, 'a', 100n)
   await issue(s, 'a', 900n)
 
   const r = await s.reserve({ animaId: 'a' }, 50n, 'act-1')
   assert.ok(r.ok)
-  assert.equal(r.locked, 100n)                      // took the 100, not the 900
+  assert.equal(r.locked, 50n)                       // the 100 is split, not held whole
   assert.equal(r.signaIds.length, 1)
+  // The 900 was never a candidate; the 100's unused half is spendable immediately.
+  assert.equal(await s.balance({ animaId: 'a' }), 950n)
 })
 
 test('reserve: insufficient balance fails closed and locks nothing', async () => {
@@ -119,8 +121,15 @@ test('reserve: never selects a negative-valor debit signum, and leaves it untouc
   assert.ok(r.ok)
   // the debit is never a spend candidate…
   assert.ok(!r.signaIds.includes(neg.id), 'negative debit must never be reserved')
-  assert.ok(r.signaIds.every(id => id === p1.id || id === p2.id), 'only positives selected')
-  // …and it is left byte-identical: still valid, still nets in balance/history.
+  // …only positives are drawn on: the 100 is locked whole, the 300 splits into the 20 shortfall.
+  const reserved = await s.history({ animaId: 'a' })
+  const lockedRows = reserved.filter(x => r.signaIds.includes(x.id))
+  assert.ok(lockedRows.every(x => x.valor > 0n), 'only positives selected')
+  assert.ok(r.signaIds.includes(p1.id))
+  assert.ok(!r.signaIds.includes(p2.id))
+  assert.equal(reserved.find(x => x.id === p2.id)!.status, 'spent')   // consumed by the split
+  assert.equal(r.locked, 120n)
+  // …and the debit is left byte-identical: still valid, still nets in balance/history.
   const negRow = (await s.history({ animaId: 'a' })).find(x => x.id === neg.id)
   assert.ok(negRow)
   assert.equal(negRow.status, 'valid')
@@ -133,28 +142,140 @@ test('reserve+settle: spends only positives; the debit still nets to the expecte
   await issueDebit(s, 'a', -200n)        // studioSpend-shaped host debit
   assert.equal(await s.balance({ animaId: 'a' }), 300n)   // netted spendable
 
-  // Reserve the full netted balance — succeeds by locking positives only (overshoot allowed).
+  // Reserve the full netted balance — succeeds by locking positives only (the 500 coin splits).
   const r = await s.reserve({ animaId: 'a' }, 300n, 'act-1')
   assert.ok(r.ok)
-  assert.equal(r.locked, 500n)
+  assert.equal(r.locked, 300n)
   assert.equal(r.signaIds.length, 1)
 
-  await s.settle(r.signaIds, 300n, 'act-1')   // charge exactly 300, refund 200
+  await s.settle(r.signaIds, 300n, 'act-1')   // charges exactly 300; the change was already returned
   // Spent 300 of the netted 300 → balance nets to 0 (200 refund − 200 debit).
   assert.equal(await s.balance({ animaId: 'a' }), 0n)
 })
 
-test('reserve: positive-only identity — selection byte-identical to pre-fix (regression guard)', async () => {
+test('reserve: positive-only identity — selection unchanged, only the last note splits', async () => {
   const s = new MemorySignorum()
   const c50 = await issue(s, 'a', 50n)
   const c100 = await issue(s, 'a', 100n)
-  await issue(s, 'a', 900n)
+  const c900 = await issue(s, 'a', 900n)
 
   const r = await s.reserve({ animaId: 'a' }, 120n, 'act-1')
   assert.ok(r.ok)
-  // greedy smallest-first, stops once covered: exactly [50, 100], the 900 untouched.
-  assert.deepEqual(r.signaIds, [c50.id, c100.id])
-  assert.equal(r.locked, 150n)
+  // Greedy smallest-first, stops once covered: {50, 100} selected, the 900 untouched. The 50 is
+  // fully consumed by the cover so it stays locked whole; the 100 over-covers and splits 70/30.
+  assert.equal(r.signaIds.length, 2)
+  assert.equal(r.signaIds[0], c50.id)
+  assert.equal(r.locked, 120n)
+
+  const hist = await s.history({ animaId: 'a' })
+  const byId = new Map(hist.map(x => [x.id, x]))
+  assert.equal(byId.get(c50.id)!.status, 'locked')
+  assert.equal(byId.get(c100.id)!.status, 'spent')      // consumed by the split, valor untouched
+  assert.equal(byId.get(c100.id)!.valor, 100n)
+  assert.equal(byId.get(c900.id)!.status, 'valid')
+  assert.equal(byId.get(r.signaIds[1])!.valor, 70n)     // the locked child
+
+  // Balance conservation: nothing minted, nothing destroyed.
+  assert.equal(await s.balance({ animaId: 'a' }), 1050n - 120n)
+})
+
+// ── change at reserve time (noema-306) ───────────────────────────────────────
+//
+// A reservation must hold exactly its ceiling. Before this, selection locked WHOLE notes until
+// the ceiling was covered, so a small reservation against one large note froze the whole note for
+// the run's duration and only returned the difference at settle. The over-covering note is now
+// split at reserve time: consumed, and replaced by a locked child for the exact shortfall plus a
+// spendable child for the remainder.
+//
+// NON-VACUITY: revert `reserve`'s split (lock whole notes again) and the over-lock test below
+// fails — the change is no longer spendable while the reservation is live.
+
+const CHANGE_AUCTOR = 'reserve:change'
+
+test('reserve: a small reservation against one big note leaves the change spendable', async () => {
+  const s = new MemorySignorum()
+  const big = await issue(s, 'a', 10_000n)
+
+  const r = await s.reserve({ animaId: 'a' }, 25n, 'act-1')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 25n, 'the reservation holds exactly the ceiling, not the whole note')
+
+  // The over-lock assertion: everything but the ceiling is spendable WHILE the run is in flight.
+  assert.equal(await s.balance({ animaId: 'a' }), 9_975n)
+
+  // Balance conservation: locked + spendable == what the identity held before.
+  assert.equal(await s.balance({ animaId: 'a' }) + r.locked, 10_000n)
+
+  const hist = await s.history({ animaId: 'a' })
+  const parent = hist.find(x => x.id === big.id)!
+  assert.equal(parent.status, 'spent', 'the split note is consumed, never mutated in value')
+  assert.equal(parent.valor, 10_000n)
+  assert.equal(parent.actumId, 'act-1')
+
+  const children = hist.filter(x => x.auctor === CHANGE_AUCTOR)
+  assert.equal(children.length, 2)
+  assert.equal(children.reduce((sum, c) => sum + c.valor, 0n), parent.valor, 'children sum to the parent')
+  assert.equal(children.filter(c => c.status === 'locked').length, 1)
+  assert.equal(children.filter(c => c.status === 'valid').length, 1)
+  // Provenance carries to both halves.
+  assert.ok(children.every(c => c.animaId === 'a' && c.forma === 'minted'))
+})
+
+test('reserve: an exact cover mints nothing — no split', async () => {
+  const s = new MemorySignorum()
+  const c = await issue(s, 'a', 300n)
+
+  const r = await s.reserve({ animaId: 'a' }, 300n, 'act-1')
+  assert.ok(r.ok)
+  assert.deepEqual(r.signaIds, [c.id])
+  assert.equal(r.locked, 300n)
+
+  const hist = await s.history({ animaId: 'a' })
+  assert.equal(hist.length, 1, 'no children minted on an exact cover')
+  assert.equal(hist[0].status, 'locked')
+})
+
+test('reserve: insufficient funds leaves no orphan children', async () => {
+  const s = new MemorySignorum()
+  await issue(s, 'a', 400n)
+
+  const r = await s.reserve({ animaId: 'a' }, 1000n, 'act-1')
+  assert.equal(r.ok, false)
+
+  const hist = await s.history({ animaId: 'a' })
+  assert.equal(hist.length, 1, 'a failed reservation mints nothing')
+  assert.equal(hist[0].status, 'valid')
+  assert.equal(await s.balance({ animaId: 'a' }), 400n)
+})
+
+test('reserve then release after a split: the locked child returns to spendable, value conserved', async () => {
+  const s = new MemorySignorum()
+  const big = await issue(s, 'a', 1000n)
+
+  const r = await s.reserve({ animaId: 'a' }, 250n, 'act-1')
+  assert.ok(r.ok)
+  await s.release(r.signaIds)
+
+  assert.equal(await s.balance({ animaId: 'a' }), 1000n, 'a released reservation charges nothing')
+  const hist = await s.history({ animaId: 'a' })
+  assert.equal(hist.find(x => x.id === big.id)!.status, 'spent', 'the parent stays terminal')
+  assert.equal(hist.filter(x => x.status === 'locked').length, 0)
+})
+
+test('reserve: arcanum notes split with the commitment carried to both children', async () => {
+  const s = new MemorySignorum()
+  await s.issue({ forma: 'arcanum', valor: 1000n, auctor: 'test', testis: 'hash-abc' })
+
+  const r = await s.reserve({ commitment: 'hash-abc' }, 400n, 'act-1')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 400n)
+  assert.equal(await s.balance({ commitment: 'hash-abc' }), 600n)
+
+  const hist = await s.history({ commitment: 'hash-abc' })
+  const children = hist.filter(x => x.auctor === CHANGE_AUCTOR)
+  assert.equal(children.length, 2)
+  // Privacy partition intact: anonymous children keep the commitment, never gain an animaId.
+  assert.ok(children.every(c => c.forma === 'arcanum' && c.testis === 'hash-abc' && c.animaId === undefined))
 })
 
 // ── transfer ───────────────────────────────────────────────────────────────
