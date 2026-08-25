@@ -1400,12 +1400,65 @@ export function floorDisabledIndices(
   return out;
 }
 
-/** Two exclusion sets as one — the screen's local curation and the session floor's
- *  disabled fragments both keep a fragment out of the next roll. */
+/** Two exclusion sets as one — both keep a fragment out of the next roll. */
 export function mergedExclusions(...sets: ReadonlyArray<ReadonlySet<number>>): Set<number> {
   const out = new Set<number>();
   for (const s of sets) for (const i of s) out.add(i);
   return out;
+}
+
+// ── Garden chips: one curation channel, and it is the floor (noema-320) ──────
+// The garden chip and the floor pill are two views of ONE fact — whether a
+// fragment is in the draw — so they read and write the same place: the session
+// floor. A chip's checked-ness is DERIVED from the floor rather than held beside
+// it, which is what makes the garden the same garden after a reload and what
+// makes a promotion carry the subset that is on screen (`musePromote.ts` builds
+// the collection from the enabled floor: darkening a fragment IS the curation).
+//
+// The index space is positional (`flattenGarden`) while the floor's key space is
+// `category:text`, and the mapping is many-to-one: the same phrase pooled from
+// several media items occupies several chip positions and ONE floor key, so
+// toggling any one of them moves all of them. That is the correct reading of a
+// single curation channel, not a defect to fight with per-index state.
+
+/** Whether the session floor holds this fragment at all. The garden is pooled from the
+ *  mother dataset client-side while the floor is session-owned, so a client holding a
+ *  stale session can render a chip whose key the floor does not carry — and a write
+ *  against a key the floor does not hold is a no-op server-side. The caller re-reads the
+ *  session (the GET reconciles the floor against the mother's live garden) rather than
+ *  letting a click disappear. */
+export function floorHolds(
+  view: MuseSessionView | null,
+  fragment: Pick<Fragment, 'category' | 'text'>,
+): boolean {
+  if (!view) return false;
+  const key = fragmentKey(fragment);
+  return view.floor.some((e) => e.key === key);
+}
+
+/** Every garden chip's checked-ness, derived from the session floor: a chip is checked
+ *  when its fragment is in the draw. With no session nothing is darkened yet. */
+export function chipStates(
+  fragments: readonly Fragment[],
+  view: MuseSessionView | null,
+): boolean[] {
+  const off = floorDisabledIndices(fragments, view);
+  return fragments.map((_, i) => !off.has(i));
+}
+
+/** What tapping a garden chip writes: the fragment at that position, with its enabled
+ *  flag flipped — the same write and the same route as a floor pill's tap. `null` when
+ *  there is nothing to write (no session yet, or an index off the end of the garden). */
+export function chipToggle(
+  fragments: readonly Fragment[],
+  index: number,
+  view: MuseSessionView | null,
+): { fragment: MuseFragmentIdentity; enabled: boolean } | null {
+  if (!view) return null;
+  const f = fragments[index];
+  if (!f) return null;
+  const on = !floorDisabledIndices(fragments, view).has(index);
+  return { fragment: { category: f.category, text: f.text }, enabled: !on };
 }
 
 // ── Manual add: the free way to widen a floor (noema-242) ────────────────────
