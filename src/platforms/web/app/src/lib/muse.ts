@@ -1703,6 +1703,32 @@ export function captionPassNote(dataset: Pick<CaptionedSet, 'media'>): string {
     + `${total} ${total === 1 ? 'image' : 'images'} · billed like any other run`;
 }
 
+// ── The caption run rides the URL (noema-321) ────────────────────────────────
+// A caption pass unmounts the instant you navigate away, and with it the only handle the
+// screen held on the run — bare `useState`, gone with the component. The pass finishes fine
+// server-side; there was just nothing left on screen that could ever watch it again. Carrying
+// the run id in `?run=` makes it a page you can return to, refresh, or share the back button
+// through, and re-attach is purely client-side: `useRunStream` already knows how to pick a
+// run up from an id and fall back to polling.
+export const CAPTION_RUN_PARAM = 'run';
+
+/** Read `?run=` off a screen's search params. Blank or absent both read as no run — a `?run=`
+ *  with nothing after the `=` is not a run id. */
+export function captionRunParam(search: URLSearchParams): string | null {
+  const v = search.get(CAPTION_RUN_PARAM);
+  return v && v.trim() !== '' ? v : null;
+}
+
+/** `search` with `?run=` set to `runId`, or removed when `runId` is `null` — a NEW
+ *  `URLSearchParams`, for `setSearchParams(withCaptionRunParam(search, id), { replace: true })`.
+ *  Replace, not push: landing on or leaving a run is not a step the back button should retrace. */
+export function withCaptionRunParam(search: URLSearchParams, runId: string | null): URLSearchParams {
+  const next = new URLSearchParams(search);
+  if (runId) next.set(CAPTION_RUN_PARAM, runId);
+  else next.delete(CAPTION_RUN_PARAM);
+  return next;
+}
+
 // ── The archive controls (noema-267) ─────────────────────────────────────────
 // Ask once, then do it, then offer it back. Three rules, pure, so the screen makes no
 // judgement of its own:

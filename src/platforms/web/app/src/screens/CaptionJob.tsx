@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AppShell } from '../shell/AppShell';
 import { api, type Dataset } from '../lib/api';
 import { captionRunRequest } from '../lib/captionsets';
-import { uncaptionedCount } from '../lib/muse';
+import { captionRunParam, uncaptionedCount, withCaptionRunParam } from '../lib/muse';
 import { useRunStream } from '../lib/runStream';
 import { Stageline } from '../components/RunStageline';
 
@@ -29,14 +29,20 @@ import { Stageline } from '../components/RunStageline';
 // first minutes acquiring a pod and preparing it before a single caption can exist, and then
 // reads every image one at a time — so the phases and the per-image count are the screen, not a
 // status word standing in for them.
+//
+// noema-321 — the run id rides `?run=`. A launch writes it (replace, so back doesn't step
+// through run states); a mount reads it back, so navigating away and returning re-attaches the
+// watch instead of losing it. A `?run=` that 404s or belongs to someone else is validated once
+// on mount and cleared rather than left to wedge the screen — `useRunStream`'s poll fallback
+// treats a persistent 404 as "still pending", not as an error, so that check happens here.
 
 export function CaptionJob() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [search] = useSearchParams();
+  const [search, setSearchParams] = useSearchParams();
   const [dataset, setDataset] = useState<Dataset | null | undefined>(undefined);   // undefined = loading
   const [name, setName] = useState('');
-  const [runId, setRunId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(() => captionRunParam(search));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [activeSet, setActiveSet] = useState<string | null>(null);
@@ -46,6 +52,7 @@ export function CaptionJob() {
   const [editing, setEditing] = useState<{ mediaId: string; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const seeded = useRef(false);
+  const mountRunChecked = useRef(false);
 
   const load = useCallback(async () => {
     if (!id) return null;
@@ -67,6 +74,26 @@ export function CaptionJob() {
       setActiveSet(named ?? dataset.captionsets[dataset.captionsets.length - 1].id);
     }
   }, [dataset, search]);
+
+  // A `?run=` carried in on mount gets ONE validating fetch — a run this caller can no longer
+  // see (stale, or someone else's; ownership is server-side) must clear rather than sit forever
+  // in "starting the pass". Only the id present at mount is checked; a run started from THIS
+  // screen via `start()` is already known good and never re-checked.
+  useEffect(() => {
+    if (mountRunChecked.current) return;
+    mountRunChecked.current = true;
+    const carried = runId;
+    if (!carried) return;
+    let live = true;
+    api.getRun(carried).catch(() => {
+      if (!live) return;
+      setRunId(null);
+      setSearchParams((prev) => withCaptionRunParam(prev, null), { replace: true });
+      setMsg({ ok: false, text: 'that caption pass is gone or not yours' });
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Watch the caption run. The pass writes its captionset onto the DATASET, so the result arrives
   // through a re-read of the record rather than through the run's own outputs.
@@ -113,6 +140,7 @@ export function CaptionJob() {
     try {
       const { run } = await api.createRun(captionRunRequest({ datasetId: dataset.id, name, captionsetId: target }));
       setRunId(run.id);
+      setSearchParams((prev) => withCaptionRunParam(prev, run.id), { replace: true });
       setMsg({ ok: true, text: `caption job started · run ${run.id.slice(0, 8)}` });
     } catch (e) {
       setMsg({ ok: false, text: `couldn't start: ${String((e as Error).message).slice(0, 160)}` });
