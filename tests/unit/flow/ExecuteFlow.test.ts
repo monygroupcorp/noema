@@ -5,6 +5,7 @@ import type { ExecuteFlowDeps } from '../../../src/flow/flows/ExecuteFlow.js'
 import type { FlowContext, PrimitiveEvent, Step, Resolution } from '../../../src/flow/types.js'
 import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
+import { MODUS_DATASET_CAPTION, MODUS_DATASET_DECOMPOSE } from '../../../src/crystal/seeds/modi.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -950,4 +951,184 @@ test('Mod • → Add: state.pinnedModels flows through _submit to inceptor.init
   const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, pinnedModels: pinned } })
   await flow.enter(ctx)
   assert.deepEqual(captured?.pinnedModels, pinned, 'pinned models reach initiate')
+})
+
+// ---------------------------------------------------------------------------
+// Port routing — the declaration is what an entering run is held to
+// ---------------------------------------------------------------------------
+//
+// The seed test (`tests/unit/crystal/seeds/modi.test.ts`) asserts which ports the
+// caption and decompose modi DECLARE. That is a statement about the seed file. The
+// block below asserts the property a run depends on: the declaration is what decides
+// which values reach the cursor.
+//
+// These drive the REAL seed modi (imported, never re-declared as a fixture) through
+// `ExecuteFlow`'s two entry routes, and read back the aditus the cursor is handed:
+//
+//   • a declared port arrives with its value intact
+//   • an undeclared key never arrives — `validateAditus` strips it before dispatch
+//     (the shipped semantics: strip, not refuse)
+//
+// The expected port sets below are written out as LITERALS on purpose. Deriving them
+// from `modus.aditus` would make the assertion read its own input: removing a port
+// from the seed would shrink both sides and the test would stay green while the route
+// changed. Pinned literally, the seed and the route have to agree.
+
+const CAPTION_PORTS_AT_CURSOR = ['captionPrompt', 'captionset', 'dataset', 'maxNewTokens', 'name']
+const DECOMPOSE_PORTS_AT_CURSOR = ['captionset', 'dataset', 'model', 'provider', 'redo', 'trigger']
+
+/** Deps bound to one real modus, capturing the aditus that reaches `cursor.run`. */
+function routingDepsFor(modus: Modus): { deps: ExecuteFlowDeps; atCursor: () => Record<string, unknown> | undefined } {
+  let seen: Record<string, unknown> | undefined
+  const deps = makeDeps({
+    modorum: {
+      find: async () => modus,
+      register: async () => {},
+      update: async () => { throw new Error('not implemented') },
+      list: async () => [],
+    },
+    inceptor: {
+      // Carry the dispatched aditus onto the Actum, exactly as the real inceptor does,
+      // so what the cursor reads is what the route actually delivered.
+      initiate: async (inceptio) => makeActum({ modusId: inceptio.modusId, aditus: inceptio.aditus }),
+    },
+    cursorum: {
+      register: () => {},
+      resolve: () => ({
+        reserve: async () => 100n,
+        run: async (actum) => {
+          seen = actum.aditus
+          return { kind: 'sync' as const, exitus: { exitus: { ok: 'done' }, impetus: 100n } }
+        },
+      }),
+    },
+  })
+  return { deps, atCursor: () => seen }
+}
+
+test('routing: the caption modus declaration decides which ports reach the cursor', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_CAPTION)
+  const flow = new ExecuteFlow(deps)
+  // Pre-filled entry (the /run shortcut): required satisfied → validate + submit.
+  // Every declared port carries a value, plus two keys the modus does not declare.
+  const ctx = makeCtx({
+    state: {
+      modusId: MODUS_DATASET_CAPTION.id,
+      aditus: {
+        dataset: 'dataset-alpha',
+        captionset: 'captionset-alpha',
+        name: 'second pass',
+        captionPrompt: 'describe the subject',
+        maxNewTokens: '128',
+        captionSet: 'captionset-alpha',   // near-miss casing — not a declared port
+        loraId: 'lora-alpha',             // belongs to another modus entirely
+      },
+    },
+  })
+  await flow.enter(ctx)
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  assert.deepEqual(Object.keys(at).sort(), CAPTION_PORTS_AT_CURSOR,
+    'exactly the declared ports reach the cursor — no declared port dropped, no undeclared key carried')
+})
+
+test('routing: a declared caption port arrives at the cursor with its value intact', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_CAPTION)
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({
+    state: {
+      modusId: MODUS_DATASET_CAPTION.id,
+      aditus: { dataset: 'dataset-alpha', captionset: 'captionset-alpha', maxNewTokens: '128' },
+    },
+  })
+  await flow.enter(ctx)
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  // `captionset` is the extend port: present at the cursor, the pass extends that set;
+  // dropped on the route, the same request mints a fresh one and re-captions the dataset.
+  assert.equal(at.captionset, 'captionset-alpha', 'the extend port survives the route')
+  assert.equal(at.dataset, 'dataset-alpha')
+  // Declared 'int' — coerced on the way in, so the cursor reads a number, not the form's string.
+  assert.equal(at.maxNewTokens, 128)
+})
+
+test('routing: an undeclared caption key never reaches the cursor', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_CAPTION)
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({
+    state: {
+      modusId: MODUS_DATASET_CAPTION.id,
+      aditus: { dataset: 'dataset-alpha', captionSet: 'captionset-alpha' },
+    },
+  })
+  await flow.enter(ctx)
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  assert.equal('captionSet' in at, false, 'an undeclared key is stripped before dispatch')
+  assert.equal('captionset' in at, false, 'and it is not silently re-homed onto the declared port')
+})
+
+test('routing: the decompose modus declaration decides which ports reach the cursor (form route)', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_DECOMPOSE)
+  const flow = new ExecuteFlow(deps)
+  // Cold entry → the flow card, then one form bundle. This is the other entry route:
+  // form values merge key-by-key (an undeclared key survives that merge), and the full
+  // validate happens at submit.
+  const ctx = makeCtx({ state: { modusId: MODUS_DATASET_DECOMPOSE.id, aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  await flow.handle(ctx, {
+    kind: 'form',
+    values: {
+      dataset: 'dataset-alpha',
+      captionset: 'captionset-alpha',
+      redo: true,
+      trigger: 'trigword',
+      model: 'model-alpha',
+      provider: 'provider-alpha',
+      rebuild: true,        // not a declared port
+      skipped: 0,           // an exitus-shaped key that was deliberately never declared
+    },
+  })
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  assert.deepEqual(Object.keys(at).sort(), DECOMPOSE_PORTS_AT_CURSOR,
+    'exactly the declared ports reach the cursor')
+})
+
+test('routing: the decompose redo port arrives at the cursor in the form its reader parses', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_DECOMPOSE)
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({ state: { modusId: MODUS_DATASET_DECOMPOSE.id, aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  await flow.handle(ctx, {
+    kind: 'form',
+    values: { dataset: 'dataset-alpha', captionset: 'captionset-alpha', redo: true, rebuild: true },
+  })
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  // Declared 'text', so the boolean is coerced to the string `isRedo` reads as on.
+  assert.equal(at.redo, 'true', 'the whole-set opt-in survives the route')
+  assert.equal('rebuild' in at, false, 'an undeclared opt-in does not')
+})
+
+test('routing: an undeclared decompose key cannot turn an incremental pass into a whole-set one', async () => {
+  const { deps, atCursor } = routingDepsFor(MODUS_DATASET_DECOMPOSE)
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({ state: { modusId: MODUS_DATASET_DECOMPOSE.id, aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  await flow.handle(ctx, {
+    kind: 'form',
+    values: { dataset: 'dataset-alpha', captionset: 'captionset-alpha', Redo: 'yes', force: 'true' },
+  })
+
+  const at = atCursor()
+  assert.ok(at, 'the run reached the cursor')
+  assert.equal('redo' in at, false, 'the declared port stays absent — the pass is incremental')
+  assert.equal('Redo' in at, false)
+  assert.equal('force' in at, false)
 })
