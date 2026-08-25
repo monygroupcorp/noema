@@ -582,6 +582,35 @@ export class CrystalApi {
     // owned-resource check below (which needs to know which of them name a stored record).
     const resolvedModus = await modorum.find(modusId)
 
+    // Undeclared inputs are refused AT THIS BOUNDARY (noema-314). A submitted aditus key the
+    // resolved modus does not declare is not carried into the run: the port never reaches a
+    // cursor, so a misspelled or invented key would otherwise be accepted, dropped, and billed
+    // as a run that did different work than the caller asked for. Refused HERE — above the
+    // `Inceptio` literal and therefore above `dispatchInceptio` — so a refusal reserves no
+    // signa and creates no actum.
+    //
+    // Scoped to the SUBMITTED aditus (account defaults only fill declared ports, so they can
+    // never introduce one), and to this entry point only: `validateAditus` keeps its tolerant
+    // strip semantics at every internal call site, where single ports are validated during
+    // draft edits and a blanket throw is the wrong shape.
+    //
+    // A definition that does not resolve here (or carries no `aditus`) is left to the dispatch
+    // path's own handling rather than refused on an absent declaration.
+    //
+    // Underscore-prefixed keys are the internal channels that ride an aditus (`_attributes`,
+    // `_dna`, `_pieceIndex`, `__capability`, …) rather than ports a modus declares. They are
+    // already excluded from the schema surface (`aditusToJsonSchema`) and from the owned-
+    // reference check (`ownedResources`), and they keep passing through here on the same terms.
+    if (resolvedModus?.aditus) {
+      const declared = resolvedModus.aditus
+      const undeclared = Object.keys(aditus).find(
+        (key) => !key.startsWith('_') && !Object.prototype.hasOwnProperty.call(declared, key),
+      )
+      // Names the first offending key and nothing else — not its value, and not the set of
+      // ports the flow does declare (the flow's schema is a separate, deliberate read).
+      if (undeclared !== undefined) throw Errors.invalidAditus({ undeclared })
+    }
+
     // Account-level defaults (Consuetudinum), applied UNDER the cast-time aditus:
     //   cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
     // Only DECLARED ports are filled, so a stale default can never inject an unknown input.

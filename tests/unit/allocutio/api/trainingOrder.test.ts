@@ -32,7 +32,19 @@ const TRAINING_ADITUS = { dataset: '[{"url":"https://example.test/a.png"}]', tri
 function ring(mandata: MemoryMandatum, modusId = TRAINING_MODUS_ID) {
   const acta = new Map<string, Actum>()
   let seq = 0
-  const modus = { id: modusId, versio: '1', genus: 'atomicum', ministerium: 'test', aditus: {}, exitus: {} }
+  // The double declares the ports these tests submit: the run-submit boundary refuses a key the
+  // resolved modus does not declare, so an empty declaration would refuse its own fixture.
+  const modus = {
+    id: modusId, versio: '1', genus: 'atomicum', ministerium: 'test',
+    aditus: {
+      dataset: { type: 'text', required: false },
+      triggerWord: { type: 'text', required: false },
+      steps: { type: 'int', required: false },
+      ownerAnimaId: { type: 'text', required: false },
+      prompt: { type: 'text', required: false },
+    },
+    exitus: {},
+  }
   const seen: Inceptio[] = []
   const deps = {
     mandata,
