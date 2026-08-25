@@ -3,6 +3,7 @@ import type { TraceContext } from './trace.js'
 import type { Actum } from '../types/actum.js'
 import type { Exitus } from '../types/cursus.js'
 import { executioFromPhaseDurations } from '../execution/progressus.js'
+import { classifyError } from './classifyError.js'
 
 export interface WideEvent {
   event:         'actum.complete' | 'actum.fail'
@@ -38,7 +39,10 @@ export interface WideEvent {
   costUsd?:           number
   // Outcome
   status:        'completed' | 'failed'
+  // Grouped over a fixed, finite set (via classifyError) — safe to group failures by. The full
+  // raw text this was classified from lives in `message`.
   errorCode?:    string
+  message?:      string
 }
 
 function inferByType(actum: Actum): WideEvent['byType'] {
@@ -52,7 +56,7 @@ export function buildWideEvent(
   ctx: TraceContext,
   status: 'completed' | 'failed',
   exitus?: Exitus,
-  errorCode?: string,
+  rawError?: string,
 ): WideEvent {
   const impetus = exitus?.impetus ?? 0n
   const reservation = actum.impetus
@@ -105,7 +109,11 @@ export function buildWideEvent(
     costPerHr:     e.costPerHr,
     costUsd,
     status,
-    errorCode,
+    // The raw text is what made a full diagnosis possible in one pass — kept verbatim in
+    // `message`, never truncated. `errorCode` is classified through the shared taxonomy so
+    // two instances of one fault with different wording group as the same fault.
+    errorCode: rawError !== undefined ? classifyError(rawError) : undefined,
+    message:   rawError,
   }
 }
 

@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Actorum, Exitus } from '../../../src/types/cursus.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 
 // ── Helpers (copied from executionWebhook.test.ts pattern) ───────────────────
 
@@ -282,4 +284,30 @@ test('POST /runpod/:nonce with a wrong nonce cannot fail a run', async () => {
 
   assert.equal(res.statusCode, 404)
   assert.equal(completor.failed.length, 0)
+})
+
+// ── log field correlation ───────────────────────────────────────────────────────
+//
+// The webhook payload's `id` (RunPod's own field) names the POD, not the actum. Logging it
+// under `actumId` puts two id spaces in one field — grepping the log by the real actum id
+// silently misses the line that explains the failure.
+
+test('the "webhook received" log line names the value under podId, not actumId', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const deps: WebhookRouterDeps = { actorum: makeActorum(actum), completor }
+
+  const entries: LogEntry[] = []
+  const onLog = (e: LogEntry) => { entries.push(e) }
+  bus.on('log', onLog)
+  try {
+    await callRunpodRoute(deps, { id: 'job-router-abc', status: 'COMPLETED', output: [] })
+  } finally {
+    bus.off('log', onLog)
+  }
+
+  const received = entries.find(e => e.msg === 'webhook received')
+  assert.ok(received, 'expected a "webhook received" log line')
+  assert.equal(received!.podId, 'job-router-abc')
+  assert.equal(received!.actumId, undefined)
 })
