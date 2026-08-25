@@ -102,10 +102,10 @@ test('reserve+settle: spends only positives; the debit still nets to the expecte
 
   const r = await store.reserve({ animaId: 'a' }, 300n, 'act-1')
   assert.ok(r.ok)
-  assert.equal(r.locked, 500n)
+  assert.equal(r.locked, 300n)   // the 500 coin splits; only the ceiling is held
   assert.equal(r.signaIds.length, 1)
 
-  await store.settle(r.signaIds, 300n, 'act-1')   // charge exactly 300, refund 200
+  await store.settle(r.signaIds, 300n, 'act-1')   // charges exactly 300; the change was already returned
   // Spent 300 of the netted 300 → balance nets to 0 (200 refund − 200 debit).
   assert.equal(await store.balance({ animaId: 'a' }), 0n)
 })
@@ -113,15 +113,116 @@ test('reserve+settle: spends only positives; the debit still nets to the expecte
 test('reserve: positive-only identity — numeric smallest-first selection unchanged (regression guard)', async () => {
   const c50 = await issue('a', 50n)
   const c100 = await issue('a', 100n)
-  await issue('a', 900n)
+  const c900 = await issue('a', 900n)
 
   const r = await store.reserve({ animaId: 'a' }, 120n, 'act-1')
   assert.ok(r.ok)
-  // greedy numeric smallest-first, stops once covered: exactly {50,100}, the 900 untouched.
+  // Greedy numeric smallest-first, stops once covered: {50,100} drawn on, the 900 untouched.
+  // The 50 is fully consumed by the cover and stays whole; the 100 over-covers and splits 70/30.
   const selected = new Set(r.signaIds)
   assert.equal(selected.size, 2)
-  assert.ok(selected.has(c50.id) && selected.has(c100.id))
-  assert.equal(r.locked, 150n)
+  assert.ok(selected.has(c50.id))
+  assert.ok(!selected.has(c900.id))
+  assert.equal(r.locked, 120n)
+  assert.equal((await col.findOne({ id: c100.id }))!.status, 'spent')
+  assert.equal((await col.findOne({ id: c900.id }))!.status, 'valid')
+})
+
+// ── change at reserve time (noema-306), Mongo parity ─────────────────────────
+//
+// A reservation holds exactly its ceiling. The note that pushes coverage past `amount` is split:
+// consumed into the terminal status, replaced by a locked child for the shortfall and a spendable
+// child for the remainder. Whole notes fully consumed by the cover are unaffected.
+//
+// NON-VACUITY: revert `reserve`'s split (lock whole notes again) and the over-lock test below
+// fails — the change is no longer spendable while the reservation is live.
+
+const CHANGE_AUCTOR = 'reserve:change'
+
+test('reserve: a small reservation against one big note leaves the change spendable', async () => {
+  const big = await issue('split', 10_000n)
+
+  const r = await store.reserve({ animaId: 'split' }, 25n, 'act-split')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 25n, 'the reservation holds exactly the ceiling, not the whole note')
+  assert.equal(r.signaIds.length, 1)
+
+  // The over-lock assertion: everything but the ceiling stays spendable while the run is live.
+  const spendable = await store.balance({ animaId: 'split' })
+  assert.equal(spendable, 9_975n)
+  assert.equal(spendable + r.locked, 10_000n, 'balance conserved: locked + spendable == before')
+
+  const parent = (await col.findOne({ id: big.id }))!
+  assert.equal(parent.status, 'spent', 'the split note is consumed, never mutated in value')
+  assert.equal(parent.valor, '10000')
+  assert.equal(parent.actumId, 'act-split')
+
+  const children = await col.find({ auctor: CHANGE_AUCTOR }).toArray()
+  assert.equal(children.length, 2)
+  assert.equal(children.reduce((sum, c) => sum + BigInt(c.valor as string), 0n), 10_000n, 'children sum to the parent')
+  const lockedChild = children.find(c => c.status === 'locked')!
+  const changeChild = children.find(c => c.status === 'valid')!
+  assert.equal(lockedChild.id, r.signaIds[0])
+  assert.equal(lockedChild.actumId, 'act-split')
+  assert.equal(changeChild.actumId, undefined, 'the change is bound to no reservation')
+  // valorNum must be written on both, or the next reserve mis-sorts them (ledger Debt #1).
+  assert.equal(lockedChild.valorNum, 25)
+  assert.equal(changeChild.valorNum, 9975)
+  // Provenance carries to both halves.
+  assert.ok(children.every(c => c.animaId === 'split' && c.forma === 'minted'))
+})
+
+test('reserve: an exact cover mints nothing — no split', async () => {
+  const c = await issue('exact', 300n)
+  const r = await store.reserve({ animaId: 'exact' }, 300n, 'act-exact')
+  assert.ok(r.ok)
+  assert.deepEqual(r.signaIds, [c.id])
+  assert.equal(r.locked, 300n)
+  assert.equal(await col.countDocuments({ auctor: CHANGE_AUCTOR }), 0)
+})
+
+test('reserve: insufficient funds leaves no orphan children', async () => {
+  await issue('short', 400n)
+  const r = await store.reserve({ animaId: 'short' }, 1000n, 'act-short')
+  assert.equal(r.ok, false)
+  assert.equal(await col.countDocuments({ auctor: CHANGE_AUCTOR }), 0, 'a failed reservation mints nothing')
+  assert.equal(await col.countDocuments({ status: 'locked' }), 0)
+  assert.equal(await store.balance({ animaId: 'short' }), 400n)
+})
+
+test('reserve then release after a split: the locked child returns to spendable, value conserved', async () => {
+  const big = await issue('rel', 1000n)
+  const r = await store.reserve({ animaId: 'rel' }, 250n, 'act-rel')
+  assert.ok(r.ok)
+  await store.release(r.signaIds)
+
+  assert.equal(await store.balance({ animaId: 'rel' }), 1000n, 'a released reservation charges nothing')
+  assert.equal((await col.findOne({ id: big.id }))!.status, 'spent', 'the parent stays terminal')
+  assert.equal(await col.countDocuments({ status: 'locked' }), 0)
+})
+
+test('reserve then settle after a split: an exactly-covering reservation mints no delta', async () => {
+  await issue('set', 1000n)
+  const r = await store.reserve({ animaId: 'set' }, 400n, 'act-set')
+  assert.ok(r.ok)
+  await store.settle(r.signaIds, 400n, 'act-set')
+
+  assert.equal(await col.countDocuments({ auctor: 'settle:delta' }), 0, 'exact cover leaves no delta')
+  assert.equal(await store.balance({ animaId: 'set' }), 600n, 'charged exactly the actual impetus')
+})
+
+test('reserve: arcanum notes split with the commitment carried to both children', async () => {
+  await store.issue({ forma: 'arcanum', valor: 1000n, auctor: 'test', testis: 'hash-abc' })
+
+  const r = await store.reserve({ commitment: 'hash-abc' }, 400n, 'act-arc')
+  assert.ok(r.ok)
+  assert.equal(r.locked, 400n)
+  assert.equal(await store.balance({ commitment: 'hash-abc' }), 600n)
+
+  const children = await col.find({ auctor: CHANGE_AUCTOR }).toArray()
+  assert.equal(children.length, 2)
+  // Privacy partition intact: anonymous children keep the commitment, never gain an animaId.
+  assert.ok(children.every(c => c.forma === 'arcanum' && c.testis === 'hash-abc' && c.animaId === undefined))
 })
 
 // ── the load-bearing concurrency proof ───────────────────────────────────────
@@ -252,18 +353,20 @@ async function selectedValors(signaIds: string[]): Promise<bigint[]> {
 
 test('SELECTION: greedy smallest-first uses NUMERIC order, not string order', async () => {
   // Values chosen so lexicographic string order ("10" < "100" < "2" < "30" < "9") diverges hard
-  // from numeric order (2 < 9 < 10 < 30 < 100). A correct numeric greedy for amount=12 picks
-  // 2 + 9 + 10 = 21 (stops once ≥ 12). A string-sorted greedy would instead pick 10 + 100 = 110.
+  // from numeric order (2 < 9 < 10 < 30 < 100). A correct numeric greedy for amount=12 draws on
+  // 2 + 9 + 10 (stops once ≥ 12). A string-sorted greedy would instead draw on 10 + 100.
   for (const v of [10n, 9n, 2n, 100n, 30n]) await issue('ord', v)
 
   const r = await store.reserve({ animaId: 'ord' }, 12n, 'act-ord')
   assert.ok(r.ok, 'reserve should cover 12 from a 151 pool')
 
-  // Exact selection: the three smallest coins, in numeric terms.
-  assert.deepEqual(await selectedValors(r.signaIds), [2n, 9n, 10n])
-  assert.equal(r.locked, 21n)
-  // Sanity: a lexicographic pick (10,100) would have locked 110 and NOT contained the 2-coin.
-  assert.ok(r.locked < 110n, 'string-order selection would have overshot to 110')
+  // Exact selection: the three smallest coins numerically — 2 and 9 whole, the 10 split to the
+  // 1-point shortfall (its 9-point remainder went back as spendable change).
+  assert.deepEqual(await selectedValors(r.signaIds), [1n, 2n, 9n])
+  assert.equal(r.locked, 12n)
+  // Sanity: a lexicographic pick would have drawn on the 100-coin — it is untouched.
+  assert.equal((await col.findOne({ valorNum: 100 }))!.status, 'valid')
+  assert.equal(await store.balance({ animaId: 'ord' }), 151n - 12n)
 })
 
 test('SELECTION: parity with the reference greedy across mixed magnitudes', async () => {
@@ -271,18 +374,25 @@ test('SELECTION: parity with the reference greedy across mixed magnitudes', asyn
   const pool = [1n, 5n, 8n, 12n, 40n, 99n, 100n, 250n, 1000n, 3n]
   for (const v of pool) await issue('mix', v)
 
-  // Reference: exactly what the old full-load + JS numeric sort would have selected.
+  // Reference greedy: the same numeric smallest-first walk, with the note that pushes coverage
+  // past `amount` contributing only the shortfall (the rest of it is change).
   const ascending = [...pool].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   const amount = 30n
   const expected: bigint[] = []
   let covered = 0n
-  for (const v of ascending) { if (covered >= amount) break; expected.push(v); covered += v }
+  for (const v of ascending) {
+    if (covered >= amount) break
+    const take = amount - covered < v ? amount - covered : v
+    expected.push(take)
+    covered += take
+  }
   expected.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
   const r = await store.reserve({ animaId: 'mix' }, amount, 'act-mix')
   assert.ok(r.ok)
   assert.deepEqual(await selectedValors(r.signaIds), expected)
-  assert.equal(r.locked, covered)
+  assert.equal(r.locked, amount)
+  assert.equal(covered, amount)
 })
 
 test('BOUNDED READ: reserve does not materialise the whole pool (~O(k), not O(n))', async () => {

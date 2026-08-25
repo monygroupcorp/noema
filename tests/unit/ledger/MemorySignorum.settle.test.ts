@@ -94,6 +94,53 @@ test('settle: spent signa have actumId and expensum set', async () => {
   assert.ok(spent.expensum instanceof Date)
 })
 
+// ── settle against a reservation that split a note (noema-306) ───────────────
+//
+// reserve() hands settle() a set that covers the ceiling EXACTLY, so the common case has no delta
+// to mint at all. These prove settle's arithmetic on the new shape, and that the identity carried
+// onto the split children survives a second hop through the delta mint.
+
+test('settle after a split: an exactly-covering reservation mints no delta', async () => {
+  const s = new MemorySignorum()
+  await s.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const r = await s.reserve({ animaId: 'anima-1' }, 400n, 'act-1')
+  assert.ok(r.ok)
+  await s.settle(r.signaIds, 400n, 'act-1')
+
+  const hist = await s.history({ animaId: 'anima-1' })
+  assert.equal(hist.filter(x => x.auctor === 'settle:delta').length, 0, 'exact cover leaves no delta to refund')
+  assert.equal(await s.balance({ animaId: 'anima-1' }), 600n, 'charged exactly the actual impetus')
+})
+
+test('settle after a split: underspend refunds the delta on top of the change', async () => {
+  const s = new MemorySignorum()
+  await s.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const r = await s.reserve({ animaId: 'anima-1' }, 400n, 'act-1')
+  assert.ok(r.ok)
+  await s.settle(r.signaIds, 150n, 'act-1')   // ran cheaper than the ceiling → 250 delta
+
+  const hist = await s.history({ animaId: 'anima-1' })
+  const delta = hist.find(x => x.auctor === 'settle:delta')
+  assert.ok(delta, 'delta refund must be present')
+  assert.equal(delta.valor, 250n)
+  assert.equal(delta.forma, 'minted')          // provenance survived the split
+  // Net cost is exactly what the run consumed: 1000 − 150.
+  assert.equal(await s.balance({ animaId: 'anima-1' }), 850n)
+})
+
+test('settle after a split: an arcanum reservation keeps the commitment through both mints', async () => {
+  const s = new MemorySignorum()
+  await s.issue({ forma: 'arcanum', valor: 1000n, auctor: 'test', testis: 'hash-abc' })
+
+  const r = await s.reserve({ commitment: 'hash-abc' }, 400n, 'act-1')
+  assert.ok(r.ok)
+  await s.settle(r.signaIds, 150n, 'act-1')
+
+  assert.equal(await s.balance({ commitment: 'hash-abc' }), 850n)
+})
+
 test('settle with zero actual impetus: full refund, nothing spent', async () => {
   const s = new MemorySignorum()
   const sig = await issueAndLock(s, 'anima-1', 800n, 'act-1')
