@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Forma } from '../../../src/types/modus.js'
 import { validateAditus } from '../../../src/execution/validateAditus.js'
+import { MODUS_DATASET_CAPTION, MODUS_DATASET_DECOMPOSE } from '../../../src/crystal/seeds/modi.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -236,4 +237,50 @@ test('validateAditus: still coerces non-array text values to string', () => {
   const s = schema({ messages: { type: 'text', required: true } })
   const result = validateAditus(s, { messages: 42 })
   assert.deepEqual(result, { messages: '42' })
+})
+
+// ---------------------------------------------------------------------------
+// 11. Against the real modus declarations — the semantics the entry route leans on
+// ---------------------------------------------------------------------------
+//
+// `ExecuteFlow` calls `validateAditus(modus.aditus, …)` at each submit, so these two
+// properties are what make a modus' declaration binding on an entering run. Driven by
+// the real seed formae rather than a local fixture: the route's behaviour and the
+// shipped declarations are asserted together. The route-level proof lives in
+// `tests/unit/flow/ExecuteFlow.test.ts`.
+
+test('validateAditus: an undeclared key is stripped, not refused (caption forma)', () => {
+  const out = validateAditus(MODUS_DATASET_CAPTION.aditus, {
+    dataset: 'dataset-alpha',
+    captionSet: 'captionset-alpha',   // near-miss casing
+  })
+  assert.equal('captionSet' in out, false, 'undeclared key does not survive')
+  assert.equal('captionset' in out, false, 'and is not re-homed onto the declared port')
+  assert.equal(out.dataset, 'dataset-alpha')
+})
+
+test('validateAditus: the caption extend port survives when it is declared and supplied', () => {
+  const out = validateAditus(MODUS_DATASET_CAPTION.aditus, {
+    dataset: 'dataset-alpha',
+    captionset: 'captionset-alpha',
+  })
+  assert.equal(out.captionset, 'captionset-alpha')
+})
+
+test('validateAditus: the decompose whole-set opt-in is carried in its parsed form', () => {
+  const out = validateAditus(MODUS_DATASET_DECOMPOSE.aditus, {
+    dataset: 'dataset-alpha',
+    captionset: 'captionset-alpha',
+    redo: true,
+    rebuild: true,   // undeclared
+  })
+  assert.equal(out.redo, 'true', "declared 'text' → the string `isRedo` reads as on")
+  assert.equal('rebuild' in out, false)
+})
+
+test('validateAditus: an absent optional port with no default is omitted, not defaulted', () => {
+  // The "mint a fresh captionset" path: absent means absent, so a run never inherits
+  // some other pass's set.
+  const out = validateAditus(MODUS_DATASET_CAPTION.aditus, { dataset: 'dataset-alpha' })
+  assert.deepEqual(Object.keys(out), ['dataset'])
 })
