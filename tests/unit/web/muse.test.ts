@@ -62,6 +62,8 @@ import {
   captionCoverageLine,
   captionPassLabel,
   captionPassNote,
+  captionRunParam,
+  withCaptionRunParam,
   decomposeGateReason,
   dismissFromStream,
   floorCounts,
@@ -1286,6 +1288,37 @@ test('the caption control quotes the WHOLE set after an append, not the delta', 
   assert.equal(captionPassLabel({ media: [{ id: 'm-1' }] }), 'Caption all 1 image →')
   assert.match(captionPassNote({ media: [{ id: 'm-1' }] }), /1 image ·/)
   assert.match(captionPassNote(nine), /billed like any other run/)
+})
+
+// ── noema-321 — the caption run rides the URL ─────────────────────────────────
+
+test('captionRunParam reads a run id off ?run=, and null off anything else', () => {
+  assert.equal(captionRunParam(new URLSearchParams('run=run-abc')), 'run-abc')
+  assert.equal(captionRunParam(new URLSearchParams('')), null, 'no ?run= at all is no run')
+  assert.equal(captionRunParam(new URLSearchParams('run=')), null, 'a bare ?run= with nothing after it is no run')
+  assert.equal(captionRunParam(new URLSearchParams('captionset=cs-1')), null, 'a different param is not a run id')
+})
+
+// NON-VACUITY 3 — a launch must write the id into the URL. Reverting the write
+// (stop calling withCaptionRunParam on launch, or drop it from the writer) must fail.
+test('withCaptionRunParam sets ?run= to the id, alongside whatever else was already there', () => {
+  const next = withCaptionRunParam(new URLSearchParams('captionset=cs-1'), 'run-xyz')
+  assert.equal(next.get('run'), 'run-xyz')
+  assert.equal(next.get('captionset'), 'cs-1', 'writing the run id does not disturb an unrelated param')
+})
+
+// NON-VACUITY 4 — a mount that reads no run must not invent one, and a clear must
+// actually remove the param rather than writing it blank.
+test('withCaptionRunParam(…, null) removes ?run= rather than leaving it blank', () => {
+  const next = withCaptionRunParam(new URLSearchParams('run=stale-run&captionset=cs-1'), null)
+  assert.equal(next.has('run'), false)
+  assert.equal(captionRunParam(next), null)
+  assert.equal(next.get('captionset'), 'cs-1')
+})
+
+test('the write and the read round-trip: what a launch writes, a mount reads back', () => {
+  const written = withCaptionRunParam(new URLSearchParams(''), 'run-123')
+  assert.equal(captionRunParam(written), 'run-123')
 })
 
 // ── Non-vacuity 3 — a partial batch keeps what landed ────────────────────────
