@@ -89,8 +89,14 @@ const BOOTSTRAP_CMD_TIMEOUT_MS = 20 * 60 * 1000  // 20 minutes
  * `sshReadyTimeoutMs` buys nothing on that machine — another attempt on a fresh pod is what the
  * run needs. This window starts only once `RUNNING` is observed, so a pod that is legitimately
  * slow to boot still gets the full `sshReadyTimeoutMs` deadline.
+ *
+ * The floor here is measured, not guessed: a healthy pod probed 2026-08-25 attached its public
+ * IP and port mapping at ~136s after `RUNNING`. A prior default of 2 minutes sat below that
+ * observed attach time and abandoned healthy pods mid-attach. 8 minutes clears the measured
+ * floor with wide margin while staying well under the 10-minute `sshReadyTimeoutMs`, so the
+ * bailout still gives up on a genuinely unplaced pod with time left for a retry.
  */
-export const SSH_IPLESS_BAILOUT_MS = 2 * 60 * 1000  // 2 minutes
+export const SSH_IPLESS_BAILOUT_MS = 8 * 60 * 1000  // 8 minutes
 
 /** Marker on the error thrown when a pod is abandoned for reporting `RUNNING` with no public IP,
  *  so callers (and logs) can tell it apart from the overall SSH-readiness timeout. */
@@ -978,6 +984,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
               `Pod ${podId} abandoned after ${iplessMs}ms as an ip-less host — ` +
               `RUNNING with no publicIp across ${pollCount} polls ` +
               `(port22=${result.observation.port22 ?? '<absent>'}); ` +
+              `may be UNPLACED (no SKU stock to satisfy the pin) rather than a host defect; ` +
               `retrying on a fresh pod rather than waiting out the ${timeoutMs}ms SSH deadline`,
             ) as IplessHostError
             err.iplessHost = true
