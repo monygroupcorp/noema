@@ -27,7 +27,7 @@ import { HoldingToggle } from '../lib/HoldingToggle';
 
 // The canonical atomic text-to-image flow (hosted API, fixed cost, no pod dependency), which
 // makes it the one seed that runs for any account without further setup.
-export const SEED_MODUS_ID = 'modus.dalle-iii';
+export const SEED_MODUS_ID = 'modus.gpt-image';
 
 // Complete, self-contained prompts — each stands alone as the whole `prompt` input, because the
 // axis varies that port directly rather than contributing a fragment to an assembled prompt.
