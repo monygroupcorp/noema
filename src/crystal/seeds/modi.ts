@@ -33,6 +33,14 @@ export const MODUS_CHATGPT: Modus = make({
 
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
+    // The conversation-threading port. `ApiCursor.runChat` reads it (`Array.isArray(aditus.messages)`)
+    // and sends it as the chat body's `messages`, falling back to a single user turn built from
+    // `prompt` when it is absent; `ExecuteFlow.enter` routes on it too (a modusId plus a
+    // `messages[]` already in state skips the form and submits). `validateAditus` iterates the
+    // SCHEMA, so an undeclared key is not copied forward — declared, so a threaded reply keeps its
+    // history on the routes that validate. Typed 'text' because that is the one declared type whose
+    // coercion passes an Array through untouched, which is the shape both readers expect.
+    messages:    { type: 'text',  required: false, description: 'Conversation history as an array of { role, content } turns. Present, it is sent as-is and `prompt` is unused; absent, the chat is a single turn built from `prompt`.' },
     model:       { type: 'text',  required: false, default: 'gpt-4o',  description: 'OpenAI model ID' },
     temperature: { type: 'float', required: false, default: 0.7,       description: 'Sampling temperature' },
     // Routing key (mirrors __spaceUrl): declares the ApiCursor capability. Hidden internal port.
@@ -117,6 +125,9 @@ export const MODUS_OPENROUTER_CHAT: Modus = make({
 
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
+    // Same port, same reason as on `modus.chatgpt` above — every chat modus reaches the one
+    // `ApiCursor.runChat`, so each must declare the threading port that path reads.
+    messages:    { type: 'text',  required: false, description: 'Conversation history as an array of { role, content } turns. Present, it is sent as-is and `prompt` is unused; absent, the chat is a single turn built from `prompt`.' },
     model:       {
       type: 'text', required: false, default: 'openai/gpt-4o', description: 'OpenRouter model ID (provider/model)',
       optiones: [
@@ -153,6 +164,9 @@ export const MODUS_VENICE_CHAT: Modus = make({
 
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'The user message or prompt' },
+    // Same port, same reason as on `modus.chatgpt` above — every chat modus reaches the one
+    // `ApiCursor.runChat`, so each must declare the threading port that path reads.
+    messages:    { type: 'text',  required: false, description: 'Conversation history as an array of { role, content } turns. Present, it is sent as-is and `prompt` is unused; absent, the chat is a single turn built from `prompt`.' },
     model:       {
       type: 'text', required: false, default: 'llama-3.3-70b', description: 'Venice model ID',
       optiones: [
@@ -280,6 +294,17 @@ export const MODUS_AITOOLKIT_TRAINING: Modus = make({
     baseModel:     { type: 'text', required: true,  description: 'Base model preset (e.g. klein-4b) — also the familia /make resolves on' },
     steps:         { type: 'int',  required: true,  description: 'Training steps — additional steps when resuming (drives the config + step/ETA progress)' },
     resumeFrom:    { type: 'text', required: false, description: 'Resume/continue weights-only: a prior LoRA weights URL (a rescued checkpoint to recover a crashed run, or a finished LoRA to extend)' },
+    // The caption opt-out. `RemoteAitoolkitTrainingCursor` reads it as `aditus.autocaption !== false`
+    // and passes the result to the launcher, so the port is default-ON and only an explicit `false`
+    // turns it off. Declared because `validateAditus` iterates the SCHEMA — undeclared, the key is
+    // not copied forward and the opt-out cannot be expressed on any route that validates.
+    //
+    // Typed 'bool', deliberately, and this is the whole reason that type exists: a 'text'
+    // declaration would coerce `false` with `String(value)` into 'false', which is `!== false` and
+    // therefore reads as ON — an opt-out that validates cleanly and does the opposite of what was
+    // asked. 'bool' passes a real boolean through and maps the 'true'/'false' strings a form
+    // produces onto the matching boolean.
+    autocaption:   { type: 'bool', required: false, description: 'Caption the dataset images that carry no caption before training. Default on; pass false to train on the captions as they are.' },
     saveEvery:     { type: 'int',  required: false, description: 'Checkpoint cadence (default min(steps, 250))' },
     rank:          { type: 'int',  required: false, description: 'LoRA rank (default per base model)' },
     gpuId:         { type: 'text', required: false, description: 'GPU device id (default 0)' },
@@ -348,6 +373,11 @@ export const MODUS_DATASET_CAPTION: Modus = make({
     name:           { type: 'text', required: false, description: 'Display name for the resulting captionset (defaults to a generated one)' },
     captionPrompt:  { type: 'text', required: false, description: 'Instruction handed to the captioner (defaults to the training-caption prompt)' },
     maxNewTokens:   { type: 'int',  required: false, description: 'Caption length cap in tokens (captioner default when absent)' },
+    // The two run knobs `DatasetCaptionCursor` reads alongside the ports above — declared here for
+    // the same reason, and with the same shape and defaults, as their counterparts on
+    // `modus.aitoolkit-training`: the cursor reads them, so the schema must carry them.
+    gpuId:          { type: 'text', required: false, description: 'GPU device id (default 0)' },
+    jobId:          { type: 'text', required: false, description: 'Run id — defaults to the actum id; becomes the caption config name' },
   },
 
   // Matches the finalizer's return: the captionset it wrote, and what that pass actually covered.
