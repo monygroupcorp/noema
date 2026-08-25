@@ -23,6 +23,25 @@ export class MongoCorpus implements Corporum {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
+  /**
+   * The id-resolving read, with the access predicate IN THE QUERY (see `Corporum.findOwned`).
+   * A corpus this caller may not name does not come back, so there is no loaded record for a
+   * later comparison to be skipped on.
+   *
+   * Two `access` shapes are admitted because the tree carries two: the flat `'public'` string
+   * `Intella` stores, and the `{ kind }` single-axis Access union the schema spec settles on.
+   * `Corpus` carries neither field today, so both arms match nothing — they are here so that
+   * the item which gives corpora an access field is a schema change, not a re-derivation of
+   * who may read what.
+   */
+  async findOwned(id: string, auctor: string): Promise<Corpus | null> {
+    const doc = await this.col.findOne({
+      id,
+      $or: [{ auctor }, { access: 'public' }, { 'access.kind': 'public' }],
+    })
+    return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
   async list(filter?: Partial<Pick<Corpus, 'auctor' | 'genus' | 'status'>>): Promise<Corpora> {
     const docs = await this.col.find(filter ?? {}).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))

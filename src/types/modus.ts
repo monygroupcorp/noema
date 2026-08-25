@@ -32,6 +32,33 @@ export type { AuctorKey }
 /** Whether a modus is a leaf operation or a tree of other modi */
 export type ModusGenus = 'atomicus' | 'compositus'
 
+/**
+ * OwnedRef — the declaration that an aditus port carries a REFERENCE to a stored,
+ * owner-bearing resource rather than a plain value.
+ *
+ * An Actum is identity-blind by design (ADR-0002: identity lives in `Hospitium`, surfaced
+ * late), so a cursor that reads a resource id out of its aditus has no caller to scope that
+ * read against — the same reason `modus.muse-steer` passes its floor inline rather than by
+ * session id. The scope is therefore resolved ABOVE the cursor, at the one seam that still
+ * knows who is calling: the API's run entry point. This marker is what tells that seam which
+ * ports to resolve, and against which store.
+ *
+ * It lives on `Porta` because a Porta already declares everything else about a port
+ * (`{type, required, default, label…}`, ADR-0003), and the Porta canon is extended in place
+ * rather than paralleled by a second declaration table (ADR-0004/0007).
+ *
+ *   `dataset`     — a `Dataset` id, resolved against the `Datasets` store.
+ *   `corpus`      — a `Corpus` id, resolved against `Corporum`. A port of this genus may
+ *                   instead carry an INLINE manifest: caller-supplied content rather than a
+ *                   reference to a stored record, and passed through untouched.
+ *   `captionset`  — a sub-resource: a captionset id, resolved against the parent dataset
+ *                   named by `parens` (the sibling aditus key carrying the dataset id).
+ */
+export type OwnedRef =
+  | { genus: 'dataset' }
+  | { genus: 'corpus' }
+  | { genus: 'captionset'; parens: string }
+
 /** A single named port (input or output) on a modus */
 export interface Porta {
   // "porta" = gate/door in Latin — an opening in the modus boundary
@@ -54,6 +81,16 @@ export interface Porta {
    *  input; the value is still whatever the caller sends (the list is a convenience, not a validator —
    *  a caller may pass an id not in the list, e.g. a brand-new upstream model). */
   optiones?: Array<{ value: string; label: string }>
+  /**
+   * Declares that this (aditus) port names a stored, owner-bearing resource — see `OwnedRef`.
+   * Present → the run entry point resolves the value against the declared store, scoped to the
+   * calling anima, and refuses the run before anything is reserved or dispatched when the
+   * reference does not resolve for that caller. Absent → the port is a plain value.
+   *
+   * Definitional: it is part of the modus's contract about what its inputs MEAN, so it rides
+   * the `contentHash` like the rest of `aditus`.
+   */
+  owned?: OwnedRef
 }
 
 /**

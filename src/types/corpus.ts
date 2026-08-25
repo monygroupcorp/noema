@@ -75,6 +75,19 @@ export type Corpora = Corpus[]
  */
 export interface Corporum {
   find(id: string): Promise<Corpus | null>
+  /**
+   * Resolve a corpus by id THAT THIS CALLER MAY NAME — the access predicate lives in the
+   * query, so a corpus the caller may not name is never loaded and there is no fetched record
+   * for a later comparison to be skipped on.
+   *
+   * The predicate is: `auctor` is the caller, OR the corpus's access kind is `public` (the
+   * single-axis Access union). A `Corpus` carries no access field today, so the public arm
+   * matches nothing yet; it is written in the query so that adding the field is a schema
+   * change rather than a re-derivation of who may read what.
+   *
+   * Returns null when no such corpus exists FOR THIS CALLER, so ids stay non-enumerable.
+   */
+  findOwned(id: string, auctor: string): Promise<Corpus | null>
   list(filter?: Partial<Pick<Corpus, 'auctor' | 'genus' | 'status'>>): Promise<Corpora>
   create(corpus: Omit<Corpus, 'id' | 'natum' | 'mutatum'>): Promise<Corpus>
   update(id: string, patch: Partial<Pick<Corpus, 'status' | 'exemplaria' | 'numerus' | 'mutatum'>>): Promise<Corpus>

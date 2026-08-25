@@ -15,6 +15,11 @@ const corpus = (exemplaria: Corpus['exemplaria']): Corpus =>
 class FakeCorpora implements Corporum {
   constructor(private readonly byId: Record<string, Corpus>) {}
   async find(id: string): Promise<Corpus | null> { return this.byId[id] ?? null }
+  /** The owner-scoped read, with the same predicate the Mongo store puts in its query. */
+  async findOwned(id: string, auctor: string): Promise<Corpus | null> {
+    const c = this.byId[id]
+    return c && c.auctor === auctor ? c : null
+  }
   async list(): Promise<Corpora> { return Object.values(this.byId) }
   async create(): Promise<Corpus> { throw new Error('not used') }
   async update(): Promise<Corpus> { throw new Error('not used') }
