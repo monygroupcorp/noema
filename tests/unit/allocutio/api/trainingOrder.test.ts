@@ -89,7 +89,11 @@ test('a training launch opens a standing order carrying the effective input, the
   assert.equal(orders.length, 1, 'the click opened exactly one order')
   const order = orders[0]
   assert.deepEqual(order.by, { animaId: 'anima-1' }, 'the payer key the actum cannot hold')
-  assert.deepEqual(order.aditus, TRAINING_ADITUS, 'the effective input, so a later attempt replays exactly')
+  assert.deepEqual(
+    order.aditus,
+    { ...TRAINING_ADITUS, ownerAnimaId: 'anima-1' },
+    'the effective input carries the stamped owner, so a later attempt replays exactly',
+  )
   assert.equal(order.modusId, TRAINING_MODUS_ID)
   assert.equal(order.status, 'active')
   assert.deepEqual(order.acta, [run.id], 'the launch is the order\'s first attempt')
@@ -104,6 +108,50 @@ test('a training launch opens a standing order carrying the effective input, the
   assert.equal(run.order?.id, order.id)
   assert.equal(run.order?.state, 'attempting')
   assert.equal(run.order?.attempts, 1)
+})
+
+// =============================================================================
+// The training owner stamp — the minted LoRA's `ownerAnimaId` is set from the
+// resolved caller, never from the request body, and rides the order's snapshot
+// so a later hourly retry replays with the same owner as the original click.
+// =============================================================================
+
+test('an anima\'s training invoke stamps the caller as owner, even without one in the request', async () => {
+  const mandata = new MemoryMandatum()
+  const { api, seen } = apiOver(mandata)
+
+  await api.invokeFlow(OWNER, { modusId: TRAINING_MODUS_ID }, TRAINING_ADITUS)
+
+  assert.equal(seen[0]?.aditus.ownerAnimaId, OWNER.animaId, 'the finalizer mints against this field')
+})
+
+test('a client-supplied ownerAnimaId is overwritten with the caller\'s — identity never comes off the payload', async () => {
+  const mandata = new MemoryMandatum()
+  const { api, seen } = apiOver(mandata)
+
+  await api.invokeFlow(OWNER, { modusId: TRAINING_MODUS_ID }, { ...TRAINING_ADITUS, ownerAnimaId: STRANGER.animaId })
+
+  assert.equal(seen[0]?.aditus.ownerAnimaId, OWNER.animaId, 'the caller\'s identity wins over anything the client set')
+})
+
+test('a bursa-bearer invoke stamps no owner, and strips one the client supplied — a bearer names no one to trust', async () => {
+  const mandata = new MemoryMandatum()
+  const { api, seen } = apiOver(mandata)
+
+  await api.invokeFlow(OWNER, { modusId: TRAINING_MODUS_ID }, { ...TRAINING_ADITUS, ownerAnimaId: STRANGER.animaId }, {
+    by: { bursaToken: 'purse-1' },
+  })
+
+  assert.equal(seen[0]?.aditus.ownerAnimaId, undefined, 'a bearer credential names no durable owner')
+})
+
+test('a non-training run\'s aditus is untouched by the owner stamp', async () => {
+  const mandata = new MemoryMandatum()
+  const { api, seen } = apiOver(mandata, 'modus.text-to-image')
+
+  await api.invokeFlow(OWNER, { modusId: 'modus.text-to-image' }, { prompt: 'a cat' })
+
+  assert.ok(!('ownerAnimaId' in seen[0]!.aditus), 'the stamp is scoped to the training modus only')
 })
 
 test('the spend cap the request carried is kept on the order — later attempts run on the same terms', async () => {

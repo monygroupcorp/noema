@@ -658,10 +658,23 @@ export class CrystalApi {
     // reference port is checked exactly like a cast-time one.
     await this._assertOwnedAditus(auctor, resolvedModus, effectiveAditus)
 
+    // A training run mints a private model, and that model needs a durable owner — the
+    // resolved caller, never a value read off the request body. Stamped HERE, before the
+    // aditus becomes the actum's and before the standing order opens on it (`_openTrainingOrder`
+    // snapshots the aditus verbatim), so every later hourly retry carries the same owner as
+    // the original click. An anima caller's identity always wins over anything the client
+    // set on the port; a bursa-bearer invoke names no durable owner, so the port is cleared
+    // rather than trusted, and the run stays honestly ownerless.
+    const runner = opts.by ?? auctor
+    if (modusId === TRAINING_MODUS_ID) {
+      const { ownerAnimaId: _drop, ...rest } = effectiveAditus
+      effectiveAditus = 'animaId' in runner ? { ...rest, ownerAnimaId: runner.animaId } : rest
+    }
+
     const inceptio: Inceptio = {
       modusId,
       aditus: effectiveAditus,
-      by: opts.by ?? auctor,
+      by: runner,
       ...(opts.studioId ? { modoId: opts.studioId } : {}),
       ...(pinnedModels?.length ? { pinnedModels } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
