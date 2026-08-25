@@ -6,6 +6,7 @@ import {
   ACCEPTED_GPU_TYPE_IDS,
   assertGpuTypeIdsAccepted,
   PROVISION_BUDGET_MS,
+  SSH_IPLESS_BAILOUT_MS,
 } from '../../../src/crystal/SecurePodClient.js'
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
@@ -906,6 +907,20 @@ test('a trainer launch (the default, no script given) still logs arm "trainer"',
 // will never be reachable. These pin both halves of the behaviour: the pod is abandoned at the
 // ip-less window, and reaching SSH-readiness is part of an attempt, so the next attempt gets a
 // fresh pod.
+
+test('SSH_IPLESS_BAILOUT_MS clears the measured healthy-attach floor (noema-311)', () => {
+  // A healthy pod probed 2026-08-25 attached its public IP at ~136s after RUNNING. The default
+  // bailout must stay clear of that floor with margin, or a healthy pod gets abandoned mid-attach.
+  const measuredHealthyAttachMs = 136_000
+  assert.ok(
+    SSH_IPLESS_BAILOUT_MS > measuredHealthyAttachMs,
+    `default bailout (${SSH_IPLESS_BAILOUT_MS}ms) must clear the measured healthy attach floor (${measuredHealthyAttachMs}ms)`,
+  )
+  assert.ok(
+    SSH_IPLESS_BAILOUT_MS >= 8 * 60 * 1000,
+    `default bailout (${SSH_IPLESS_BAILOUT_MS}ms) regressed below the calibrated 8-minute floor`,
+  )
+})
 
 type PodBehaviour =
   | { kind: 'healthy' }
