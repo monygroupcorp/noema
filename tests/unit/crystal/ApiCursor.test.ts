@@ -161,12 +161,42 @@ test('chat impetus is clamped to the reservation', async () => {
   assert.equal(exitus.impetus, 1n)
 })
 
-test('image impetus is per-image × n, clamped to reservation', async () => {
-  // OpenAI imageImpetusPerImage = 40n; n=2 → 80n; reservation 50n → clamp to 50n.
+test('image impetus is one image, clamped to reservation', async () => {
+  // OpenAI imageImpetusPerImage = 40n; the rail charges one image → 40n; reservation 25n → clamp to 25n.
   const c = cursor(OPENAI_PROVIDER, fakeHttp(IMAGE_RES))
-  const res = await c.run(makeActum({ prompt: 'a cat', n: 2, __capability: 'image' }, 50n))
+  const res = await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }, 25n))
   const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
-  assert.equal(exitus.impetus, 50n)
+  assert.equal(exitus.impetus, 25n)
+})
+
+// ── generation rail reads only declared ports (noema-317) ───────────────────────
+
+test('image generation pins n to 1 — an undeclared n neither reaches the provider nor the meter', async () => {
+  // imageImpetusPerImage = 40n. Undeclared `n: 3` must not become 3 provider images, and must
+  // not become 120n of metering; the rail requests one image and charges one image.
+  const http = fakeHttp(IMAGE_RES)
+  const c = cursor(OPENAI_PROVIDER, http)
+  const res = await c.run(makeActum({ prompt: 'a cat', n: 3, __capability: 'image' }, 100n))
+  assert.equal((http.lastJson?.body as { n: number }).n, 1)
+  const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
+  assert.equal(exitus.impetus, 40n)
+})
+
+test('image generation pins the model to the capability default — an undeclared model is not sent', async () => {
+  const http = fakeHttp(IMAGE_RES)
+  const c = cursor(OPENAI_PROVIDER, http)
+  await c.run(makeActum({ prompt: 'a cat', model: 'some-other-model', __capability: 'image' }))
+  assert.equal(
+    (http.lastJson?.body as { model: string }).model,
+    OPENAI_PROVIDER.capabilities.image!.defaultModel,
+  )
+})
+
+test('imageEdit still honours its declared model port', async () => {
+  const http = fakeHttp(IMAGE_RES)
+  const c = cursor(OPENAI_PROVIDER, http)
+  await c.run(makeActum({ image: 'https://x/in.png', prompt: 'add a hat', model: 'edit-model', __capability: 'imageEdit' }))
+  assert.equal(http.lastForm?.form.get('model'), 'edit-model')
 })
 
 test('run is always sync kind and never exceeds reserve', async () => {
