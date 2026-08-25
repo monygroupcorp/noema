@@ -172,6 +172,11 @@ Invoke a flow and return its run handle.
         "modusVersion": {
           "type": "string",
           "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
+        },
+        "order": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order."
         }
       },
       "required": [
@@ -267,6 +272,11 @@ Fetch a run by id (poll for completion).
         "modusVersion": {
           "type": "string",
           "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
+        },
+        "order": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order."
         }
       },
       "required": [
@@ -278,6 +288,162 @@ Fetch a run by id (poll for completion).
   },
   "required": [
     "run"
+  ]
+}
+```
+
+### GET /v1/runs/:id/order
+
+The standing order behind a run — the request, not the attempt. A training run that fails on infrastructure stays scheduled: the order attempts again hourly until it lands or its window closes. Returns { order: null } for a run that has none.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "order": {
+      "type": "object",
+      "description": "A standing order behind a run — the request, not the attempt.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The order identifier."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "attempting",
+            "scheduled",
+            "fulfilled",
+            "stopped",
+            "cancelled"
+          ],
+          "description": "Where the request stands: an attempt running now (attempting), another one queued (scheduled), succeeded (fulfilled), ended without succeeding (stopped), or cancelled by the holder."
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "fulfilled",
+            "failed",
+            "exhausted",
+            "cancelled"
+          ],
+          "description": "Why a terminal order ended. Absent while it is still live."
+        },
+        "attempts": {
+          "type": "number",
+          "description": "Attempts made so far, the first one included."
+        },
+        "attemptsRemaining": {
+          "type": "number",
+          "description": "Attempts the order may still make."
+        },
+        "nextAttemptAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the next attempt is due, ISO-8601."
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the order stops trying regardless, ISO-8601."
+        },
+        "latestRunId": {
+          "type": "string",
+          "description": "The most recent attempt — the run to watch now."
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "attempts",
+        "attemptsRemaining"
+      ]
+    }
+  },
+  "required": [
+    "order"
+  ]
+}
+```
+
+### POST /v1/runs/:id/order/revoke
+
+Cancel the standing order behind a run — no further attempts will be made. Idempotent; the attempt already in flight is unaffected.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "order": {
+      "type": "object",
+      "description": "A standing order behind a run — the request, not the attempt.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The order identifier."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "attempting",
+            "scheduled",
+            "fulfilled",
+            "stopped",
+            "cancelled"
+          ],
+          "description": "Where the request stands: an attempt running now (attempting), another one queued (scheduled), succeeded (fulfilled), ended without succeeding (stopped), or cancelled by the holder."
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "fulfilled",
+            "failed",
+            "exhausted",
+            "cancelled"
+          ],
+          "description": "Why a terminal order ended. Absent while it is still live."
+        },
+        "attempts": {
+          "type": "number",
+          "description": "Attempts made so far, the first one included."
+        },
+        "attemptsRemaining": {
+          "type": "number",
+          "description": "Attempts the order may still make."
+        },
+        "nextAttemptAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the next attempt is due, ISO-8601."
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the order stops trying regardless, ISO-8601."
+        },
+        "latestRunId": {
+          "type": "string",
+          "description": "The most recent attempt — the run to watch now."
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "attempts",
+        "attemptsRemaining"
+      ]
+    }
+  },
+  "required": [
+    "order"
   ]
 }
 ```

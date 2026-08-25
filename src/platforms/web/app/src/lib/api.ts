@@ -41,6 +41,23 @@ export interface JsonSchema {
 export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string }
 
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
+
+// A standing order — what the user ASKED FOR, as distinct from any one attempt at it. A
+// training request survives an infrastructure failure: the order keeps attempting, hourly,
+// until it lands or its window closes. Mirrors the server's `RunOrder` projection, so a
+// screen reads `state` and never the failure sentence.
+export type RunOrderState = 'attempting' | 'scheduled' | 'fulfilled' | 'stopped' | 'cancelled';
+export interface RunOrder {
+  id: string;
+  state: RunOrderState;
+  reason?: 'fulfilled' | 'failed' | 'exhausted' | 'cancelled';
+  attempts: number;
+  attemptsRemaining: number;
+  nextAttemptAt?: string;
+  until?: string;
+  latestRunId?: string;
+}
+
 export interface Run {
   id: string;
   status: RunStatus;
@@ -49,6 +66,7 @@ export interface Run {
   failure?: { code: string; message: string };
   cost?: string;
   createdAt?: string;
+  order?: RunOrder;
 }
 
 export interface RunRequest {
@@ -452,6 +470,14 @@ export const api = {
     return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
   },
   getRun: (id: string) => fetch(`/v1/runs/${id}`, { headers: readHeaders() }).then(j<{ run: Run }>),
+  // The standing order behind a run, and the cancel for it. Owner-scoped server-side off the
+  // run — a run id addresses the order, it does not authorise it.
+  getRunOrder: (id: string) =>
+    fetch(`/v1/runs/${encodeURIComponent(id)}/order`, { headers: readHeaders() })
+      .then(j<{ order: RunOrder | null }>),
+  revokeRunOrder: (id: string) =>
+    fetch(`/v1/runs/${encodeURIComponent(id)}/order/revoke`, { method: 'POST', headers: authHeaders() })
+      .then(j<{ order: RunOrder | null }>),
   // SSE — a fetch-based reader, NOT an EventSource. EventSource cannot send headers, and
   // the server route is owner-scoped auth (bearer/x-commitment header only) — a plain
   // EventSource is a structural 401 for every caller. `readHeaders()` covers both a

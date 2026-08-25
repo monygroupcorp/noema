@@ -38,6 +38,7 @@ import path from 'node:path'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import { ApiError } from '../../../src/allocutio/api/errors.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
+import { MemoryMandatum } from '../crystal/memoryMandatum.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../../../src/types/provincia.js'
@@ -335,14 +336,15 @@ function makeApi() {
   const museSessions = new MemMuseSessions()
   const actorum = new MemoryActorum()
   const signorum = new MemorySignorum()
+  const mandata = new MemoryMandatum()
   const { calls, cursor } = recordingCursor()
   const api = new CrystalApi({
     provinciarum, sodalitatum, tabulae, collectiones, datasets, museSessions, actorum, signorum,
-    collectioCursor: cursor,
+    mandata, collectioCursor: cursor,
   } as unknown as CrystalApiDeps)
   return {
     api, provinciarum, sodalitatum, tabulae, collectiones, datasets, museSessions,
-    actorum, signorum, cursorCalls: calls,
+    actorum, signorum, mandata, cursorCalls: calls,
   }
 }
 
@@ -512,7 +514,7 @@ test('INVARIANT: a non-member cannot read or mutate a Sodalitas by id', async ()
 // ── BY ID: Actum (_owns) ─────────────────────────────────────────────────────
 
 test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => {
-  const { api, actorum, signorum } = makeApi()
+  const { api, actorum, signorum, mandata } = makeApi()
   const signum = await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 1000n, auctor: 'test' })
   const run = await actorum.create({
     id: 'actum-of-a', modusId: 'modus-1', modusVersiono: '1.0.0', impetus: 100n,
@@ -528,10 +530,33 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
     // is resolved on it before anything else in the call is looked at. `name` is required
     // by the signature and is inert here — the rejection lands before a slug is derived.
     { name: 'saveFlow', call: (id) => api.saveFlow(B, { fromRun: id, name: 'flow saved by B' }) },
+    // The standing order behind a run is addressed BY the run, so it inherits the run's
+    // ownership rule — and must, because cancelling one is a mutation of someone's request
+    // and reading one exposes what they asked for.
+    { name: 'getRunOrder', call: (id) => api.getRunOrder(B, id) },
+    { name: 'revokeRunOrder', call: (id) => api.revokeRunOrder(B, id) },
   ], () => snapshot(actorum['store'] as Map<string, unknown>))
 
   const own = await api.getRun(A, run.id)
   assert.equal(own.id, run.id, 'A still reads their own run')
+
+  // With a live order on A's run, the refusal must still hold and must leave it untouched —
+  // an absent order would let the two calls pass for the wrong reason.
+  await mandata.create({
+    modusId: 'modus.aitoolkit-training',
+    aditus: {},
+    by: { animaId: A.animaId },
+    triggerGenus: 'schedula',
+    status: 'active',
+  })
+  await mandata.update((await mandata.list())[0].id, { acta: [run.id], ignitions: 1 })
+
+  await assert.rejects(
+    () => api.revokeRunOrder(B, run.id),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+  assert.equal((await mandata.list())[0].status, 'active', 'B\'s refused cancel left A\'s order running')
+  assert.equal((await api.getRunOrder(A, run.id))?.state, 'scheduled', 'A still reads their own order')
 })
 
 // ── BY ID: Dataset (owner resolved in getDataset) ────────────────────────────
