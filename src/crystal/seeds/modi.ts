@@ -55,15 +55,18 @@ export const MODUS_CHATGPT: Modus = make({
   mutatum: new Date('2025-01-01'),
 })
 
+// Retained for historical actus only — its contentHash is referenced by past runs.
+// Superseded by modus.gpt-image, the same hosted OpenAI text-to-image lane on the current image
+// model; DALL·E 3 is deprecated upstream.
 export const MODUS_DALLE_III: Modus = make({
   id: 'modus.dalle-iii',
   nomen: 'DALL·E 3 — image generation',
-  descriptio: 'DALL·E 3 text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Pick it for quick OpenAI image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
+  descriptio: 'DALL·E 3 text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Superseded by GPT Image; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
   deliveryMode: 'sync',
-  canonica: true,
+  canonica: false,
   impetusFixum: 50n,
 
   aditus: {
@@ -79,6 +82,36 @@ export const MODUS_DALLE_III: Modus = make({
 
   natum:   new Date('2025-01-01'),
   mutatum: new Date('2025-01-01'),
+})
+
+// OpenAI image generation (gpt-image): prompt → image. The canon hosted text-to-image lane —
+// the option that runs for any account with no pod and no setup. No `model` port: the model
+// comes from the provider's image-capability `defaultModel`, so the lane moves with the provider
+// rather than with a seeded string.
+export const MODUS_GPT_IMAGE: Modus = make({
+  id: 'modus.gpt-image',
+  nomen: 'GPT Image — image generation',
+  descriptio: 'GPT Image text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Pick it for quick hosted image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  ministerium: 'openai',
+  deliveryMode: 'sync',
+  canonica: true,
+  impetusFixum: 50n,
+
+  aditus: {
+    prompt:  { type: 'text', required: true,  description: 'Image description' },
+    size:    { type: 'text', required: false, default: '1024x1024', description: 'Image dimensions (1024x1024, 1536x1024, 1024x1536, or auto)' },
+    quality: { type: 'text', required: false, default: 'auto',      description: 'Render quality — low, medium, high, or auto' },
+    __capability: { type: 'text', required: false, default: 'image', description: 'ApiCursor capability (internal)' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'The generated image' },
+  },
+
+  natum:   new Date('2026-08-25'),
+  mutatum: new Date('2026-08-25'),
 })
 
 // OpenAI image editing (gpt-image edit): input image (+ optional mask) + prompt → edited image.
@@ -499,6 +532,7 @@ export const MODUS_MUSE_STEER: Modus = make({
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
+  MODUS_GPT_IMAGE,
   MODUS_GPT_IMAGE_EDIT,
   MODUS_OPENROUTER_CHAT,
   MODUS_VENICE_CHAT,

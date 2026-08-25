@@ -4,6 +4,7 @@ import {
   CANONICAL_MODI,
   MODUS_CHATGPT,
   MODUS_DALLE_III,
+  MODUS_GPT_IMAGE,
   MODUS_GPT_IMAGE_EDIT,
   MODUS_OPENROUTER_CHAT,
   MODUS_VENICE_CHAT,
@@ -15,8 +16,8 @@ import {
   MODUS_MUSE_STEER,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains eleven entries', () => {
-  assert.equal(CANONICAL_MODI.length, 11)
+test('CANONICAL_MODI contains twelve entries', () => {
+  assert.equal(CANONICAL_MODI.length, 12)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
@@ -114,6 +115,41 @@ test('chatgpt / dalle declare their ApiCursor capability via __capability', () =
   assert.equal(MODUS_DALLE_III.aditus.__capability?.default, 'image')
 })
 
+test('gpt-image modus is the canon openai image lane (prompt in, image out, flat 50n)', () => {
+  assert.equal(MODUS_GPT_IMAGE.id, 'modus.gpt-image')
+  assert.equal(MODUS_GPT_IMAGE.ministerium, 'openai')
+  assert.equal(MODUS_GPT_IMAGE.genus, 'atomicus')
+  assert.equal(MODUS_GPT_IMAGE.deliveryMode, 'sync')
+  assert.equal(MODUS_GPT_IMAGE.canonica, true)
+  assert.equal(MODUS_GPT_IMAGE.impetusFixum, 50n)
+  assert.equal(MODUS_GPT_IMAGE.aditus.__capability?.default, 'image')
+  assert.equal(MODUS_GPT_IMAGE.aditus.prompt?.required, true)
+  assert.equal(MODUS_GPT_IMAGE.exitus.image?.type, 'image')
+  assert.ok(MODUS_GPT_IMAGE.contentHash.length > 0)
+  // The model is the provider's, not the seed's: a `model` port here would pin the lane to a
+  // string that the provider descriptor can no longer move.
+  assert.equal('model' in MODUS_GPT_IMAGE.aditus, false)
+  // `quality` must carry a value the image model actually accepts, or every default-quality run
+  // is rejected at the vendor.
+  assert.ok(
+    ['low', 'medium', 'high', 'auto'].includes(String(MODUS_GPT_IMAGE.aditus.quality?.default)),
+    'quality default must be one of low/medium/high/auto',
+  )
+})
+
+test('the canon image modus is gpt-image, and dalle is retained but de-canonised', () => {
+  const canonImage = CANONICAL_MODI.filter(
+    m => m.canonica && m.aditus.__capability?.default === 'image',
+  )
+  assert.deepEqual(canonImage.map(m => m.id), ['modus.gpt-image'])
+  assert.equal(MODUS_DALLE_III.canonica, false)
+  assert.ok(
+    CANONICAL_MODI.some(m => m.id === MODUS_DALLE_III.id),
+    'modus.dalle-iii must still be seeded — historical actus reference its contentHash',
+  )
+  assert.ok(MODUS_DALLE_III.contentHash.length > 0)
+})
+
 test('gpt-image-edit modus is openai imageEdit with image+prompt in, image out', () => {
   assert.equal(MODUS_GPT_IMAGE_EDIT.ministerium, 'openai')
   assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.__capability?.default, 'imageEdit')
@@ -132,7 +168,7 @@ test('openrouter chat modus proves the descriptor generalizes (new ministerium, 
 // being written (historical Actum rows reference its contentHash) even once it is de-canonised and
 // therefore no longer surfaced by `modorum.list({ canonica: true })`.
 test('every seeded modus is canonica true except the ones deliberately retired', () => {
-  const retired = new Set([MODUS_CHATGPT.id])
+  const retired = new Set([MODUS_CHATGPT.id, MODUS_DALLE_III.id])
   for (const m of CANONICAL_MODI) {
     if (retired.has(m.id)) continue
     assert.equal(m.canonica, true, `${m.id} should have canonica true`)
@@ -154,7 +190,7 @@ test('dataset-decompose modus is a canon decompose job on its OWN ministerium (s
   // provider would replace that provider's ApiCursor and send every chat/image dispatch into the
   // decomposer — with a green typecheck and a green suite.
   assert.equal(MODUS_DATASET_DECOMPOSE.ministerium, 'musegarden')
-  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_DALLE_III, MODUS_GPT_IMAGE_EDIT]) {
+  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_GPT_IMAGE, MODUS_GPT_IMAGE_EDIT]) {
     assert.notEqual(MODUS_DATASET_DECOMPOSE.ministerium, other.ministerium)
   }
   assert.equal(MODUS_DATASET_DECOMPOSE.genus, 'atomicus')
@@ -218,7 +254,7 @@ test('muse-steer modus is a canon steer job on its OWN ministerium (sync, usage-
   // would replace the decomposer — with a green typecheck and a green suite.
   assert.equal(MODUS_MUSE_STEER.ministerium, 'musesteer')
   assert.notEqual(MODUS_MUSE_STEER.ministerium, MODUS_DATASET_DECOMPOSE.ministerium)
-  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_DALLE_III, MODUS_GPT_IMAGE_EDIT]) {
+  for (const other of [MODUS_CHATGPT, MODUS_OPENROUTER_CHAT, MODUS_GPT_IMAGE, MODUS_GPT_IMAGE_EDIT]) {
     assert.notEqual(MODUS_MUSE_STEER.ministerium, other.ministerium)
   }
   assert.equal(MODUS_MUSE_STEER.genus, 'atomicus')

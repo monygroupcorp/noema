@@ -14,6 +14,13 @@ import type { Tractus } from '../lib/api';
 const req = () => buildCreateRequest({ nomen: 'my collection', reviewEnabled: true });
 
 describe('create sends a working starting configuration', () => {
+  // Pinned by id, not only through the constant: the seed must name the canon hosted
+  // text-to-image modus — the one flow that runs for any account with no pod and no setup.
+  // Asserting the payload against the constant alone would follow the constant anywhere it went.
+  it('seeds the canon hosted text-to-image modus', () => {
+    expect(SEED_MODUS_ID).toBe('modus.gpt-image');
+  });
+
   it('create sends a seeded modusId + one prompt axis with >1 value + total', () => {
     const body = req();
     expect(body.modusId).toBe(SEED_MODUS_ID);

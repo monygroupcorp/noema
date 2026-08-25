@@ -107,7 +107,7 @@ export const PROJECTS: Project[] = [
     desc: 'Logo explorations, type, and marks for the studio.',
     updated: '1d ago',
     chats: [{ id: 'c1', title: 'monogram directions', when: '1d ago' }],
-    cards: [{ id: 'dalleiii', name: 'DALL·E III', verb: 'make' }],
+    cards: [{ id: 'gpt-image', name: 'GPT Image', verb: 'make' }],
     canvases: [{ id: 'cv1', name: 'logo → variations', nodes: 3 }],
     gens: 27,
     datasetIds: [], modelIds: [], collectionIds: [],
