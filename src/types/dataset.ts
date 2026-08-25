@@ -229,10 +229,35 @@ export type CreateDatasetInput = CreateDatasetFromUpload | CreateDatasetFromGene
  * Datasets — genitive plural "of the datasets."
  * The dataset store. Serves both the full rich shape (`list`) and the thin
  * summary projection (`listSummaries`) off ONE underlying collection.
+ *
+ * OWNER SCOPING: the mutating seams below resolve the owner at the API layer from the
+ * authenticated caller, and each says so where it is declared. `findOwned` is the exception,
+ * and deliberately so: it is the ID-RESOLVING READ that answers "may this caller name this
+ * dataset", and the answer has to be a property of the QUERY rather than of a comparison made
+ * after the record is in hand.
  */
 export interface Datasets {
   create(input: Omit<Dataset, 'id' | 'natum' | 'mutatum'>): Promise<Dataset>
   find(id: string): Promise<Dataset | null>
+  /**
+   * Resolve a dataset by id THAT THIS OWNER MAY NAME — the access predicate lives in the
+   * query, so a dataset the caller may not name is never loaded and there is no fetched
+   * record for a later comparison to be skipped on.
+   *
+   * The predicate is: the caller owns it, OR its access kind is `public` (the single-axis
+   * Access union). A `Dataset` carries no access field today, so the public arm matches
+   * nothing yet; it is written in the query so that adding the field is a schema change
+   * rather than a re-derivation of who may read what.
+   *
+   * Returns null when no such dataset exists FOR THIS CALLER — the caller cannot tell a
+   * dataset that is not theirs from one that does not exist, so ids stay non-enumerable.
+   *
+   * OPTIONAL on the interface so a store double is not obliged to implement it. A store that
+   * does not is a store that cannot affirm access, and the run entry point refuses the
+   * reference rather than admitting it (the fail-closed convention `_ownedStudio` follows
+   * when no Conductor is wired).
+   */
+  findOwned?(id: string, owner: string): Promise<Dataset | null>
   list(opts: DatasetListOpts): Promise<DatasetListPage>
   listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage>
   /** Append media to a dataset. APPEND-ONLY: the supplied items are added after the media

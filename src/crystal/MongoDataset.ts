@@ -67,6 +67,25 @@ export class MongoDataset implements Datasets {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
+  /**
+   * The id-resolving read, with the access predicate IN THE QUERY (see `Datasets.findOwned`).
+   * A dataset this owner may not name does not come back, so there is no loaded record for a
+   * later comparison to be skipped on.
+   *
+   * Two `access` shapes are admitted because the tree carries two: the flat `'public'` string
+   * `Intella` stores, and the `{ kind }` single-axis Access union the schema spec settles on.
+   * `Dataset` carries neither field today, so both arms match nothing — they are here so that
+   * the item which gives datasets an access field is a schema change, not a re-derivation of
+   * who may read what.
+   */
+  async findOwned(id: string, owner: string): Promise<Dataset | null> {
+    const doc = await this.col.findOne({
+      id,
+      $or: [{ owner }, { access: 'public' }, { 'access.kind': 'public' }],
+    })
+    return doc ? fromDoc(doc as Record<string, unknown>) : null
+  }
+
   private async _page(opts: DatasetListOpts): Promise<{ entries: Dataset[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
     // Archived datasets are gone from the lists. `archivum` is UNSET on restore rather than

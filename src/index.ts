@@ -961,6 +961,11 @@ async function main(): Promise<void> {
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
     datasets: ring.datasets,
+    // The corpus store a declared corpus reference resolves against (the training modus's
+    // dataset port). Wired for the same reason the dataset store is: the run entry point
+    // resolves the reference for the calling anima, and a store it cannot reach is a
+    // reference it has to refuse.
+    corpora: ring.corpora,
     museSessions: ring.museSessions,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,

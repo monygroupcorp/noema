@@ -44,6 +44,26 @@ test('find returns null for unknown', async () => {
   assert.equal(await store.find('nope'), null)
 })
 
+test('findOwned returns the dataset to its owner', async () => {
+  const d = await store.create(base)
+  assert.equal((await store.findOwned(d.id, base.owner))?.id, d.id)
+})
+
+test('findOwned returns null to anyone else — the predicate is in the query', async () => {
+  const d = await store.create(base)
+  assert.equal(await store.findOwned(d.id, 'anima-other'), null)
+  assert.equal(await store.findOwned('nope', base.owner), null, 'and null for an id that names nothing')
+})
+
+test('findOwned admits a dataset whose access kind is public, in either shape', async () => {
+  const flat = await store.create(base)
+  const union = await store.create({ ...base, name: 'union' })
+  await col.updateOne({ id: flat.id }, { $set: { access: 'public' } })
+  await col.updateOne({ id: union.id }, { $set: { access: { kind: 'public' } } })
+  assert.equal((await store.findOwned(flat.id, 'anima-other'))?.id, flat.id)
+  assert.equal((await store.findOwned(union.id, 'anima-other'))?.id, union.id)
+})
+
 test('find returns the dataset', async () => {
   const d = await store.create(base)
   const found = await store.find(d.id)
