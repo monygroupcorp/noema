@@ -2654,6 +2654,9 @@ export const API_CONTRACT: ApiContract = {
     // There is no work left to do. NOT retryable: the request cannot succeed until the resource
     // changes or the caller asks for a rebuild.
     { code: 'conflict.nothing_to_decompose', httpStatus: 409, retryable: false },
+    // Concurrent writes to the same muse session exhausted the retry budget. Retryable: the
+    // stored session is intact, and the same call succeeds once contention clears.
+    { code: 'conflict.muse_session', httpStatus: 409, retryable: true },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     { code: 'secret.required', httpStatus: 422 },
