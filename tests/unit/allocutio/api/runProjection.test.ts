@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { toRun, toRunDetail, toCollection } from '../../../../src/allocutio/api/runProjection.js'
 import type { Actum, ActumStatus } from '../../../../src/types/actum.js'
 import type { Collectio } from '../../../../src/types/collectio.js'
+import { classifyError } from '../../../../src/lib/classifyError.js'
 
 function makeActum(over: Partial<Actum>): Actum {
   return {
@@ -32,17 +33,29 @@ test('status maps each ActumStatus to the public RunStatus', () => {
   }
 })
 
-test('fractus actum surfaces failure with execution_error code and the error message', () => {
-  const run = toRun(makeActum({ status: 'fractus', error: 'boom' }))
+test('fractus actum surfaces failure with execution_error code and CLASSIFIED copy', () => {
+  // The stored `error` is operator text — pod ids, elapsed milliseconds, the recovery the
+  // platform was already attempting. It goes through `classifyError` on the way out, so the
+  // public surface says what the chat surfaces already say and carries no internals.
+  const raw = 'Pod pod-7 abandoned after 128476ms as an ip-less host — retrying on a fresh pod'
+  const run = toRun(makeActum({ status: 'fractus', error: raw }))
   assert.equal(run.status, 'failed')
   assert.ok(run.failure)
   assert.equal(run.failure?.code, 'run.execution_error')
-  assert.equal(run.failure?.message, 'boom')
+  assert.equal(run.failure?.message, classifyError(raw))
+  assert.ok(!/pod-7|128476/.test(run.failure?.message ?? ''), 'raw internal detail must not reach the caller')
 })
 
-test('fractus without error falls back to a default message', () => {
+test('a recognised failure class keeps its own copy rather than the generic line', () => {
+  const raw = 'RunPod pod provision failed: no capacity'
+  const run = toRun(makeActum({ status: 'fractus', error: raw }))
+  assert.equal(run.failure?.message, classifyError(raw))
+  assert.notEqual(classifyError(raw), classifyError('a failure nobody classified'), 'the case is vacuous unless the classes differ')
+})
+
+test('fractus without error falls back to classified copy for the default message', () => {
   const run = toRun(makeActum({ status: 'fractus' }))
-  assert.equal(run.failure?.message, 'run failed')
+  assert.equal(run.failure?.message, classifyError('run failed'))
 })
 
 test('cost is the impetus bigint serialised as a string', () => {
