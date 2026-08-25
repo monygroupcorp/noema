@@ -41,6 +41,9 @@ import {
   captionPassNote,
   canFireOne,
   categoryColor,
+  chipStates,
+  chipToggle,
+  floorHolds,
   dismissFromStream,
   flattenGarden,
   floorCounts,
@@ -73,7 +76,6 @@ import {
   manualAddError,
   manualAddRequest,
   missingNozzleNote,
-  mergedExclusions,
   nextPieceDecision,
   pieceReadout,
   pieceRecord,
@@ -171,7 +173,12 @@ import './muse.css';
 // the cheap conflict detector in `muse/weaver.ts`) as a badge only; the paid smoother is
 // never called here — that is a later item's rail (noema-228).
 //
-// Curation (check/uncheck a chip) and kept rolls are local UI state only.
+// Curation (check/uncheck a chip) writes the SESSION FLOOR (noema-320): a chip and a
+// floor pill are two views of one fact, so a chip's tap is the same call a pill's tap
+// makes and its checked-ness is derived from the floor rather than held beside it. The
+// garden therefore survives a navigate, and a promotion carries the subset on screen —
+// `musePromote.ts` builds the collection from the enabled floor. Kept rolls remain
+// local UI state.
 //
 // Ignition (Muse P4, noema-230) is the one thing on this screen that spends: a mined
 // prompt can be fired at a t2i flow. The rules — which flows are offered, whether a
@@ -300,16 +307,9 @@ export function Muse() {
 
   const d = (datasets ?? []).find((x) => x.id === id);
 
-  // Which flattened-garden indices are unchecked. Local curation state only — see the file
-  // header note; nothing here is persisted or fed to a decompose call.
-  const [excluded, setExcluded] = useState<Set<number>>(new Set());
-  const toggle = (i: number) => {
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      return next;
-    });
-  };
+  // Which garden chip is mid-write. Chip curation itself is not held here: it is read
+  // from the session floor and written to it (see `toggleChip`).
+  const [chipBusy, setChipBusy] = useState<string | null>(null);
 
   const [count, setCount] = useState(5);
   const [report, setReport] = useState<RollReport | null>(null);
@@ -954,10 +954,47 @@ export function Muse() {
   const counts = useMemo(() => (build ? gardenCounts(build.garden) : []), [build]);
   const flat = useMemo(() => (build ? flattenGarden(build.garden) : []), [build]);
 
-  // What a roll may not draw: the chips unchecked on this screen, plus every fragment the
-  // session floor has darkened. A darkened fragment is out of the draw, not gone (S8).
-  const offTheFloor = useMemo(() => floorDisabledIndices(flat, session), [flat, session]);
-  const outOfPlay = useMemo(() => mergedExclusions(excluded, offTheFloor), [excluded, offTheFloor]);
+  // What a roll may not draw: every fragment the session floor has darkened, whether a
+  // chip, a pill or a steer darkened it. One channel, one set. A darkened fragment is out
+  // of the draw, not gone (S8).
+  const outOfPlay = useMemo(() => floorDisabledIndices(flat, session), [flat, session]);
+
+  // Chip checked-ness, derived from that same floor — never held beside it.
+  const chipOn = useMemo(() => chipStates(flat, session), [flat, session]);
+
+  // A garden chip's tap is a floor write, and it is the same call and the same route the
+  // floor sheet's pills use — the floor is never held locally, so the screen re-renders
+  // from the session the write returns.
+  //
+  // The write names a fragment by `category:text`, and the server leaves the session
+  // unchanged when the floor does not hold that key. The garden is pooled from the mother
+  // dataset client-side while the floor is session-owned, so a client holding a stale
+  // session can render a chip whose key is not yet on the floor. Rather than lose the
+  // click, re-read the session once — the GET reconciles the floor against the mother's
+  // live garden — and write again. If the key is still absent the chip stays visibly
+  // unchanged and the screen says so.
+  async function toggleChip(i: number) {
+    if (!session || chipBusy) return;
+    const write = chipToggle(flat, i, session);
+    if (!write) return;
+    setChipBusy(`${write.fragment.category}:${write.fragment.text}`);
+    try {
+      let next = (await api.setMuseFragmentEnabled(session.id, write.fragment, write.enabled)).session;
+      if (!floorHolds(next, write.fragment)) {
+        next = (await api.getMuseSession(session.id)).session;
+        if (floorHolds(next, write.fragment)) {
+          next = (await api.setMuseFragmentEnabled(session.id, write.fragment, write.enabled)).session;
+        }
+      }
+      setSession(next);
+      if (floorHolds(next, write.fragment)) setDismissals(recordFloorChange);
+      else setSessionError(`this session's floor doesn't hold '${write.fragment.category}: ${write.fragment.text}' — reload the screen to pick up the set's fragments`);
+    } catch (e) {
+      setSessionError(`that fragment didn't move: ${errText(e)}`);
+    } finally {
+      setChipBusy(null);
+    }
+  }
 
   function roll() {
     if (flat.length === 0) return;
@@ -2112,20 +2149,21 @@ export function Muse() {
             <div className="gt-head">
               <span className="gt-title"><b>Garden</b></span>
             </div>
-            <div className="gt-sub mono">check/uncheck a fragment to include/exclude it from the next roll</div>
+            <div className="gt-sub mono">check/uncheck a fragment to include/exclude it from the draw — it is kept with the session</div>
             {flat.length === 0 ? (
               <div className="gt-sub mono">no fragments pooled.</div>
             ) : (
               <div className="pref-chips muse-garden">
                 {flat.map((f, i) => {
-                  const on = !excluded.has(i);
+                  const on = chipOn[i] ?? true;
                   return (
                     <button
                       key={`${f.category}-${i}`}
                       type="button"
                       className={`fchip${on ? ' on' : ''}`}
                       title={`${f.category} · ${f.source}`}
-                      onClick={() => toggle(i)}
+                      disabled={!session || chipBusy !== null}
+                      onClick={() => void toggleChip(i)}
                     >
                       <span style={{ background: categoryColor(f.category), width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
                       {f.text}
