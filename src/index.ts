@@ -101,6 +101,9 @@ import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { MongoActorum } from './crystal/MongoActorum.js'
 import { startIdleReaper } from './crystal/idleReaper.js'
 import { startExpiryReaper, recoverExpiredActa } from './crystal/expiryReaper.js'
+import { MongoMandatum } from './crystal/MongoMandatum.js'
+import { MandatumRunner, type AttemptOutcome } from './crystal/MandatumRunner.js'
+import type { ComputeStrategy, GpuClass } from './types/actum.js'
 import { startCensus } from './crystal/Census.js'
 import { MongoIntella } from './crystal/MongoIntella.js'
 import { R2Uploader } from './crystal/R2Uploader.js'
@@ -173,6 +176,7 @@ const RUNPOD_CLOUD_TYPE = (process.env.RUNPOD_CLOUD_TYPE ?? 'SECURE') as 'SECURE
 const RUNPOD_KEEP_WARM = process.env.RUNPOD_KEEP_WARM !== 'false'  // default true
 const RUNPOD_WARM_TTL_MS = Number(process.env.RUNPOD_WARM_TTL_MS ?? 60_000)  // idle window before reaper kills a warm pod
 const EXPIRY_REAPER_INTERVAL_MS = Number(process.env.EXPIRY_REAPER_INTERVAL_MS ?? 60_000)  // sweep cadence for cold-start-timeout acta
+const MANDATUM_RUNNER_INTERVAL_MS = Number(process.env.MANDATUM_RUNNER_INTERVAL_MS ?? 30_000)  // tick cadence for standing orders (the hour between attempts is the ORDER's, not this loop's)
 // Production: derive from public WEBHOOK_URL. Local dev: post back to ourselves.
 // SecurePodClient runs on our server (not on the pod), so localhost always works.
 const RUNPOD_WEBHOOK_URL = process.env.WEBHOOK_URL
@@ -925,8 +929,16 @@ async function main(): Promise<void> {
     dicta: new MongoDictum(mongo.db(DB_NAME).collection('dicta')),
   })
 
+  // Standing orders (Mandatum, noema-310) — a training click is an instruction that outlives
+  // any one attempt at it. Built here (like the erased denylist above) rather than in the ring
+  // because exactly two things hold it: the facade that opens and reads orders, and the runner
+  // below that works them.
+  const mandata = new MongoMandatum(mongo.db(DB_NAME).collection('mandata'))
+  await mandata.ensureIndexes().catch((err) => log.warn('mandata index ensure failed', { error: String(err) }))
+
   const crystalApi = new CrystalApi({
     pricer,
+    mandata,
     eraser: meEraser,
     depositAddress: CREDIT_VAULT,
     deposita: ring.deposita,
@@ -1410,6 +1422,43 @@ async function main(): Promise<void> {
     compositusCursor: ring.compositusCursor,
   }, EXPIRY_REAPER_INTERVAL_MS)
   log.info('expiry reaper started', { tickMs: EXPIRY_REAPER_INTERVAL_MS })
+
+  // Mandatum runner (noema-310) — works the standing orders a training click opens. It reads
+  // each order's outstanding attempt, and when that attempt failed for a reason another
+  // machine could fix, asks again on the hour until the order lands or its day runs out.
+  // In-process beside the other reapers, behind the store's atomic claim (the PublicationWorker
+  // shape), so it survives restarts and can be lifted into its own container unchanged.
+  //
+  // It moves no money itself: every attempt is an ordinary invoke as the order's payer, so the
+  // freeze, content, cap and balance gates all re-run, and a failed attempt refunds exactly as
+  // a hand-clicked one does.
+  new MandatumRunner({
+    mandata,
+    outcome: async (actumId): Promise<AttemptOutcome | null> => {
+      const a = await ring.actorum.findById(actumId)
+      if (!a) return null
+      if (a.status === 'completus') return { state: 'succeeded' }
+      if (a.status === 'fractus') return { state: 'failed', error: a.error ?? 'run failed' }
+      return { state: 'pending' }
+    },
+    fire: async (m) => {
+      const run = await crystalApi.invokeFlow(
+        m.by,
+        { modusId: m.modusId },
+        m.aditus,
+        {
+          mandatumId: m.id,
+          ...(m.invocatio?.maxImpetus !== undefined ? { maxImpetus: m.invocatio.maxImpetus } : {}),
+          ...(m.invocatio?.computeStrategy ? { computeStrategy: m.invocatio.computeStrategy as ComputeStrategy } : {}),
+          ...(m.invocatio?.gpuClass ? { gpuClass: m.invocatio.gpuClass as GpuClass } : {}),
+        },
+      )
+      return run.id
+    },
+    // An erased account is never spent on: erasure ends the order rather than pausing it.
+    payerLive: async (by) => ('animaId' in by ? !(await erasedDenylist.has(by.animaId)) : true),
+  }, ).start(MANDATUM_RUNNER_INTERVAL_MS)
+  log.info('mandatum runner started', { tickMs: MANDATUM_RUNNER_INTERVAL_MS })
 
   // Census — the host's continuous per-time cost reckoning (studio billing tick).
   // Every 60s walks active Hospitia and debits the host secondsSinceLastTick ×

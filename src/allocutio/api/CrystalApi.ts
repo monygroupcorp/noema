@@ -38,12 +38,16 @@ import type { MeEraser } from '../../crystal/MeEraser.js'
 import type { ErasureReceipt } from '../../types/erasure.js'
 import type { Actum, ComputeStrategy, GpuClass, ModelRef } from '../../types/actum.js'
 import type { Inceptio } from '../../types/cursus.js'
+import type { Mandatum, Mandatorum } from '../../types/mandatum.js'
 
 import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregate.js'
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toRunDetail, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import { toRun, toRunDetail, toRunOrder, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import {
+  HOURLY_CRON, ORDER_MAX_RUNS, ORDER_WINDOW_MS, TRAINING_MODUS_ID,
+} from '../../crystal/MandatumRunner.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -54,7 +58,7 @@ import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
-import type { Run, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+import type { Run, RunOrder, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
 
 /** Options for the owner's settled spend-history listing (`listRuns`). */
 export interface ListRunsOpts {
@@ -164,6 +168,10 @@ export interface CrystalApiDeps {
   /** Fire-and-forget webhook poster (the `options.webhookUrl` seam). Absent → no webhook.
    *  Kept here (not in the crystal ring) so `fetch` stays out of `Conductor`. */
   notify?: (url: string, body: unknown) => void
+  /** Standing-order store (Mandatorum). Present → a training run opens an order the user
+   *  can point at, cancel, and be retried under (noema-310). Absent → no orders are opened
+   *  and every run behaves exactly as it did before. */
+  mandata?: Mandatorum
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
   /** Session store — keys studios by their bound Modo id (the canonical studio handle)
@@ -350,6 +358,12 @@ export interface InvokeOpts {
    * arcanumProof) that bypass AuctorKey identity entirely.
    */
   by?: Inceptio['by']
+  /**
+   * Set when this invocation IS an attempt on an existing standing order (a Mandatum
+   * firing). Suppresses opening a second order for the same request — the order that
+   * fired is the one that records the attempt.
+   */
+  mandatumId?: string
 }
 
 /** A compact catalog summary of one runnable flow. */
@@ -686,7 +700,111 @@ export class CrystalApi {
       }
       throw err
     }
-    return toRunDetail(actum)
+
+    // A training launch is a standing order, not a coin flip: the click says "I want this
+    // trained", so it opens an order that outlives the one attempt. Opening it HERE is what
+    // makes that possible — the payer key and the dispatch terms are known at the click and
+    // nowhere downstream (an Actum deliberately carries no identity, and no cap). The order
+    // opens holding this attempt, and the runner decides from that attempt's OUTCOME whether
+    // asking again is warranted, so nothing is ever re-run on a click alone.
+    const mandatum = await this._openTrainingOrder(modusId, effectiveAditus, inceptio.by, actum.id, opts)
+
+    const run = toRunDetail(actum)
+    if (mandatum) run.order = toRunOrder(mandatum)
+    return run
+  }
+
+  /**
+   * Open the standing order behind a training run. Returns undefined — and changes nothing —
+   * unless the store is wired, the flow is training, this is the FIRST attempt (an order
+   * firing does not open another), and the payer is a key an order can hold. A bursa bearer
+   * token is not: an order is a durable instruction to spend hours later, and a bearer
+   * credential names no owner to spend on behalf of.
+   */
+  private async _openTrainingOrder(
+    modusId: string,
+    aditus: Record<string, unknown>,
+    by: Inceptio['by'],
+    actumId: string,
+    opts: InvokeOpts,
+  ): Promise<Mandatum | undefined> {
+    const store = this.deps.mandata
+    if (!store || modusId !== TRAINING_MODUS_ID || opts.mandatumId) return undefined
+    const payer =
+      'animaId' in by ? { animaId: by.animaId }
+      : 'commitment' in by ? { commitment: by.commitment }
+      : undefined
+    if (!payer) return undefined
+
+    const now = Date.now()
+    const invocatio = {
+      ...(opts.maxImpetus !== undefined ? { maxImpetus: String(opts.maxImpetus) } : {}),
+      ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
+      ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),
+    }
+    try {
+      const created = await store.create({
+        modusId,
+        aditus,
+        by: payer,
+        triggerGenus: 'schedula',
+        schedula: { cron: HOURLY_CRON, zona: 'UTC', maxRuns: ORDER_MAX_RUNS },
+        status: 'active',
+        // The window runs from the ORIGINAL click, not from the first failure — "a day" is
+        // the day the user asked, however many attempts fall inside it.
+        finis: new Date(now + ORDER_WINDOW_MS),
+        // Due immediately, but in WATCH mode: `pendens` is the attempt just dispatched, so
+        // the first thing the runner does with this order is read that attempt's result.
+        proximum: new Date(now),
+        pendens: actumId,
+        ...(Object.keys(invocatio).length ? { invocatio } : {}),
+      })
+      // `create` seeds the lineage empty by contract, so the launch is stamped on straight
+      // after — the first attempt is an attempt, and counts against the day's allowance.
+      return await store.update(created.id, { acta: [actumId], ignitions: 1, ignitum: new Date(now) })
+    } catch (err) {
+      // The order is a convenience over the run, never a precondition for it: a store failure
+      // must not turn a dispatched, paid-for training into a failed request.
+      log.warn('could not open a standing order for a training run', { error: String(err) })
+      return undefined
+    }
+  }
+
+  /**
+   * The standing order behind one of the caller's runs — OWNER-SCOPED through the run itself
+   * (`_owns`), so a stranger's run id is `not_found.run` exactly as it is on `getRun`: no new
+   * resource, no new error code, and no second ownership rule to keep in step with the first.
+   */
+  async getRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null> {
+    const mandatum = await this._ownedOrder(auctor, runId)
+    return mandatum ? toRunOrder(mandatum) : null
+  }
+
+  /**
+   * Cancel the standing order behind one of the caller's runs. The order is the user's, so
+   * ending it is theirs to do. Idempotent: revoking an order that has already stopped returns
+   * its current state rather than reopening or re-terminating it.
+   */
+  async revokeRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null> {
+    const mandatum = await this._ownedOrder(auctor, runId)
+    if (!mandatum || !this.deps.mandata) return null
+    if (mandatum.status !== 'active' && mandatum.status !== 'dormiens') return toRunOrder(mandatum)
+    const revoked = await this.deps.mandata.update(mandatum.id, {
+      status: 'revocatum',
+      causa: 'revocatum',
+      pendens: undefined,
+    })
+    return toRunOrder(revoked)
+  }
+
+  /** The order behind a run the caller owns, or null when there is none. The RUN's ownership
+   *  is checked first and an unowned id is indistinguishable from an unknown one, as
+   *  everywhere else on this surface. */
+  private async _ownedOrder(auctor: AuctorKey, runId: string): Promise<Mandatum | null> {
+    const a = await this.deps.actorum.findById(runId)
+    if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(runId)
+    if (!this.deps.mandata) return null
+    return this.deps.mandata.findByActum(runId)
   }
 
   /**
@@ -700,7 +818,13 @@ export class CrystalApi {
   async getRun(auctor: AuctorKey, id: string): Promise<Run> {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
-    return toRunDetail(a)
+    const run = toRunDetail(a)
+    // The order, when there is one, rides on the run: a client polling a failed training
+    // learns from the SAME response that it is scheduled to be attempted again, and learns it
+    // from a field — never by reading the failure sentence.
+    const mandatum = await this.deps.mandata?.findByActum(id).catch(() => null)
+    if (mandatum) run.order = toRunOrder(mandatum)
+    return run
   }
 
   /**

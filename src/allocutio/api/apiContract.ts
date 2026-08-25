@@ -124,8 +124,52 @@ const RunSchema: JsonSchema = {
       type: 'string',
       description: 'OWNER-SCOPED: the cast-time modus version. Present only when populated.',
     },
+    order: {
+      type: 'object',
+      additionalProperties: true,
+      description:
+        'The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order.',
+    },
   },
   required: ['id', 'status', 'modusId'],
+}
+
+/**
+ * A standing order (mirrors `types.ts#RunOrder`): what the caller ASKED FOR, as distinct
+ * from any one attempt at it. A training request survives an infrastructure failure — the
+ * order keeps attempting, hourly, until it lands or its window closes.
+ */
+const RunOrderSchema: JsonSchema = {
+  type: 'object',
+  description: 'A standing order behind a run — the request, not the attempt.',
+  properties: {
+    id: { type: 'string', description: 'The order identifier.' },
+    state: {
+      type: 'string',
+      enum: ['attempting', 'scheduled', 'fulfilled', 'stopped', 'cancelled'],
+      description:
+        'Where the request stands: an attempt running now (attempting), another one queued (scheduled), ' +
+        'succeeded (fulfilled), ended without succeeding (stopped), or cancelled by the holder.',
+    },
+    reason: {
+      type: 'string',
+      enum: ['fulfilled', 'failed', 'exhausted', 'cancelled'],
+      description: 'Why a terminal order ended. Absent while it is still live.',
+    },
+    attempts: { type: 'number', description: 'Attempts made so far, the first one included.' },
+    attemptsRemaining: { type: 'number', description: 'Attempts the order may still make.' },
+    nextAttemptAt: { type: 'string', format: 'date-time', description: 'When the next attempt is due, ISO-8601.' },
+    until: { type: 'string', format: 'date-time', description: 'When the order stops trying regardless, ISO-8601.' },
+    latestRunId: { type: 'string', description: 'The most recent attempt — the run to watch now.' },
+  },
+  required: ['id', 'state', 'attempts', 'attemptsRemaining'],
+}
+
+/** The `{ order }` envelope returned by the order operations. `null` when the run has none. */
+const RunOrderEnvelopeSchema: JsonSchema = {
+  type: 'object',
+  properties: { order: RunOrderSchema },
+  required: ['order'],
 }
 
 /** The `{ run }` envelope returned by the run operations. */
@@ -1750,6 +1794,25 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Fetch a run by id (poll for completion).',
       auth: true,
       response: RunEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/runs/:id/order',
+      summary:
+        'The standing order behind a run — the request, not the attempt. A training run that fails on ' +
+        'infrastructure stays scheduled: the order attempts again hourly until it lands or its window ' +
+        'closes. Returns { order: null } for a run that has none.',
+      auth: true,
+      response: RunOrderEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/runs/:id/order/revoke',
+      summary:
+        'Cancel the standing order behind a run — no further attempts will be made. Idempotent; the ' +
+        'attempt already in flight is unaffected.',
+      auth: true,
+      response: RunOrderEnvelopeSchema,
     },
     {
       method: 'GET',
