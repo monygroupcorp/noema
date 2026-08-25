@@ -59,7 +59,7 @@ export const OPENAI_PROVIDER: ApiProvider = {
   authEnv: 'OPENAI_API_KEY',
   capabilities: {
     chat:      { path: '/chat/completions', defaultModel: 'gpt-4o' },
-    image:     { path: '/images/generations', defaultModel: 'dall-e-3' },
+    image:     { path: '/images/generations', defaultModel: 'gpt-image-1' },
     imageEdit: { path: '/images/edits', defaultModel: 'gpt-image-1' },
   },
   pricing: {

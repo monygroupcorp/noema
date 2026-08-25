@@ -100,6 +100,15 @@ test('__capability image hits the image path and maps data[0].url → image', as
   assert.equal(http.lastJson?.url, 'https://api.openai.com/v1/images/generations')
 })
 
+test('image generation without a model port posts the provider default model', async () => {
+  const http = fakeHttp(IMAGE_RES)
+  const c = cursor(OPENAI_PROVIDER, http)
+  // The canon image modus declares no `model` port, so the model on the wire is whatever the
+  // provider descriptor names — this is the only place that binding is asserted.
+  await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }))
+  assert.equal((http.lastJson?.body as { model?: string }).model, 'gpt-image-1')
+})
+
 test('image b64_json response becomes a data URI', async () => {
   const http = fakeHttp({ data: [{ b64_json: 'QUJD' }] })
   const c = cursor(OPENAI_PROVIDER, http)
