@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.16.0](https://github.com/monygroupcorp/noema/compare/v5.15.0...v5.16.0) (2026-08-25)
+
+
+### Features
+
+* **training:** keep a training request standing for a day instead of ending it at one attempt ([50dbc16](https://github.com/monygroupcorp/noema/commit/50dbc16cd8835a3f7b10075a7a8e9ecd381205d7))
+
+
+### Bug Fixes
+
+* correlate caption-arm pod logs by id, arm, and errorCode ([30b3fc3](https://github.com/monygroupcorp/noema/commit/30b3fc36527e5fadaf678448313e43b78c2d4015))
+* correlate caption-arm pod logs by id, arm, and errorCode ([6f932bb](https://github.com/monygroupcorp/noema/commit/6f932bbb6fc6d5d11cf17d78f2c5cc63cac674cd))
+* **crystal:** declare the muse-session surface's conflict error code ([88b2c51](https://github.com/monygroupcorp/noema/commit/88b2c51df9c294a94c064c37cbd061df5e6ccc0d))
+* **crystal:** declare the muse-session surface's conflict error code ([2808c4b](https://github.com/monygroupcorp/noema/commit/2808c4b7d729f25cb17e99d5d8a1615fd26ed428))
+* **crystal:** raise the ip-less bailout above the measured healthy attach floor ([69b32af](https://github.com/monygroupcorp/noema/commit/69b32af57005dca167b710e336ddb9e2f862b113))
+* **crystal:** raise the ip-less bailout above the measured healthy attach floor ([bd2e335](https://github.com/monygroupcorp/noema/commit/bd2e3357d287618eb01b4e6bcfbca28560c883c0))
+* **crystal:** re-provision a training pod that never becomes SSH-reachable ([5cefde7](https://github.com/monygroupcorp/noema/commit/5cefde7d72e1beabc8d7be9899b9b067cd711f70))
+* **crystal:** resolve declared owned-resource references for the calling anima ([0559a58](https://github.com/monygroupcorp/noema/commit/0559a580a6fde004535ec3aa8928ed350f0f6650))
+* **crystal:** resolve declared owned-resource references for the calling anima ([ce99ce3](https://github.com/monygroupcorp/noema/commit/ce99ce35bb04e82fb68b09ea98026e3f51ac95fc))
+* **muse:** version Muse session writes so overlapping mutations cannot lose one another ([560b35b](https://github.com/monygroupcorp/noema/commit/560b35b3ad8f98e1613713b26db37f000c4dc07c))
+
 ## [5.15.0](https://github.com/monygroupcorp/noema/compare/v5.14.1...v5.15.0) (2026-08-24)
 
 
