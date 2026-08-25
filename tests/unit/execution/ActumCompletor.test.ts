@@ -11,6 +11,7 @@ import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { WARM_SURCHARGE_IMPETUS } from '../../../src/ledger/rates.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 import { bus } from '../../../src/lib/bus.js'
+import { classifyError } from '../../../src/lib/classifyError.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -589,7 +590,10 @@ test('fail emits its wide event with no trace context — a swept run still reac
   assert.equal(seen.length, 1)
   assert.equal(seen[0].actumId, 'act-swept')
   assert.equal(seen[0].status, 'failed')
-  assert.equal(seen[0].errorCode, 'Pod never reported in')
+  // errorCode is the classified value (grouping fairly by fault) — the raw text this run
+  // actually failed with is preserved verbatim in `message`.
+  assert.equal(seen[0].errorCode, classifyError('Pod never reported in'))
+  assert.equal(seen[0].message, 'Pod never reported in')
   // Release-only, so the whole reservation is refunded and nothing is charged.
   assert.equal(seen[0].reservation, '1800')
   assert.equal(seen[0].impetus, '0')

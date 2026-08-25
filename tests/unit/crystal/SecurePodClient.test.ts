@@ -10,6 +10,8 @@ import {
 import type { SecurePodConfig, SshTransportLike } from '../../../src/crystal/SecurePodClient.js'
 import { impetusPerSecondFromHourly } from '../../../src/ledger/rates.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 
 // ── terminatePod spy ──────────────────────────────────────────────────────────
 // SecurePodClient takes terminatePodFn as a constructor dep; we pass a spy
@@ -832,6 +834,68 @@ test('a launch with no phase hook behaves exactly as before', async () => {
   await within(detached.promise, 'the detached launch command')
   assert.equal(podId, 'pod-xyz')
   assert.equal(terminateSpy.calls.length, 0)
+})
+
+// ── the detached launch names its own arm (noema-269 gave captioning its own script; the log
+// lines never followed) ─────────────────────────────────────────────────────────────────────
+//
+// A structured `arm` field survives grep-by-arm regardless of message wording — that is why it
+// carries the selector rather than a string-switched message.
+
+test('a captioner launch logs its own arm, not a hardcoded training-pod message', async () => {
+  const detached = deferred<void>()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  const entries: LogEntry[] = []
+  const onLog = (e: LogEntry) => { entries.push(e) }
+  bus.on('log', onLog)
+  try {
+    await client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup: [], script: 'captioner' })
+    await within(detached.promise, 'the detached launch command')
+  } finally {
+    bus.off('log', onLog)
+  }
+
+  const locked = entries.find(e => e.msg === 'pod locked')
+  const bootstrapping = entries.find(e => e.msg === 'bootstrapping pod')
+  const launched = entries.find(e => e.msg === 'pod launched')
+  assert.ok(locked && bootstrapping && launched, 'expected all three lifecycle log lines')
+  assert.equal(locked!.arm, 'captioner')
+  assert.equal(bootstrapping!.arm, 'captioner')
+  assert.equal(launched!.arm, 'captioner')
+  for (const e of entries) assert.doesNotMatch(String(e.msg), /training/i)
+})
+
+test('a trainer launch (the default, no script given) still logs arm "trainer"', async () => {
+  const detached = deferred<void>()
+  const ssh = makeSshTransport({
+    async exec(cmd: string) {
+      if (cmd.includes('nohup')) detached.resolve()
+      return ''
+    },
+  })
+  const { fetch } = makeFetchMock()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+
+  const entries: LogEntry[] = []
+  const onLog = (e: LogEntry) => { entries.push(e) }
+  bus.on('log', onLog)
+  try {
+    await client.launchTrainingPod({ image: 'runpod/pytorch:2.4.0', env: {}, setup: [] })
+    await within(detached.promise, 'the detached launch command')
+  } finally {
+    bus.off('log', onLog)
+  }
+
+  const launched = entries.find(e => e.msg === 'pod launched')
+  assert.equal(launched!.arm, 'trainer')
 })
 
 // ── ip-less hosts and the SSH-readiness attempt (noema-305) ────────────────────

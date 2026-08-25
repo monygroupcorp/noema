@@ -634,13 +634,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
       const acquired = await this._acquireSshReadyTrainingPod(firstPodId, opts, attemptsSpent)
       holdingPodId = acquired.podId
       const { podId, sshInfo } = acquired
-      log.info('training pod locked', { podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
+      const arm = opts.script ?? 'trainer'
+      log.info('pod locked', { podId, arm, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr })
       opts.onPhase?.(coldStartProgressus('pod-locked', {
         podId, gpuType: sshInfo.gpuType, costPerHr: sshInfo.costPerHr,
       }) ?? { phase: 'provisioning' })
       ssh = await this._waitForSshd(sshInfo)
       const pod = resolveDetachedPodScript(opts.script)
-      await this._bootstrapDetached(ssh, podId, pod.path, pod.name,
+      await this._bootstrapDetached(ssh, podId, pod.path, pod.name, arm,
         { ...opts.env, RUNPOD_POD_ID: podId }, opts.setup, provisionDeadline, opts.onPhase)
       await ssh.close()
       ssh = null
@@ -745,11 +746,11 @@ export class SecurePodClient implements RunPodClient, Procurator {
    * surfacing later as a run that never reported back.
    */
   private async _bootstrapDetached(
-    ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string,
+    ssh: SshTransportLike, podId: string, scriptPath: string, scriptName: string, arm: DetachedPodScript,
     env: Record<string, string>, setup: string[] = [], deadline?: number,
     onPhase?: (progressus: Omit<Progressus, 'at'>) => void,
   ): Promise<void> {
-    log.info('bootstrapping training pod', { podId, script: scriptName, setupSteps: setup.length })
+    log.info('bootstrapping pod', { podId, arm, script: scriptName, setupSteps: setup.length })
     // The pod exists and is being built — a distinct, minutes-long phase from acquiring it.
     onPhase?.({ phase: 'installing', message: 'preparing the pod' })
     const timeLeft = (): number => (deadline === undefined ? BOOTSTRAP_CMD_TIMEOUT_MS : deadline - Date.now())
@@ -768,7 +769,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     await ssh.exec(`echo '${b64}' | base64 -d > /root/${scriptName}`, { timeout: 10_000 })
     const envStr = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ')
     await ssh.exec(`${envStr} nohup python3 /root/${scriptName} >> /tmp/${scriptName}.log 2>&1 &`, { timeout: 10_000 })
-    log.info('training pod launched', { podId })
+    log.info('pod launched', { podId, arm })
     // Handover: the pod owns the run from here and reports its own phases on /runner/status.
     onPhase?.({ phase: 'loading', message: 'starting the job on the pod' })
   }
