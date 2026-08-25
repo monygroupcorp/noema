@@ -72,6 +72,9 @@ import { coverageOver, liveMedia } from '../../types/dataset.js'
 import type {
   Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets, IngestMediaInput,
 } from '../../types/dataset.js'
+import type { Corporum } from '../../types/corpus.js'
+import { parseManifest } from '../../crystal/datasetManifest.js'
+import { checkOwnedAditus, type OwnedResourceLookups } from '../../execution/ownedResources.js'
 import { floorToEntries, isMuseSessionVersionConflict } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
@@ -186,9 +189,14 @@ export interface CrystalApiDeps {
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
   collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
-  /** Dataset store — backs `listDatasets`/`listDatasetSummaries`/`getDataset`/`createDataset`.
-   *  Absent → dataset ops unavailable. */
+  /** Dataset store — backs `listDatasets`/`listDatasetSummaries`/`getDataset`/`createDataset`,
+   *  and resolves a run's declared dataset references for the calling anima.
+   *  Absent → dataset ops unavailable, and a declared dataset reference is refused. */
   datasets?: Datasets
+  /** Corpus store — resolves a run's declared corpus references (the training modus's dataset
+   *  port) for the calling anima. Absent → a declared corpus reference is refused; an inline
+   *  manifest, which names no stored record, is unaffected. */
+  corpora?: Corporum
   /** Muse session store — backs the session spawn/read/steer/record surface.
    *  Absent → Muse session ops unavailable. */
   museSessions?: MuseSessions
@@ -570,6 +578,10 @@ export class CrystalApi {
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
 
+    // Read the definition once: the account-defaults pass needs its ports, and so does the
+    // owned-resource check below (which needs to know which of them name a stored record).
+    const resolvedModus = await modorum.find(modusId)
+
     // Account-level defaults (Consuetudinum), applied UNDER the cast-time aditus:
     //   cast-time input > affines (per-modus) > generatio (cross-cutting) > modus defaults.
     // Only DECLARED ports are filled, so a stale default can never inject an unknown input.
@@ -582,7 +594,7 @@ export class CrystalApi {
       ])
       generatio = resolvedGeneratio
       if (affines || generatio) {
-        const ports = (await modorum.find(modusId))?.aditus ?? {}
+        const ports = resolvedModus?.aditus ?? {}
         effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
       }
     }
@@ -635,6 +647,16 @@ export class CrystalApi {
     // that tenant's studio toward drain and reaping). Refused HERE — above the `Inceptio` literal
     // and therefore above `dispatchInceptio` — so a refusal reserves no signa and creates no actum.
     if (opts.studioId) await this._ownedStudio(auctor, opts.studioId)
+
+    // Resource scope comes from the CALLER too. A modus declares which of its aditus ports name
+    // a stored, owner-bearing record (`Porta.owned`), and every declared reference is resolved
+    // here against the calling anima before the run exists. A cursor cannot make this check for
+    // itself — an Actum is identity-blind, so by dispatch there is no caller left to scope the
+    // read against. Refused HERE, above the `Inceptio` literal and therefore above
+    // `dispatchInceptio`, so a refusal reserves no signa, creates no actum, provisions no pod
+    // and resolves no manifest. Runs on the EFFECTIVE aditus so an account default that fills a
+    // reference port is checked exactly like a cast-time one.
+    await this._assertOwnedAditus(auctor, resolvedModus, effectiveAditus)
 
     const inceptio: Inceptio = {
       modusId,
@@ -2956,6 +2978,51 @@ export class CrystalApi {
    * Fail-closed: with no conductor wired there is nothing that can affirm ownership, so a requested
    * studio is refused rather than allowed through.
    */
+  /**
+   * Refuse a run whose aditus names a stored resource this caller may not name.
+   *
+   * The modus declares which ports are references (`Porta.owned`); each is resolved through a
+   * store read whose access predicate is IN THE QUERY and whose owner is closed over here, so
+   * a record the caller may not name is never loaded and there is no fetched record for a
+   * comparison to be skipped on. A reference that does not resolve fails the request as bad
+   * INPUT (`input.invalid_aditus`, 422) naming only the port: the caller learns the value was
+   * not usable, never whether an id exists behind it, so ids stay non-enumerable — the same
+   * property `_ownedStudio`'s `not_found.studio` refusal preserves.
+   *
+   * FAIL CLOSED. Datasets and corpora both key their owner on an `animaId`, so an anonymous
+   * (commitment/bursa) caller can never resolve one and every reference they name is refused;
+   * a deployment with no store wired cannot affirm access and refuses for the same reason. The
+   * one value that is not a reference passes through untouched: an inline manifest on a corpus
+   * port is content the caller supplied, not a name for someone's record.
+   *
+   * Declared ports ONLY. Nothing else in the aditus is read, rewritten or stripped, so the
+   * internal channels that ride an aditus (`_attributes`, `__capability`) are untouched.
+   */
+  private async _assertOwnedAditus(
+    auctor: AuctorKey,
+    modus: Modus | null,
+    values: Record<string, unknown>,
+  ): Promise<void> {
+    const aditus = modus?.aditus
+    if (!aditus) return
+    if (!Object.values(aditus).some(porta => porta.owned !== undefined)) return
+
+    const owner = 'animaId' in auctor ? auctor.animaId : undefined
+    const datasets = this.deps.datasets
+    const corpora = this.deps.corpora
+
+    const lookups: OwnedResourceLookups = {
+      inline: raw => parseManifest(raw) !== null,
+      ...(owner && datasets?.findOwned
+        ? { dataset: (id: string) => datasets.findOwned!(id, owner) }
+        : {}),
+      ...(owner && corpora ? { corpus: (id: string) => corpora.findOwned(id, owner) } : {}),
+    }
+
+    const verdict = await checkOwnedAditus(aditus, values, lookups)
+    if (!verdict.ok) throw Errors.invalidAditus({ field: verdict.field })
+  }
+
   private async _ownedStudio(auctor: AuctorKey, studioId: string): Promise<StudioHandle> {
     if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
     const handle = await this.deps.conductor.getStudio(studioId, auctor)
