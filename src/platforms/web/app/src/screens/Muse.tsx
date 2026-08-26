@@ -104,6 +104,18 @@ import {
   resumePhase,
   rollAt,
   rollCurated,
+  ancestryOf,
+  childrenOf,
+  currentMiningNode,
+  isLocked,
+  lockCount,
+  lockSummaryLine,
+  rootFrom,
+  stepTo,
+  toggleLock,
+  varyBlockReason,
+  varyFrom,
+  varyInto,
   savedOf,
   settlePieceResult,
   setControlHand,
@@ -135,6 +147,9 @@ import {
   MAX_FLOOR_FRAGMENTS,
   MAX_INSTRUCTION_CHARS,
   MUSE_NARROW_VIEWPORT,
+  EMPTY_MINING,
+  MAX_ROLLS,
+  NO_LOCKS,
   SESSION_PARAM,
   LORA_WEIGHT_MAX,
   LORA_WEIGHT_MIN,
@@ -147,8 +162,12 @@ import {
   type GestureGate,
   type ControlHand,
   type HoldState,
+  type LockSet,
   type LoraChoice,
+  type MiningNode,
+  type MiningTree,
   type MuseControl,
+  type VaryOrigin,
   type PieceProgress,
   type SessionRow,
   type SheetPhase,
@@ -323,6 +342,16 @@ export function Muse() {
   // is written server-side; the panel below renders `keptRollsOf(session)`. What is held
   // here is only which keep is mid-write, so the control can refuse a double-send.
   const [keeping, setKeeping] = useState(false);
+
+  // ── The mining loop (Muse P5, noema-231) ──────────────────────────────────
+  // Locks and the vary tree are this sitting's own working state: they steer the
+  // next free roll and nothing else, so nothing here is written server-side. A roll
+  // that is worth keeping is KEPT, and that rail is unchanged — a varied roll goes
+  // through it exactly as an independent one does. Every rule below is a pure
+  // function in `lib/muse.ts`; this screen holds the state and renders them.
+  const [locks, setLocks] = useState<LockSet>(NO_LOCKS);
+  const [mining, setMining] = useState<MiningTree>(EMPTY_MINING);
+  const [varyNote, setVaryNote] = useState<string | null>(null);
 
   // ── Ignition ──────────────────────────────────────────────────────────────
   // The workflow catalog, narrowed to t2i. `effect` (i2i) needs an input image and
@@ -1022,6 +1051,115 @@ export function Muse() {
     setReport(rollCurated(flat, outOfPlay, count));
     setEdits({});
     setFired({});
+    setVaryNote(null);
+  }
+
+  // ── Lock, vary, step back ─────────────────────────────────────────────────
+  // The independent `Roll →` above is unchanged and stays unlocked: it is how a
+  // direction is found. Everything below is how one is refined.
+
+  function lock(fragment: Fragment) {
+    setLocks((prev) => toggleLock(prev, fragment));
+    setVaryNote(null);
+  }
+
+  /** Draw `count` neighbours of a roll. A roll from the independent batch enters the
+   *  tree as a new root; a node already in the tree is varied in place. */
+  function vary(origin: VaryOrigin | null, nodeId: string | null) {
+    if (flat.length === 0) return;
+    // Asked BEFORE the draw, because a vary that cannot move returns N copies of
+    // where it started and reads as a broken button rather than as a full floor.
+    const refusal = varyBlockReason(flat, outOfPlay, locks);
+    if (refusal) { setVaryNote(refusal); return; }
+    setVaryNote(null);
+    setMining((prev) => {
+      const seeded = nodeId ? stepTo(prev, nodeId) : (origin ? rootFrom(prev, origin, locks) : prev);
+      const parentId = seeded.currentId;
+      if (!parentId) return prev;
+      return varyInto(seeded, parentId, varyFrom(flat, outOfPlay, locks, seeded.nextIndex, count), locks);
+    });
+  }
+
+  /** Step back to an ancestor — or across to a neighbour. The node is returned as it
+   *  was drawn, never re-sampled, so the roll you came from is the roll you get. */
+  function stepMining(nodeId: string) {
+    setMining((prev) => stepTo(prev, nodeId));
+    setVaryNote(null);
+  }
+
+  /** A roll's fragments, each one a lock toggle. Locking IS the dialing-in: a pinned
+   *  fragment survives every subsequent vary and everything else re-samples, so a
+   *  setting and a palette that are working can be held while pose and props keep
+   *  pulling. A lock is per CATEGORY, so pinning a second fragment of a category
+   *  replaces the first rather than putting two of it in one prompt. */
+  function fragmentRow(fragments: readonly Fragment[]) {
+    return (
+      <div className="muse-roll-frags mono">
+        {fragments.map((f, j) => {
+          const on = isLocked(locks, f);
+          return (
+            <button
+              key={`${f.category}-${j}`}
+              type="button"
+              className={`muse-roll-frag${on ? ' locked' : ''}`}
+              style={{ borderColor: categoryColor(f.category) }}
+              aria-pressed={on}
+              title={on
+                ? `[${f.category}] is locked — it survives every vary. Click to unlock.`
+                : `lock [${f.category}] so the next vary keeps it`}
+              onClick={() => lock(f)}
+            >
+              [{f.category}] {f.text}{f.trigger ? ` <- ${f.trigger}` : ''}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  /** One node of the mining tree, rendered as a roll card. A varied roll is an
+   *  ordinary roll — same keep rail, same fire rail, same badge. */
+  function miningCard(node: MiningNode, standing: boolean) {
+    const prompt = promptOf(node.rollIndex, node.prompt);
+    const armed = canFireOne(modusId, prompt, blockReason);
+    return (
+      <div key={node.id} className={`muse-roll${standing ? ' standing' : ''}`}>
+        <div className="muse-roll-head">
+          {standing && <span className="gt-sub mono muse-standing">varying from this one</span>}
+          <span className={`muse-badge ${node.paid ? 'paid' : 'free'}`}>
+            {node.paid ? 'paid — a smoother would run' : 'free'}
+          </span>
+        </div>
+        <textarea
+          className="cer-input muse-roll-text"
+          value={prompt}
+          onChange={(e) => setEdits((prev) => ({ ...prev, [node.rollIndex]: e.target.value }))}
+        />
+        {fragmentRow(node.fragments)}
+        <div className="muse-roll-foot">
+          <button
+            className="btn ghost sm"
+            disabled={keeping || keepBlocked(session, prompt)}
+            onClick={() => keep(prompt, node.paid)}
+          >
+            {keeping ? 'keeping…' : 'Keep'}
+          </button>
+          <button className="btn ghost sm" disabled={liveFragments === 0} onClick={() => vary(null, node.id)}>
+            Vary ×{count} →
+          </button>
+          <button
+            className="btn accent sm"
+            disabled={!armed || busy === node.rollIndex}
+            onClick={() => doFire(node.rollIndex, prompt, node.fragments)}
+          >
+            {busy === node.rollIndex ? 'firing…' : 'Fire this one →'}
+          </button>
+          {fired[node.rollIndex]?.error && (
+            <span className="gt-sub mono">{fired[node.rollIndex]!.error}</span>
+          )}
+        </div>
+      </div>
+    );
   }
 
   // How many fragments a launch actually has to draw from: the pooled garden minus this
@@ -2202,8 +2340,10 @@ export function Muse() {
 
             <div className="muse-roll-controls">
               <label className="cc-field cc-narrow"><span>Rolls</span>
-                <input className="cer-input" type="number" min={1} max={50} value={count}
-                  onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))} /></label>
+                {/* Clamped here as well as on the input, because the bound is what keeps
+                    an independent roll's index space below the mining tree's. */}
+                <input className="cer-input" type="number" min={1} max={MAX_ROLLS} value={count}
+                  onChange={(e) => setCount(Math.min(MAX_ROLLS, Math.max(1, Number(e.target.value) || 1)))} /></label>
               <button className="btn accent" disabled={liveFragments === 0} onClick={roll}>
                 Roll →
               </button>
@@ -2228,13 +2368,7 @@ export function Muse() {
                       value={edits[r.index] ?? r.prompt}
                       onChange={(e) => setEdits((prev) => ({ ...prev, [r.index]: e.target.value }))}
                     />
-                    <div className="muse-roll-frags mono">
-                      {r.fragments.map((f, j) => (
-                        <span key={j} className="muse-roll-frag" style={{ borderColor: categoryColor(f.category) }}>
-                          [{f.category}] {f.text}{f.trigger ? ` <- ${f.trigger}` : ''}
-                        </span>
-                      ))}
-                    </div>
+                    {fragmentRow(r.fragments)}
                     <div className="muse-roll-foot">
                       <button
                         className="btn ghost sm"
@@ -2242,6 +2376,16 @@ export function Muse() {
                         onClick={() => keep(promptOf(r.index, r.prompt), r.paid)}
                       >
                         {keeping ? 'keeping…' : 'Keep'}
+                      </button>
+                      {/* An independent roll is where a search STARTS. Varying it drops it
+                          into the mining tree as a root and draws its neighbours; the roll
+                          itself stays exactly where it is. */}
+                      <button
+                        className="btn ghost sm"
+                        disabled={liveFragments === 0}
+                        onClick={() => vary({ index: r.index, fragments: r.fragments, prompt: r.prompt, paid: r.paid }, null)}
+                      >
+                        Vary ×{count} →
                       </button>
                       {/* One control, and it fires this one prompt. The price sits on the
                           launch control above: a t2i reservation is evaluated against the
@@ -2268,6 +2412,55 @@ export function Muse() {
                 ))}
               </div>
             )}
+
+            {/* The mining tree (P5, noema-231). Free start to finish — locking, varying
+                and stepping back are arithmetic over a garden already in memory. Nothing
+                here is written server-side; a roll worth keeping goes through the same
+                keep rail an independent roll does. */}
+            {varyNote && <div className="gt-sub mono muse-vary-note">{varyNote}</div>}
+            {(() => {
+              const standing = currentMiningNode(mining);
+              if (!standing) return null;
+              const trail = ancestryOf(mining, standing.id);
+              const neighbours = childrenOf(mining, standing.id);
+              return (
+                <div className="muse-mining">
+                  <div className="muse-mining-head">
+                    <span className="gc-l">mining</span>
+                    <span className="gt-sub mono">{lockSummaryLine(locks)}</span>
+                  </div>
+                  {/* The trail back. Every roll a vary came out of is still here, and
+                      stepping onto one returns the roll as it was drawn — not a re-sample
+                      of it — so a wrong turn does not cost the roll it started from. */}
+                  <div className="muse-trail mono">
+                    {trail.map((n, i) => (
+                      <span key={n.id}>
+                        {i > 0 && <span className="muse-trail-sep">→</span>}
+                        <button
+                          type="button"
+                          className="linkish"
+                          disabled={n.id === standing.id}
+                          title={n.prompt}
+                          onClick={() => stepMining(n.id)}
+                        >
+                          roll {n.rollIndex}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  {miningCard(standing, true)}
+                  {neighbours.length > 0 && (
+                    <div className="muse-rolls muse-neighbours">
+                      <div className="gt-sub mono">
+                        {neighbours.length} neighbour{neighbours.length === 1 ? '' : 's'}
+                        {lockCount(locks) > 0 ? ' — the locked fragments are held across all of them' : ''}
+                      </div>
+                      {neighbours.map((n) => miningCard(n, false))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* The kept panel reads the SESSION. Keeping is a durable act, so what it
                 shows survives leaving this screen and coming back to the session. */}
