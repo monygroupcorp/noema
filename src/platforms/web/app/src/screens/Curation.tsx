@@ -21,8 +21,19 @@ export function Curation() {
   useEffect(() => {
     if (!id) return;
     let live = true;
-    Promise.all([api.getCollection(id).catch(() => null), api.listCollectionPieces(id, 'pending')])
-      .then(([c, p]) => { if (!live) return; if (c) setCol(c.collection); setQueue(p.pieces); })
+    Promise.all([api.getCollection(id).catch(() => null), api.listCollectionPieces(id, 'all')])
+      .then(([c, p]) => {
+        if (!live) return;
+        if (c) setCol(c.collection);
+        // 'none' = review not enabled for this piece (auto-approved) — excluded from the
+        // reviewable queue so an auto-approve collection still shows the empty state below.
+        const reviewable = p.pieces.filter((piece) => piece.review !== 'none');
+        setQueue(reviewable);
+        const resumeAt = reviewable.findIndex((piece) => piece.review === 'pending');
+        setIdx(resumeAt === -1 ? reviewable.length : resumeAt);
+        setKept(reviewable.filter((piece) => piece.review === 'approved').length);
+        setRejected(reviewable.filter((piece) => piece.review === 'rejected').length);
+      })
       .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, [id]);
@@ -119,7 +130,7 @@ export function Curation() {
         )}
 
         <div className="cu-foot">
-          <span className="mono"><span className="hemi2 dashed" /> Reviewed in this session · nothing is published until you export</span>
+          <span className="mono"><span className="hemi2 dashed" /> Progress is saved · nothing is published until you export</span>
           <div className="right" style={{ display: 'flex', gap: 'var(--s3)' }}>
             <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
             <Link className="btn accent" to={`/collections/${id}/export`}>Export →</Link>
