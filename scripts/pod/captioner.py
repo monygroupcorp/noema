@@ -13,8 +13,10 @@ it everything via env. On boot it:
   1. parses the dataset MANIFEST (NOEMA_MANIFEST_B64 = [{url, id}]) — one entry per media item
   2. loads the captioner model named by NOEMA_CAPTION_MODEL (a load failure FAILS the run:
      see below)
-  3. downloads and captions EVERY manifest entry, posting periodic progress to
-     NOEMA_STATUS_URL keyed by NOEMA_ACTUM_ID
+  3. downloads and captions EVERY manifest entry — in chunks of NOEMA_CAPTION_BATCH when the
+     loaded captioner supports batched inference, prefetching each chunk's downloads against the
+     previous chunk's inference — posting periodic progress to NOEMA_STATUS_URL keyed by
+     NOEMA_ACTUM_ID
   4. writes the collected `{media id: caption}` map as one JSON object, uploads it to
      `captions/<job>/captions.json` in R2 and fires the completion webhook
      {id, status:'COMPLETED', output:[{url}], executionTime}; on error → FAILED.
@@ -44,6 +46,7 @@ Tests:  python3 -m unittest test_captioner   (from scripts/pod)
 """
 
 import base64
+import concurrent.futures
 import json
 import logging
 import os
@@ -67,6 +70,9 @@ DEFAULT_PROMPT = (
 )
 
 DEFAULT_MAX_NEW_TOKENS = 256
+
+#: Images per batched `generate()` call when the captioner exposes one — small and pod-class-safe.
+DEFAULT_CAPTION_BATCH = 4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +187,31 @@ def build_webhook_payload(pod_id: str, status: str, captions_url=None, execution
     return {"id": pod_id, "status": "FAILED", "error": error or "captioning failed"}
 
 
-def caption_manifest(manifest: list, work_dir: str, caption_one, fetch=_download, on_progress=None):
+def chunk(items: list, size: int) -> list:
+    """Split `items` into consecutive groups of at most `size`, in order.
+
+    The final group is never dropped for being smaller than `size` — every item must land in
+    exactly one group, or a caption pass fed through it would silently stop short of the walk."""
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _download_group(group: list, work_dir: str, fetch) -> list:
+    """Fetch every item in a chunk → [(index, item, path_or_None, error_or_None), ...]."""
+    out = []
+    for i, item in group:
+        path = os.path.join(work_dir, f"{i:04d}{_ext_for(item['url'])}")
+        try:
+            fetch(item["url"], path)
+            out.append((i, item, path, None))
+        except Exception as e:  # noqa: BLE001
+            out.append((i, item, None, e))
+    return out
+
+
+def caption_manifest(manifest: list, work_dir: str, caption_one, fetch=_download, on_progress=None,
+                     batch_size: int = 1):
     """Caption EVERY item in the manifest → ({media id: caption}, uncollected).
 
     The walk is total by construction: it iterates the manifest itself, so there is no gap count,
@@ -191,13 +221,78 @@ def caption_manifest(manifest: list, work_dir: str, caption_one, fetch=_download
     whole pass (the model itself) is raised by the caller before this walk begins.
 
     An item with no `id`, or for which no non-empty caption was produced, is OMITTED and COUNTED.
+
+    When `caption_one` exposes a `.caption_batch(paths) -> [str]` attribute AND `batch_size > 1`,
+    the manifest is walked in chunks: each chunk's images are captioned in one batched call while
+    the NEXT chunk's downloads run on a background thread, overlapping fetch with inference. A
+    chunk whose batched call raises (or returns the wrong count) falls back to captioning that
+    chunk one item at a time via `caption_one`, so a batch failure degrades to today's per-item
+    behavior rather than losing the chunk. Identity is still echoed from the manifest, never from
+    batch position — the map key is always the item's own `id`.
+
+    Absent that capability (a plain per-item callable, as in tests, or `batch_size` <= 1), the
+    walk is the original strictly serial one: fetch, then caption, one item at a time.
     """
     os.makedirs(work_dir, exist_ok=True)
     captions = {}
     uncollected = 0
     total = len(manifest)
-    for i, item in enumerate(manifest):
+    caption_batch = getattr(caption_one, "caption_batch", None)
+
+    def record(item: dict, text: str) -> None:
+        nonlocal uncollected
         media_id = item.get("id")
+        text = (text or "").strip()
+        if not isinstance(media_id, str) or not media_id or not text:
+            uncollected += 1
+        else:
+            captions[media_id] = text
+
+    if caption_batch and batch_size > 1:
+        groups = chunk(list(enumerate(manifest)), batch_size)
+        done = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(_download_group, groups[0], work_dir, fetch) if groups else None
+            for gi, group in enumerate(groups):
+                downloaded = pending.result()
+                pending = (pool.submit(_download_group, groups[gi + 1], work_dir, fetch)
+                          if gi + 1 < len(groups) else None)
+
+                ready = []
+                for i, item, path, err in downloaded:
+                    if err is not None:
+                        log.warning(f"item {i + 1}/{total} not captioned: {err}")
+                        record(item, "")
+                        done += 1
+                        if on_progress:
+                            on_progress(done, total)
+                    else:
+                        ready.append((i, item, path))
+                if not ready:
+                    continue
+
+                try:
+                    texts = caption_batch([p for _, _, p in ready])
+                    if len(texts) != len(ready):
+                        raise ValueError(f"batch returned {len(texts)} captions for {len(ready)} images")
+                except Exception as e:  # noqa: BLE001
+                    log.warning(f"batch of {len(ready)} failed ({e}); falling back to per-item")
+                    texts = []
+                    for _, _, path in ready:
+                        try:
+                            texts.append(caption_one(path))
+                        except Exception as item_e:  # noqa: BLE001
+                            log.warning(f"item not captioned: {item_e}")
+                            texts.append("")
+
+                for (i, item, _), text in zip(ready, texts):
+                    record(item, text)
+                    done += 1
+                    if on_progress:
+                        on_progress(done, total)
+        return captions, uncollected
+
+    for i, item in enumerate(manifest):
         text = ""
         try:
             path = os.path.join(work_dir, f"{i:04d}{_ext_for(item['url'])}")
@@ -205,10 +300,7 @@ def caption_manifest(manifest: list, work_dir: str, caption_one, fetch=_download
             text = (caption_one(path) or "").strip()
         except Exception as e:  # noqa: BLE001
             log.warning(f"item {i + 1}/{total} not captioned: {e}")
-        if not isinstance(media_id, str) or not media_id or not text:
-            uncollected += 1
-        else:
-            captions[media_id] = text
+        record(item, text)
         if on_progress:
             on_progress(i + 1, total)
     return captions, uncollected
@@ -219,7 +311,8 @@ def caption_manifest(manifest: list, work_dir: str, caption_one, fetch=_download
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_captioner(model_name: str, prompt: str, max_new_tokens: int):
-    """Load the VL model and return `caption_one(path) -> str`.
+    """Load the VL model and return `caption_one(path) -> str`, with `.caption_batch(paths) ->
+    [str]` attached for callers that walk a manifest in chunks (see `caption_manifest`).
 
     Raises if the model cannot be loaded. The caller lets that failure fail the run: a pass whose
     model never loaded has nothing to say about any image, and an empty map uploaded in its place
@@ -236,16 +329,21 @@ def load_captioner(model_name: str, prompt: str, max_new_tokens: int):
     model.eval()
     log.info("captioner ready")
 
-    def caption_one(path: str) -> str:
-        image = Image.open(path).convert("RGB")
+    def caption_batch(paths: list) -> list:
+        images = [Image.open(p).convert("RGB") for p in paths]
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]}]
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=[image], return_tensors="pt").to(model.device)
+        inputs = processor(text=[text] * len(images), images=images, return_tensors="pt",
+                           padding=True).to(model.device)
         with torch.inference_mode():
             generated = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-        trimmed = generated[0][inputs["input_ids"].shape[1]:]
-        return processor.decode(trimmed, skip_special_tokens=True).strip()
+        input_len = inputs["input_ids"].shape[1]
+        return [processor.decode(row[input_len:], skip_special_tokens=True).strip() for row in generated]
 
+    def caption_one(path: str) -> str:
+        return caption_batch([path])[0]
+
+    caption_one.caption_batch = caption_batch
     return caption_one
 
 
@@ -281,7 +379,8 @@ def run_caption_job(cfg: dict, loader=load_captioner, fetch=_download, upload=_u
                 post_status(status_url, build_status_signal(actum_id, done, n))
 
         captions, uncollected = caption_manifest(manifest, cfg["workDir"], caption_one,
-                                                 fetch=fetch, on_progress=on_progress)
+                                                 fetch=fetch, on_progress=on_progress,
+                                                 batch_size=cfg.get("batchSize", 1))
         log.info(f"captioned {len(captions)} of {total} items ({uncollected} not collected)")
 
         os.makedirs(cfg["workDir"], exist_ok=True)
@@ -315,6 +414,7 @@ def config_from_env(environ) -> dict:
 
     job_id = get("NOEMA_JOB_ID", required=True)
     raw_tokens = get("NOEMA_CAPTION_MAX_NEW_TOKENS", "") or ""
+    raw_batch = get("NOEMA_CAPTION_BATCH", "") or ""
     return {
         "jobId": job_id,
         "podId": get("RUNPOD_POD_ID", "") or job_id,
@@ -323,6 +423,7 @@ def config_from_env(environ) -> dict:
         "model": get("NOEMA_CAPTION_MODEL", "") or DEFAULT_MODEL,
         "prompt": get("NOEMA_CAPTION_PROMPT", "") or DEFAULT_PROMPT,
         "maxNewTokens": int(raw_tokens) if raw_tokens.strip().isdigit() else DEFAULT_MAX_NEW_TOKENS,
+        "batchSize": int(raw_batch) if raw_batch.strip().isdigit() else DEFAULT_CAPTION_BATCH,
         "actumId": get("NOEMA_ACTUM_ID", "") or "",
         "statusUrl": get("NOEMA_STATUS_URL", "") or "",
         "webhookUrl": get("NOEMA_WEBHOOK_URL", required=True),
