@@ -27,7 +27,8 @@
           "src/styles/design/typography.css",
           "src/styles/design/primitives.css",
           "src/styles/design/layout.css",
-          "src/styles/design/noema-signature.css"
+          "src/styles/design/noema-signature.css",
+          "src/styles/app.css"
         ]
       }
     ]
