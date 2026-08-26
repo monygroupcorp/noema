@@ -3376,7 +3376,7 @@ export function activityDoorLabel(kind: ActivityKind): string {
     case 'caption':
       return 'view captions';
     case 'decompose':
-      return 'view garden';
+      return 'view cutting floor';
     default:
       return 'view media';
   }
