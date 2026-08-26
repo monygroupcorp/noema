@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
-import { api, type MeStatus, type SettledRun } from '../lib/api';
+import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
+import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivity } from '../lib/muse';
 
 const IMPETUS_USD = 0.000337;
 
@@ -53,12 +54,36 @@ export function Status() {
       .finally(() => setSpendLoading(false));
   };
 
+  // Running-now / recently-finished bands (GET /v1/me/activity) — the SAME poll the
+  // rail's badge reads (noema-326), not a second request.
+  const { rows: activityRows, loaded: activityLoaded } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
+  const { running, finished } = partitionActivity(activityRows);
+
   const credits = me ? Number(me.balanceImpetus) : 0;
   const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
   const runs = me?.gens.length ?? 0;
   const studios = me?.studios.length ?? 0;
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+
+  // One row's link: a generation's door is a raw media URL (a plain external anchor,
+  // never a router Link), training/caption/decompose door through the source dataset
+  // (a real in-app route), and a door-less row renders without a link at all.
+  const activityRow = (row: ActivityRow, right: ReactNode) => {
+    const href = activityDoorHref(row);
+    const body = (
+      <>
+        <div className="li-main">
+          <div className="t">{row.modusLabel ?? activityKindLabel(row.kind)}</div>
+          <div className="s">{activityKindLabel(row.kind)}{href ? ` · ${activityDoorLabel(row.kind)}` : ''}</div>
+        </div>
+        <div className="li-right">{right}</div>
+      </>
+    );
+    if (!href) return <div className="lrow" key={row.actumId}>{body}</div>;
+    if (row.kind === 'generation') return <a className="lrow" href={href} target="_blank" rel="noreferrer" key={row.actumId}>{body}</a>;
+    return <Link className="lrow" to={href} key={row.actumId}>{body}</Link>;
+  };
 
   return (
     <AppShell crumb="activity">
@@ -76,25 +101,32 @@ export function Status() {
           <div className="stat"><div className="l">Studios</div><div className="n">{me ? studios : '…'}</div><div className="d">warm sessions</div></div>
         </div>
 
-        <div className="sectionhead">Active runs</div>
-        {!me ? (
-          <div className="empty"><div className="t">Loading your account…</div></div>
-        ) : runs === 0 ? (
+        <div className="sectionhead">Running now</div>
+        {!activityLoaded ? (
+          <div className="empty"><div className="t">Loading what’s running…</div></div>
+        ) : running.length === 0 ? (
           <div className="empty">
             <div className="ico"><Ic name="sparkles" /></div>
-            <div className="t">Nothing running right now — queued &amp; in-flight gens show here; finished ones live in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.</div>
+            <div className="t">Nothing running right now — queued &amp; in-flight runs show here the moment you fire one.</div>
           </div>
         ) : (
           <div className="list">
-            {me.gens.slice(0, 8).map((gn) => (
-              <Link className="lrow" to={`/run?id=${gn.actumId}`} key={gn.actumId}>
-                <div className="li-main">
-                  <div className="t">{gn.modusLabel}</div>
-                  <div className="s">{gn.status === 'agens' ? 'running' : 'queued'}{gn.studio ? ` · ${gn.studio.hostLabel}` : ''}</div>
-                </div>
-                <div className="li-right">{gn.status === 'agens' ? fmtElapsed(gn.elapsedMs) : gn.etaMs ? `~${fmtElapsed(gn.etaMs)}` : ''}</div>
-              </Link>
-            ))}
+            {running.slice(0, 8).map((row) =>
+              activityRow(row, row.createdAt ? `${fmtElapsed(Date.now() - new Date(row.createdAt).getTime())} ago` : 'running'))}
+          </div>
+        )}
+
+        <div className="sectionhead">Recently finished</div>
+        {!activityLoaded ? (
+          <div className="empty"><div className="t">Loading recent activity…</div></div>
+        ) : finished.length === 0 ? (
+          <div className="empty">
+            <div className="ico"><Ic name="footprints" /></div>
+            <div className="t">Nothing finished yet — a completed run lands here, and stays in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link> after.</div>
+          </div>
+        ) : (
+          <div className="list">
+            {finished.slice(0, 8).map((row) => activityRow(row, fmtDate(row.settledAt)))}
           </div>
         )}
 
