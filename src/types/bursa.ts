@@ -20,8 +20,14 @@ export interface Bursa {
   owner?: { animaId: string }
   /** Owner's label for the purse (e.g. "discord mods"). Owned purses only. */
   label?: string
-  /** Lifecycle for owned purses — 'revoked' purses are drained on revoke. Absent = active. */
-  status?: 'active' | 'revoked'
+  /** Lifecycle for owned purses. Absent = active. Both non-active states are terminal and
+   *  leave the purse drained: 'revoked' (the owner pulled the leftover credits home) and
+   *  'redeemed' (an identified account took the whole remaining balance into its Signum). */
+  status?: 'active' | 'revoked' | 'redeemed'
+  /** When the purse was redeemed. Owned purses only; stamped by the redemption claim.
+   *  PRIVACY: the timestamp answers "which invite converted, and when" — the REDEEMER is
+   *  deliberately not recorded, so a purse row never becomes an identity table. */
+  redeemedAt?: Date
 }
 
 export interface BursaCreateOpts {
@@ -63,4 +69,20 @@ export interface Bursarum {
   listByOwner(animaId: string): Promise<Bursa[]>
   /** Mark an owned purse revoked (after draining it). */
   setStatus(token: string, status: NonNullable<Bursa['status']>): Promise<void>
+  /**
+   * Atomically claim an ACTIVE OWNED purse for redemption: status 'active' → 'redeemed',
+   * stamping `redeemedAt`. Returns the claimed purse (post-update), or null when the purse
+   * is absent, anonymous, or no longer active.
+   *
+   * This is the single-writer guard the one-shot rule rests on: `debit` ignores status and
+   * `setStatus` is unconditional, so a read-then-drain pair lets two concurrent redemptions
+   * of the same purse both conclude they won. The claim is one conditional update, so exactly
+   * one caller sees the purse and every other caller sees null.
+   */
+  claimForRedemption(token: string, at: Date): Promise<Bursa | null>
+  /**
+   * Release a redemption claim — status back to 'active', `redeemedAt` cleared. Compensates a
+   * failure AFTER the claim so credits are never stranded in a terminal purse.
+   */
+  releaseRedemptionClaim(token: string): Promise<void>
 }

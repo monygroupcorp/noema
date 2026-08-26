@@ -1303,7 +1303,33 @@ async function main(): Promise<void> {
   // shareable Bursa funded from its balance (or an agent's it owns); the purse token is
   // the invite code, runs spend it via the existing `/v1/runs` x-bursa-token path. Purses
   // are owner-linked (dashboard/reclaim); the anon Bursa path is untouched (privacy).
+  //
+  // Redeem is limited on TWO independent keys, because either one alone leaves an easy way
+  // around it: per source address, and per caller credential (an address rotation does not
+  // reset the caller bucket, and a fresh account does not reset the address bucket). Tokens
+  // are UUIDs, so this is hygiene on a route that moves credits, not the thing standing
+  // between an attacker and a purse. Callers with no credential share one bucket — they are
+  // answered 401 by the route regardless.
+  const { default: purseRateLimit } = await import('express-rate-limit')
+  const PURSE_REDEEM_WINDOW_MS = Number(process.env.PURSE_REDEEM_RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000)
+  const PURSE_REDEEM_MAX = Number(process.env.PURSE_REDEEM_RATE_LIMIT_MAX ?? 20)
+  const redeemLimitMessage = { error: { code: 'rate.limited', message: 'too many code redemptions — try again shortly' } }
+  const purseRedeemPerIp = purseRateLimit({
+    windowMs: PURSE_REDEEM_WINDOW_MS, max: PURSE_REDEEM_MAX,
+    standardHeaders: true, legacyHeaders: false, message: redeemLimitMessage,
+  })
+  const purseRedeemPerCaller = purseRateLimit({
+    windowMs: PURSE_REDEEM_WINDOW_MS, max: PURSE_REDEEM_MAX,
+    standardHeaders: true, legacyHeaders: false, message: redeemLimitMessage,
+    // The credential itself is never used as a key — it is hashed, so the limiter's store
+    // holds no bearer material.
+    keyGenerator: (req) => {
+      const cred = req.headers.authorization
+      return cred ? `c:${createHash('sha256').update(cred).digest('hex')}` : 'c:unauthenticated'
+    },
+  })
   app.use('/v1/purses', express.json(), createPurseRouter({
+    rateLimiters: { redeem: [purseRedeemPerIp, purseRedeemPerCaller] },
     identity: apiResolver,
     signorum: ring.signorum,
     bursarium: ring.bursarium,
