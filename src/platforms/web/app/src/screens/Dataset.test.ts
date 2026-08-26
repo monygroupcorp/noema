@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { captionFor, categoryColor, curatedFragments } from './Dataset';
 import type { DatasetCaptionset, Fragment } from '../lib/api';
@@ -5,6 +7,8 @@ import type { DatasetCaptionset, Fragment } from '../lib/api';
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) — so
 // this exercises the chip garden's pure curation/color logic rather than a full DOM render,
 // per the item's "any component test the app supports" allowance.
+
+const SOURCE = readFileSync(fileURLToPath(new URL('./Dataset.tsx', import.meta.url)), 'utf8');
 
 function frag(category: Fragment['category'], text: string): Fragment {
   return { category, text, source: 'moodboard-1', trigger: 'stationthis' };
@@ -78,5 +82,29 @@ describe('categoryColor — every taxonomy category resolves to a distinct, stab
 
   it('is deterministic — the same category always resolves to the same color', () => {
     expect(categoryColor('setting')).toBe(categoryColor('setting'));
+  });
+});
+
+// noema-323 — the grid's fragment chips are read-only display; curation moved to the
+// dataset-wide Muse screen (noema-320), so this screen must carry no toggle affordance at
+// all. No jsdom means the render itself is not inspectable here (see the file-header note
+// above), so this asserts directly against the component's own source: no toggle handler and
+// no per-fragment exclusion state. Non-vacuity: re-adding an `onClick` to the chip element
+// (or reintroducing `excludedByItem`/`toggleFragment`) makes this fail.
+describe('Dataset chip garden — read-only, no curation affordance (noema-323)', () => {
+  it('defines no per-fragment toggle handler or exclusion state', () => {
+    expect(SOURCE).not.toMatch(/toggleFragment/);
+    expect(SOURCE).not.toMatch(/excludedByItem/);
+  });
+
+  it('the chip element itself carries no onClick', () => {
+    const chipBlockStart = SOURCE.indexOf('<span\n', SOURCE.indexOf('fragments.map((f, i)'));
+    const chipBlock = SOURCE.slice(chipBlockStart, chipBlockStart + 400);
+    expect(chipBlock).not.toMatch(/onClick/);
+  });
+
+  it('points at the dataset-wide Muse screen as the real curation surface', () => {
+    expect(SOURCE).toMatch(/curate in muse/);
+    expect(SOURCE).toMatch(/\/datasets\/\$\{d\.id\}\/muse/);
   });
 });
