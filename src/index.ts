@@ -1408,13 +1408,6 @@ async function main(): Promise<void> {
     res.json(await crystalApi.reportProgressus(req.body))
   })
 
-  // TEE browser client — served at /tee so it shares the same origin as the API (no CORS needed).
-  app.use('/tee', express.static(path.join(__dirname, '..', 'tee', 'browser'), {
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm')
-    },
-  }))
-
   // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://
   // resources for agent tool-use (Phase 3). Stateless per-request streamable-HTTP transport.
   app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
