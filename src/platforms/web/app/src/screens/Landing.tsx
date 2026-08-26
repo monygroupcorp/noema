@@ -141,7 +141,7 @@ export function Landing() {
         <p className="lsec-sub">
           No email, no account trail. Deposit, join the anonymity set, and spend with a
           zero-knowledge proof — we never learn your wallet. Generation runs on external
-          providers today; hardware-sealed private compute is in development.
+          providers today; hardware-sealed compute (TEE) is on the roadmap.
         </p>
         <div className="docs">
           <Link className="btn-ghost" to="/about"><Ic name="file-text" /> Read the architecture</Link>

@@ -21,7 +21,6 @@ const SECTIONS: { key: string; label: string; ico: string; to?: string }[] = [
   { key: 'compute', label: 'Compute', ico: 'server' },
   { key: 'preferences', label: 'Preferences', ico: 'sparkles', to: '/preferences' },
   { key: 'api', label: 'API keys', ico: 'key-round' },
-  { key: 'security', label: 'Security & privacy', ico: 'eye-off' },
 ];
 
 type Availability = 'economy' | 'balanced' | 'fastest';
@@ -214,10 +213,6 @@ export function AccountSettings() {
               <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
               <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
               <div className="ac-note mono">every run executes on our compute — we can see the work.</div>
-            </SectionCard>
-            <SectionCard to="/account/security" ico="eye-off" name="Security &amp; privacy">
-              <Row k="devices" v={<span className="muted">coming soon — device management isn’t wired yet</span>} />
-              <Row k="conditional anonymity" v={<span className="accent">learn the rule ▸</span>} />
             </SectionCard>
             <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
               <Row k="scope" v={<>portable across web · Telegram · API</>} />
