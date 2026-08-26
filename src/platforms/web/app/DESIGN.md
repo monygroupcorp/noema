@@ -151,10 +151,9 @@ Only one of them renders. Every screen in this app authors against the **local**
   (EX-1), not a defect to be filed repeatedly. Closing it is an upstream change to the design
   system followed by a re-copy — never a local edit to `styles/design/`.
 
-> **Ratification question R-1:** D-4 makes the tighter local ladder normative and treats the
-> system ramp as upstream truth for anything shared across brands. The alternative — adopt the
-> system ramp here and restyle every screen to it — is a large, visible change to a shipped app
-> and is not proposed. Confirm the narrower reading, or rule the other way.
+> **Ratification R-1 — resolved.** The narrower reading is confirmed: the local ladder (D-4) is
+> normative for this app; the system ramp stays upstream reference for cross-brand surfaces only
+> (D-5). Ratified by rth, 2026-08-26.
 
 ---
 
@@ -479,14 +478,17 @@ nothing; a finding must point at a *specific selector or screen* to be worth rea
 
 Collected for one pass, in priority order:
 
-- **R-1** (§2.2) — **open.** Local scales normative, system ramp upstream-only — confirm, or
-  adopt the system ramp here.
+- **R-1** (§2.2) — **resolved, rth 2026-08-26.** Confirmed: the local ladder is normative for
+  this app, the system ramp stays upstream reference for cross-brand surfaces only.
 - **R-2** (§4.2) — **resolved, rth 2026-08-26.** Promoted: 13px and 15px are named steps
   (`--fs-s`, `--fs-m`).
 - **R-3** (§6.1) — **resolved, rth 2026-08-26.** Retuned: radius tokens moved to the observed
   ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`).
 - **R-4** (§9) — **resolved, rth 2026-08-26.** Exceptions list confirmed complete, no additions
   or removals.
+
+All four ratification questions are answered. DESIGN.md is fully ratified as of 2026-08-26; the
+Phase-2 critic may cite it.
 
 ---
 
