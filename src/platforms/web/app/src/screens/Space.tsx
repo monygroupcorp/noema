@@ -9,6 +9,7 @@ import { Ic } from '../lib/icons';
 import { sampleImages, launchTraining } from '../lib/training';
 import { api } from '../lib/api';
 import type { Vestigium as ApiVestigium } from '../lib/api';
+import { useSession } from '../state/session';
 
 // The 3D Vestigium space. Two data sources:
 //   real    — a signed-in/commitment caller's OWN vestigia, PCA-projected on demand
@@ -120,7 +121,7 @@ export function axesGridSize(extent: number): { boxSize: number; axisLength: num
   return { boxSize: extent + 0.4, axisLength: extent / 2 + 0.1 };
 }
 
-type Layer = 'text' | 'image';
+export type Layer = 'text' | 'image';
 interface Manifest { n: number; k: number; projection: string }
 interface Cluster { label: string; terms: string[]; color: string; count: number }
 interface PtMeta { p: string; m: string; c: string; u: string; d: string; s?: string; l?: string[] }
@@ -128,6 +129,24 @@ interface Corpus { positions: Float32Array; clusters: Uint16Array; manifest: Man
 
 const BG = '#08090A';
 const base = (layer: Layer) => (layer === 'image' ? '/space-image' : '/space');
+
+// Selection view-state (no server object exists for a space selection yet — the house
+// precedent for this class, client view-state with no backend store, is state/project.tsx's
+// namespaced localStorage overlay: keys scoped by active animaId, try/catch reads, tolerate
+// garbage). Spheres are coordinates in a specific projection LAYER; a stored set is only ever
+// restored onto the layer it was carved in, never silently reprojected onto another.
+export type SelSphere = { x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' };
+export const selectionKey = (scope: string) => `noema-${scope}-space-selection`;
+export function loadStoredSelection(scope: string, layer: Layer): SelSphere[] {
+  try {
+    const raw = localStorage.getItem(selectionKey(scope));
+    if (raw) {
+      const v = JSON.parse(raw);
+      if (v && v.layer === layer && Array.isArray(v.spheres)) return v.spheres;
+    }
+  } catch { /* malformed entry restores to empty, never throws */ }
+  return [];
+}
 
 // The corpus explorer mounts on data presence, not a build flag (UX handoff 2, D7): it always
 // loads and shows a real loading → space | empty state. Corpus artifacts are static files under
@@ -407,6 +426,13 @@ export function Space() {
 
 function CorpusSpace() {
   const glOk = useMemo(webglAvailable, []);
+  // Selection persistence is scoped like the project overlay: namespaced by the active
+  // animaId, anon path stays local-only. Switching accounts mid-session must not bleed one
+  // account's spheres into another's view — resync (render-time, before commit) on scope
+  // change, mirroring state/project.tsx's loadedScope pattern.
+  const { activeAnimaId } = useSession();
+  const scope = activeAnimaId ?? 'anon';
+  const [selScope, setSelScope] = useState(scope);
   const [layer, setLayer] = useState<Layer>('text');
   const [imageLayerOk, setImageLayerOk] = useState(true);
   // Data source switch: null while the
@@ -435,9 +461,28 @@ function CorpusSpace() {
   const [galLimit, setGalLimit] = useState(12);                // infinite-scroll page size
   const [focus, setFocus] = useState<Focus | null>(null);      // camera fly-to target
   const [sphere, setSphere] = useState<{ x: number; y: number; z: number; r: number } | null>(null);
-  const [selection, setSelection] = useState<{ x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' }[]>([]);
+  const [selection, setSelection] = useState<SelSphere[]>(() => loadStoredSelection(scope, layer));
   const focusKey = useRef(0);
   const MIN_R = 0.03, DEFAULT_R = MIN_R;   // a selection starts atomic; expand outward via the slider
+
+  // Account switch mid-session: reload this account's stored selection for the current
+  // layer (or empty if it has none) before the next paint, same technique project.tsx uses
+  // to keep the render-time state sync ahead of the persist effect below.
+  if (selScope !== scope) {
+    setSelScope(scope);
+    setSelection(loadStoredSelection(scope, layer));
+  }
+
+  // Write-through: small state, plain synchronous set alongside every change (project.tsx
+  // convention). Layer travels with the spheres so a later restore never lands them on a
+  // different projection. Selection emptied by any existing gesture (remove-one, clear-all)
+  // clears the stored entry too — one effect covers every path, no per-gesture bookkeeping.
+  useEffect(() => {
+    try {
+      if (selection.length === 0) localStorage.removeItem(selectionKey(scope));
+      else localStorage.setItem(selectionKey(scope), JSON.stringify({ layer, spheres: selection }));
+    } catch { /* storage unavailable — this is view-state only, safe to skip */ }
+  }, [selection, layer, scope]);
 
   const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };
 
