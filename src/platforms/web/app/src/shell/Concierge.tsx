@@ -6,6 +6,7 @@ import { buildPrompt } from '../lib/promptExamples';
 import { api, newTurnKey, type ConciergeProposal, type ConciergeResult, type ColloquiumSummary } from '../lib/api';
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
+import { pickConciergeThread } from '../lib/conciergeThread';
 
 // Thread history in the compact dock (noema-111). The dock renders only the LATEST turn (not a
 // full transcript), so "resume" here means: continue the picked thread on the next send, and show
@@ -64,6 +65,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   const { project, projects } = useProject();
   const [threads, setThreads] = useState<ColloquiumSummary[]>([]);
   const [histOpen, setHistOpen] = useState(false);
+  // The dock is remounted per-screen (AppShell), so this fires once per mount to resolve the
+  // active-thread pointer BEFORE the user's first send — otherwise idleSend()'s lazy create
+  // (below) fires on every navigation and orphans the prior thread (noema-324).
+  const autoResumeAttempted = useRef(false);
   const projectNameOf = (id?: string): string | undefined => (id ? projects.find((p) => p.id === id)?.name : undefined);
 
   async function refreshThreads() {
@@ -88,6 +93,25 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
     setIdleColloquiumId(undefined);
     setIdleResult(null);
   }
+
+  // Resume by default (noema-324): on mount, with no active pointer yet, pick the caller's most
+  // recent thread and resume into it. Runs once per mount (guarded by the ref) so it never fights
+  // the explicit "+ New conversation" affordance, which clears the pointer on purpose afterward.
+  // Zero existing threads is the one case this leaves the pointer unset — idleSend() below still
+  // creates lazily on the first message, same as it always has.
+  useEffect(() => {
+    if (autoResumeAttempted.current) return;
+    autoResumeAttempted.current = true;
+    void (async () => {
+      try {
+        const { colloquia } = await api.listColloquia();
+        setThreads(colloquia);
+        const pick = pickConciergeThread(colloquia);
+        if (pick.action === 'resume') void resumeDock(pick.id);
+      } catch { /* offline / not-yet-authed — falls back to lazy create on first send */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A fresh target (new object on each field focus) slides the panel open and resets.
   // On mobile (<=760px) the panel must not auto-open — it collides with the OS keyboard —
