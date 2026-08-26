@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type DepositConfig, type Pack } from '../lib/api';
+import { api, ApiRequestError, type DepositConfig, type Pack } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { Hemisphere, Meter } from './IdentityMeter';
@@ -31,6 +31,19 @@ export function buildCheckoutRequest(packId: string, origin: string): { packId: 
     successUrl: `${origin}/funding?checkout=success`,
     cancelUrl: `${origin}/funding?checkout=cancel`,
   };
+}
+
+// A redeem refusal, said plainly. The server answers `{ error: { code, message } }`; each code
+// below is a state the holder of a code can actually be in, so each gets its own sentence rather
+// than one generic failure.
+export function redeemMessage(err: unknown): string {
+  const code = err instanceof ApiRequestError ? err.code : '';
+  if (code === 'purse.redeemed') return 'That code has already been redeemed.';
+  if (code === 'purse.owner_reclaims') return 'That purse is yours — reclaim it from your Vault instead.';
+  if (code === 'purse.not_redeemable') return "That code can't be redeemed.";
+  if (code === 'purse.not_found') return "We don't recognise that code — check it for a typo.";
+  if (code === 'rate.limited') return 'Too many tries just now. Wait a few minutes and try again.';
+  return err instanceof Error ? err.message : String(err);
 }
 
 // Native ETH sentinel for the deposit pricer (0x000…000 = the chain's native coin).
@@ -80,6 +93,33 @@ export function Funding() {
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout'>('idle');
+
+  // Invite code → balance. Someone mints a purse from their balance and sends you the token;
+  // redeeming moves its whole remaining balance onto your account, once.
+  const [code, setCode] = useState('');
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemErr, setRedeemErr] = useState<string | null>(null);
+  const [redeemed, setRedeemed] = useState<{ credited: string; balance?: string } | null>(null);
+
+  async function redeemCode(e: { preventDefault: () => void }) {
+    e.preventDefault();
+    const token = code.trim();
+    if (!token || redeemBusy || !session) return;
+    setRedeemBusy(true); setRedeemErr(null); setRedeemed(null);
+    try {
+      const out = await api.redeemPurse(token);
+      setCode('');
+      setRedeemed({ credited: out.credited });
+      // The credit is already landed server-side; read the balance back so the confirmation
+      // shows the account's real state rather than only the delta we were told about.
+      try { const s = await api.meStatus(); setRedeemed({ credited: out.credited, balance: s.balanceImpetus }); }
+      catch { /* the redemption stands; only the balance read-back is missing */ }
+    } catch (err) {
+      setRedeemErr(redeemMessage(err));
+    } finally {
+      setRedeemBusy(false);
+    }
+  }
 
   async function connect() {
     setWalletErr(null);
@@ -178,6 +218,62 @@ export function Funding() {
         </div>
 
         <div className="fund-rows">
+
+          {/* Have a code? — someone funded a purse from their balance and sent you the token.
+              Redeeming moves its whole remaining balance onto your account, once. Not a rail
+              of its own: no money enters the system here, it changes hands. */}
+          <section className="fund-row">
+            <div className="fund-rowhead">
+              <div className="fund-ic slate"><Ic name="key-round" /></div>
+              <div className="fund-rowmain">
+                <div className="fund-titleline">
+                  <h3>Have a code?</h3>
+                </div>
+                <p className="fund-desc">
+                  Someone can send you credits as a code. Redeem it and whatever is left in it
+                  becomes part of your balance. A code works <b>once</b>.
+                </p>
+              </div>
+            </div>
+
+            <div className="fund-guide">
+              {session ? (
+                <form
+                  className="fund-actions"
+                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)' }}
+                  onSubmit={redeemCode}
+                >
+                  <input
+                    className="inp mono"
+                    style={{ maxWidth: 320 }}
+                    aria-label="Invite code"
+                    placeholder="paste your code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    disabled={redeemBusy}
+                  />
+                  <button className="btn" type="submit" disabled={redeemBusy || code.trim() === ''}>
+                    {redeemBusy ? 'Redeeming…' : <>Redeem <Ic name="arrow-right" /></>}
+                  </button>
+                </form>
+              ) : (
+                <div className="warn fund-warn">
+                  <WarnIc />
+                  <span>
+                    Redeeming a code needs an account — <Link to="/onboard">sign in</Link> first,
+                    then come back and paste it here.
+                  </span>
+                </div>
+              )}
+              {redeemErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{redeemErr}</div>}
+              {redeemed && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Redeemed — {fmt(Number(redeemed.credited))} credits added.
+                  {redeemed.balance != null && <> Your balance is {fmt(Number(redeemed.balance))}.</>}
+                </div>
+              )}
+            </div>
+          </section>
 
           {/* Row 1 · On-chain wallet — an address, not a person. Normal = pseudonymous,
               shielded/fresh = the strong-anonymity path available today. */}

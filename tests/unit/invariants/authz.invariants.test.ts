@@ -40,6 +40,8 @@ import { ApiError } from '../../../src/allocutio/api/errors.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
 import { MemoryMandatum } from '../crystal/memoryMandatum.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { mintOwnedPurse, reclaimOwnedPurse, redeemOwnedPurse } from '../../../src/crystal/ownedPurse.js'
+import { MemoryBursarium } from './_purseKit.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../../../src/types/provincia.js'
 import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sodalitas.js'
@@ -1176,4 +1178,63 @@ test('COVERAGE GUARD self-check: a new, uncased owner-scoped method is reported'
     'a public method reaching an ownership member must be derived; one that reaches none, and ' +
       'the private helper itself, must not be',
   )
+})
+
+// ── Purse redemption: the one owner-scoped surface where a resource CHANGES HANDS ───────────
+// Every other case in this file asserts that B may not reach A's resource. Redemption is the
+// deliberate exception — A mints a purse and hands B the token so B can take its balance — so
+// what has to be pinned is the SHAPE of the exception: B gains exactly the purse's balance and
+// nothing more; A's own balance is not reachable through it; the transfer happens once; and the
+// purse row A can see afterwards does not name B. This is the two-identity case for the
+// redemption path (noema-336), and it lives here with the other cross-identity assertions.
+
+test('BY TOKEN: B redeeming A\'s purse credits B alone, once, and never names B to A', async () => {
+  const signorum = new MemorySignorum()
+  const bursarium = new MemoryBursarium()
+  const deps = { signorum, bursarium }
+  await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 5000n, auctor: 'test' })
+
+  const minted = await mintOwnedPurse(deps, { owner: A, credits: 1000n, label: 'invite' })
+  assert.ok(minted.ok)
+  if (!minted.ok) return
+  const token = minted.bursa.id
+
+  // B holds the token, so B may redeem — into B's OWN balance.
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: B }), { ok: true, credited: 1000n })
+  assert.equal(await signorum.balance({ animaId: B.animaId }), 1000n)
+  assert.equal(await signorum.balance({ animaId: A.animaId }), 4000n, "B's redemption reaches the purse, never A's balance")
+
+  // Once. A second holder of the same token gets nothing.
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: { animaId: 'anima-3' } }), { ok: false, reason: 'redeemed' })
+  assert.equal(await signorum.balance({ animaId: 'anima-3' }), 0n)
+
+  // A's dashboard shows the conversion, not the converter.
+  const [row] = await bursarium.listByOwner(A.animaId)
+  assert.equal(row?.status, 'redeemed')
+  assert.ok(row?.redeemedAt instanceof Date)
+  assert.equal(
+    JSON.stringify(row, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(B.animaId),
+    false, 'the purse row must not identify the redeemer',
+  )
+  assert.deepEqual(await bursarium.listByOwner(B.animaId), [], 'redeeming a purse does not make B its owner')
+})
+
+test('BY TOKEN: A cannot redeem A\'s own purse, and B cannot reclaim it', async () => {
+  const signorum = new MemorySignorum()
+  const bursarium = new MemoryBursarium()
+  const deps = { signorum, bursarium }
+  await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 3000n, auctor: 'test' })
+  const minted = await mintOwnedPurse(deps, { owner: A, credits: 800n })
+  assert.ok(minted.ok)
+  if (!minted.ok) return
+  const token = minted.bursa.id
+
+  // The owner's route is reclaim; redeem refuses them, so the two stay distinct in the ledger.
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: A }), { ok: false, reason: 'owner_reclaims' })
+  // And B, who may redeem, may still not RECLAIM — that is the owner's route, by ownership.
+  assert.deepEqual(await reclaimOwnedPurse(deps, { token, owner: B }), { ok: false, refunded: 0n })
+
+  assert.equal(await signorum.balance({ animaId: A.animaId }), 2200n)
+  assert.equal(await signorum.balance({ animaId: B.animaId }), 0n)
+  assert.equal((await bursarium.findByToken(token))?.credits, 800n, 'the purse still holds its balance')
 })
