@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
-import { api } from '../lib/api';
+import { api, getActivitySnapshot, subscribeActivity } from '../lib/api';
+import { activityBadgeCount } from '../lib/muse';
 import { useIdentity } from '../state/identity';
 import { IDENTITY_PRIV } from '../lib/idents';
 import { Chip } from './Chip';
@@ -77,6 +78,9 @@ export function Rail() {
   const { ident } = useIdentity();
   const who = IDENTITY_PRIV[ident.funding];
   const location = useLocation();
+  // Same poll Status reads for its running/finished bands — one fetch, two consumers.
+  const { rows: activity } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
+  const activityCount = activityBadgeCount(activity);
   // Moderation nav appears only for the platform reviewer (server-authoritative me.admin).
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
@@ -187,6 +191,7 @@ export function Rail() {
         </NavLink>
         <NavLink to="/status" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="receipt-text" /></span> Activity
+          {activityCount > 0 && <span className="badge accent" style={{ marginLeft: 'auto' }}>{activityCount}</span>}
         </NavLink>
         <NavLink to="/account" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings

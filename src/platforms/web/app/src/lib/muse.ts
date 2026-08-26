@@ -25,6 +25,9 @@ import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
 import { mediaFromOutput, type Media } from './media';
 import type {
   AddDatasetMediaRequest,
+  ActivityDoor,
+  ActivityKind,
+  ActivityRow,
   Fragment,
   FragmentCategory,
   MuseSteerProposal,
@@ -3206,4 +3209,71 @@ export function sessionHistoryHref(datasetId: string): string {
  */
 export function unreadableRun(): RunResult {
   return { terminal: 'failed', error: 'the image for this piece could not be read' };
+}
+
+// ── Activity bands (noema-326) ────────────────────────────────────────────────
+// Pure helpers over `GET /v1/me/activity` rows (types + fetch live in `./api`) for
+// the Activity screen's "running now" / "recently finished" bands and the rail
+// badge. This file is the Muse-specific engine's front end elsewhere; these
+// functions are unrelated to it — kept here because it's the client's designated
+// non-component home for pure display logic (`Status.tsx`/`Rail.tsx` are the UI).
+
+/**
+ * Split one activity page into the two bands the Activity screen renders:
+ * in-flight rows first (newest first, same order the read returns), then
+ * settled rows. Order within each band is preserved from the input.
+ *
+ * Non-vacuity: a finished row landing in `running` (or vice versa) must fail —
+ * every assertion below checks band MEMBERSHIP, not just band length.
+ */
+export function partitionActivity(rows: ActivityRow[]): { running: ActivityRow[]; finished: ActivityRow[] } {
+  const running: ActivityRow[] = [];
+  const finished: ActivityRow[] = [];
+  for (const row of rows) (row.status === 'running' ? running : finished).push(row);
+  return { running, finished };
+}
+
+/**
+ * The rail's Activity badge count: how many rows are in flight right now.
+ *
+ * Non-vacuity: a badge that shows with zero in-flight rows must fail — this is
+ * tested at zero explicitly, not just at a positive count.
+ */
+export function activityBadgeCount(rows: ActivityRow[]): number {
+  return rows.reduce((n, row) => (row.status === 'running' ? n + 1 : n), 0);
+}
+
+// Kind → label copy — the same nouns the app already uses elsewhere (dataset/caption
+// job/derive screens); no new vocabulary introduced for the Activity read.
+const ACTIVITY_KIND_LABEL: Record<ActivityKind, string> = {
+  training: 'training',
+  caption: 'caption pass',
+  decompose: 'decompose',
+  generation: 'generation',
+};
+
+/** Plain-English label for an activity row's kind. */
+export function activityKindLabel(kind: ActivityKind): string {
+  return ACTIVITY_KIND_LABEL[kind];
+}
+
+/**
+ * The link back to what a row produced, or `undefined` when the door doesn't resolve
+ * to a real in-app route — a door-less row renders without a link, never a dead one.
+ *
+ * Only two door shapes have an actual route today: a dataset (training/caption/
+ * decompose all door through the source dataset, which is where its captionsets and
+ * trained models are found) and a generation's raw media URL. `modelId`/`captionsetId`
+ * alone have no standalone page, so they don't produce a link by themselves.
+ */
+export function activityDoorHref(row: Pick<ActivityRow, 'kind' | 'door'>): string | undefined {
+  const door: ActivityDoor | undefined = row.door;
+  if (!door) return undefined;
+  if (row.kind === 'generation') return door.mediaUrl;
+  return door.datasetId ? `/datasets/${encodeURIComponent(door.datasetId)}` : undefined;
+}
+
+/** Link text for `activityDoorHref`'s target, per kind. */
+export function activityDoorLabel(kind: ActivityKind): string {
+  return kind === 'generation' ? 'view media' : 'view dataset';
 }
