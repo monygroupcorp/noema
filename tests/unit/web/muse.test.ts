@@ -192,7 +192,10 @@ import {
   activityDoorHref,
   activityDoorLabel,
   activityKindLabel,
+  activityRowLabel,
   partitionActivity,
+  partitionHomeActivity,
+  AWAITING_YOU_MAX,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
@@ -3559,18 +3562,8 @@ test('buildTrainingAffinesPayload: merges onto the caller\'s existing record ins
 
 // ── Activity bands (noema-326) ────────────────────────────────────────────────
 
-function actRow(over: Partial<ActivityRow> = {}): ActivityRow {
-  return {
-    actumId: 'act-1',
-    kind: 'generation',
-    modusId: 'flux-schnell',
-    status: 'settled',
-    ...over,
-  };
-}
-
 test('partitionActivity: a running row lands in running, never in finished', () => {
-  const rows = [actRow({ actumId: 'a', status: 'running' }), actRow({ actumId: 'b', status: 'settled' })];
+  const rows = [activityRow({ actumId: 'a', status: 'running' }), activityRow({ actumId: 'b', status: 'settled' })];
   const { running, finished } = partitionActivity(rows);
   assert.deepEqual(running.map((r) => r.actumId), ['a']);
   assert.deepEqual(finished.map((r) => r.actumId), ['b']);
@@ -3579,48 +3572,91 @@ test('partitionActivity: a running row lands in running, never in finished', () 
 test('partitionActivity: a settled row lands in finished, never in running', () => {
   // Guards the OTHER direction too — a partition that dumped everything into one band
   // (or swapped the two) would still pass a test that only checked lengths.
-  const rows = [actRow({ actumId: 'x', status: 'settled' }), actRow({ actumId: 'y', status: 'settled' })];
+  const rows = [activityRow({ actumId: 'x', status: 'settled' }), activityRow({ actumId: 'y', status: 'settled' })];
   const { running, finished } = partitionActivity(rows);
   assert.deepEqual(running, []);
   assert.deepEqual(finished.map((r) => r.actumId), ['x', 'y']);
 });
 
 test('activityBadgeCount: zero in-flight rows is zero, not a truthy placeholder', () => {
-  const rows = [actRow({ status: 'settled' }), actRow({ status: 'settled' })];
+  const rows = [activityRow({ status: 'settled' }), activityRow({ status: 'settled' })];
   assert.equal(activityBadgeCount(rows), 0);
 });
 
 test('activityBadgeCount: counts only the running rows, ignoring settled ones', () => {
   const rows = [
-    actRow({ actumId: 'a', status: 'running' }),
-    actRow({ actumId: 'b', status: 'settled' }),
-    actRow({ actumId: 'c', status: 'running' }),
+    activityRow({ actumId: 'a', status: 'running' }),
+    activityRow({ actumId: 'b', status: 'settled' }),
+    activityRow({ actumId: 'c', status: 'running' }),
   ];
   assert.equal(activityBadgeCount(rows), 2);
 });
 
-test('activityDoorHref: a generation door links straight to its media', () => {
-  const row = actRow({ kind: 'generation', door: { mediaUrl: 'https://cdn.example/out.png' } });
-  assert.equal(activityDoorHref(row), 'https://cdn.example/out.png');
-});
-
-test('activityDoorHref: training/caption/decompose door through the source dataset', () => {
-  assert.equal(activityDoorHref(actRow({ kind: 'training', door: { datasetId: 'ds-1', modelId: 'model-1' } })), '/datasets/ds-1');
-  assert.equal(activityDoorHref(actRow({ kind: 'caption', door: { datasetId: 'ds-2' } })), '/datasets/ds-2');
-  assert.equal(activityDoorHref(actRow({ kind: 'decompose', door: { datasetId: 'ds-3', captionsetId: 'cs-1' } })), '/datasets/ds-3');
-});
-
-test('activityDoorHref: a door that resolves to no real route renders without a link, never a dead one', () => {
-  assert.equal(activityDoorHref(actRow({ kind: 'training', door: { modelId: 'model-1' } })), undefined);
-  assert.equal(activityDoorHref(actRow({ kind: 'generation', door: {} })), undefined);
-  assert.equal(activityDoorHref(actRow({ kind: 'generation' })), undefined);
-});
-
-test('activityKindLabel / activityDoorLabel: the app\'s own nouns, no new vocabulary', () => {
+test('activityKindLabel / activityDoorLabel: the app\'s own nouns, labels match where the door leads', () => {
   assert.equal(activityKindLabel('training'), 'training');
   assert.equal(activityKindLabel('caption'), 'caption pass');
   assert.equal(activityKindLabel('decompose'), 'decompose');
   assert.equal(activityKindLabel('generation'), 'generation');
   assert.equal(activityDoorLabel('generation'), 'view media');
-  assert.equal(activityDoorLabel('training'), 'view dataset');
+  assert.equal(activityDoorLabel('training'), 'view models');
+  assert.equal(activityDoorLabel('caption'), 'view captions');
+  assert.equal(activityDoorLabel('decompose'), 'view garden');
 });
+
+// ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
+
+function activityRow(over: Partial<ActivityRow> = {}): ActivityRow {
+  return { actumId: 'a1', kind: 'generation', modusId: 'm1', status: 'settled', ...over }
+}
+
+test('partitionHomeActivity: splits real activity rows into settled (capped) and running', () => {
+  // Real ActivityRow shapes only — status/kind/door are exactly what a client-local chat
+  // title never carries, so feeding that list back in here would filter to empty on both
+  // sides rather than reproducing a "recent" band.
+  const settled = Array.from({ length: AWAITING_YOU_MAX + 3 }, (_, i) =>
+    activityRow({ actumId: `settled-${i}`, status: 'settled' }))
+  const running = [activityRow({ actumId: 'r1', status: 'running' }), activityRow({ actumId: 'r2', status: 'running' })]
+  const { awaiting, running: runningOut } = partitionHomeActivity([...settled, ...running])
+  assert.equal(awaiting.length, AWAITING_YOU_MAX)
+  assert.deepEqual(awaiting.map((r) => r.actumId), settled.slice(0, AWAITING_YOU_MAX).map((r) => r.actumId))
+  assert.deepEqual(runningOut.map((r) => r.actumId), ['r1', 'r2'])
+})
+
+test('partitionHomeActivity: chat-shaped (non-activity) input contributes to neither band', () => {
+  // Feeding the OLD localStorage chat list back into the band (the regression this item
+  // fixes) has no `status` field at all, so it partitions to nothing rather than rendering.
+  const chatShaped = [{ kind: 'chat', detail: 'a title', project: 'demo' }] as unknown as ActivityRow[]
+  const { awaiting, running } = partitionHomeActivity(chatShaped)
+  assert.equal(awaiting.length, 0)
+  assert.equal(running.length, 0)
+})
+
+test('activityRowLabel: prefers modusLabel, falls back to the house noun for the kind', () => {
+  assert.equal(activityRowLabel(activityRow({ kind: 'training', modusLabel: 'Portrait LoRA' })), 'Portrait LoRA')
+  assert.equal(activityRowLabel(activityRow({ kind: 'training' })), 'training')
+  assert.equal(activityRowLabel(activityRow({ kind: 'caption' })), 'caption pass')
+  assert.equal(activityRowLabel(activityRow({ kind: 'decompose' })), 'decompose')
+  assert.equal(activityRowLabel(activityRow({ kind: 'generation' })), 'generation')
+})
+
+test('activityDoorHref: resolves each kind\'s door to its real destination', () => {
+  assert.equal(activityDoorHref(activityRow({ kind: 'training', door: { modelId: 'model-1' } })), '/models')
+  assert.equal(
+    activityDoorHref(activityRow({ kind: 'caption', door: { datasetId: 'ds-1', captionsetId: 'cs-1' } })),
+    '/datasets/ds-1/caption?captionset=cs-1',
+  )
+  assert.equal(activityDoorHref(activityRow({ kind: 'decompose', door: { datasetId: 'ds-1' } })), '/datasets/ds-1/muse')
+  assert.equal(
+    activityDoorHref(activityRow({ kind: 'generation', door: { mediaUrl: 'https://cdn.example/media/x.png' } })),
+    'https://cdn.example/media/x.png',
+  )
+})
+
+test('activityDoorHref: a row without the door fields its kind needs renders without a link, never a dead one', () => {
+  assert.equal(activityDoorHref(activityRow({ kind: 'training', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'caption', door: { datasetId: 'ds-1' } })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'decompose', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'generation', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'generation' })), undefined)
+})
+

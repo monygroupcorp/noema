@@ -122,6 +122,10 @@ export function TrainRun() {
   const dayExhausted = order?.state === 'stopped' && order.reason === 'exhausted';
   const done = run.status === 'complete';
   const failed = run.status === 'failed' && !waiting;
+  // True only while the run itself is actually progressing on a machine — excludes the
+  // pre-machine/between-attempts states (315's copy already covers those), and every terminal
+  // state, so this never sits next to failure, apology, or cancellation copy.
+  const activelyTraining = !done && !failed && !waiting && !dayExhausted && order?.state !== 'cancelled';
 
   const cancelOrder = () => {
     if (!id || cancelling) return;
@@ -152,6 +156,9 @@ export function TrainRun() {
               <span className={`rdot ${failed || dayExhausted ? 'amber' : 'good'}`} />{' '}
               {notice.chip}
             </span>
+            {activelyTraining && (
+              <div className="sub mono">safe to close this page — training continues on the machine.</div>
+            )}
           </div>
         </div>
 
@@ -202,7 +209,7 @@ export function TrainRun() {
         {done && (
           <p className="tr-note">Training finished — the model is on <Link to="/models" className="accent">your shelf</Link>.</p>
         )}
-        {!done && !failed && !waiting && !dayExhausted && order?.state !== 'cancelled' && (
+        {activelyTraining && (
           <p className="tr-note">Training is under way on our compute. This page follows the run and updates itself; you can leave and come back to the same address.</p>
         )}
 
