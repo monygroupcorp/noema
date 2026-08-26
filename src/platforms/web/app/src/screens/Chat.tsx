@@ -32,7 +32,7 @@ function Hemisphere({ vis, className }: { vis: Vis; className?: string }) {
 }
 
 // ── Chat routing — the routes offered by the composer picker ──────────────────
-type RouteId = 'noema' | 'remote' | 'tee';
+type RouteId = 'noema' | 'remote';
 interface Route { id: RouteId; name: string; vis: Vis; tag: string; tagKind: 'egress' | 'wait' | 'safe'; egress: boolean; desc: ReactNode }
 
 const ROUTES: Route[] = [
@@ -40,8 +40,6 @@ const ROUTES: Route[] = [
     desc: <>Routed to a top provider’s API. <b>Fastest, most capable, cheapest per token</b> — but your words leave our app to that provider. <b>We always name who.</b></> },
   { id: 'remote', name: 'Your remote LLM', vis: 'tee', tag: '↗ to your server', tagKind: 'egress', egress: true,
     desc: <>An endpoint <b>you provision</b>; conversation goes to your infrastructure.</> },
-  { id: 'tee', name: 'TEE · in development', vis: 'tee', tag: 'in development', tagKind: 'wait', egress: false,
-    desc: <>Hardware-isolated private sessions are <b>in development — not yet available</b>. This route is a placeholder for that tier.</> },
 ];
 
 // Map a chosen route → a provenance meter. TODO(backend): real routing/egress
@@ -51,7 +49,6 @@ function provFor(r: Route, modality: string): Prov {
   switch (r.id) {
     case 'noema':  return { modality, route: 'routed via openrouter', vis: 'remote', egress: { left: true, to: 'openrouter' } };
     case 'remote': return { modality, route: 'your remote endpoint', vis: 'tee', egress: { left: true, to: 'your server' } };
-    default:       return { modality, route: 'TEE · in development', vis: 'tee', egress: { left: false, note: 'in development — not yet available' } };
   }
 }
 
