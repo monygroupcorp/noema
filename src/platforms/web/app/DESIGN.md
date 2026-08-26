@@ -232,8 +232,8 @@ in-product surface. Martian Mono carries marketing display type and the wordmark
 
 ### 4.2 The scale
 
-Declared in `app.css`: `--fs-xs 11` · `--fs-sm 12.5` · `--fs-base 14` · `--fs-md 16` ·
-`--fs-lg 19` · `--fs-xl 22` · `--fs-2xl 28`. Body is 14px / 1.6 / `-0.01em`.
+Declared in `app.css`: `--fs-xs 11` · `--fs-sm 12.5` · `--fs-s 13` · `--fs-base 14` · `--fs-m 15` ·
+`--fs-md 16` · `--fs-lg 19` · `--fs-xl 22` · `--fs-2xl 28`. Body is 14px / 1.6 / `-0.01em`.
 
 The census counted roughly 2,100 text-bearing elements across the 32 routes. Around **57%**
 rendered at a size on that scale; the remainder landed on off-ladder values — 13, 13.5, 15, 15.5,
@@ -243,18 +243,18 @@ rendered at a size on that scale; the remainder landed on off-ladder values — 
 - **D-20** **The functional floor is 11px.** No text renders below it. The census found ~76
   sub-floor elements at 10px and 10.5px — chips, badges, byline and timestamp metadata, id
   strings. Each is fixed by moving to `--fs-xs`, not by shrinking the container.
-- **D-21** The scale has seven steps and gains no eighth informally. 13px and 15px are frequent
-  enough that they are either promoted to named steps or removed; the ambiguity is what lets the
-  ladder erode. See R-2.
+- **D-21** The scale has nine steps: `--fs-xs`, `--fs-sm`, `--fs-s`, `--fs-base`, `--fs-m`,
+  `--fs-md`, `--fs-lg`, `--fs-xl`, `--fs-2xl`. 13px and 15px are promoted, named steps (`--fs-s`,
+  `--fs-m`) — ratified R-2.
 - **D-22** Weight carries hierarchy in three values only: 400 body, 500 label, 600 heading. 700
   and 800 belong to marquee display type (§4.3) and appear nowhere in the app shell.
 - **D-23** Line height is 1.6 for running copy, 1.3–1.4 for headings and dense rows. Tracking is
   `-0.01em` at body size, `-0.02em` at heading sizes, and `0` for mono.
 
-> **Ratification question R-2:** promote 13px and 15px to named steps (`--fs-s`, `--fs-m`),
-> matching what ships — or hold the seven-step ladder and treat every 13/15px use as debt to
-> close. The narrower reading is to hold the ladder and record the debt; that is what D-21 says
-> pending your word.
+> **Ratification R-2 — resolved.** 13px and 15px are promoted to named steps (`--fs-s`, `--fs-m`),
+> matching what ships. Ratified by rth, 2026-08-26. The nine-step ladder is now normative; the
+> ~127 existing hardcoded 13px/15px uses remain expressible-but-unmigrated, tracked separately
+> (token-lint baseline).
 
 ### 4.3 Two heading registers
 
@@ -299,7 +299,7 @@ Declared: `--s1 4` · `--s2 8` · `--s3 12` · `--s4 16` · `--s5 20` · `--s6 2
 
 ### 6.1 Radius
 
-Declared: `--r-sm 6` · `--r 10` · `--r-lg 14` · `--r-pill 999`. What actually ships, by frequency:
+Declared: `--r-sm 8` · `--r 10` · `--r-lg 14` · `--r-pill 999`. What actually ships, by frequency:
 **8px** dominates, then `999px` (pills), `50%` (avatars), `9px`, `10px`, then a long tail of 2, 5,
 6, 7, 11, 12, 13, 14.
 
@@ -309,10 +309,8 @@ Declared: `--r-sm 6` · `--r 10` · `--r-lg 14` · `--r-pill 999`. What actually
   pill; a pill is never a container for arbitrary content.
 - **D-34** `50%` means an avatar or identity chip, and nothing else.
 
-> **Ratification question R-3:** the shipped default control radius is 8–9px, not the declared
-> 6/10. Either retune the tokens to the observed ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`) — one
-> token edit, no screen churn — or hold the declared values and close the drift screen by screen.
-> The narrower, cheaper reading is to retune the tokens; that is the recommendation.
+> **Ratification R-3 — resolved.** Tokens retuned to the observed ladder (`--r-sm 8`, `--r 10`,
+> `--r-lg 14`), matching the shipped default. Ratified by rth, 2026-08-26.
 
 ### 6.2 Elevation
 
@@ -432,6 +430,9 @@ This is P-3 made concrete, and it is the pattern the app was weakest on.
 **These are adjudicated. A critique pass that files any of them is filing a finding that has
 already been rejected, and it must be discarded.**
 
+> **Ratification R-4 — resolved.** List confirmed complete: no additions or removals. Ratified by
+> rth, 2026-08-26.
+
 ### Conscious keeps
 
 - **EX-1 — Two parallel scales.** `app.css` declares `--s*` / `--fs-*` alongside the vendored
@@ -474,18 +475,18 @@ nothing; a finding must point at a *specific selector or screen* to be worth rea
 
 ---
 
-## 10. Open ratification questions
+## 10. Ratification questions
 
 Collected for one pass, in priority order:
 
-- **R-1** (§2.2) Local scales normative, system ramp upstream-only — confirm, or adopt the system
-  ramp here.
-- **R-2** (§4.2) Promote 13px and 15px to named steps, or hold the seven-step ladder and close the
-  drift.
-- **R-3** (§6.1) Retune radius tokens to the shipped 8–9px default, or hold 6/10 and close the
-  drift per screen.
-- **R-4** (§9) Is the exceptions list complete? Anything you would not want re-argued belongs
-  here, and anything here you *do* want reopened should come out.
+- **R-1** (§2.2) — **open.** Local scales normative, system ramp upstream-only — confirm, or
+  adopt the system ramp here.
+- **R-2** (§4.2) — **resolved, rth 2026-08-26.** Promoted: 13px and 15px are named steps
+  (`--fs-s`, `--fs-m`).
+- **R-3** (§6.1) — **resolved, rth 2026-08-26.** Retuned: radius tokens moved to the observed
+  ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`).
+- **R-4** (§9) — **resolved, rth 2026-08-26.** Exceptions list confirmed complete, no additions
+  or removals.
 
 ---
 
