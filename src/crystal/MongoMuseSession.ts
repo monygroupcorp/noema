@@ -29,7 +29,7 @@ import type {
   MuseSessions,
   StoredMuseSession,
 } from '../types/museSession.js'
-import type { MuseSession, MuseSetup, Piece } from './muse/session.js'
+import type { KeptRoll, MuseSession, MuseSetup, Piece } from './muse/session.js'
 import type { Fragment } from './muse/taxonomy.js'
 
 /** The persisted form of a session's pure value: the floor flattened to entries. */
@@ -47,6 +47,12 @@ interface MuseSessionDoc {
    * because `normalizeSetup` gives neither a field to land in.
    */
   setup?: MuseSetup
+  /**
+   * The rolls the user kept, in the order they kept them. Absent on a document
+   * written before the field existed, and absent when the list is empty — the two
+   * read identically, which is what "absent means empty" buys: no backfill.
+   */
+  keptRolls?: KeptRoll[]
 }
 
 /**
@@ -65,6 +71,7 @@ function toDoc(session: MuseSession): MuseSessionDoc {
     floor: floorToEntries(session.floor),
     pieces: [...session.pieces],
     ...(session.setup ? { setup: session.setup } : {}),
+    ...(session.keptRolls?.length ? { keptRolls: session.keptRolls.map((r) => ({ ...r })) } : {}),
   }
 }
 
@@ -76,6 +83,7 @@ function fromDoc(doc: MuseSessionDoc): MuseSession {
     floor: floorFromEntries(doc.floor ?? []),
     pieces: doc.pieces ?? [],
     ...(doc.setup ? { setup: doc.setup } : {}),
+    ...(doc.keptRolls?.length ? { keptRolls: doc.keptRolls.map((r) => ({ ...r })) } : {}),
   }
 }
 

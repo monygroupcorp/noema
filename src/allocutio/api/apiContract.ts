@@ -1596,6 +1596,35 @@ const MuseSetupSchema: JsonSchema = {
   },
 }
 
+/** One roll the caller kept: the prompt as it stood, and its paid/free verdict. */
+const MuseKeptRollSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'A rolled prompt the caller kept. The verdict rides along because it is not recoverable ' +
+    'afterwards — whether a prompt fires as a paid run is decided by what it drew and what it ' +
+    'was rolled against, and both move.',
+  properties: {
+    prompt: { type: 'string', description: 'The prompt as it was kept, edits included.' },
+    paid: { type: 'boolean', description: 'Whether firing this prompt would be a paid run.' },
+  },
+  required: ['prompt', 'paid'],
+}
+
+/** The request body for `POST /v1/data/muse/sessions/:id/kept`. */
+const KeepMuseRollRequestSchema: JsonSchema = {
+  type: 'object',
+  description:
+    'Keep one rolled prompt against the session. Append-only: keeping the same prompt twice ' +
+    'stores it twice, because keeping is an explicit act and collapsing two of them would ' +
+    'discard one the caller made on purpose. Nothing is spent on this call — the prompt is ' +
+    'kept, not fired.',
+  properties: {
+    prompt: { type: 'string', description: 'The prompt to keep. Required and non-empty.' },
+    paid: { type: 'boolean', description: 'Whether firing this prompt would be a paid run.' },
+  },
+  required: ['prompt', 'paid'],
+}
+
 /** A Muse session as this surface returns it. */
 const MuseSessionSchema: JsonSchema = {
   type: 'object',
@@ -1612,10 +1641,17 @@ const MuseSessionSchema: JsonSchema = {
     floor: { type: 'array', items: MuseFloorEntrySchema },
     pieces: { type: 'array', items: MusePieceSchema },
     setup: MuseSetupSchema,
+    keptRolls: {
+      type: 'array',
+      items: MuseKeptRollSchema,
+      description:
+        'The rolls the caller kept, in the order they kept them. Always present: a session that ' +
+        'has kept none returns an empty list.',
+    },
     natum: { type: 'string', format: 'date-time' },
     mutatum: { type: 'string', format: 'date-time' },
   },
-  required: ['id', 'owner', 'motherDatasetId', 'fragments', 'floor', 'pieces', 'natum', 'mutatum'],
+  required: ['id', 'owner', 'motherDatasetId', 'fragments', 'floor', 'pieces', 'keptRolls', 'natum', 'mutatum'],
 }
 
 /** The `{ session }` envelope every single-session operation returns. */
@@ -2232,6 +2268,15 @@ export const API_CONTRACT: ApiContract = {
       auth: true,
       request: SteerMuseSessionRequestSchema,
       response: SteerProposalEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/muse/sessions/:id/kept',
+      summary:
+        "Keep one rolled prompt against a session the caller owns. Rolling is free and a roll in progress is uncommitted work, so a report and the edits made to it are the client's; keeping is the explicit act and is what is held on the session, so it survives leaving the screen. The list is APPEND-ONLY — keeping the same prompt twice stores it twice, and no route here removes one. Nothing is spent and nothing is fired: the prompt is kept, not launched. A body with no prompt, or with a verdict that is not a boolean, is rejected with 400. A session the caller does not own is reported as not found.",
+      auth: true,
+      request: KeepMuseRollRequestSchema,
+      response: MuseSessionEnvelopeSchema,
     },
     {
       method: 'POST',

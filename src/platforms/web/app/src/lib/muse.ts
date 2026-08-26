@@ -36,6 +36,7 @@ import type {
   FlowDescription,
   ModelCard,
   MuseFragmentIdentity,
+  MuseKeptRoll,
   MusePiece,
   MusePieceRecord,
   MuseReaction,
@@ -1107,6 +1108,51 @@ export function reactionOf(view: MuseSessionView, runId: string): MuseReaction |
  */
 export function savedOf(view: MuseSessionView, runId: string): boolean {
   return recordedPiece(view, runId)?.saved ?? false;
+}
+
+// ── Kept rolls (noema-329) ───────────────────────────────────────────────────
+// Rolling is free and a roll in progress is uncommitted work, so the report this
+// screen is showing and the edits made to its text are the screen's own. KEEPING is
+// the explicit act, and an explicit act that a navigation erases is one the product
+// did not honour — so a kept roll is written to the session and the panel is rendered
+// from the session, exactly as the floor pills and the piece rail already are.
+
+/**
+ * What one keep sends: the prompt as it stands, and its paid/free verdict.
+ *
+ * The prompt is the EDITED text where the user edited it, because that is the prompt
+ * they read before deciding to keep it. The verdict is carried rather than recomputed
+ * later — whether the prompt fires as a paid run depends on what it drew and what it
+ * was rolled against, and both of those move.
+ */
+export function keptRollRequest(prompt: string, paid: boolean): MuseKeptRoll {
+  return { prompt: prompt.trim(), paid };
+}
+
+/** Whether a keep can be sent at all — a session to write against, and a prompt to keep. */
+export function keepBlocked(view: MuseSessionView | null | undefined, prompt: string): boolean {
+  return !view || !prompt.trim();
+}
+
+/**
+ * The kept rolls the panel renders, oldest first.
+ *
+ * Read off the SESSION and never off a local list. A local list is this page's own
+ * record of this sitting and does not survive leaving the screen, while the session's
+ * is the server's — so a kept roll is still there when the screen is opened again.
+ * Absent reads as empty, so a session stored before the field existed renders as a
+ * session with nothing kept rather than as an error.
+ *
+ * Non-vacuity: rendering a local `kept` array instead must fail "the kept panel comes
+ * back with the session".
+ */
+export function keptRollsOf(view: MuseSessionView | null | undefined): MuseKeptRoll[] {
+  return view?.keptRolls ?? [];
+}
+
+/** The panel's heading count — how many rolls the session is holding. */
+export function keptCount(view: MuseSessionView | null | undefined): number {
+  return keptRollsOf(view).length;
 }
 
 // ── Why a gesture is refused (noema-277) ─────────────────────────────────────

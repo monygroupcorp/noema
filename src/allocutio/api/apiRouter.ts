@@ -177,6 +177,8 @@ export interface ApiFacade {
   setMuseSetup(auctor: AuctorKey, id: string, setup: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm. */
   steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<import('./CrystalApi.js').SteerProposalView>
+  /** Appends one kept prompt to the session. Append-only; spends nothing and fires nothing. */
+  keepMuseRoll(auctor: AuctorKey, id: string, roll: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   updateMusePiece(auctor: AuctorKey, id: string, runId: string, patch: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<import('./CrystalApi.js').MuseSessionView>
@@ -1179,6 +1181,19 @@ export function createApiRouter(deps: {
     const auctor = await auth(req)
     const body = (req.body ?? {}) as { instruction?: unknown }
     res.json(await api.steerMuseSession(auctor, String(req.params.id), body))
+  }))
+
+  // POST /v1/data/muse/sessions/:id/kept — keep one rolled prompt against the session.
+  // Rolling is free and a roll in progress is uncommitted work, so a report and the edits
+  // made to it stay in the client; KEEPING is the explicit act and is what gets a server
+  // home. Append-only: keeping the same prompt twice stores it twice, and there is no
+  // route here that removes one. NOTHING IS SPENT and nothing is fired — the body carries
+  // a prompt and its paid/free verdict, the owner is `auth(req)`, and the session is the
+  // path's.
+  router.post('/data/muse/sessions/:id/kept', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const body = (req.body ?? {}) as { prompt?: unknown; paid?: unknown }
+    res.status(201).json({ session: await api.keepMuseRoll(auctor, String(req.params.id), body) })
   }))
 
   // POST /v1/data/muse/sessions/:id/pieces — append a piece to the session's ledger with

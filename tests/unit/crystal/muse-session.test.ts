@@ -26,11 +26,22 @@ import {
   withSessionDataset,
   withSetup,
   normalizeSetup,
+  keepRoll,
+  keptRollsOf,
+  normalizeKeptRolls,
   pieceOf,
 } from '../../../src/crystal/muse/session.js'
+import { MongoMuseSession } from '../../../src/crystal/MongoMuseSession.js'
+import type { Collection } from 'mongodb'
 
 // Hermetic: pure domain only. No I/O, no clock, no randomness — a session is a
 // value, every operation returns a new one, and nothing here touches a store.
+//
+// ONE EXCEPTION, at the bottom of the file: the kept-rolls round trip drives
+// `MongoMuseSession` over an in-memory collection double. The document mapping is
+// module-private, and a session field missing from either half of it is dropped on
+// every write and every read with nothing failing — so the mapping is only reachable
+// through the store class. No driver connection and no clock: the double is a Map.
 
 function frag(category: Fragment['category'], text: string, source = 'boardA'): Fragment {
   return { category, text, source, trigger: `${source}-trigger` }
@@ -679,4 +690,145 @@ test('a cap is a whole number of pieces, at least one', () => {
   assert.equal(normalizeSetup({ cap: '12' }).cap, undefined, 'a cap off the wire is a number or it is nothing')
   assert.equal(normalizeSetup({ mode: 'endless' }).mode, undefined, 'a mode outside the two is no mode')
   assert.deepEqual(normalizeSetup(null), {})
+})
+
+// --- Kept rolls: the one durable act of a rolling sitting (noema-329) --------
+
+/** A spawned session with nothing kept — the state every kept-roll test starts from. */
+function rollingSession() {
+  return spawnSession('mother-dataset', motherFragments())
+}
+
+test('keeping a roll appends it, and keeping the same prompt twice keeps it twice', () => {
+  const session = rollingSession()
+  assert.deepEqual(keptRollsOf(session), [], 'a fresh session has kept nothing')
+
+  const once = keepRoll(session, { prompt: 'a lone figure, still and cold', paid: false })
+  assert.deepEqual(keptRollsOf(once), [{ prompt: 'a lone figure, still and cold', paid: false }])
+  assert.deepEqual(keptRollsOf(session), [], 'the mutator is pure — the session it was given is untouched')
+
+  const twice = keepRoll(once, { prompt: 'two figures, still and cold', paid: true })
+  assert.deepEqual(
+    keptRollsOf(twice),
+    [
+      { prompt: 'a lone figure, still and cold', paid: false },
+      { prompt: 'two figures, still and cold', paid: true },
+    ],
+    'append-only, in the order they were kept',
+  )
+
+  // Keeping the same prompt again is the user saying so again, not a mistake to collapse.
+  const again = keepRoll(twice, { prompt: 'two figures, still and cold', paid: true })
+  assert.equal(keptRollsOf(again).length, 3, 'a duplicate prompt is a third entry, not a no-op')
+
+  // NON-VACUITY: a mutator that dropped the roll and returned the session unchanged
+  // fails every assertion above. That is the guard this test exists to be.
+  assert.notEqual(once, session, 'a keep returns a new session')
+})
+
+test('a kept roll carries a prompt and a verdict and nothing else, whatever the caller sends', () => {
+  const session = rollingSession()
+
+  // Non-vacuity: a normalize that spread its input instead of reading the two fields it
+  // defines would carry `runId` and `reaction` onto the session, and this would fail.
+  const smuggled = keepRoll(session, {
+    prompt: 'a lone figure',
+    paid: true,
+    runId: 'run-1',
+    reaction: 'up',
+    saved: true,
+  })
+  assert.deepEqual(keptRollsOf(smuggled), [{ prompt: 'a lone figure', paid: true }])
+
+  // A malformed roll is dropped rather than repaired — a defaulted verdict would label
+  // a paid prompt free, and a defaulted prompt would keep a roll nobody kept.
+  assert.deepEqual(keptRollsOf(keepRoll(session, { prompt: '   ', paid: false })), [], 'an empty prompt is no prompt')
+  assert.deepEqual(keptRollsOf(keepRoll(session, { prompt: 'a lone figure' })), [], 'a missing verdict is no verdict')
+  assert.deepEqual(keptRollsOf(keepRoll(session, { prompt: 'a lone figure', paid: 'yes' })), [], 'nor is a string one')
+  assert.deepEqual(keptRollsOf(keepRoll(session, { prompt: 42, paid: true })), [], 'a prompt is a string or it is nothing')
+  assert.deepEqual(keptRollsOf(keepRoll(session, null)), [], 'and nothing at all keeps nothing')
+
+  // The prompt is stored as it is identified — trimmed, like every other text this
+  // module takes off the wire.
+  assert.equal(keptRollsOf(keepRoll(session, { prompt: '  spaced  ', paid: false }))[0]?.prompt, 'spaced')
+
+  // The list normalizer's own edges: a non-array input is the empty list, and a
+  // malformed entry inside a list is dropped without taking its neighbours with it.
+  assert.deepEqual(normalizeKeptRolls(undefined), [])
+  assert.deepEqual(normalizeKeptRolls('not a list'), [])
+  assert.deepEqual(
+    normalizeKeptRolls([{ prompt: 'kept', paid: false }, { prompt: '', paid: true }, { prompt: 'also kept', paid: true }]),
+    [{ prompt: 'kept', paid: false }, { prompt: 'also kept', paid: true }],
+  )
+})
+
+/**
+ * The slice of `Collection` `MongoMuseSession` uses, over a Map.
+ *
+ * Only the four calls the store makes are implemented, and each one keeps the
+ * semantics the store depends on: `findOneAndUpdate` matches on the version and
+ * returns the document after the write.
+ */
+function collectionDouble(): Collection {
+  const docs = new Map<string, Record<string, unknown>>()
+  return {
+    async insertOne(doc: Record<string, unknown>) {
+      docs.set(String(doc.id), { ...doc })
+      return { acknowledged: true }
+    },
+    async findOne(filter: Record<string, unknown>) {
+      return docs.get(String(filter.id)) ?? null
+    },
+    async findOneAndUpdate(filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) {
+      const found = docs.get(String(filter.id))
+      if (!found) return null
+      const next = { ...found, ...update.$set }
+      docs.set(String(filter.id), next)
+      return next
+    },
+    /** The seam a test writes a pre-field document through. */
+    _put(doc: Record<string, unknown>) { docs.set(String(doc.id), doc) },
+  } as unknown as Collection
+}
+
+test('kept rolls survive the store round trip, and a document written without the field reads as empty', async () => {
+  const col = collectionDouble()
+  const store = new MongoMuseSession(col)
+
+  const kept = keepRoll(rollingSession(), { prompt: 'a lone figure, still and cold', paid: true })
+  const created = await store.create({ owner: 'anima-1', session: kept })
+
+  // NON-VACUITY: `keptRolls` missing from either half of the document mapping drops it
+  // here with nothing else failing — which is exactly the defect this asserts against.
+  const read = await store.find(created.id)
+  assert.ok(read)
+  assert.deepEqual(
+    keptRollsOf(read.session),
+    [{ prompt: 'a lone figure, still and cold', paid: true }],
+    'what was written comes back',
+  )
+
+  // A second keep, through the store's own save, lands beside the first.
+  const saved = await store.save(created.id, keepRoll(read.session, { prompt: 'two figures', paid: false }), read.versio ?? 0)
+  assert.ok(saved)
+  assert.deepEqual(keptRollsOf(saved.session).map((r) => r.prompt), ['a lone figure, still and cold', 'two figures'])
+
+  // A document written before the field existed carries none. It reads as a session
+  // that has kept nothing — no backfill, and no distinction between absent and empty.
+  ;(col as unknown as { _put(doc: Record<string, unknown>): void })._put({
+    id: 'sess-legacy',
+    owner: 'anima-1',
+    session: {
+      motherDatasetId: 'mother-dataset',
+      fragments: [],
+      floor: [],
+      pieces: [],
+    },
+    natum: new Date(),
+    mutatum: new Date(),
+  })
+  const legacy = await store.find('sess-legacy')
+  assert.ok(legacy)
+  assert.equal(legacy.session.keptRolls, undefined, 'the field is absent, not an empty array on disk')
+  assert.deepEqual(keptRollsOf(legacy.session), [], 'and absent reads as empty')
 })
