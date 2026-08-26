@@ -46,8 +46,10 @@ import {
   type TerminalRun,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
 import {
+  BASE_MODELS,
   DECOMPOSE_IN_FLIGHT_CODE,
   DECOMPOSE_NOTHING_TO_DO_CODE,
+  buildTrainingAffinesPayload,
   canFireDecompose,
   canOfferDecompose,
   decomposeCaptionsetId,
@@ -55,6 +57,7 @@ import {
   decomposePlanNote,
   decomposeRunRequest,
   decomposeWorkload,
+  hydrateTrainingAffines,
 } from '../../../src/platforms/web/app/src/lib/training.js'
 import {
   appendFailureNote,
@@ -3491,4 +3494,57 @@ test('promotedCollectionPath: a promotion lands in the new draft\'s own garden',
   assert.equal(promotedCollectionPath('col-1'), '/collections/col-1/garden');
   assert.equal(promotedCollectionPath('a b/c'), '/collections/a%20b%2Fc/garden',
     'the id is encoded — an unescaped one would walk out of the route');
+});
+
+// ── training form affines: hydrate + write-through (noema-330) ──────────────
+//
+// Derive's baseModel/steps/trigger used to be bare useState — navigate away and the
+// configuration was gone. They now live in the caller's per-modus affines: hydrated onto the
+// form on mount, and written back on change. `chosenSet` is out of scope here — it is
+// dataset-contextual (which captionset is newest), not a stored preference.
+
+test('hydrateTrainingAffines: seeds the form from stored affines', () => {
+  const stored = { baseModel: BASE_MODELS[1].id, steps: 2400, trigger: 'frostknight' };
+  assert.deepEqual(hydrateTrainingAffines(stored), { baseModel: BASE_MODELS[1].id, steps: 2400, trigger: 'frostknight' });
+});
+
+test('hydrateTrainingAffines: no stored affines falls back to today\'s defaults', () => {
+  const fallback = hydrateTrainingAffines(undefined);
+  assert.deepEqual(fallback, hydrateTrainingAffines(null));
+  assert.equal(fallback.baseModel, BASE_MODELS[0].id);
+  assert.equal(fallback.trigger, '');
+  assert.ok(fallback.steps > 0);
+});
+
+test('hydrateTrainingAffines: garbage is tolerated field-by-field, not as an all-or-nothing reject', () => {
+  const defaults = hydrateTrainingAffines(undefined);
+
+  // A base model this catalogue no longer offers falls back alone — a good stored trigger
+  // and step count are not thrown out along with it.
+  const droppedModel = hydrateTrainingAffines({ baseModel: 'retired-model-id', steps: 500, trigger: 'ok' });
+  assert.equal(droppedModel.baseModel, defaults.baseModel);
+  assert.equal(droppedModel.steps, 500);
+  assert.equal(droppedModel.trigger, 'ok');
+
+  // A non-numeric (or non-positive) steps falls back alone.
+  assert.equal(hydrateTrainingAffines({ steps: 'lots' }).steps, defaults.steps);
+  assert.equal(hydrateTrainingAffines({ steps: 0 }).steps, defaults.steps);
+  assert.equal(hydrateTrainingAffines({ steps: -5 }).steps, defaults.steps);
+  assert.equal(hydrateTrainingAffines({ steps: Number.NaN }).steps, defaults.steps);
+
+  // A non-string trigger falls back alone.
+  assert.equal(hydrateTrainingAffines({ trigger: 42 }).trigger, '');
+});
+
+test('buildTrainingAffinesPayload: writes the three training fields', () => {
+  const payload = buildTrainingAffinesPayload(null, { baseModel: 'klein-4b', steps: 1500, trigger: 'frostknight' });
+  assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'frostknight' });
+});
+
+test('buildTrainingAffinesPayload: merges onto the caller\'s existing record instead of clobbering it', () => {
+  // setAffines replaces the whole per-modus map server-side, so a naive `{ baseModel, steps,
+  // trigger }` PUT would erase any other key some other surface stored under this modus.
+  const existing = { baseModel: 'zimage', steps: 1000, trigger: 'old', someOtherFlag: true };
+  const payload = buildTrainingAffinesPayload(existing, { baseModel: 'klein-4b', steps: 1500, trigger: 'new' });
+  assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'new', someOtherFlag: true });
 });
