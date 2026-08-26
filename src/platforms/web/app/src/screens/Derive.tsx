@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset } from '../lib/api';
 import { captionsToTrainingImages } from '../lib/captionsets';
-import { BASE_MODELS, launchTraining } from '../lib/training';
+import {
+  BASE_MODELS,
+  buildTrainingAffinesPayload,
+  hydrateTrainingAffines,
+  launchTraining,
+  TRAINING_MODUS_ID,
+} from '../lib/training';
 
 // Derive a training (train-derive-spec.md, render noema-train-derive.png) — the recipe:
 // pick captionset (the lesson) + base + trigger + steps → fire. One dataset, many models.
@@ -16,6 +22,12 @@ import { BASE_MODELS, launchTraining } from '../lib/training';
 // `autocaption` is FALSE on this path by construction: the point of the screen is that the user
 // chooses which caption pass the model learns from, and the trainer's own captioner would
 // overwrite exactly that choice.
+//
+// `baseModel`/`trigger`/`steps` persist across visits as the caller's per-modus affines
+// (noema-330): hydrated on mount, written back debounced on change. `chosenSet` stays
+// session-local — it is dataset-contextual (which captionset is newest), not a preference.
+
+const AFFINES_SAVE_DEBOUNCE_MS = 1500;
 
 export function Derive() {
   const { id } = useParams();
@@ -28,11 +40,53 @@ export function Derive() {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The caller's last-known affines record, kept so a write-through merges onto it rather
+  // than clobbering keys another surface may have stored under this modus (setAffines
+  // replaces the whole map). Populated once hydrate resolves.
+  const affinesRef = useRef<Record<string, unknown> | null>(null);
+  const [affinesHydrated, setAffinesHydrated] = useState(false);
+  const skipNextAffinesSave = useRef(true);
+  const affinesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     let live = true;
     api.listDatasetsFull().then(({ datasets: ds }) => { if (live) setDatasets(ds); }).catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
   }, []);
+
+  // Hydrate the training form from the caller's stored affines once, on mount.
+  useEffect(() => {
+    let live = true;
+    api.getAffines(TRAINING_MODUS_ID).then(({ affines }) => {
+      if (!live) return;
+      affinesRef.current = affines;
+      const values = hydrateTrainingAffines(affines);
+      setBaseModel(values.baseModel);
+      setSteps(values.steps);
+      setTrigger(values.trigger);
+    }).catch(() => { /* no stored preference (or unreachable) — form keeps today's defaults */ })
+      .finally(() => { if (live) setAffinesHydrated(true); });
+    return () => { live = false; };
+  }, []);
+
+  // Write-through, debounced: any change to baseModel/steps/trigger after hydrate persists as
+  // the caller's next-time default. Never blocks the launch button; a failed save is silent
+  // and simply retried on the next change rather than surfaced as an error. Gated on
+  // `affinesHydrated` so the setState calls hydrate itself makes don't immediately re-save.
+  useEffect(() => {
+    if (!affinesHydrated) return;
+    if (skipNextAffinesSave.current) { skipNextAffinesSave.current = false; return; }
+    if (affinesSaveTimer.current) clearTimeout(affinesSaveTimer.current);
+    affinesSaveTimer.current = setTimeout(() => {
+      const payload = buildTrainingAffinesPayload(affinesRef.current, { baseModel, steps, trigger });
+      api.setAffines(TRAINING_MODUS_ID, payload)
+        .then(({ affines }) => { affinesRef.current = affines; })
+        .catch(() => { /* silent — the next change retries */ });
+    }, AFFINES_SAVE_DEBOUNCE_MS);
+    return () => { if (affinesSaveTimer.current) clearTimeout(affinesSaveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseModel, steps, trigger, affinesHydrated]);
+
   const d = (datasets ?? []).find((x) => x.id === id);
 
   // Seed the chosen captionset once the record resolves (newest pass); the choice is the

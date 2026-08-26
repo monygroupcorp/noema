@@ -29,6 +29,58 @@ export interface TrainingConfig {
   autocaption?: boolean;
 }
 
+/** The modus a training run fires, and the key its per-caller form defaults live under. */
+export const TRAINING_MODUS_ID = 'modus.aitoolkit-training';
+
+/** Default step count for a fresh training form (no stored preference yet). */
+const DEFAULT_TRAINING_STEPS = 1000;
+
+/** The caller's per-caller training defaults, as stored in `/v1/me/affines/:modusId` — shape
+ * unenforced server-side, so every field is read defensively before use. */
+export interface TrainingAffines {
+  baseModel?: unknown;
+  steps?: unknown;
+  trigger?: unknown;
+}
+
+/** The training form's persisted fields (everything BUT `chosenSet`, which is dataset-contextual
+ * rather than a preference and is never written back). */
+export interface TrainingFormValues {
+  baseModel: string;
+  steps: number;
+  trigger: string;
+}
+
+/**
+ * Map stored training affines onto form values, tolerating garbage field-by-field: a
+ * `baseModel` that isn't one of `BASE_MODELS`, or a `steps` that isn't a positive finite
+ * number, falls back to today's default rather than failing the whole hydrate. Absent affines
+ * (a caller who has never trained) hydrate to the same defaults the form already had.
+ */
+export function hydrateTrainingAffines(affines: TrainingAffines | null | undefined): TrainingFormValues {
+  const baseModel = typeof affines?.baseModel === 'string' && BASE_MODELS.some((b) => b.id === affines.baseModel)
+    ? affines.baseModel
+    : BASE_MODELS[0].id;
+  const steps = typeof affines?.steps === 'number' && Number.isFinite(affines.steps) && affines.steps > 0
+    ? affines.steps
+    : DEFAULT_TRAINING_STEPS;
+  const trigger = typeof affines?.trigger === 'string' ? affines.trigger : '';
+  return { baseModel, steps, trigger };
+}
+
+/**
+ * Build the affines record to PUT after a form change. `setAffines` replaces the caller's whole
+ * per-modus map rather than merging (see MongoConsuetudinum/MemoryConsuetudinum), so this reads
+ * the caller's last-known affines and merges the training fields onto them — any other key a
+ * future surface stores under this modus survives instead of being clobbered.
+ */
+export function buildTrainingAffinesPayload(
+  current: Record<string, unknown> | null | undefined,
+  values: TrainingFormValues,
+): Record<string, unknown> {
+  return { ...(current ?? {}), baseModel: values.baseModel, steps: values.steps, trigger: values.trigger };
+}
+
 /**
  * Stride-sample down to `cap` images for diversity (evenly spaced, not the first N).
  * Returns the input unchanged when already at or under the cap.
@@ -286,7 +338,7 @@ export async function launchTraining(cfg: TrainingConfig): Promise<Run> {
   const trigger = cfg.triggerWord.trim();
   const dataset = buildDatasetManifest(cfg.images, cfg.autocaption);
   const { run } = await api.createRun({
-    modusId: 'modus.aitoolkit-training',
+    modusId: TRAINING_MODUS_ID,
     aditus: {
       dataset,
       baseModel: cfg.baseModel,
