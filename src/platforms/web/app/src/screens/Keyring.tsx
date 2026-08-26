@@ -65,7 +65,7 @@ export function Keyring() {
         </div>
 
         <div className="sub" style={{ marginTop: 'var(--s4)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-          Going private (TEE) or running on your own machine is a <b>session mode</b>, not a separate account — switch it per window from the identity menu. Any account can use it.
+          Running on your own machine is a <b>session mode</b>, not a separate account — switch it per window from the identity menu. Any account can use it. (TEE is on the roadmap.)
         </div>
 
         <div className="sectionhead">On unlinkability</div>

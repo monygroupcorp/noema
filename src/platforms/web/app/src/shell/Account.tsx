@@ -15,8 +15,8 @@ import { guardedClick, guardedNavigate } from '../lib/dirtyGuard';
 // restrained, posture-rich dropdown (NOT the old fused meter panel).
 
 // compute label from the session execution mode (custody is per-run; this is the standing posture).
-function computeLabel(exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: string } {
-  if (exec === 'tee') return { glyph: 'ring', text: '1 sealed session' };
+// Every run executes on our shared compute today — there is no other posture to report.
+function computeLabel(_exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: string } {
   return { glyph: 'lit', text: 'shared' };
 }
 
