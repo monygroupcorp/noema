@@ -15,7 +15,29 @@
 .muse-roll-text { width: 100%; min-height: 54px; resize: vertical; }
 .muse-roll-frags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .muse-roll-frag { border: 1px solid var(--hair); border-radius: 999px; padding: 3px 9px; font-size: 11px; color: var(--muted); }
-.muse-roll-foot { display: flex; justify-content: flex-end; }
+.muse-roll-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+
+/* the mining loop (noema-231) — lock, vary, step back.
+   A fragment chip is a lock toggle: pinned reads as filled rather than outlined, so
+   what is being held is legible across a column of neighbours at a glance. */
+.muse-roll-frag { background: none; cursor: pointer; font-family: inherit; }
+.muse-roll-frag:hover { color: var(--fg); }
+.muse-roll-frag.locked {
+  color: var(--fg);
+  border-width: 1px;
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.muse-mining { margin-top: 18px; border-top: 1px solid var(--hair-soft); padding-top: 12px; }
+.muse-mining-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.muse-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0 10px; font-size: 11.5px; }
+.muse-trail-sep { color: var(--muted); margin: 0 4px; }
+.muse-neighbours { margin-top: 12px; padding-left: 12px; border-left: 1px solid var(--hair-soft); }
+.muse-roll.standing { border-color: color-mix(in srgb, var(--accent) 35%, var(--hair)); }
+.muse-roll-head .muse-standing { margin-right: auto; }
+.muse-vary-note { margin-top: 10px; }
 
 .muse-badge { font-family: var(--font-mono); font-size: 11px; border-radius: 5px; padding: 2px 7px; }
 .muse-badge.free { color: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--hair)); }
