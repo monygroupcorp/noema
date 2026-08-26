@@ -24,7 +24,7 @@ import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { InsufficientFundsError } from '../../execution/ActumInceptor.js'
 import { InsufficientBursaCreditsError } from '../../types/bursa.js'
 import { DecomposeInFlightError, DecomposeNothingToDoError } from '../../crystal/MuseDecomposeCursor.js'
-import type { ActumIndexStore } from '../../types/actumIndex.js'
+import type { ActumIndex, ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
@@ -58,7 +58,10 @@ import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
-import type { Run, RunOrder, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+import type {
+  Run, RunOrder, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage,
+  ActivityKind, ActivityDoor, ActivityRow, ActivityPage,
+} from './types.js'
 
 /** Options for the owner's settled spend-history listing (`listRuns`). */
 export interface ListRunsOpts {
@@ -66,6 +69,79 @@ export interface ListRunsOpts {
   cursor?: string
   /** Page size (clamped 1..100; default 20). */
   limit?: number
+}
+
+/** Options for the owner's activity read (`listActivity`). Mirrors `ListRunsOpts`. */
+export interface ListActivityOpts {
+  /** Opaque page cursor from a prior page; omit for the first page. */
+  cursor?: string
+  /** Page size (clamped 1..100; default 20). */
+  limit?: number
+}
+
+/**
+ * The activity `kind` table: modusId → what the run produced.
+ *
+ * A TABLE, not a prefix rule — flows dispatched to a pod carry essentia-derived ids
+ * (`flux-schnell`, …) that no prefix classifies. `Modus.verbum` is likewise not a
+ * classifier here: `describe` cannot separate captioning from decomposition, and
+ * training's `compose` is a self-declared fallback. Anything absent from this table
+ * is reported as `generation` — an honest catch-all, not a guess about the flow.
+ */
+const ACTIVITY_KIND_BY_MODUS: Readonly<Record<string, ActivityKind>> = {
+  'modus.aitoolkit-training': 'training',
+  'modus.dataset-caption': 'caption',
+  'modus.dataset-decompose': 'decompose',
+}
+
+/** The activity kind for a modusId. Unknown flows are generations. */
+export function activityKindFor(modusId: string): ActivityKind {
+  return ACTIVITY_KIND_BY_MODUS[modusId] ?? 'generation'
+}
+
+/** Read a string field off a free-form record, or undefined when it is absent/not a string. */
+function str(rec: Record<string, unknown> | undefined, key: string): string | undefined {
+  const v = rec?.[key]
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+/**
+ * The door for one run: id references into the canonical asset stores, read off the
+ * Actum the row points at. A field the run did not produce is ABSENT — never guessed.
+ *
+ * Generations have no server-side artifact record to point at today (there is no
+ * by-actum lookup on the trace store), so they carry at most the first media URL
+ * already present in `exitus` — the same key-agnostic first-http(s)-value rule the
+ * trace hook uses. Returns undefined when nothing is resolvable.
+ */
+export function activityDoorFor(
+  kind: ActivityKind,
+  aditus: Record<string, unknown> | undefined,
+  exitus: Record<string, unknown> | undefined,
+): ActivityDoor | undefined {
+  const door: ActivityDoor = {}
+  if (kind === 'training') {
+    const modelId = str(exitus, 'loraId')
+    const datasetId = str(aditus, 'dataset') ?? str(aditus, 'datasetId')
+    if (modelId) door.modelId = modelId
+    if (datasetId) door.datasetId = datasetId
+  } else if (kind === 'caption') {
+    const captionsetId = str(exitus, 'captionsetId')
+    const datasetId = str(aditus, 'dataset') ?? str(aditus, 'datasetId')
+    if (captionsetId) door.captionsetId = captionsetId
+    if (datasetId) door.datasetId = datasetId
+  } else if (kind === 'decompose') {
+    const datasetId = str(aditus, 'dataset') ?? str(aditus, 'datasetId')
+    const captionsetId = str(aditus, 'captionset') ?? str(aditus, 'captionsetId')
+    if (datasetId) door.datasetId = datasetId
+    if (captionsetId) door.captionsetId = captionsetId
+  } else {
+    const mediaUrl = Object.values(exitus ?? {}).find(
+      (v): v is string => typeof v === 'string' && /^https?:\/\//.test(v),
+    )
+    if (mediaUrl) door.mediaUrl = mediaUrl
+  }
+  return Object.keys(door).length > 0 ? door : undefined
 }
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import { coverageOver, liveMedia } from '../../types/dataset.js'
@@ -921,6 +997,66 @@ export class CrystalApi {
       ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
       runningTotal: { impetus: totalImpetus, usd: Number(totalImpetus) * IMPETUS_USD_RATE },
     }
+  }
+
+  /**
+   * The caller's ACTIVITY — one owner-scoped projection of what they have in flight and
+   * what has settled, newest first, with a door to each run's artifact
+   * (`GET /v1/me/activity`).
+   *
+   * READ-ONLY and purely compositional: it reads the two owner-scoped listings the run
+   * index already exposes — `findFor` (in-flight: `nascens|agens`) and `listSettled`
+   * (settled: `completus`) — and adds nothing to either. Ownership is the index key
+   * itself (`animaId` OR anon `commitment`), the same identity-blind primitive `/status`
+   * and `/me/runs` use; a foreign key reaches no row, and a bursaToken caller gets an
+   * empty page (those runs are never indexed).
+   *
+   * PAGINATION: `findFor` is an unpaginated, bounded in-flight set, so the in-flight rows
+   * ride the FIRST page (no `?cursor=`); subsequent pages walk settled history through the
+   * settled cursor, exactly as `/me/runs` does.
+   *
+   * DOORS: one bounded `actorum.findById` per row ON THIS PAGE (the collection-pieces
+   * precedent), read only for the artifact ids the run recorded. A run whose door cannot
+   * be resolved ships without one.
+   *
+   * Degrades to an empty page when the wired index lacks the settled-history method.
+   */
+  async listActivity(auctor: AuctorKey, opts: ListActivityOpts = {}): Promise<ActivityPage> {
+    const index = this.deps.actumIndex
+    if (!index?.listSettled) return { activity: [] }
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
+    const [inFlight, page] = await Promise.all([
+      opts.cursor ? Promise.resolve([]) : index.findFor(auctor),
+      index.listSettled(auctor, { limit, ...(opts.cursor ? { cursor: opts.cursor } : {}) }),
+    ])
+
+    const rows: ActivityRow[] = [
+      ...inFlight.map(e => this._toActivityRow(e, 'running')),
+      ...page.entries.map(e => this._toActivityRow(e, 'settled')),
+    ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+
+    for (const row of rows) {
+      const actum = await this.deps.actorum?.findById(row.actumId)
+      if (!actum) continue
+      const door = activityDoorFor(row.kind, actum.aditus, actum.exitus)
+      if (door) row.door = door
+    }
+
+    return { activity: rows, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }
+  }
+
+  /** Project one owner-scoped index row onto its public activity row (doors added separately). */
+  private _toActivityRow(entry: ActumIndex, status: 'running' | 'settled'): ActivityRow {
+    const row: ActivityRow = {
+      actumId: entry.actumId,
+      kind: activityKindFor(entry.modusId),
+      modusId: entry.modusId,
+      status,
+    }
+    if (entry.modusLabel !== undefined) row.modusLabel = entry.modusLabel
+    if (entry.createdAt !== undefined) row.createdAt = new Date(entry.createdAt).toISOString()
+    if (entry.settledAt !== undefined) row.settledAt = new Date(entry.settledAt).toISOString()
+    return row
   }
 
   /** A run is owned by an auctor iff:

@@ -16,7 +16,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, RunOrder, Collection, Team, Edition, FeedItem, Project, RunsPage } from './types.js'
+import type { Run, RunOrder, Collection, Team, Edition, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
@@ -102,6 +102,8 @@ export interface ApiFacade {
   /** Cancel that order. Idempotent; null when the run has no order. */
   revokeRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null>
   listRuns(auctor: AuctorKey, opts: import('./CrystalApi.js').ListRunsOpts): Promise<RunsPage>
+  /** The caller's in-flight + settled runs as one newest-first projection, each with a door. */
+  listActivity(auctor: AuctorKey, opts: import('./CrystalApi.js').ListActivityOpts): Promise<ActivityPage>
   listFlows(): Promise<unknown[]>
   describeFlow(id: string): Promise<unknown>
   quote(
@@ -959,6 +961,19 @@ export function createApiRouter(deps: {
     const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
     const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
     res.json(await api.listRuns(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/me/activity — the caller's ACTIVITY: in-flight runs and settled runs in ONE
+  // owner-scoped, newest-first projection, each row carrying its kind and a door to the
+  // artifact it produced. Read-only — composed from the run index's existing in-flight and
+  // settled listings. `?cursor=` pages settled history (in-flight rows ride the first page);
+  // `?limit=` sizes (1..100, default 20).
+  router.get('/me/activity', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listActivity(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
   }))
 
   // GET /v1/data/datasets — the caller's datasets as the THIN `DatasetSummary[]` projection
