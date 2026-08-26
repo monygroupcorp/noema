@@ -92,6 +92,34 @@ jobs:
       - run: npm test
         working-directory: src/platforms/web/app
 
+  # Token-drift gate — flags CSS declarations that bypass the design tokens (hardcoded
+  # color/size instead of var(--*)) and var() references to undefined custom properties.
+  # Advisory-first: continue-on-error, findings surfaced as a step summary. A separate PR
+  # promotes this to blocking once a first triaged run has been reviewed.
+  lint-tokens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/platforms/web/app/package-lock.json
+      - run: npm ci
+        working-directory: src/platforms/web/app
+      - name: lint:tokens
+        id: lint_tokens
+        continue-on-error: true
+        working-directory: src/platforms/web/app
+        run: npm run lint:tokens
+      - name: Step summary
+        if: always()
+        working-directory: src/platforms/web/app
+        run: |
+          echo "### Token-drift lint" >> "$GITHUB_STEP_SUMMARY"
+          echo "Outcome: ${{ steps.lint_tokens.outcome }} (advisory — non-blocking)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline count: $(wc -l < stylelint-baseline.txt)" >> "$GITHUB_STEP_SUMMARY"
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
