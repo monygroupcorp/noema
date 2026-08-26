@@ -216,6 +216,50 @@ const RunsPageSchema: JsonSchema = {
   required: ['runs', 'runningTotal'],
 }
 
+/** The door back to what one run produced — id references into the canonical asset stores. */
+const ActivityDoorSchema: JsonSchema = {
+  type: 'object',
+  description: 'The way back to a run\'s artifact. Every field is optional; a field the run did not produce is absent.',
+  properties: {
+    modelId: { type: 'string', description: 'The registered model (Intella) id a training run produced.' },
+    datasetId: { type: 'string', description: 'The dataset the run trained on, captioned, or decomposed.' },
+    captionsetId: { type: 'string', description: 'The captionset the run produced or decomposed.' },
+    mediaUrl: { type: 'string', description: 'First media URL among the run\'s outputs, when one is trivially present.' },
+  },
+}
+
+/** One row of the owner's activity read. */
+const ActivityRowSchema: JsonSchema = {
+  type: 'object',
+  description: 'One run in the owner\'s activity — in-flight or settled — with a door to its artifact.',
+  properties: {
+    actumId: { type: 'string', description: 'The run (Actum) identifier.' },
+    kind: {
+      type: 'string',
+      enum: ['training', 'caption', 'decompose', 'generation'],
+      description: 'What the run produced. Resolved from a modusId table; "generation" is the catch-all.',
+    },
+    modusId: { type: 'string', description: 'The flow (modus) the run executed.' },
+    modusLabel: { type: 'string', description: 'Human label of the modus, when the index row carries one.' },
+    status: { type: 'string', enum: ['running', 'settled'], description: 'In-flight, or settled successfully.' },
+    createdAt: { type: 'string', format: 'date-time', description: 'When the run started, ISO-8601.' },
+    settledAt: { type: 'string', format: 'date-time', description: 'When the run settled, ISO-8601. Absent while in flight.' },
+    door: ActivityDoorSchema,
+  },
+  required: ['actumId', 'kind', 'modusId', 'status'],
+}
+
+/** The response for `GET /v1/me/activity` — a page of the owner's runs, newest first. */
+const ActivityPageSchema: JsonSchema = {
+  type: 'object',
+  description: 'A page of the owner\'s activity: in-flight and settled runs merged newest-first.',
+  properties: {
+    activity: { type: 'array', items: ActivityRowSchema, description: 'Activity rows, newest first.' },
+    nextCursor: { type: 'string', description: 'Opaque cursor for the next page of settled rows; absent on the last page.' },
+  },
+  required: ['activity'],
+}
+
 /** The request body for `POST /v1/runs`. */
 const RunsRequestSchema: JsonSchema = {
   type: 'object',
@@ -1998,6 +2042,25 @@ export const API_CONTRACT: ApiContract = {
         },
       ],
       response: RunsPageSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me/activity',
+      summary: "The caller's activity — in-flight and settled runs in ONE newest-first projection, each row carrying its kind and a door to the artifact it produced. Owner-scoped (identified or anon-commitment), cursor-paginated. In-flight rows ride the first page; the cursor pages settled history.",
+      auth: true,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page of settled rows.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
+      response: ActivityPageSchema,
     },
     {
       method: 'GET',
