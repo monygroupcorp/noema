@@ -1276,3 +1276,167 @@ test('a mutation that loses every attempt is refused as a retryable conflict, an
     await closeServer(server)
   }
 })
+
+// ── Keeping a roll (noema-329) ───────────────────────────────────────────────
+//
+// Rolling is free and a roll in progress is uncommitted work, so a report and the
+// edits made to it stay in the client. KEEPING is the explicit act, and this is the
+// route that makes it durable. Four claims, each one a decision rather than an
+// implementation detail:
+//
+//   A. A KEPT ROLL IS ON THE SESSION, and the list is append-only in the order it
+//      was kept — including two keeps of the same prompt, which is the user saying
+//      so twice rather than a mistake to collapse.
+//   B. NOTHING IS SPENT AND NO RUN IS MADE. The Actum double throws on every write
+//      and the ledger double throws on every reservation, so a 201 here is proof
+//      that keeping a prompt is not firing one.
+//   C. A MALFORMED BODY IS REFUSED, and refusing writes nothing.
+//   D. THE OWNER IS THE RESOLVED CALLER. A stranger naming the session — and naming
+//      its owner in the body — reaches nothing, and is told "not found".
+
+test('keeping a roll puts it on the session, append-only, and spends nothing', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  // Every write path on the run store and the ledger throws: a keep that fired or
+  // reserved anything cannot reach a 201.
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    assert.equal(spawned.status, 201)
+    const sessionId: string = spawned.body.session.id
+    assert.deepEqual(spawned.body.session.keptRolls, [], 'a fresh session has kept nothing, as an empty list')
+
+    const first = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+      method: 'POST', headers: HEADERS, body: { prompt: 'a lantern-keeper, ink wash', paid: false },
+    })
+    assert.equal(first.status, 201, `keeping needs no run: ${JSON.stringify(first.body)}`)
+    assert.deepEqual(first.body.session.keptRolls, [{ prompt: 'a lantern-keeper, ink wash', paid: false }])
+
+    const second = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+      method: 'POST', headers: HEADERS, body: { prompt: 'a lantern-keeper, dusk glow', paid: true },
+    })
+    assert.equal(second.status, 201)
+
+    // Kept twice on purpose: the same prompt again is a third entry.
+    const third = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+      method: 'POST', headers: HEADERS, body: { prompt: 'a lantern-keeper, dusk glow', paid: true },
+    })
+    assert.equal(third.status, 201)
+    assert.deepEqual(
+      third.body.session.keptRolls,
+      [
+        { prompt: 'a lantern-keeper, ink wash', paid: false },
+        { prompt: 'a lantern-keeper, dusk glow', paid: true },
+        { prompt: 'a lantern-keeper, dusk glow', paid: true },
+      ],
+      'append-only, in the order they were kept',
+    )
+
+    // And it is on the SESSION, not on the response alone — a re-read brings it back.
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: HEADERS })
+    assert.equal(resumed.body.session.keptRolls.length, 3, 'the kept panel survives leaving the screen')
+    assert.equal(sessions.store.get(sessionId)!.session.keptRolls?.length, 3)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a keep with no prompt, or with a verdict that is not a boolean, is refused and writes nothing', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    for (const body of [
+      {},
+      { paid: false },
+      { prompt: '   ', paid: false },
+      { prompt: 'a lantern-keeper', paid: 'yes' },
+      { prompt: 'a lantern-keeper' },
+    ]) {
+      const refused = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+        method: 'POST', headers: HEADERS, body,
+      })
+      assert.equal(refused.status, 400, `refused as malformed: ${JSON.stringify(body)}`)
+      assert.equal(refused.body.error.code, 'input.malformed')
+    }
+
+    assert.equal(sessions.store.get(sessionId)!.session.keptRolls, undefined, 'nothing was written')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a session belonging to another identity cannot have a roll kept against it', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    // Nothing in the body is a scope value, so naming the owner buys the stranger nothing.
+    const stranger = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'someone-else' },
+      body: { owner: OWNER, animaId: OWNER, prompt: 'a lantern-keeper', paid: false },
+    })
+    assert.equal(stranger.status, 404, 'someone else’s session is not found, never forbidden')
+    assert.equal(stranger.body.error.code, 'not_found.muse_session')
+    assert.equal(sessions.store.get(sessionId)!.session.keptRolls, undefined, 'and nothing was written')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a keep that collides with a concurrent write is re-applied to the fresh session, and both survive', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+  const { server, url } = await createServer(datasets, sessions, readOnlyActorum([]))
+  try {
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    const sessionId: string = spawned.body.session.id
+
+    // A floor change lands in the gap between this request's read and its write.
+    sessions.saveAttempts = []
+    sessions.beforeSave = () => {
+      sessions.beforeSave = null
+      landCompetingWrite(sessions, sessionId, (session) =>
+        setFragmentEnabled(session, { category: 'style', text: 'ink wash' }, false))
+    }
+
+    const kept = await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, {
+      method: 'POST', headers: HEADERS, body: { prompt: 'a lantern-keeper, ink wash', paid: false },
+    })
+    assert.equal(kept.status, 201, `the keep lands, not refused: ${JSON.stringify(kept.body)}`)
+    assert.deepEqual(sessions.saveAttempts, [0, 1], 'the losing attempt was retried against the fresh version')
+
+    const stored = sessions.store.get(sessionId)
+    assert.ok(stored)
+    assert.deepEqual(
+      stored.session.keptRolls,
+      [{ prompt: 'a lantern-keeper, ink wash', paid: false }],
+      'the kept roll survived',
+    )
+    assert.equal(
+      stored.session.floor.get(fragmentKey({ category: 'style', text: 'ink wash' }))?.enabled, false,
+      'and so did the concurrent floor change',
+    )
+  } finally {
+    await closeServer(server)
+  }
+})

@@ -803,6 +803,16 @@ export const api = {
     fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/steer`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify({ instruction }),
     }).then(j<{ proposal: MuseSteerProposal }>),
+  // POST …/kept — the keep gesture. Rolling is free and a roll in progress is this
+  // screen's own, so the report and its edits stay here; keeping is the explicit act and
+  // goes to the server, which is why a kept roll is still there after a navigation. The
+  // whole updated session comes back and the panel re-renders from it, like every other
+  // session write. APPEND-ONLY: keeping the same prompt twice keeps it twice, and there
+  // is no call here that removes one. NOTHING IS SPENT — the prompt is kept, not fired.
+  keepMuseRoll: (id: string, roll: MuseKeptRoll) =>
+    fetch(`/v1/data/muse/sessions/${encodeURIComponent(id)}/kept`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(roll),
+    }).then(j<{ session: MuseSessionView }>),
   // Append-only, one entry per run: a piece is recorded once, at fire time, with the
   // lineage that produced it. A second record for the same run is rejected.
   recordMusePiece: (id: string, piece: MusePieceRecord) =>
@@ -1282,6 +1292,14 @@ export interface MuseSetup {
   prefix?: string;
   suffix?: string;
 }
+/**
+ * One roll the user kept — the prompt as it stood, and its paid/free verdict.
+ *
+ * Two fields and no more. The verdict is stored because it cannot be recomputed later:
+ * whether a prompt fires as a paid run depends on what it drew and what it was rolled
+ * against, and both of those move while the kept roll stays as it was.
+ */
+export interface MuseKeptRoll { prompt: string; paid: boolean }
 export interface MuseSessionView {
   id: string;
   owner: string;
@@ -1293,6 +1311,8 @@ export interface MuseSessionView {
   pieces: MusePiece[];
   /** What the session fires its draw through. Absent until a setup is committed. */
   setup?: MuseSetup;
+  /** The rolls kept in this session, oldest first. Always sent — none kept is an empty list. */
+  keptRolls: MuseKeptRoll[];
   natum: string;
   mutatum: string;
 }
