@@ -29,6 +29,10 @@ import {
 
 const AFFINES_SAVE_DEBOUNCE_MS = 1500;
 
+// How long the launch confirmation shows before handing off to the run monitor — long enough
+// to read, short enough that it's a beat, not a wait.
+const LAUNCH_NOTE_MS = 1200;
+
 export function Derive() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -39,6 +43,7 @@ export function Derive() {
   const [steps, setSteps] = useState(1000);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [justLaunched, setJustLaunched] = useState(false);
 
   // The caller's last-known affines record, kept so a write-through merges onto it rather
   // than clobbering keys another surface may have stored under this modus (setAffines
@@ -126,7 +131,10 @@ export function Derive() {
     try {
       // autocaption stays false: the chosen captionset IS the lesson.
       const run = await launchTraining({ images, triggerWord: word, baseModel, steps, autocaption: false });
-      navigate(`/train/run/${run.id}`);
+      // A beat on the confirmation before handing off — long enough that "you can leave" is
+      // actually read, not just flashed past on the way to the run monitor.
+      setJustLaunched(true);
+      setTimeout(() => navigate(`/train/run/${run.id}`), LAUNCH_NOTE_MS);
     } catch (e) {
       setError(`couldn't start training: ${String((e as Error).message).slice(0, 160)}`);
       setLaunching(false);
@@ -202,12 +210,17 @@ export function Derive() {
           ) : <>pick a captionset to see what will be sent.</>}
         </p>
         {error && <p className="dv-note mono" style={{ color: 'var(--red-500, #e5746a)' }}>{error}</p>}
+        {justLaunched && (
+          <p className="dv-note mono" style={{ color: 'var(--accent)' }}>
+            training started — runs on its own; you can leave. it&rsquo;ll be on your shelf when it&rsquo;s done.
+          </p>
+        )}
 
         {/* footer */}
         <div className="dv-foot">
           <div className="dv-est mono">↳ lands on your model shelf when it finishes</div>
           <button className="btn accent lg" onClick={() => void begin()} disabled={!canFire}>
-            {launching ? 'starting…' : 'Begin training →'}
+            {justLaunched ? 'started →' : launching ? 'starting…' : 'Begin training →'}
           </button>
         </div>
       </div></div>
