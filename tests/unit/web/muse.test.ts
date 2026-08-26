@@ -187,9 +187,20 @@ import {
   unreadableRun,
   SESSION_PARAM,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  activityBadgeCount,
+  activityDoorHref,
+  activityDoorLabel,
+  activityKindLabel,
+  activityRowLabel,
+  partitionActivity,
+  partitionHomeActivity,
+  AWAITING_YOU_MAX,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
+  ActivityRow,
   Fragment,
   DatasetMediaItem,
   FlowSummary,
@@ -3549,16 +3560,52 @@ test('buildTrainingAffinesPayload: merges onto the caller\'s existing record ins
   assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'new', someOtherFlag: true });
 });
 
-// ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
-import {
-  partitionHomeActivity,
-  activityRowLabel,
-  activityDoorHref,
-  AWAITING_YOU_MAX,
-} from '../../../src/platforms/web/app/src/lib/muse.js'
-import type { ActivityRow } from '../../../src/platforms/web/app/src/lib/api.js'
+// ── Activity bands (noema-326) ────────────────────────────────────────────────
 
-function activityRow(over: Partial<ActivityRow>): ActivityRow {
+test('partitionActivity: a running row lands in running, never in finished', () => {
+  const rows = [activityRow({ actumId: 'a', status: 'running' }), activityRow({ actumId: 'b', status: 'settled' })];
+  const { running, finished } = partitionActivity(rows);
+  assert.deepEqual(running.map((r) => r.actumId), ['a']);
+  assert.deepEqual(finished.map((r) => r.actumId), ['b']);
+});
+
+test('partitionActivity: a settled row lands in finished, never in running', () => {
+  // Guards the OTHER direction too — a partition that dumped everything into one band
+  // (or swapped the two) would still pass a test that only checked lengths.
+  const rows = [activityRow({ actumId: 'x', status: 'settled' }), activityRow({ actumId: 'y', status: 'settled' })];
+  const { running, finished } = partitionActivity(rows);
+  assert.deepEqual(running, []);
+  assert.deepEqual(finished.map((r) => r.actumId), ['x', 'y']);
+});
+
+test('activityBadgeCount: zero in-flight rows is zero, not a truthy placeholder', () => {
+  const rows = [activityRow({ status: 'settled' }), activityRow({ status: 'settled' })];
+  assert.equal(activityBadgeCount(rows), 0);
+});
+
+test('activityBadgeCount: counts only the running rows, ignoring settled ones', () => {
+  const rows = [
+    activityRow({ actumId: 'a', status: 'running' }),
+    activityRow({ actumId: 'b', status: 'settled' }),
+    activityRow({ actumId: 'c', status: 'running' }),
+  ];
+  assert.equal(activityBadgeCount(rows), 2);
+});
+
+test('activityKindLabel / activityDoorLabel: the app\'s own nouns, labels match where the door leads', () => {
+  assert.equal(activityKindLabel('training'), 'training');
+  assert.equal(activityKindLabel('caption'), 'caption pass');
+  assert.equal(activityKindLabel('decompose'), 'decompose');
+  assert.equal(activityKindLabel('generation'), 'generation');
+  assert.equal(activityDoorLabel('generation'), 'view media');
+  assert.equal(activityDoorLabel('training'), 'view models');
+  assert.equal(activityDoorLabel('caption'), 'view captions');
+  assert.equal(activityDoorLabel('decompose'), 'view garden');
+});
+
+// ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
+
+function activityRow(over: Partial<ActivityRow> = {}): ActivityRow {
   return { actumId: 'a1', kind: 'generation', modusId: 'm1', status: 'settled', ...over }
 }
 
@@ -3612,3 +3659,4 @@ test('activityDoorHref: a row without the door fields its kind needs renders wit
   assert.equal(activityDoorHref(activityRow({ kind: 'generation', door: {} })), undefined)
   assert.equal(activityDoorHref(activityRow({ kind: 'generation' })), undefined)
 })
+

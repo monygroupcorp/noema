@@ -25,6 +25,9 @@ import type { FragmentState } from '../../../../../crystal/muse/sampler.js';
 import { mediaFromOutput, type Media } from './media';
 import type {
   AddDatasetMediaRequest,
+  ActivityDoor,
+  ActivityKind,
+  ActivityRow,
   Fragment,
   FragmentCategory,
   MuseSteerProposal,
@@ -41,8 +44,6 @@ import type {
   MuseSetup,
   RunRequest,
   RunStatus,
-  ActivityRow,
-  ActivityKind,
 } from './api';
 
 export { buildGarden, gardenCounts, rollReport, formatRoll, CATEGORIES };
@@ -3210,6 +3211,40 @@ export function unreadableRun(): RunResult {
   return { terminal: 'failed', error: 'the image for this piece could not be read' };
 }
 
+// ── Activity read helpers (noema-326 + noema-327) ─────────────────────────────
+// Pure helpers over `GET /v1/me/activity` rows (types + fetch live in `./api`).
+// Two surfaces consume the same read: the Activity screen's "running now" /
+// "recently finished" bands + the rail badge (326: `Status.tsx`/`Rail.tsx`), and
+// the home dashboard's AWAITING YOU / RUNNING NOW bands (327: `Dashboard.tsx`).
+// This file is the Muse-specific engine's front end elsewhere; these functions
+// are unrelated to it — kept here because it's the client's designated
+// non-component home for pure display logic.
+
+/**
+ * Split one activity page into the two bands the Activity screen renders:
+ * in-flight rows first (newest first, same order the read returns), then
+ * settled rows. Order within each band is preserved from the input.
+ *
+ * Non-vacuity: a finished row landing in `running` (or vice versa) must fail —
+ * every assertion below checks band MEMBERSHIP, not just band length.
+ */
+export function partitionActivity(rows: ActivityRow[]): { running: ActivityRow[]; finished: ActivityRow[] } {
+  const running: ActivityRow[] = [];
+  const finished: ActivityRow[] = [];
+  for (const row of rows) (row.status === 'running' ? running : finished).push(row);
+  return { running, finished };
+}
+
+/**
+ * The rail's Activity badge count: how many rows are in flight right now.
+ *
+ * Non-vacuity: a badge that shows with zero in-flight rows must fail — this is
+ * tested at zero explicitly, not just at a positive count.
+ */
+export function activityBadgeCount(rows: ActivityRow[]): number {
+  return rows.reduce((n, row) => (row.status === 'running' ? n + 1 : n), 0);
+}
+
 // ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
 //
 // The home dashboard's two real bands, built from ONE `GET /v1/me/activity` read (the
@@ -3247,6 +3282,11 @@ const ACTIVITY_KIND_LABEL: Record<ActivityKind, string> = {
   generation: 'generation',
 };
 
+/** Plain-English label for an activity row's kind. */
+export function activityKindLabel(kind: ActivityKind): string {
+  return ACTIVITY_KIND_LABEL[kind];
+}
+
 /** The label for one activity row: its server-supplied `modusLabel` if present, else the
  *  house noun for its kind. */
 export function activityRowLabel(row: ActivityRow): string {
@@ -3263,7 +3303,7 @@ export function activityRowLabel(row: ActivityRow): string {
  * Every case requires the door field(s) it needs; missing them returns `undefined` so a
  * door-less row renders without a link rather than a dead one — never guess a target.
  */
-export function activityDoorHref(row: ActivityRow): string | undefined {
+export function activityDoorHref(row: Pick<ActivityRow, 'kind' | 'door'>): string | undefined {
   const door = row.door;
   if (!door) return undefined;
   switch (row.kind) {
@@ -3279,5 +3319,19 @@ export function activityDoorHref(row: ActivityRow): string | undefined {
       return door.mediaUrl || undefined;
     default:
       return undefined;
+  }
+}
+
+/** Link text for `activityDoorHref`'s target, per kind — matches where the door leads. */
+export function activityDoorLabel(kind: ActivityKind): string {
+  switch (kind) {
+    case 'training':
+      return 'view models';
+    case 'caption':
+      return 'view captions';
+    case 'decompose':
+      return 'view garden';
+    default:
+      return 'view media';
   }
 }
