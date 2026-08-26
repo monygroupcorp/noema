@@ -26,9 +26,11 @@ const ACTIVITY_ICON: Record<ActivityRow['kind'], string> = {
   generation: 'sparkles',
 };
 
-function computeRow(exec: string): { glyph: string; text: string } {
+// The TEE roadmap line is not mode-gated (rth ruling, noema-344): every viewer — guest,
+// signed-in, or ZK-private — sees it, not only accounts already running in TEE mode.
+export function computeRow(exec: string): { glyph: string; text: string; roadmap?: string } {
   if (exec === 'tee') return { glyph: 'ring', text: 'hardware-sealed compute (TEE) is on the roadmap.' };
-  return { glyph: 'lit', text: 'shared — running on our compute' };
+  return { glyph: 'lit', text: 'shared — running on our compute', roadmap: 'hardware-sealed compute (TEE) is on the roadmap.' };
 }
 
 // the full project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
@@ -78,6 +80,7 @@ export function Dashboard() {
             <div className="ib-cell">
               <div className="ib-l">active compute · what we see</div>
               <div className="ib-compute"><span className={`hemi2 ${comp.glyph}`} /> {comp.text}</div>
+              {comp.roadmap && <div className="ib-sub">{comp.roadmap}</div>}
             </div>
             <div className="ib-cell">
               <div className="ib-l">credits</div>
