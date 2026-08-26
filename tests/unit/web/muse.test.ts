@@ -187,9 +187,17 @@ import {
   unreadableRun,
   SESSION_PARAM,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  activityBadgeCount,
+  activityDoorHref,
+  activityDoorLabel,
+  activityKindLabel,
+  partitionActivity,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
+  ActivityRow,
   Fragment,
   DatasetMediaItem,
   FlowSummary,
@@ -3547,4 +3555,72 @@ test('buildTrainingAffinesPayload: merges onto the caller\'s existing record ins
   const existing = { baseModel: 'zimage', steps: 1000, trigger: 'old', someOtherFlag: true };
   const payload = buildTrainingAffinesPayload(existing, { baseModel: 'klein-4b', steps: 1500, trigger: 'new' });
   assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'new', someOtherFlag: true });
+});
+
+// ── Activity bands (noema-326) ────────────────────────────────────────────────
+
+function actRow(over: Partial<ActivityRow> = {}): ActivityRow {
+  return {
+    actumId: 'act-1',
+    kind: 'generation',
+    modusId: 'flux-schnell',
+    status: 'settled',
+    ...over,
+  };
+}
+
+test('partitionActivity: a running row lands in running, never in finished', () => {
+  const rows = [actRow({ actumId: 'a', status: 'running' }), actRow({ actumId: 'b', status: 'settled' })];
+  const { running, finished } = partitionActivity(rows);
+  assert.deepEqual(running.map((r) => r.actumId), ['a']);
+  assert.deepEqual(finished.map((r) => r.actumId), ['b']);
+});
+
+test('partitionActivity: a settled row lands in finished, never in running', () => {
+  // Guards the OTHER direction too — a partition that dumped everything into one band
+  // (or swapped the two) would still pass a test that only checked lengths.
+  const rows = [actRow({ actumId: 'x', status: 'settled' }), actRow({ actumId: 'y', status: 'settled' })];
+  const { running, finished } = partitionActivity(rows);
+  assert.deepEqual(running, []);
+  assert.deepEqual(finished.map((r) => r.actumId), ['x', 'y']);
+});
+
+test('activityBadgeCount: zero in-flight rows is zero, not a truthy placeholder', () => {
+  const rows = [actRow({ status: 'settled' }), actRow({ status: 'settled' })];
+  assert.equal(activityBadgeCount(rows), 0);
+});
+
+test('activityBadgeCount: counts only the running rows, ignoring settled ones', () => {
+  const rows = [
+    actRow({ actumId: 'a', status: 'running' }),
+    actRow({ actumId: 'b', status: 'settled' }),
+    actRow({ actumId: 'c', status: 'running' }),
+  ];
+  assert.equal(activityBadgeCount(rows), 2);
+});
+
+test('activityDoorHref: a generation door links straight to its media', () => {
+  const row = actRow({ kind: 'generation', door: { mediaUrl: 'https://cdn.example/out.png' } });
+  assert.equal(activityDoorHref(row), 'https://cdn.example/out.png');
+});
+
+test('activityDoorHref: training/caption/decompose door through the source dataset', () => {
+  assert.equal(activityDoorHref(actRow({ kind: 'training', door: { datasetId: 'ds-1', modelId: 'model-1' } })), '/datasets/ds-1');
+  assert.equal(activityDoorHref(actRow({ kind: 'caption', door: { datasetId: 'ds-2' } })), '/datasets/ds-2');
+  assert.equal(activityDoorHref(actRow({ kind: 'decompose', door: { datasetId: 'ds-3', captionsetId: 'cs-1' } })), '/datasets/ds-3');
+});
+
+test('activityDoorHref: a door that resolves to no real route renders without a link, never a dead one', () => {
+  assert.equal(activityDoorHref(actRow({ kind: 'training', door: { modelId: 'model-1' } })), undefined);
+  assert.equal(activityDoorHref(actRow({ kind: 'generation', door: {} })), undefined);
+  assert.equal(activityDoorHref(actRow({ kind: 'generation' })), undefined);
+});
+
+test('activityKindLabel / activityDoorLabel: the app\'s own nouns, no new vocabulary', () => {
+  assert.equal(activityKindLabel('training'), 'training');
+  assert.equal(activityKindLabel('caption'), 'caption pass');
+  assert.equal(activityKindLabel('decompose'), 'decompose');
+  assert.equal(activityKindLabel('generation'), 'generation');
+  assert.equal(activityDoorLabel('generation'), 'view media');
+  assert.equal(activityDoorLabel('training'), 'view dataset');
 });

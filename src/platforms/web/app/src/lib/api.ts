@@ -552,6 +552,16 @@ export const api = {
     if (opts.limit) q.set('limit', String(opts.limit));
     return fetch(`/v1/me/runs?${q.toString()}`, { headers: readHeaders() }).then(j<RunsPage>);
   },
+  // GET /v1/me/activity — the caller's in-flight + settled runs in one newest-first
+  // projection, each row carrying its kind and a door to the artifact it produced.
+  // Owner-scoped (identified or anon-commitment), cursor-paginated like listRuns.
+  activity: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return fetch(`/v1/me/activity${qs ? `?${qs}` : ''}`, { headers: readHeaders() }).then(j<ActivityPage>);
+  },
 
   // ── Deposit / buy-points (Funding) — public, no auth ─────────────────────────
   // GET /v1/deposit/config — the CreditVault address + canonical points-per-USD +
@@ -1101,6 +1111,58 @@ export const api = {
     }).then(j<{ id: string }>),
 };
 
+// ── Shared activity poll (noema-326) ──────────────────────────────────────────
+// Rail's badge and Status's running/finished bands read ONE poll, not two: a plain
+// module-level store (subscribe + cached snapshot), the same shape as `pins.ts`'s
+// usePins store (localStorage there, a fetch + interval here) MINUS the React hook
+// itself — this file stays framework-free like the rest of its exports (it is
+// imported for its types by the hermetic test tree, which cannot resolve 'react');
+// callers wrap these two functions in their own `useSyncExternalStore`. This is the
+// app's ONE recurring poll — deliberately slow (60s-class) and paused while hidden.
+const ACTIVITY_POLL_MS = 60_000;
+let activitySnapshot: { rows: ActivityRow[]; loaded: boolean } = { rows: [], loaded: false };
+let activityListeners = new Set<() => void>();
+let activityTimer: ReturnType<typeof setInterval> | null = null;
+
+function setActivitySnapshot(rows: ActivityRow[]) {
+  activitySnapshot = { rows, loaded: true };
+  activityListeners.forEach((fn) => fn());
+}
+
+function fetchActivityOnce() {
+  api.activity({ limit: 20 })
+    .then((p) => setActivitySnapshot(p.activity))
+    .catch(() => { /* keep last-known rows; the next tick tries again */ });
+}
+
+function ensureActivityPolling() {
+  if (activityTimer) return;
+  fetchActivityOnce();
+  activityTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') fetchActivityOnce();
+  }, ACTIVITY_POLL_MS);
+}
+
+/** Subscribe to the shared activity store — for `useSyncExternalStore`'s first arg. */
+export function subscribeActivity(fn: () => void): () => void {
+  activityListeners.add(fn);
+  ensureActivityPolling();
+  return () => {
+    activityListeners.delete(fn);
+    if (activityListeners.size === 0 && activityTimer) {
+      clearInterval(activityTimer);
+      activityTimer = null;
+    }
+  };
+}
+
+/** The shared activity store's current snapshot — for `useSyncExternalStore`'s 2nd/3rd arg.
+ *  `loaded` distinguishes "not fetched yet" from "fetched, zero rows" so a caller doesn't
+ *  flash an empty state before the first response lands. */
+export function getActivitySnapshot(): { rows: ActivityRow[]; loaded: boolean } {
+  return activitySnapshot;
+}
+
 // Account settings (mirror the backend Consuetudo shapes).
 export interface Appearance { avatarUrl?: string; bannerUrl?: string; backgroundUrl?: string; accent?: string; look?: string }
 export interface Generatio {
@@ -1553,6 +1615,33 @@ export interface RunsPage {
   runs: SettledRun[];
   nextCursor?: string;
   runningTotal: { impetus: string; usd: number };
+}
+
+// Activity (GET /v1/me/activity, noema-326) — mirrors the backend's ActivityKind /
+// ActivityStatus / ActivityDoor / ActivityRow / ActivityPage (allocutio/api/types.ts).
+// One owner-scoped read merging in-flight and settled runs, newest first; in-flight
+// rows ride the first page only, the cursor pages settled history.
+export type ActivityKind = 'training' | 'caption' | 'decompose' | 'generation';
+export type ActivityStatus = 'running' | 'settled';
+export interface ActivityDoor {
+  modelId?: string;
+  datasetId?: string;
+  captionsetId?: string;
+  mediaUrl?: string;
+}
+export interface ActivityRow {
+  actumId: string;
+  kind: ActivityKind;
+  modusId: string;
+  modusLabel?: string;
+  status: ActivityStatus;
+  createdAt?: string;
+  settledAt?: string;
+  door?: ActivityDoor;
+}
+export interface ActivityPage {
+  activity: ActivityRow[];
+  nextCursor?: string;
 }
 
 // Deposit / buy-points config (GET /v1/deposit/config) — mirrors the backend DepositConfig.
