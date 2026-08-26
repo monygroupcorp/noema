@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "lint:tokens": "stylelint \"src/**/*.css\" --config .stylelintrc.json",
     "walk": "tsx walk/walk.ts"
   },
   "dependencies": {
@@ -35,6 +36,9 @@
     "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.3.1",
     "playwright": "^1.62.1",
+    "stylelint": "^17.14.1",
+    "stylelint-declaration-strict-value": "^1.12.1",
+    "stylelint-value-no-unknown-custom-properties": "^6.1.1",
     "tsx": "^4.23.12",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
