@@ -48,13 +48,16 @@ import {
 // to produce; nothing here computes a fragment. An item's `fragments` is filled out-of-band (an
 // operator run of `scripts/muse-roll.ts` against the item's caption) and rendered as chips here.
 // An empty/absent `fragments` is a valid, expected "nothing has decomposed this item yet" state —
-// rendered as an empty garden, never as an error. Curation (check/uncheck a chip) is local UI
-// state only: it decides which fragments a future garden-build would draw from, it does not write
-// anything back. No LLM call and no credit rail are touched by any of this.
+// rendered as an empty garden, never as an error.
+//
+// noema-323 — the chips here are READ-ONLY display: a label showing what decompose mined,
+// nothing more. Curation (which fragments feed a build) now lives on the dataset-wide Muse
+// screen (noema-320: chips → session floor → promote), so this screen carries a pointer to it
+// instead of its own toggle affordance. One curation surface.
 //
 // noema-229 (Muse P3) — `categoryColor` and `curatedFragments` now live in `lib/muse.ts`, shared
 // with the dataset-wide Muse screen (`/datasets/:id/muse`), and are re-exported here so this
-// screen's own call sites and its existing test keep working unchanged.
+// screen's existing test keeps working unchanged; `categoryColor` still colors each chip's dot.
 //
 // noema-265 — growing the set has its home here, against the media grid. The panel itself is
 // `components/AddImages` (noema-260), rendered on the muse screen too; what this screen adds is
@@ -129,20 +132,8 @@ export function Dataset() {
     if (d && activeSet === null) setActiveSet(d.captionsets[0]?.id ?? '');
   }, [d, activeSet]);
 
-  // Which chips are unchecked, per media item id. Local curation state only — see the file
-  // header note; nothing here is persisted or fed to a decompose call.
-  const [excludedByItem, setExcludedByItem] = useState<Record<string, Set<number>>>({});
-  const toggleFragment = (itemId: string, fragIndex: number) => {
-    setExcludedByItem((prev) => {
-      const next = new Set(prev[itemId] ?? []);
-      if (next.has(fragIndex)) next.delete(fragIndex); else next.add(fragIndex);
-      return { ...prev, [itemId]: next };
-    });
-  };
-
   // Which media items' fragment gardens are open (noema-283). Closed by default; per item,
-  // keyed by media id — opening one does not open the rest. Distinct from `excludedByItem`
-  // above: this press only reveals the chips, it does not exclude a fragment.
+  // keyed by media id — opening one does not open the rest.
   const [openGardens, setOpenGardens] = useState<Set<string>>(new Set());
   const toggleGarden = (itemId: string) => setOpenGardens((prev) => toggleGardenId(prev, itemId));
 
@@ -364,7 +355,6 @@ export function Dataset() {
               <div className="ds-imgrid">
                 {live.map((m) => {
                   const fragments = m.fragments ?? [];
-                  const excluded = excludedByItem[m.id] ?? new Set<number>();
                   return (
                     <figure key={m.id} className="ds-img">
                       <span className="ds-img-tile" style={{ backgroundImage: `url(${m.url})`, backgroundSize: 'cover' }} />
@@ -386,33 +376,34 @@ export function Dataset() {
                       </div>
                       {fragments.length > 0 && (
                         <>
-                          {/* Opening the garden is a SEPARATE control from a chip press — a
-                              chip press already means something (`toggleFragment` excludes it
-                              from a future build), so opening the list must never also toggle
-                              one. */}
+                          {/* Opening the garden only reveals the chips below — read-only display,
+                              not a curation control (noema-323). */}
                           <button
                             type="button"
                             className="ds-garden-toggle"
                             onClick={() => toggleGarden(m.id)}
                           >
-                            {gardenSummaryLine(fragments.length, excluded.size)} {isGardenOpen(openGardens, m.id) ? '▾' : '▸'}
+                            {gardenSummaryLine(fragments.length, 0)} {isGardenOpen(openGardens, m.id) ? '▾' : '▸'}
                           </button>
                           {isGardenOpen(openGardens, m.id) && (
                             <div className="pref-chips ds-garden">
                               {fragments.map((f, i) => {
-                                const on = !excluded.has(i);
                                 const color = categoryColor(f.category);
                                 return (
-                                  <button
+                                  // A label, not a control (noema-323) — `<span>`, no onClick, no
+                                  // checked/unchecked state. `.fchip` is a SHARED class
+                                  // (styles/app.css, also used by `.fund-actions`) that carries
+                                  // `cursor:pointer`; that file stays untouched, so the
+                                  // non-clickable cursor is set here instead.
+                                  <span
                                     key={`${f.category}-${i}`}
-                                    type="button"
-                                    className={`fchip${on ? ' on' : ''}`}
+                                    className="fchip"
+                                    style={{ cursor: 'default' }}
                                     title={`${f.category} · ${f.source}`}
-                                    onClick={() => toggleFragment(m.id, i)}
                                   >
                                     <span style={{ background: color, width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
                                     {f.text}
-                                  </button>
+                                  </span>
                                 );
                               })}
                             </div>
@@ -422,6 +413,14 @@ export function Dataset() {
                     </figure>
                   );
                 })}
+              </div>
+            )}
+
+            {/* noema-323 — the chips above are read-only; this is the pointer to where curation
+                actually happens, shown only once there is something to curate. */}
+            {live.some((m) => (m.fragments ?? []).length > 0) && (
+              <div className="sub mono ds-muse-pointer">
+                <Link to={`/datasets/${d.id}/muse`}>curate in muse →</Link>
               </div>
             )}
 
