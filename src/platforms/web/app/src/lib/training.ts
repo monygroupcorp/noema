@@ -268,9 +268,10 @@ export function decomposeCaptionsetId(d: CaptionsetBearing, selectedId: string |
 }
 
 /**
- * Whether the fire button is armed. A decompose is `deliveryMode: 'sync'` — the request stays
- * open until the last caption is written — and it spends one chat call per caption, so a
- * second pass cannot start while one is in flight.
+ * Whether the fire button is armed. A decompose spends one chat call per caption and the
+ * server holds a single-flight claim on the dataset for the length of the pass, so a second
+ * pass cannot start while one is in flight. `inFlight` is now "a run is being watched" rather
+ * than "a request is open" — the dispatch returns at once and the pass continues server-side.
  */
 export function canFireDecompose(gate: {
   captionsetId: string | null;
@@ -324,13 +325,40 @@ export function decomposeFailureNote(message: string): string {
 }
 
 /**
- * Launch a decompose pass. The run is synchronous: this promise settles when the pass has
- * written its fragments, so the caller re-reads the dataset afterwards rather than polling.
+ * Launch a decompose pass. This settles at DISPATCH: the pass — one chat call per caption,
+ * serial — continues server-side after the response, so what comes back is a run to watch,
+ * not a finished job. Callers put the run id in the URL (`withDecomposeRunParam`) and
+ * subscribe with `useRunStream`, then re-read the dataset when the run goes terminal.
  * Throws on a failed dispatch (caller surfaces the error).
  */
 export async function launchDecomposeJob(cfg: DecomposeConfig): Promise<Run> {
   const { run } = await api.createRun(decomposeRunRequest(cfg));
   return run;
+}
+
+/**
+ * The query param a decompose run id rides in, so a pass survives leaving the screen.
+ *
+ * The same key and the same reasoning as the caption screen's (noema-321): a launch writes
+ * it with `replace` so Back does not step through run states, and a mount reads it back and
+ * re-attaches the watch. Without it a pass that now outlives the request would be lost the
+ * moment the user navigates — which is the failure the async move would otherwise introduce.
+ */
+export const DECOMPOSE_RUN_PARAM = 'run';
+
+/** The decompose run id carried in a URL, or null. Blank is treated as absent. */
+export function decomposeRunParam(search: URLSearchParams): string | null {
+  const v = search.get(DECOMPOSE_RUN_PARAM);
+  return v && v.trim() ? v : null;
+}
+
+/** The same params with the decompose run id set (or cleared, on null). Returns a NEW
+ *  `URLSearchParams`, for `setSearchParams(withDecomposeRunParam(search, id), { replace: true })`. */
+export function withDecomposeRunParam(search: URLSearchParams, runId: string | null): URLSearchParams {
+  const next = new URLSearchParams(search);
+  if (runId) next.set(DECOMPOSE_RUN_PARAM, runId);
+  else next.delete(DECOMPOSE_RUN_PARAM);
+  return next;
 }
 
 /** Launch a LoRA training run. Throws on a failed dispatch (caller surfaces the error). */

@@ -336,7 +336,14 @@ test('registering the steer cursor leaves the ApiCursor registrations and the de
   }
   cursorum.register(
     MODUS_DATASET_DECOMPOSE.ministerium!,
-    new MuseDecomposeCursor({ datasets: {} as never, providers: [binding()] }),
+    // Registration only — nothing here runs a pass, so the settlement rail the decomposer takes
+    // (its own actum store and completor, since no webhook finishes a decompose) is never reached.
+    new MuseDecomposeCursor({
+      datasets: {} as never,
+      providers: [binding()],
+      actorum: {} as never,
+      completor: () => ({} as never),
+    }),
   )
   cursorum.register(MUSE_STEER_MINISTERIUM, new MuseSteerCursor({ providers: [binding()] }))
 

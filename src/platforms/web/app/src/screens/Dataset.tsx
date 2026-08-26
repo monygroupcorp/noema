@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { custodyGlyph, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
@@ -29,9 +29,12 @@ import {
   decomposeCaptionsetId,
   decomposeFailureNote,
   decomposePlanNote,
+  decomposeRunParam,
   decomposeWorkload,
   launchDecomposeJob,
+  withDecomposeRunParam,
 } from '../lib/training';
+import { useRunStream } from '../lib/runStream';
 
 // Dataset detail (train-dataset-spec.md, render noema-train-dataset.png) — the core asset:
 // media (king) + versions + captionsets. Captionsets are a separate versioned layer (the
@@ -115,7 +118,15 @@ export function captionFor(dataset: Pick<DatasetT, 'captionsets'>, activeSetId: 
 export function Dataset() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [search, setSearchParams] = useSearchParams();
   const [datasets, setDatasets] = useState<DatasetT[] | null>(null);
+
+  // The list read, callable again: a finished decompose writes fragments onto the record
+  // server-side, so the chips arrive through a re-read rather than through the run's outputs.
+  const loadDatasets = useCallback(async () => {
+    const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
+    setDatasets(ds);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -138,11 +149,64 @@ export function Dataset() {
   const toggleGarden = (itemId: string) => setOpenGardens((prev) => toggleGardenId(prev, itemId));
 
   // Decomposing the SELECTED captionset — the rung between a caption pass and the garden
-  // above. The pass is synchronous and metered (one chat call per caption), so the action
-  // locks while it runs and the dataset is re-read when it returns, which is what fills the
-  // chips. The rules — offered at all, which captionset, when armed — live in `lib/training.ts`.
-  const [decomposing, setDecomposing] = useState(false);
+  // above. The pass is metered (one chat call per caption) and it is WATCHED, not awaited:
+  // the dispatch returns a run id at once and the pass continues server-side, so the screen
+  // subscribes to the run and re-reads the dataset when it goes terminal, which is what fills
+  // the chips. The rules — offered at all, which captionset, when armed — live in
+  // `lib/training.ts`.
+  //
+  // The run id rides `?run=`, the same way the caption screen carries its pass (noema-321): a
+  // pass that outlives its request must also survive leaving the screen, or a user who
+  // navigates away loses a run that is still spending. A launch writes the param with
+  // `replace` (Back must not step through run states) and a mount reads it back.
+  const [decomposeRun, setDecomposeRun] = useState<string | null>(() => decomposeRunParam(search));
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const mountRunChecked = useRef(false);
+
+  const decomposeStream = useRunStream(decomposeRun ?? undefined);
+  const decomposeTerminal = decomposeStream.terminal;
+  // What the control and the notes below read as "a pass is running": a run is attached and it
+  // has not gone terminal, or a dispatch is on the wire.
+  const decomposing = starting || (decomposeRun !== null && decomposeTerminal === null);
+
+  // A `?run=` carried in on mount gets ONE validating fetch. A run that is gone, or was never
+  // this caller's (ownership is server-side), must clear rather than leave the screen showing a
+  // pass that is not running — `useRunStream`'s poll fallback reads a persistent 404 as "still
+  // pending", so the check belongs here. A run started from this screen is known good and is
+  // never re-checked.
+  useEffect(() => {
+    if (mountRunChecked.current) return;
+    mountRunChecked.current = true;
+    const carried = decomposeRun;
+    if (!carried) return;
+    let live = true;
+    api.getRun(carried).catch(() => {
+      if (!live) return;
+      setDecomposeRun(null);
+      setSearchParams((prev) => withDecomposeRunParam(prev, null), { replace: true });
+      setDecomposeMsg({ ok: false, text: 'that decompose is gone or not yours' });
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The pass landing. Fragments are written onto the DATASET, so the result arrives through a
+  // re-read of the record rather than through the run's own exitus.
+  useEffect(() => {
+    if (!decomposeRun || decomposeTerminal === null) return;
+    if (decomposeTerminal === 'failed') {
+      setDecomposeMsg({ ok: false, text: `decompose failed: ${decomposeStream.error ?? 'no reason reported'}` });
+      return;
+    }
+    let live = true;
+    void (async () => {
+      await loadDatasets();
+      if (!live) return;
+      setDecomposeMsg({ ok: true, text: 'decompose finished — the chips below come from it' });
+    })();
+    return () => { live = false; };
+  }, [decomposeRun, decomposeTerminal, decomposeStream.error, loadDatasets]);
   // noema-278 — the whole-set path, off by default. A decompose runs one model call per item,
   // and an item that already carries fragments has already been through the extractor, so the
   // default pass is the new work only. This is the explicit ask for everything, and the control
@@ -229,7 +293,7 @@ export function Dataset() {
     // With `redo` the workload is the whole pass, so the pending count is not what gates it.
     const pending = redoAll ? undefined : decomposeWorkload(dataset, captionsetId).pending;
     if (!canFireDecompose({ captionsetId, inFlight: decomposing, pending })) return;
-    setDecomposing(true);
+    setStarting(true);
     setDecomposeMsg(null);
     try {
       const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, redo: redoAll });
@@ -237,16 +301,19 @@ export function Dataset() {
         setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
         return;
       }
-      const { datasets: ds } = await api.listDatasetsFull();
-      setDatasets(ds);
-      setDecomposeMsg({ ok: true, text: 'decompose finished — the chips below come from it' });
+      // The dispatch is done, the pass is not: attach to the run and let the watch above
+      // finish the story. The id goes into the URL in the same breath, so it is on the
+      // record before anything can navigate away from it.
+      setDecomposeRun(run.id);
+      setSearchParams((prev) => withDecomposeRunParam(prev, run.id), { replace: true });
+      setDecomposeMsg({ ok: true, text: `decompose started · run ${run.id.slice(0, 8)}` });
     } catch (e) {
       // A refusal because this dataset is ALREADY decomposing comes back through here, and
       // it is a status rather than a failure — `decomposeFailureNote` is what tells them
       // apart, so a second press reads as "one is running" instead of as an error.
       setDecomposeMsg({ ok: false, text: decomposeFailureNote(String((e as Error).message)) });
     } finally {
-      setDecomposing(false);
+      setStarting(false);
     }
   }
 
@@ -489,7 +556,13 @@ export function Dataset() {
               )}
               <p className="ds-panel-note">{captionCoverageLine(working, nextCaptionsetId)}</p>
               {decomposeGate && <p className="ds-panel-note">{decomposeGate}</p>}
-              {decomposing && <p className="ds-panel-note">a decompose is running on this dataset — one pass per caption, and it stays open until the last one is written. Only one runs at a time.</p>}
+              {decomposing && (
+                <p className="ds-panel-note">
+                  a decompose is running on this dataset — one pass per caption, and it keeps
+                  going on our side whether or not this page is open. Only one runs at a time.
+                  {decomposeRun && ` run ${decomposeRun.slice(0, 8)} · ${decomposeStream.elapsedSec}s elapsed`}
+                </p>
+              )}
               {decomposeMsg && <p className="ds-panel-note">{decomposeMsg.text}</p>}
             </div>
 
