@@ -3695,7 +3695,7 @@ test('activityKindLabel / activityDoorLabel: the app\'s own nouns, labels match 
   assert.equal(activityDoorLabel('generation'), 'view media');
   assert.equal(activityDoorLabel('training'), 'view models');
   assert.equal(activityDoorLabel('caption'), 'view captions');
-  assert.equal(activityDoorLabel('decompose'), 'view garden');
+  assert.equal(activityDoorLabel('decompose'), 'view cutting floor');
 });
 
 // ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
