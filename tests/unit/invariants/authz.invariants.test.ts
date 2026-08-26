@@ -682,6 +682,14 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
         owner: A.animaId, animaId: A.animaId, modusId: 'flow-of-b', mode: 'infinite', cap: 99,
       }),
     },
+    {
+      // Keeping a roll appends the prompt text of a draw to the session's durable kept
+      // list. B naming A's session must be refused at the session: the body carries no
+      // owner and neither does the route, so the only scope is the resolved caller, and
+      // A's kept list must not gain an entry B wrote.
+      name: 'keepMuseRoll',
+      call: (id) => api.keepMuseRoll(B, id, { prompt: 'b-was-here', paid: false }),
+    },
   ], () => snapshot(museSessions.store))
 
   assert.deepEqual(
@@ -699,6 +707,7 @@ test('INVARIANT: identity B cannot read or steer identity A\'s Muse session by i
   assert.equal(own.pieces[0].runId, 'run-of-a', 'the one entry is A\'s own')
   assert.equal(own.pieces[0].reaction, undefined, 'B\'s reaction did not land on A\'s piece')
   assert.equal(own.pieces[0].saved, false, 'B\'s save did not flag A\'s piece')
+  assert.deepEqual(own.keptRolls, [], 'no kept roll from B reached A\'s session')
   assert.equal(own.sessionDatasetId, undefined, 'and A\'s session was never pointed at a dataset')
   assert.equal(own.motherDatasetId, mother.id, 'A still reads their own session')
 })

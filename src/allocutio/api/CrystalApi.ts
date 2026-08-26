@@ -162,6 +162,8 @@ import {
   UnknownPieceError,
   addFragment,
   enabledFragments,
+  keepRoll,
+  keptRollsOf,
   manualFragment,
   reconcileFloor,
   recordPiece,
@@ -171,6 +173,7 @@ import {
   updatePiece,
   withSessionDataset,
   withSetup,
+  type KeptRoll,
   type MuseSession,
   type MuseSetup,
   type Piece,
@@ -2476,6 +2479,10 @@ export class CrystalApi {
       floor: floorToEntries(stored.session.floor),
       pieces: [...stored.session.pieces],
       ...(stored.session.setup ? { setup: stored.session.setup } : {}),
+      // Always projected, empty list included: a session written before the field
+      // existed carries none, and a client that had to tell "absent" from "empty"
+      // apart would be reading a storage detail rather than the session.
+      keptRolls: keptRollsOf(stored.session).map((r) => ({ ...r })),
       natum: stored.natum,
       mutatum: stored.mutatum,
     }
@@ -2793,6 +2800,34 @@ export class CrystalApi {
         throw err
       }
     })
+  }
+
+  /**
+   * Keep one rolled prompt against a session the caller owns.
+   *
+   * KEEPING IS THE EXPLICIT ACT, and it is the only part of rolling that is durable.
+   * A roll is free and a roll in progress is uncommitted work, so the report a session
+   * is rolling and the edits made to it stay in the client; the moment the user says
+   * this one is worth having, that statement gets a server home and survives leaving
+   * the screen.
+   *
+   * NOTHING IS SPENT AND NOTHING IS FIRED. There is no run behind this method — it
+   * validates a body and hands the pure module a new value, exactly as the floor and
+   * setup routes do. The prompt is kept, not launched.
+   *
+   * The body is validated to `recordMusePiece`'s strictness rather than normalized
+   * quietly: a request with no prompt, or with a verdict that is not a boolean, is a
+   * malformed request and is answered as one.
+   *
+   * Owner scoping is `_mutateMuseSession`'s, as for every other write here — nothing
+   * in the body is a scope value, and a stranger's session is reported as not found.
+   */
+  async keepMuseRoll(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    const body = (input ?? {}) as { prompt?: unknown; paid?: unknown }
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+    if (!prompt) throw Errors.inputMalformed('prompt is required')
+    if (typeof body.paid !== 'boolean') throw Errors.inputMalformed('paid must be a boolean')
+    return this._mutateMuseSession(auctor, id, (session) => keepRoll(session, { prompt, paid: body.paid }))
   }
 
   /**
@@ -4528,6 +4563,12 @@ export interface MuseSessionView {
    * no field for it.
    */
   setup?: MuseSetup
+  /**
+   * The rolls the user kept, in the order they kept them. Always present — a session
+   * that has kept none projects an empty list, so a client never has to tell an absent
+   * field from an empty one.
+   */
+  keptRolls: KeptRoll[]
   natum: Date
   mutatum: Date
 }

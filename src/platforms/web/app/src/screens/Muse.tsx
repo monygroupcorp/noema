@@ -73,6 +73,10 @@ import {
   setLoraWeight,
   nozzleChanged,
   nozzleTriggerLabel,
+  keepBlocked,
+  keptCount,
+  keptRollRequest,
+  keptRollsOf,
   manualAddError,
   manualAddRequest,
   missingNozzleNote,
@@ -315,8 +319,10 @@ export function Muse() {
   const [report, setReport] = useState<RollReport | null>(null);
   // Edited prompt text, keyed by roll index within the current report.
   const [edits, setEdits] = useState<Record<number, string>>({});
-  // Kept rolls: the roll's prompt text (possibly edited) plus its free/paid verdict.
-  const [kept, setKept] = useState<Array<{ prompt: string; paid: boolean }>>([]);
+  // Kept rolls live on the SESSION (noema-329), not here. Keeping is an explicit act and
+  // is written server-side; the panel below renders `keptRollsOf(session)`. What is held
+  // here is only which keep is mid-write, so the control can refuse a double-send.
+  const [keeping, setKeeping] = useState(false);
 
   // ── Ignition ──────────────────────────────────────────────────────────────
   // The workflow catalog, narrowed to t2i. `effect` (i2i) needs an input image and
@@ -657,6 +663,21 @@ export function Muse() {
       return false;
     } finally {
       setAdding(false);
+    }
+  }
+
+  // Keep — the one durable act of a rolling sitting (noema-329). One call, and the panel
+  // re-renders from the session it returns, like every other session write. Nothing is
+  // fired and nothing is spent: the prompt is kept, not launched.
+  async function keep(prompt: string, paid: boolean) {
+    if (!session || keeping || keepBlocked(session, prompt)) return;
+    setKeeping(true);
+    try {
+      setSession((await api.keepMuseRoll(session.id, keptRollRequest(prompt, paid))).session);
+    } catch (e) {
+      setSessionError(`that roll wasn't kept: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setKeeping(false);
     }
   }
 
@@ -2215,8 +2236,12 @@ export function Muse() {
                       ))}
                     </div>
                     <div className="muse-roll-foot">
-                      <button className="btn ghost sm" onClick={() => setKept((prev) => [...prev, { prompt: promptOf(r.index, r.prompt), paid: r.paid }])}>
-                        Keep
+                      <button
+                        className="btn ghost sm"
+                        disabled={keeping || keepBlocked(session, promptOf(r.index, r.prompt))}
+                        onClick={() => keep(promptOf(r.index, r.prompt), r.paid)}
+                      >
+                        {keeping ? 'keeping…' : 'Keep'}
                       </button>
                       {/* One control, and it fires this one prompt. The price sits on the
                           launch control above: a t2i reservation is evaluated against the
@@ -2244,10 +2269,12 @@ export function Muse() {
               </div>
             )}
 
-            {kept.length > 0 && (
+            {/* The kept panel reads the SESSION. Keeping is a durable act, so what it
+                shows survives leaving this screen and coming back to the session. */}
+            {keptCount(session) > 0 && (
               <div className="muse-kept">
-                <div className="gc-l">kept ({kept.length})</div>
-                {kept.map((k, i) => (
+                <div className="gc-l">kept ({keptCount(session)})</div>
+                {keptRollsOf(session).map((k, i) => (
                   <div key={i} className="muse-kept-row">
                     <span className={`muse-badge sm ${k.paid ? 'paid' : 'free'}`}>{k.paid ? 'paid' : 'free'}</span>
                     <span className="mono">{k.prompt}</span>
