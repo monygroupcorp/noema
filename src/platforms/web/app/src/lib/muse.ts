@@ -45,8 +45,6 @@ import type {
   MuseSetup,
   RunRequest,
   RunStatus,
-  ActivityRow,
-  ActivityKind,
 } from './api';
 
 export { buildGarden, gardenCounts, rollReport, formatRoll, CATEGORIES };
