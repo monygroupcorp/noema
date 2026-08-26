@@ -7,6 +7,7 @@
 //   GET  /v1/purses                 — your purses + leftover credits (the dashboard)
 //   POST /v1/purses/:token/reclaim  — pull leftover credits back to your balance
 //   POST /v1/purses/:token/revoke   — drain + revoke a purse
+//   POST /v1/purses/:token/redeem   — take the whole remaining balance into YOUR balance
 //
 // This IS the delegation system, reduced to the crystal core: an owned Bursa purse +
 // the existing bearer-token run path. The purse's `token` is the invite code; runs spend
@@ -20,12 +21,12 @@ import type { Bursarum, Bursa } from '../../types/bursa.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { Credentials } from './IdentityResolver.js'
 import { credentialsFromHeaders } from './IdentityResolver.js'
-import { mintOwnedPurse, reclaimOwnedPurse } from '../../crystal/ownedPurse.js'
+import { mintOwnedPurse, reclaimOwnedPurse, redeemOwnedPurse } from '../../crystal/ownedPurse.js'
 
 export interface PurseRouterDeps {
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
   signorum: Pick<Signorum, 'reserve' | 'settle' | 'release' | 'issue'>
-  bursarium: Pick<Bursarum, 'create' | 'findByToken' | 'debit' | 'setStatus' | 'listByOwner'>
+  bursarium: Pick<Bursarum, 'create' | 'findByToken' | 'debit' | 'credit' | 'setStatus' | 'listByOwner' | 'claimForRedemption' | 'releaseRedemptionClaim'>
   /** For an agent-funded purse: the funding anima if `callerAnimaId` owns `agentId`, else null. */
   fundFromAgent?: (agentId: string, callerAnimaId: string) => Promise<{ animaId: string } | null>
   /** Identity store — reads the caller's `disputeFrozen` flag to block purse MINT (a value-outflow /
@@ -33,6 +34,12 @@ export interface PurseRouterDeps {
    *  Absent → the freeze check is skipped (dev/in-memory). RECLAIM (value inflow) is never blocked. */
   animae?: Pick<AnimaStore, 'find'>
   publicBase?: string
+  /** Optional rate-limit middleware, applied in order to the routes named here (index.ts wires
+   *  express-rate-limit; tests omit it). `redeem` is a list because the route is limited on two
+   *  independent keys — per source address and per caller — and one bucket cannot express both. */
+  rateLimiters?: {
+    redeem?: express.RequestHandler[]
+  }
 }
 
 function fail(res: Response, status: number, code: string, message: string): void {
@@ -44,6 +51,8 @@ function serialize(b: Bursa): Record<string, unknown> {
     token: b.id, credits: b.credits.toString(), createdAt: b.createdAt,
     ...(b.label !== undefined ? { label: b.label } : {}),
     status: b.status ?? 'active',
+    // The owner's conversion signal: WHETHER and WHEN an invite was redeemed. Never by whom.
+    ...(b.redeemedAt !== undefined ? { redeemedAt: b.redeemedAt } : {}),
   }
 }
 
@@ -121,6 +130,32 @@ export function createPurseRouter(deps: PurseRouterDeps): Router {
       res.status(200).json({ ok: true, refunded: out.refunded.toString() })
     })
   }
+
+  // POST /v1/purses/:token/redeem — the invite-code rail.
+  //
+  // The caller is whoever HOLDS the token, and they must have an account: redemption moves the
+  // purse's whole remaining balance into their own Signum, once, and a bearer token has no
+  // balance to move it into. Refusals are 409 state conflicts rather than 404s because the
+  // holder of a valid token is entitled to know why their code did not work; a token they do
+  // not hold stays a 404, which is also what a wrong guess gets.
+  router.post('/:token/redeem', ...(deps.rateLimiters?.redeem ?? []), async (req: Request, res: Response): Promise<void> => {
+    const animaId = await requireAnima(req, res)
+    if (!animaId) return
+    const out = await redeemOwnedPurse(deps, { token: String(req.params.token), redeemer: { animaId } })
+    if (!out.ok) {
+      switch (out.reason) {
+        case 'not_found':
+          fail(res, 404, 'purse.not_found', 'That code does not match a purse'); return
+        case 'owner_reclaims':
+          fail(res, 409, 'purse.owner_reclaims', 'This purse is yours — reclaim it instead of redeeming it'); return
+        case 'redeemed':
+          fail(res, 409, 'purse.redeemed', 'That code has already been redeemed'); return
+        case 'not_redeemable':
+          fail(res, 409, 'purse.not_redeemable', 'That code cannot be redeemed'); return
+      }
+    }
+    res.status(200).json({ ok: true, credited: out.credited.toString() })
+  })
 
   return router
 }
