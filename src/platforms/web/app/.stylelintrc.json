@@ -1,0 +1,35 @@
+{
+  "plugins": [
+    "stylelint-declaration-strict-value",
+    "stylelint-value-no-unknown-custom-properties"
+  ],
+  "rules": {
+    "scale-unlimited/declaration-strict-value": [
+      ["/color$/", "background-color", "fill", "stroke", "font-size", "font-family"],
+      {
+        "ignoreValues": [
+          "transparent",
+          "inherit",
+          "currentColor",
+          "initial",
+          "unset",
+          "0",
+          "none"
+        ]
+      }
+    ],
+    "csstools/value-no-unknown-custom-properties": [
+      true,
+      {
+        "importFrom": [
+          "src/styles/design/noema-theme.css",
+          "src/styles/design/semantic.css",
+          "src/styles/design/typography.css",
+          "src/styles/design/primitives.css",
+          "src/styles/design/layout.css",
+          "src/styles/design/noema-signature.css"
+        ]
+      }
+    ]
+  }
+}
