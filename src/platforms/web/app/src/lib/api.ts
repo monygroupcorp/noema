@@ -553,6 +553,16 @@ export const api = {
     return fetch(`/v1/me/runs?${q.toString()}`, { headers: readHeaders() }).then(j<RunsPage>);
   },
 
+  // GET /v1/me/activity — the caller's ACTIVITY: in-flight runs and settled runs in one read,
+  // newest first (noema-325). In-flight rows ride the first page only.
+  listActivity: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return fetch(`/v1/me/activity${qs ? `?${qs}` : ''}`, { headers: readHeaders() }).then(j<ActivityPage>);
+  },
+
   // ── Deposit / buy-points (Funding) — public, no auth ─────────────────────────
   // GET /v1/deposit/config — the CreditVault address + canonical points-per-USD +
   // default funding rate + supported chains. Static; drives the buy-credits UI.
@@ -1553,6 +1563,38 @@ export interface RunsPage {
   runs: SettledRun[];
   nextCursor?: string;
   runningTotal: { impetus: string; usd: number };
+}
+
+// ActivityKind/Status/Door/Row/Page mirror the backend's activity read (allocutio/api/types.ts)
+// as local literal types/interfaces — the web app doesn't import backend source, same convention
+// as `CanonVerb` above. What a run produced (`generation` is the catch-all).
+export type ActivityKind = 'training' | 'caption' | 'decompose' | 'generation';
+// In-flight, or settled successfully.
+export type ActivityStatus = 'running' | 'settled';
+// The way back to what a run produced: id references into the canonical asset stores. Every
+// field is optional — a field the run did not produce is absent rather than guessed.
+export interface ActivityDoor {
+  modelId?: string;
+  datasetId?: string;
+  captionsetId?: string;
+  mediaUrl?: string;
+}
+// One run in the owner's activity read (GET /v1/me/activity).
+export interface ActivityRow {
+  actumId: string;
+  kind: ActivityKind;
+  modusId: string;
+  modusLabel?: string;
+  status: ActivityStatus;
+  createdAt?: string;
+  settledAt?: string;
+  door?: ActivityDoor;
+}
+// A page of the owner's activity — in-flight and settled runs, newest first. In-flight rows
+// ride the first page only; `nextCursor` walks settled history.
+export interface ActivityPage {
+  activity: ActivityRow[];
+  nextCursor?: string;
 }
 
 // Deposit / buy-points config (GET /v1/deposit/config) — mirrors the backend DepositConfig.
