@@ -1,6 +1,6 @@
 # Privacy Policy — DRAFT
-**Last updated:** 2026-06-17
-**Status:** DRAFT. Not legal advice. Requires counsel review before publication.
+**Last updated:** 2026-08-26
+**Status:** DRAFT. Not legal advice. Requires review before publication.
 **Entity placeholder:** [ENTITY NAME], [JURISDICTION]
 
 ---
@@ -9,10 +9,11 @@
 
 We collect as little as we can and we do not track you. Here is what that means in practice:
 
-- We do not retain your prompts or outputs after a request completes, and we do not use them to train models.
+- Your runs — the inputs you submit and the outputs they produce — are kept as **your own history**, so you can go back to what you made and what it cost. We do not use them to train models.
 - We do not run Google Analytics or any third-party tracking.
-- If you use Bursa anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
-- A hardware-sealed private-compute tier (TEE), in which session content would be technically inaccessible to us, is **in development** and not yet available. We do not currently claim that the compute provider cannot see your session content.
+- If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
+- Your session content travels encrypted, but it is **executed on rented third-party GPU hardware**. The operator of that hardware is inside the trust boundary. We do not claim otherwise (see Section 2d).
+- A hardware-sealed private-compute tier (TEE), in which session content would be technically inaccessible to us and to the host, is **in development and not available** (see Section 2e).
 
 The long version follows.
 
@@ -22,7 +23,7 @@ The long version follows.
 
 [ENTITY NAME] operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
 
-For GDPR purposes, [ENTITY NAME] is the data controller for account and billing data, and processes session content transiently to deliver the service (see Section 2d).
+For GDPR purposes, [ENTITY NAME] is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
 
 ---
 
@@ -32,71 +33,84 @@ For GDPR purposes, [ENTITY NAME] is the data controller for account and billing 
 
 | Data | Why we collect it | Retention |
 |---|---|---|
-| Email address | Account creation, service notices | Until account deletion + 30 days |
-| Password hash | Authentication | Until account deletion |
-| Account ID (animaId) | Session and billing association | Until account deletion + 30 days |
-| Wallet address (if crypto sign-up) | Payment rail association | Until account deletion + 30 days |
+| Username | Sign-in and account identification | Until you erase your account (see Section 8) |
+| Email address (if you supply one) | Account recovery | Until you erase your account |
+| Password hash | Authentication | Until you erase your account |
+| Account ID (animaId) | Run and billing association | Pseudonymized on erasure; the opaque id is retained (Section 7) |
+| Wallet address (if crypto sign-up) | Payment rail association | Until you erase your account |
 
-You can use anonymous credits (Bursa) without an account. If you do, we hold none of the above.
+We do not currently send email. Verification and reset links are issued in-product; no outbound mail provider is configured in the deployment.
+
+You can use anonymous credits without an account. If you do, we hold none of the above.
 
 ### 2b. Billing and payment data
 
-We do not store payment card numbers. Credit card payments are processed by [PAYMENT PROCESSOR], subject to their privacy policy.
+We do not store payment card numbers. Card payments are processed by Stripe, subject to their privacy policy; we hold the reference identifiers their webhooks return.
 
-Crypto deposits: we screen incoming deposit addresses against OFAC sanctions lists. This is a legal obligation, not surveillance. We retain the deposit address and transaction ID for compliance record-keeping (see Section 6).
+Crypto deposits: deposit events reach us through Alchemy's webhooks, so the depositing address and transaction hash are visible to that provider and to us. We screen incoming deposit addresses against OFAC sanctions lists. This is a legal obligation, not surveillance. We retain the deposit address and transaction ID for compliance record-keeping (see Section 6).
 
-Anonymous credit (Bursa): a Bursa token is a Groth16 zero-knowledge proof. We verify the proof and dispense compute; we cannot link the spend to your identity or prior transactions. We retain: that a proof was verified, the credit amount, the timestamp.
+Anonymous credit: a purse token is a Groth16 zero-knowledge proof. We verify the proof and dispense compute; we cannot link the spend to your identity or prior transactions. We retain: that a proof was verified, the credit amount, the timestamp.
 
-### 2c. Session metadata (all session types)
+### 2c. Run records
 
-| Data | Why we collect it | Retention |
+A run is one piece of work you asked for. When it settles, we keep its record:
+
+| Data | Why we keep it | Retention |
 |---|---|---|
-| Session ID | Billing reconciliation | 90 days |
-| Session start / end timestamps | Billing | 90 days |
-| GPU-hours consumed | Billing | 90 days |
-| Credit amount charged | Billing | 90 days |
-| IP address (connection establishment only) | Rate limiting, abuse prevention | 24 hours |
+| The inputs you submitted | Your run history — so you can see and reuse what you asked for | Until you erase your account |
+| The outputs produced | Your run history — so your results stay available to you | Until you erase your account |
+| Run id, start / end timestamps | Billing reconciliation and your history | Until you erase your account |
+| Compute consumed and credit charged | Billing; part of the append-only spend ledger | Retained (Section 7) |
 
-We do not retain IP addresses beyond 24 hours. We do not correlate IPs with account identities.
+This is a deliberate design: a spend history is worth little if the thing you spent on is gone. The record is visible to you in the product, and to us — we can technically read it. It is not used to train models and it is not shared beyond the processors in Section 5.
 
-### 2d. Session content — how we process prompts and outputs
+We do not currently operate an automatic expiry window on run records. When that machinery ships, this section will state the window; until then the honest statement is: retained until account erasure.
 
-To generate your results, your prompts and outputs are processed on external GPU compute (RunPod) and, for concierge/chat, an external LLM provider (via OpenRouter). These providers are inside the trust boundary: we and they can technically access session content in order to run it.
+**IP addresses:** used in memory for rate limiting, in a rolling fifteen-minute window. They are not written to the database.
 
-- We do not retain prompt or output content after the request completes.
-- We do not use prompt or output content to train models.
-- We retain session metadata as described in 2c.
+### 2d. Where your session content is executed
 
-We do not claim your session content is unseen by the compute provider. That guarantee requires the hardware-sealed tier described in 2e, which is not yet available.
+To produce your results, your inputs and outputs are processed on external GPU compute (RunPod) and, for concierge/chat, an external LLM provider (via OpenRouter). These providers are inside the trust boundary: we and they can technically access session content in order to run it.
+
+The transport hop is encrypted end to end. That is a statement about the wire, not about the host: the compute runs on rented third-party hardware without attestation, so the operator of that hardware is inside the boundary too. We do not claim your session content is unseen by the compute provider. That guarantee requires the hardware-sealed tier described in 2e, which is not available.
+
+Generated media is stored in our Cloudflare R2 outputs bucket, which is bound to a public URL: anyone holding an output's link can fetch it. Treat an output link as a shareable link.
 
 ### 2e. Private compute (TEE) — in development
 
-We are building a hardware-sealed private-compute tier in which a WireGuard tunnel is established directly between your browser and a single-tenant GPU pod, with browser-verified attestation, so that session content would be technically inaccessible to us. **This tier is in development and not yet available.** Until it ships, do not treat any session as sealed from the compute provider. This policy will be updated when the tier launches.
+We are building a hardware-sealed private-compute tier in which a tunnel runs directly between your browser and a single-tenant GPU pod, with browser-verified attestation of the host, so that session content would be technically inaccessible to us and to the host operator. In that tier, inputs and outputs would not be retained after the request completes.
 
-### 2f. Usage and error logs
+**This tier is in development and is not available.** Nothing in this section describes the service as it runs today. Until it ships, do not treat any session as sealed from the compute provider. This policy will be updated when the tier launches.
 
-We collect server-side error logs (stack traces, request metadata, error codes) for debugging. These logs do not contain prompt or output content. Retention: 30 days.
+### 2f. Reports you file
 
-### 2g. What we do not collect
+If you file a bug report, feature request, or feedback from inside the product, we store what you wrote along with the route you were on, the run it concerned (if any), your browser's user-agent string, and the error your client surfaced. Reports are tied to the account or purse that filed them. They stay in our own database — no report is forwarded to a third-party tracker or issue service. Retention: until the report is handled, or until you erase your account.
+
+### 2g. Usage and error logs
+
+We collect server-side diagnostic logs (component, message, error detail, and identifiers such as the account id and run id) for debugging. Prompt and output bodies are not written to these logs. The logs go to the host's container log; they are not stored in the application database.
+
+### 2h. What we do not collect
 
 - Browser fingerprints
-- Third-party analytics (no Google Analytics, no Mixpanel, no similar services)
+- Third-party analytics (no Google Analytics, no Mixpanel, no similar services). The optional telemetry forwarder built into the service is not configured in production.
 - Advertising identifiers
 - Cross-site tracking data
 - Device identifiers beyond what's necessary for rate limiting
 
 ---
 
-## 3. Cookies
+## 3. Cookies and browser storage
 
-We use strictly necessary cookies only:
+We set **one** cookie, and only if you contribute to the trusted-setup ceremony:
 
-| Cookie | Purpose | Duration |
+| Cookie | Purpose | Properties |
 |---|---|---|
-| Session token | Authentication | Session / 30 days if "stay logged in" |
-| CSRF token | Security | Session |
+| `noema-cer-sid` | Holds one ceremony contribution slot per session, so refresh-spam cannot inflate the transcript | httpOnly, SameSite=Lax, scoped to `/v1/ceremony`, 30 days. A signed random id, carrying no account data |
 
-We do not use advertising cookies, analytics cookies, or third-party tracking cookies. You cannot opt out of strictly necessary cookies without disabling the service. There is nothing else to opt out of.
+Your sign-in session is **not** a cookie. It is a token held in your browser's `localStorage` and sent on each API call. The full browser-storage inventory is in the [Cookie Policy](/legal/cookies).
+
+We do not use advertising cookies, analytics cookies, or third-party tracking cookies. There is nothing to opt out of.
 
 ---
 
@@ -104,15 +118,16 @@ We do not use advertising cookies, analytics cookies, or third-party tracking co
 
 We use collected data to:
 - Provide and operate the service
+- Show you your own run history
 - Bill for compute usage
-- Detect and prevent abuse, fraud, and prohibited content (see Section 7)
+- Detect and prevent abuse, fraud, and prohibited content (see Section 6)
 - Comply with legal obligations (OFAC screening, CSAM reporting)
-- Respond to support requests
+- Respond to reports and support requests
 
 We do not:
 - Sell your data to third parties
 - Use your data for advertising
-- Train AI models on your prompts or outputs
+- Train AI models on your inputs or outputs
 - Share your data with third parties except as described in Section 5
 
 ---
@@ -121,9 +136,11 @@ We do not:
 
 We share data only in these limited circumstances:
 
-**Infrastructure providers:** We use RunPod for GPU compute and, for concierge/chat, an external LLM provider (via OpenRouter). Session content is transmitted to these providers as necessary to run your request; it is not retained after the request completes.
+**Compute providers:** RunPod for GPU compute and, for concierge/chat, an external LLM provider (via OpenRouter). Session content is transmitted to these providers as necessary to run your request.
 
-**Payment processors:** [PROCESSOR NAME] handles payment card processing. We share only what's necessary to process your payment.
+**Storage:** Cloudflare R2 holds generated outputs and data-export bundles.
+
+**Payments:** Stripe handles card processing. Alchemy's webhooks deliver on-chain deposit events, which carry the depositing address and transaction hash.
 
 **Legal requirements:** We will disclose data when required by law, court order, or to cooperate with law enforcement. We will attempt to notify you before disclosing (where legally permitted).
 
@@ -145,14 +162,19 @@ We run content classifiers and hash-matching against known CSAM databases at the
 
 | Data type | Retention |
 |---|---|
-| Account data | Until account deletion + 30 days |
-| Session metadata (billing) | 90 days |
-| IP addresses | 24 hours |
-| Error logs | 30 days |
-| Prompt / output content | Not retained after request |
+| Account credentials and profile | Until you erase your account |
+| Run records (inputs, outputs, timestamps) | Until you erase your account |
+| Generated media in object storage | Until you erase your account |
+| Credit ledger, deposits, and payment records | Retained — the ledger is append-only and is never rewritten. After erasure it carries no identifying fields (Section 8) |
+| Account anchor after erasure | Pseudonymized shell, 7 years, for financial-record and dispute-resolution duties |
+| In-progress workflow state | 30 days from last update (automatic expiry) |
+| Sign-in links and short-lived secrets | Expire at their own stated expiry (automatic) |
+| Data-export bundles | Private bucket; the download link expires 15 minutes after it is issued |
+| IP addresses | Not stored |
+| Diagnostic logs | Host container log; not stored in the application database |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
-| Bursa ZK proof records | Proof verification timestamp + credit amount, 90 days |
+| Purse ZK proof records | Proof verification timestamp + credit amount |
 
 ---
 
@@ -161,14 +183,24 @@ We run content classifiers and hash-matching against known CSAM databases at the
 Depending on your jurisdiction, you may have the right to:
 - Access the personal data we hold about you
 - Correct inaccurate data
-- Delete your account and associated data
+- Erase your account and associated data
 - Export your data
 - Object to processing
 - Lodge a complaint with your supervisory authority (EU: your national DPA)
 
-To exercise these rights: [CONTACT EMAIL]
+**Export** is self-service: the product assembles everything held under your account into a downloadable bundle, delivered by a link that expires fifteen minutes after it is issued.
 
-Because we hold minimal data by design, most requests can be fulfilled immediately. We do not retain prompt or output content after a request completes, so there is no session content for us to retrieve or delete.
+**Erasure** is self-service, and it works by pseudonymization rather than by rewriting the ledger. When you erase your account:
+
+1. Your live sessions are revoked immediately.
+2. Your account record is stripped of its identifying fields — name, credentials, wallet — and marked erased. What remains is an opaque id with nothing in it that points to a person.
+3. Identity and content collections are deleted outright: profiles, credentials, preferences, memory, projects, requests, and your chat conversations and their messages.
+4. The financial ledger — credits, payments, deposits, revenue — is **not** modified. It is append-only by design. Those rows keep the opaque account id, which after step 2 identifies nobody.
+5. Run records and any works you published keep the same opaque id, for the same reason. Published works stay live and are shown as authored by an anonymous creator.
+
+We state this plainly rather than promise a deletion we do not perform: erasure severs the person from the record, and the anonymized financial and run rows remain.
+
+To exercise these rights: use the account controls in the product, or contact [CONTACT EMAIL].
 
 ---
 
@@ -198,11 +230,12 @@ Address: [ADDRESS]
 
 ---
 
-*Counsel review checklist:*
+*Review checklist:*
 - [ ] Confirm GDPR controller/processor classification for each data type
 - [ ] Confirm DPA registration requirement in target jurisdictions
-- [ ] Finalize OFAC retention period with compliance counsel
+- [ ] Finalize OFAC retention period
 - [ ] Confirm Standard Contractual Clauses or alternative transfer mechanism
 - [ ] Add DPO contact if required (EU entities with large-scale processing)
 - [ ] Review cookie section against ePrivacy Directive requirements
 - [ ] Confirm CCPA compliance (if serving California residents)
+- [ ] Re-state Section 2c once run-record expiry windows exist
