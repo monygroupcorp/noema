@@ -4,12 +4,27 @@ import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
 import { useIdentity } from '../state/identity';
 import { counts, type Project } from '../lib/projects';
-import { api } from '../lib/api';
+import { api, type ActivityRow } from '../lib/api';
+import { activityDoorHref, activityRowLabel, partitionHomeActivity } from '../lib/muse';
 import { Ic } from '../lib/icons';
 
 // Home / dashboard (dashboard-spec.md, render noema-dashboard.png). Leads with the brand's
 // one question answered — "What NOEMA can see: the meter, nothing more." — then projects, then
-// recent. The instrument band is the one framed element (.noema-frame, corner ticks earned).
+// the AWAITING YOU / RUNNING NOW activity bands. The instrument band is the one framed
+// element (.noema-frame, corner ticks earned).
+//
+// noema-327 (crit V1): the old "recent" band read the client-local chat-title list, which
+// is never real activity. It's replaced here by two bands off the real `GET /v1/me/activity`
+// read (noema-325) — no second section kept below the fold, one real read is less new
+// structure than two parallel "recent" ideas.
+
+// Icon per activity kind — matches the nouns `activityRowLabel` already uses.
+const ACTIVITY_ICON: Record<ActivityRow['kind'], string> = {
+  training: 'graduation-cap',
+  caption: 'file-text',
+  decompose: 'workflow',
+  generation: 'sparkles',
+};
 
 function computeRow(exec: string): { glyph: string; text: string } {
   if (exec === 'tee') return { glyph: 'ring', text: 'hardware-sealed compute (TEE) is on the roadmap.' };
@@ -36,17 +51,21 @@ export function Dashboard() {
   const { projects } = useProject();
   const { ident, execution } = useIdentity();
   const [credits, setCredits] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityRow[]>([]);
 
   useEffect(() => {
     let live = true;
     api.meStatus().then((s) => { if (live && s?.balanceImpetus != null) setCredits(Number(s.balanceImpetus).toLocaleString()); }).catch(() => {});
     return () => { live = false; };
   }, []);
+  useEffect(() => {
+    let live = true;
+    api.listActivity().then((p) => { if (live) setActivity(p.activity); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const cr = credits ?? (ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '—');
   const comp = computeRow(execution);
-
-  // recent: a flat list across projects (kind · detail · in ‹project› · custody).
-  const recent = projects.flatMap((p) => p.chats.slice(0, 1).map((ch) => ({ kind: 'chat', detail: ch.title, project: p.name }))).slice(0, 5);
+  const { awaiting, running } = partitionHomeActivity(activity);
 
   return (
     <AppShell title="Home">
@@ -99,18 +118,39 @@ export function Dashboard() {
           <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
         </div>
 
-        {/* recent */}
-        <div className="sectionhead">recent</div>
+        {/* AWAITING YOU — finished work, each row a door to what it produced */}
+        <div className="sectionhead">AWAITING YOU</div>
         <div className="dbrecent">
-          {recent.length === 0 ? (
-            <div className="empty"><div className="t">Nothing yet — start a chat or a run.</div></div>
-          ) : recent.map((r, i) => (
-            <div className="dbrec-row" key={i}>
-              <Ic name="message-square" />
-              <span className="rk">{r.kind}</span>
-              <span className="rd">{r.detail}</span>
-              <span className="rp mono">in {r.project}</span>
-              <span className={`hemi2 ${comp.glyph}`} title="custody" />
+          {awaiting.length === 0 ? (
+            <div className="empty"><div className="t">nothing finished yet</div></div>
+          ) : awaiting.map((r) => {
+            const href = activityDoorHref(r);
+            const row = (
+              <>
+                <Ic name={ACTIVITY_ICON[r.kind]} />
+                <span className="rk">{activityRowLabel(r)}</span>
+                <span className="rp mono">{r.settledAt ?? r.createdAt ?? ''}</span>
+              </>
+            );
+            if (!href) return <div className="dbrec-row" key={r.actumId}>{row}</div>;
+            return href.startsWith('/') ? (
+              <Link className="dbrec-row" key={r.actumId} to={href}>{row}</Link>
+            ) : (
+              <a className="dbrec-row" key={r.actumId} href={href} target="_blank" rel="noreferrer">{row}</a>
+            );
+          })}
+        </div>
+
+        {/* RUNNING NOW — in-flight rows */}
+        <div className="sectionhead">RUNNING NOW</div>
+        <div className="dbrecent">
+          {running.length === 0 ? (
+            <div className="empty"><div className="t">nothing running — start something</div></div>
+          ) : running.map((r) => (
+            <div className="dbrec-row" key={r.actumId}>
+              <Ic name={ACTIVITY_ICON[r.kind]} />
+              <span className="rk">{activityRowLabel(r)}</span>
+              <span className="rp mono">running…</span>
             </div>
           ))}
         </div>

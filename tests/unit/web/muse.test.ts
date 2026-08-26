@@ -3548,3 +3548,67 @@ test('buildTrainingAffinesPayload: merges onto the caller\'s existing record ins
   const payload = buildTrainingAffinesPayload(existing, { baseModel: 'klein-4b', steps: 1500, trigger: 'new' });
   assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'new', someOtherFlag: true });
 });
+
+// ── Home "awaiting you" / "running now" bands (noema-327) ──────────────────────────────
+import {
+  partitionHomeActivity,
+  activityRowLabel,
+  activityDoorHref,
+  AWAITING_YOU_MAX,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
+import type { ActivityRow } from '../../../src/platforms/web/app/src/lib/api.js'
+
+function activityRow(over: Partial<ActivityRow>): ActivityRow {
+  return { actumId: 'a1', kind: 'generation', modusId: 'm1', status: 'settled', ...over }
+}
+
+test('partitionHomeActivity: splits real activity rows into settled (capped) and running', () => {
+  // Real ActivityRow shapes only — status/kind/door are exactly what a client-local chat
+  // title never carries, so feeding that list back in here would filter to empty on both
+  // sides rather than reproducing a "recent" band.
+  const settled = Array.from({ length: AWAITING_YOU_MAX + 3 }, (_, i) =>
+    activityRow({ actumId: `settled-${i}`, status: 'settled' }))
+  const running = [activityRow({ actumId: 'r1', status: 'running' }), activityRow({ actumId: 'r2', status: 'running' })]
+  const { awaiting, running: runningOut } = partitionHomeActivity([...settled, ...running])
+  assert.equal(awaiting.length, AWAITING_YOU_MAX)
+  assert.deepEqual(awaiting.map((r) => r.actumId), settled.slice(0, AWAITING_YOU_MAX).map((r) => r.actumId))
+  assert.deepEqual(runningOut.map((r) => r.actumId), ['r1', 'r2'])
+})
+
+test('partitionHomeActivity: chat-shaped (non-activity) input contributes to neither band', () => {
+  // Feeding the OLD localStorage chat list back into the band (the regression this item
+  // fixes) has no `status` field at all, so it partitions to nothing rather than rendering.
+  const chatShaped = [{ kind: 'chat', detail: 'a title', project: 'demo' }] as unknown as ActivityRow[]
+  const { awaiting, running } = partitionHomeActivity(chatShaped)
+  assert.equal(awaiting.length, 0)
+  assert.equal(running.length, 0)
+})
+
+test('activityRowLabel: prefers modusLabel, falls back to the house noun for the kind', () => {
+  assert.equal(activityRowLabel(activityRow({ kind: 'training', modusLabel: 'Portrait LoRA' })), 'Portrait LoRA')
+  assert.equal(activityRowLabel(activityRow({ kind: 'training' })), 'training')
+  assert.equal(activityRowLabel(activityRow({ kind: 'caption' })), 'caption pass')
+  assert.equal(activityRowLabel(activityRow({ kind: 'decompose' })), 'decompose')
+  assert.equal(activityRowLabel(activityRow({ kind: 'generation' })), 'generation')
+})
+
+test('activityDoorHref: resolves each kind\'s door to its real destination', () => {
+  assert.equal(activityDoorHref(activityRow({ kind: 'training', door: { modelId: 'model-1' } })), '/models')
+  assert.equal(
+    activityDoorHref(activityRow({ kind: 'caption', door: { datasetId: 'ds-1', captionsetId: 'cs-1' } })),
+    '/datasets/ds-1/caption?captionset=cs-1',
+  )
+  assert.equal(activityDoorHref(activityRow({ kind: 'decompose', door: { datasetId: 'ds-1' } })), '/datasets/ds-1/muse')
+  assert.equal(
+    activityDoorHref(activityRow({ kind: 'generation', door: { mediaUrl: 'https://cdn.example/media/x.png' } })),
+    'https://cdn.example/media/x.png',
+  )
+})
+
+test('activityDoorHref: a row without the door fields its kind needs renders without a link, never a dead one', () => {
+  assert.equal(activityDoorHref(activityRow({ kind: 'training', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'caption', door: { datasetId: 'ds-1' } })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'decompose', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'generation', door: {} })), undefined)
+  assert.equal(activityDoorHref(activityRow({ kind: 'generation' })), undefined)
+})
