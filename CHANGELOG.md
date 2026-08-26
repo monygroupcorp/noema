@@ -1,5 +1,25 @@
 # Changelog
 
+## [5.18.0](https://github.com/monygroupcorp/noema/compare/v5.17.0...v5.18.0) (2026-08-26)
+
+
+### Features
+
+* **purses:** redeem a purse token into the holder's balance ([0584592](https://github.com/monygroupcorp/noema/commit/0584592a56029b9a6eebc64fc57ae0c469651de6))
+* **purses:** redeem a purse token into the holder's balance ([a8f7fca](https://github.com/monygroupcorp/noema/commit/a8f7fca22fd04c909774696d5eb86a10be399e6c))
+
+
+### Bug Fixes
+
+* unmount the /tee static route ([796ecd9](https://github.com/monygroupcorp/noema/commit/796ecd96b1a8268a9047b821873fa4d359b92848))
+* unmount the /tee static route ([80c7a02](https://github.com/monygroupcorp/noema/commit/80c7a0227eb108954cd9fdaff33599b906e940ed))
+
+
+### Performance Improvements
+
+* batch the pod caption pass instead of one image at a time ([0b09a00](https://github.com/monygroupcorp/noema/commit/0b09a0038da744c9936ccb6063cd6c2abaffaa6d))
+* **crystal:** batch the pod caption pass instead of one image at a time ([87ea785](https://github.com/monygroupcorp/noema/commit/87ea7856a2fe2bcbaeba4ecf327bbeb652c6a352))
+
 ## [5.17.0](https://github.com/monygroupcorp/noema/compare/v5.16.0...v5.17.0) (2026-08-26)
 
 
