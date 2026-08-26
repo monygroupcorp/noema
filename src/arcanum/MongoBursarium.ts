@@ -11,6 +11,7 @@ function fromDoc(doc: Record<string, unknown>): Bursa {
     ...(doc.ownerAnimaId ? { owner: { animaId: doc.ownerAnimaId as string } } : {}),
     ...(doc.label !== undefined ? { label: doc.label as string } : {}),
     ...(doc.status !== undefined ? { status: doc.status as Bursa['status'] } : {}),
+    ...(doc.redeemedAt !== undefined ? { redeemedAt: doc.redeemedAt as Date } : {}),
   }
 }
 
@@ -44,6 +45,25 @@ export class MongoBursarium implements Bursarum {
 
   async setStatus(token: string, status: NonNullable<Bursa['status']>): Promise<void> {
     await this.col.updateOne({ token }, { $set: { status } })
+  }
+
+  // The redemption claim — ONE conditional update, so exactly one caller can win it.
+  // `status: 'active'` is the compare; only an OWNED purse carries a status at all, and the
+  // `ownerAnimaId` term states that requirement in the filter rather than relying on it.
+  // No redeemer identity is written: the row records THAT it converted and WHEN, nothing more.
+  async claimForRedemption(token: string, at: Date): Promise<Bursa | null> {
+    const claimed = await this.col.findOneAndUpdate(
+      { token, ownerAnimaId: { $exists: true }, status: 'active' },
+      { $set: { status: 'redeemed', redeemedAt: at } },
+      { returnDocument: 'after' },
+    )
+    return claimed ? fromDoc(claimed as Record<string, unknown>) : null
+  }
+
+  // Compensation for a failure after the claim: the purse goes back to active and the
+  // conversion stamp is removed, so the credits stay reachable.
+  async releaseRedemptionClaim(token: string): Promise<void> {
+    await this.col.updateOne({ token, status: 'redeemed' }, { $set: { status: 'active' }, $unset: { redeemedAt: '' } })
   }
 
   // OCC debit: read → check → CAS update. Retries on concurrent debit (rare).

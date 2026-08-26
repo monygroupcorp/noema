@@ -8,6 +8,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { mintOwnedPurse, redeemOwnedPurse } from '../../../src/crystal/ownedPurse.js'
+import { MemoryBursarium, purseCredits } from './_purseKit.js'
 
 // ── Privacy Partition ────────────────────────────────────────────────────────
 // RULE: forma 'arcanum' and 'tessera' NEVER have animaId.
@@ -259,4 +261,65 @@ test('INVARIANT: identified signum with commitment is preserved through history'
   assert.equal(history.length, 1)
   assert.equal(history[0].commitment, 'hash-anon', 'forward link must be stored on identified signum')
   assert.equal(history[0].animaId, 'anima-1', 'identified signum must retain animaId')
+})
+
+// ── Purse redemption: credits change hands, the system total does not ────────
+// RULE: a purse redemption is a TRANSFER. Whatever the purse loses, the redeemer gains —
+// exactly, and nothing else in the system moves. A redemption that credited without draining
+// (or drained twice) would print or destroy credits, which is the one thing the ledger may
+// never do. These run over the real MemorySignorum, so the reserve/settle discipline of the
+// mint is exercised too, not stubbed.
+
+/** Every credit in this little world: held by an account, or sitting in a purse. */
+async function systemTotal(s: MemorySignorum, bur: MemoryBursarium, animae: string[]): Promise<bigint> {
+  let held = 0n
+  for (const animaId of animae) held += await s.balance({ animaId })
+  return held + purseCredits(bur)
+}
+
+test('INVARIANT: a purse redemption transfers credits and leaves the system total unchanged', async () => {
+  const s = new MemorySignorum()
+  const bur = new MemoryBursarium()
+  const deps = { signorum: s, bursarium: bur }
+  const ANIMAE = ['owner', 'stranger']
+  await s.issue({ animaId: 'owner', forma: 'minted', valor: 5000n, auctor: 'test' })
+  const before = await systemTotal(s, bur, ANIMAE)
+
+  const minted = await mintOwnedPurse(deps, { owner: { animaId: 'owner' }, credits: 1200n })
+  assert.ok(minted.ok)
+  if (!minted.ok) return
+  assert.equal(await systemTotal(s, bur, ANIMAE), before, 'minting a purse moves credits, it does not create them')
+
+  const out = await redeemOwnedPurse(deps, { token: minted.bursa.id, redeemer: { animaId: 'stranger' } })
+  assert.deepEqual(out, { ok: true, credited: 1200n })
+  assert.equal(await s.balance({ animaId: 'stranger' }), 1200n, 'the redeemer gains exactly what the purse held')
+  assert.equal(await s.balance({ animaId: 'owner' }), 3800n, "the owner's balance is untouched by the redemption")
+  assert.equal(purseCredits(bur), 0n, 'the purse is drained')
+  assert.equal(await systemTotal(s, bur, ANIMAE), before, 'system-wide total is unchanged by a redemption')
+})
+
+test('INVARIANT: a refused redemption moves nothing at all', async () => {
+  const s = new MemorySignorum()
+  const bur = new MemoryBursarium()
+  const deps = { signorum: s, bursarium: bur }
+  const ANIMAE = ['owner', 'first', 'second']
+  await s.issue({ animaId: 'owner', forma: 'minted', valor: 4000n, auctor: 'test' })
+  const minted = await mintOwnedPurse(deps, { owner: { animaId: 'owner' }, credits: 900n })
+  assert.ok(minted.ok)
+  if (!minted.ok) return
+  const token = minted.bursa.id
+
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: { animaId: 'first' } }), { ok: true, credited: 900n })
+  const settled = await systemTotal(s, bur, ANIMAE)
+
+  // Every refusal shape, one after another — each must be inert.
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: { animaId: 'second' } }), { ok: false, reason: 'redeemed' })
+  assert.deepEqual(await redeemOwnedPurse(deps, { token, redeemer: { animaId: 'owner' } }), { ok: false, reason: 'owner_reclaims' })
+  assert.deepEqual(await redeemOwnedPurse(deps, { token: 'absent', redeemer: { animaId: 'second' } }), { ok: false, reason: 'not_found' })
+  const anon = await bur.create(300n)   // an anon purse: no owner, never redeemable
+  assert.deepEqual(await redeemOwnedPurse(deps, { token: anon.id, redeemer: { animaId: 'second' } }), { ok: false, reason: 'not_redeemable' })
+
+  assert.equal(await s.balance({ animaId: 'first' }), 900n, 'the settled redemption is not disturbed')
+  assert.equal(await s.balance({ animaId: 'second' }), 0n, 'a refused redeemer gains nothing')
+  assert.equal(await systemTotal(s, bur, ANIMAE), settled + 300n, 'only the newly minted anon purse changes the total')
 })
