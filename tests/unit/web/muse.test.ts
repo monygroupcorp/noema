@@ -201,6 +201,31 @@ import {
   partitionHomeActivity,
   AWAITING_YOU_MAX,
 } from '../../../src/platforms/web/app/src/lib/muse.js'
+import {
+  ancestryOf,
+  applyLocks,
+  childrenOf,
+  currentMiningNode,
+  isLocked,
+  lockCount,
+  lockSummaryLine,
+  lockedCategories,
+  nodeOf,
+  parentOf,
+  rootFrom,
+  stepTo,
+  toggleLock,
+  varyAt,
+  varyBlockReason,
+  varyFrom,
+  varyInto,
+  EMPTY_MINING,
+  MAX_ROLLS,
+  MINING_INDEX_BASE,
+  NO_LOCKS,
+  type LockSet,
+  type VaryOrigin,
+} from '../../../src/platforms/web/app/src/lib/muse.js'
 import { CATEGORIES, fragmentKey } from '../../../src/crystal/muse/taxonomy.js'
 import { WEIGHT_MAX, WEIGHT_MIN } from '../../../src/crystal/muse/sampler.js'
 import type {
@@ -3728,4 +3753,278 @@ test('activityDoorHref: a row without the door fields its kind needs renders wit
   assert.equal(activityDoorHref(activityRow({ kind: 'decompose', door: {} })), undefined)
   assert.equal(activityDoorHref(activityRow({ kind: 'generation', door: {} })), undefined)
   assert.equal(activityDoorHref(activityRow({ kind: 'generation' })), undefined)
+})
+
+// ---------------------------------------------------------------------------
+// The mining loop (Muse P5, noema-231) — lock, vary, ancestry.
+//
+// The three moves that turn independent draws into a search you can steer. All
+// three are pure arithmetic over a garden already in memory: nothing below reaches
+// a route, a provider or a credit, and the tests do not stub one because there is
+// nothing to stub.
+//
+// The engine itself is untouched. `rollFragments` takes no notion of a lock, so a
+// vary is a FRESH roll at a FRESH index with the locked categories overwritten
+// afterwards — which is what keeps every node replayable from its index and its
+// lock set.
+
+/** A garden with two fragments in every category — enough for an unlocked category
+ *  to actually move between rolls, which is what makes the lock tests non-vacuous. */
+const MINING_GARDEN: Fragment[] = [
+  frag('subject', 'a heron'),
+  frag('subject', 'a fox'),
+  frag('pose', 'mid-stride'),
+  frag('pose', 'seated'),
+  frag('setting', 'a rooftop at dusk'),
+  frag('setting', 'a quiet library'),
+  frag('style', 'ink wash'),
+  frag('style', 'oil painting'),
+]
+
+const NOTHING_EXCLUDED: ReadonlySet<number> = new Set<number>()
+
+function textIn(fragments: readonly Fragment[], category: Fragment['category']): string | undefined {
+  return fragments.find((f) => f.category === category)?.text
+}
+
+function locking(...fragments: Fragment[]): LockSet {
+  let locks: LockSet = NO_LOCKS
+  for (const f of fragments) locks = toggleLock(locks, f)
+  return locks
+}
+
+test('toggleLock: pins a fragment, unpins the same one, and replaces within a category', () => {
+  const dusk = frag('setting', 'a rooftop at dusk')
+  const library = frag('setting', 'a quiet library')
+
+  const pinned = toggleLock(NO_LOCKS, dusk)
+  assert.equal(isLocked(pinned, dusk), true)
+  assert.equal(lockCount(pinned), 1)
+
+  // A category contributes one fragment, so it can pin only one: locking a second
+  // setting replaces the first rather than holding both.
+  const replaced = toggleLock(pinned, library)
+  assert.equal(lockCount(replaced), 1)
+  assert.equal(isLocked(replaced, library), true)
+  assert.equal(isLocked(replaced, dusk), false)
+
+  assert.equal(lockCount(toggleLock(replaced, library)), 0)
+})
+
+test('lockedCategories reads in taxonomy order, and the summary says what is held', () => {
+  const locks = locking(frag('setting', 'a quiet library'), frag('subject', 'a fox'))
+  // Attribute tier first, then exclusive — CATEGORIES order, not insertion order.
+  assert.deepEqual(lockedCategories(locks), ['subject', 'setting'])
+  assert.equal(lockSummaryLine(locks), 'locked: subject, setting')
+  assert.equal(lockSummaryLine(NO_LOCKS), 'nothing locked — a vary is a fresh roll')
+})
+
+// NON-VACUITY 1 (plan proof 1). Reverting the lock — dropping `applyLocks` from
+// `varyAt` so a locked category is re-sampled — must fail this test.
+test('a locked fragment is byte-identical across successive varies', () => {
+  const dusk = frag('setting', 'a rooftop at dusk')
+  const from = MINING_INDEX_BASE
+  const batch = 6
+
+  // The control: with nothing locked, `setting` genuinely moves across this batch.
+  // Without this assertion the test below could pass on a garden that never varied.
+  const unlocked = varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, NO_LOCKS, from, batch)
+  const drawnSettings = new Set(unlocked.map((d) => textIn(d.fragments, 'setting')))
+  assert.ok(drawnSettings.size > 1, 'the control batch must re-sample setting, or the lock proves nothing')
+
+  const varied = varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locking(dusk), from, batch)
+  assert.equal(varied.length, batch)
+  for (const draw of varied) {
+    assert.deepEqual(draw.fragments.find((f) => f.category === 'setting'), dusk)
+    assert.ok(draw.prompt.includes('a rooftop at dusk'))
+  }
+
+  // And the unlocked categories are still moving — a vary that pins everything is a
+  // different failure, tested separately.
+  assert.ok(new Set(varied.map((d) => textIn(d.fragments, 'pose'))).size > 1)
+})
+
+// NON-VACUITY 2 (plan proof 2). Reverting the tier rule — composing the locked
+// fragments as `[...sampled, ...locks.values()]` instead of replacing in place —
+// must fail this test.
+test('an exclusive category yields at most one fragment per roll, locked or not', () => {
+  const library = frag('setting', 'a quiet library')
+  const ink = frag('style', 'ink wash')
+  const from = MINING_INDEX_BASE
+  const batch = 6
+
+  // The control again: at least one draw in this batch would have sampled a DIFFERENT
+  // setting, so an appending implementation would carry two of it.
+  const unlocked = varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, NO_LOCKS, from, batch)
+  assert.ok(
+    unlocked.some((d) => textIn(d.fragments, 'setting') !== library.text),
+    'the control batch must sample a setting other than the locked one',
+  )
+
+  for (const draw of varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locking(library, ink), from, batch)) {
+    const counts = new Map<string, number>()
+    for (const f of draw.fragments) counts.set(f.category, (counts.get(f.category) ?? 0) + 1)
+    for (const [category, n] of counts) assert.equal(n, 1, `${category} contributed ${n} fragments to one roll`)
+    assert.equal(textIn(draw.fragments, 'setting'), library.text)
+    assert.equal(textIn(draw.fragments, 'style'), ink.text)
+  }
+})
+
+test('applyLocks: a locked category the roll could not sample is added exactly once', () => {
+  // A pool the floor has emptied still has a lock standing over it. The locked
+  // fragment is the category's contribution, and it appears one time.
+  const props = frag('props', 'a brass lantern')
+  const sampled = [frag('subject', 'a fox'), frag('setting', 'a quiet library')]
+  const out = applyLocks(sampled, locking(props))
+  assert.equal(out.filter((f) => f.category === 'props').length, 1)
+  assert.deepEqual(out.find((f) => f.category === 'props'), props)
+  assert.equal(out.length, 3)
+})
+
+test('varyAt: a vary is a new roll at a new index, and the index reproduces it', () => {
+  const locks = locking(frag('style', 'oil painting'))
+  const a = varyAt(MINING_GARDEN, NOTHING_EXCLUDED, locks, MINING_INDEX_BASE + 4)
+  const again = varyAt(MINING_GARDEN, NOTHING_EXCLUDED, locks, MINING_INDEX_BASE + 4)
+  assert.deepEqual(again, a, 'the same index and lock set must reproduce the roll exactly')
+  assert.equal(a.index, MINING_INDEX_BASE + 4)
+})
+
+test('the mining index space sits above the independent-roll space', () => {
+  // An independent batch indexes from zero and is bounded by MAX_ROLLS, so a roll
+  // index names exactly one card on the screen.
+  assert.ok(MAX_ROLLS < MINING_INDEX_BASE)
+  assert.equal(EMPTY_MINING.nextIndex, MINING_INDEX_BASE)
+  const seeded = rootFrom(EMPTY_MINING, origin(), NO_LOCKS)
+  assert.ok(seeded.nextIndex >= MINING_INDEX_BASE)
+})
+
+/** A roll from the independent batch, carrying text this garden cannot produce — so a
+ *  node holding it can only be the stored roll, never a re-sample. */
+function origin(): VaryOrigin {
+  return {
+    index: 3,
+    fragments: [frag('subject', 'a heron in the reeds'), frag('setting', 'a tidal flat')],
+    prompt: 'a heron in the reeds, set in a tidal flat',
+    paid: false,
+  }
+}
+
+// NON-VACUITY 3 (plan proof 3). Reverting the parent pointer — writing `parentId:
+// null` on the children in `varyInto` — must fail this test.
+test('stepping back returns the exact prior roll, not a re-sample of it', () => {
+  const locks = locking(frag('style', 'ink wash'))
+  const seeded = rootFrom(EMPTY_MINING, origin(), locks)
+  const root = currentMiningNode(seeded)
+  assert.ok(root)
+
+  const tree = varyInto(
+    seeded,
+    root.id,
+    varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locks, seeded.nextIndex, 3),
+    locks,
+  )
+  const neighbours = childrenOf(tree, root.id)
+  assert.equal(neighbours.length, 3)
+  // Standing stays on the roll that was varied FROM — the neighbours are what you
+  // are looking at, the parent is what you are looking from.
+  assert.equal(tree.currentId, root.id)
+
+  // Step across onto a neighbour, then back up through its parent pointer.
+  const onNeighbour = stepTo(tree, neighbours[1].id)
+  assert.equal(currentMiningNode(onNeighbour)?.id, neighbours[1].id)
+
+  const back = parentOf(onNeighbour, neighbours[1])
+  assert.ok(back, 'a varied roll must know the roll it came from')
+  const stepped = stepTo(onNeighbour, back.id)
+  const standing = currentMiningNode(stepped)
+  assert.ok(standing)
+
+  // The roll you came from, byte for byte. Its text is not in the garden at all, so
+  // a re-sample at any index could not produce it.
+  assert.deepEqual(standing.fragments, origin().fragments)
+  assert.equal(standing.prompt, origin().prompt)
+  assert.equal(standing.rollIndex, origin().index)
+})
+
+test('ancestry reads root-first, and every node is recomputable from its index and locks', () => {
+  const locks = locking(frag('style', 'ink wash'))
+  const seeded = rootFrom(EMPTY_MINING, origin(), locks)
+  const root = currentMiningNode(seeded)!
+  const firstPass = varyInto(seeded, root.id, varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locks, seeded.nextIndex, 2), locks)
+
+  const branch = childrenOf(firstPass, root.id)[0]
+  const secondPass = varyInto(firstPass, branch.id, varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locks, firstPass.nextIndex, 2), locks)
+  const leaf = childrenOf(secondPass, branch.id)[1]
+
+  assert.deepEqual(ancestryOf(secondPass, leaf.id).map((n) => n.id), [root.id, branch.id, leaf.id])
+
+  // The node stores what it needs to be recomputed exactly: its index and its locks.
+  const replayed = varyAt(MINING_GARDEN, NOTHING_EXCLUDED, leaf.locks, leaf.rollIndex)
+  assert.deepEqual(replayed.fragments, leaf.fragments)
+  assert.equal(replayed.prompt, leaf.prompt)
+
+  // Every vary took a fresh index — none of the tree's rolls share one.
+  const indices = secondPass.nodes.filter((n) => n.parentId !== null).map((n) => n.rollIndex)
+  assert.equal(new Set(indices).size, indices.length)
+})
+
+test('stepTo and varyInto refuse an id the tree does not hold, rather than clearing it', () => {
+  const seeded = rootFrom(EMPTY_MINING, origin(), NO_LOCKS)
+  assert.equal(stepTo(seeded, 'not-a-node').currentId, seeded.currentId)
+  assert.deepEqual(varyInto(seeded, 'not-a-node', [], NO_LOCKS), seeded)
+  assert.equal(nodeOf(seeded, null), undefined)
+})
+
+// NON-VACUITY 4 (plan proof 4). Reverting the all-locked guard — returning `null`
+// unconditionally from `varyBlockReason` — must fail this test.
+test('varying with every category locked reports that nothing can change', () => {
+  const everything = locking(
+    frag('subject', 'a fox'),
+    frag('pose', 'seated'),
+    frag('setting', 'a quiet library'),
+    frag('style', 'ink wash'),
+  )
+  const refusal = varyBlockReason(MINING_GARDEN, NOTHING_EXCLUDED, everything)
+  assert.ok(refusal, 'a vary that cannot move must say so')
+  assert.match(refusal, /nothing can change/)
+  // It names what is pinning it, so the refusal is actionable.
+  for (const category of ['subject', 'pose', 'setting', 'style']) assert.match(refusal, new RegExp(category))
+
+  // The control: one category unlocked and the vary can move again.
+  const loosened = toggleLock(everything, frag('pose', 'seated'))
+  assert.equal(varyBlockReason(MINING_GARDEN, NOTHING_EXCLUDED, loosened), null)
+})
+
+test('a category with one fragment in the draw pins a vary exactly as a lock does', () => {
+  // The common case on a real dataset, not an edge case: decomposition routinely
+  // leaves a category holding a single fragment, or none.
+  const thin: Fragment[] = [frag('subject', 'a heron'), frag('mood', 'still')]
+  const refusal = varyBlockReason(thin, NOTHING_EXCLUDED, NO_LOCKS)
+  assert.ok(refusal)
+  assert.match(refusal, /subject, mood have one fragment in the draw/)
+
+  // And with everything excluded there is no draw at all — a different sentence,
+  // because unlocking a category would not help.
+  assert.match(
+    varyBlockReason(thin, new Set([0, 1]), NO_LOCKS) ?? '',
+    /every fragment is excluded/,
+  )
+})
+
+test('a varied roll goes through the existing keep rail exactly as an independent one does', () => {
+  // The vary tree is session state and is never written server-side, but a roll worth
+  // keeping is kept — and a varied roll is an ordinary roll at an ordinary index, so
+  // the keep rail needs nothing new to carry it (noema-329's `keptRolls`).
+  const locks = locking(frag('setting', 'a quiet library'))
+  const seeded = rootFrom(EMPTY_MINING, origin(), locks)
+  const root = currentMiningNode(seeded)!
+  const tree = varyInto(seeded, root.id, varyFrom(MINING_GARDEN, NOTHING_EXCLUDED, locks, seeded.nextIndex, 2), locks)
+  const neighbour = childrenOf(tree, root.id)[0]
+
+  const view = session(MINING_GARDEN)
+  assert.equal(keepBlocked(view, neighbour.prompt), false)
+  assert.deepEqual(keptRollRequest(neighbour.prompt, neighbour.paid), {
+    prompt: neighbour.prompt,
+    paid: neighbour.paid,
+  })
 })
