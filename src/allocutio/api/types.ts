@@ -121,6 +121,66 @@ export interface RunsPage {
   runningTotal: { impetus: string; usd: number }
 }
 
+/**
+ * ActivityKind — what a run produced, for the activity read (`GET /v1/me/activity`).
+ *
+ * Resolved from a modusId table, not a prefix rule: pod flows carry essentia-derived
+ * ids that no prefix classifies. `generation` is the catch-all — a row whose modus is
+ * not one of the named asset-producing flows is reported as a generation.
+ */
+export type ActivityKind = 'training' | 'caption' | 'decompose' | 'generation'
+
+/** Lifecycle of one activity row: in-flight, or settled successfully. */
+export type ActivityStatus = 'running' | 'settled'
+
+/**
+ * ActivityDoor — the way back to what a run produced: id references into the
+ * canonical asset stores (never copies of the assets). Every field is optional;
+ * a field the run did not produce is absent rather than guessed.
+ */
+export interface ActivityDoor {
+  /** The registered model (Intella) id a training run produced. */
+  modelId?: string
+  /** The dataset the run trained on / captioned / decomposed. */
+  datasetId?: string
+  /** The captionset the run produced or decomposed. */
+  captionsetId?: string
+  /** First media URL among the run's outputs, when one is trivially present. */
+  mediaUrl?: string
+}
+
+/**
+ * ActivityRow — one run in the owner's activity read. JSON-safe.
+ *
+ * A read-only projection composed from the owner-scoped run index: no new
+ * persisted column, no lifecycle change.
+ */
+export interface ActivityRow {
+  /** The run (Actum) identifier. */
+  actumId: string
+  /** What the run produced. */
+  kind: ActivityKind
+  /** The flow (modus) the run executed. */
+  modusId: string
+  /** Human label of the modus, when the index row carries one. */
+  modusLabel?: string
+  /** In-flight or settled. */
+  status: ActivityStatus
+  /** When the run started, as an ISO-8601 string. */
+  createdAt?: string
+  /** When the run settled, as an ISO-8601 string. Absent while in flight. */
+  settledAt?: string
+  /** The link to the run's artifact, when one is resolvable. */
+  door?: ActivityDoor
+}
+
+/** A page of the owner's activity — in-flight and settled runs, newest first. */
+export interface ActivityPage {
+  activity: ActivityRow[]
+  /** Opaque cursor for the next page of settled rows; absent on the last page. */
+  nextCursor?: string
+}
+
 /** Public collection status — the externalised projection of CollectioStatus.
  *  `draft` = authored but not yet fired (tractus still editable). */
 export type CollectionStatus = 'draft' | 'pending' | 'running' | 'complete' | 'cancelled'
