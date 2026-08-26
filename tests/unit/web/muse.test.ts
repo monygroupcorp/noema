@@ -182,6 +182,10 @@ import {
   sessionHistory,
   sessionHistoryHref,
   sessionHref,
+  keepBlocked,
+  keptCount,
+  keptRollRequest,
+  keptRollsOf,
   sessionRow,
   sessionSearchEmptyNote,
   unreadableRun,
@@ -206,6 +210,7 @@ import type {
   FlowSummary,
   ModelCard,
   MuseFloorEntry,
+  MuseKeptRoll,
   MusePiece,
   MuseSessionView,
   MuseSetup,
@@ -588,7 +593,10 @@ function ledgerPiece(runId: string, fragments: Fragment[], patch: Partial<MusePi
 
 function session(
   fragments: Fragment[],
-  opts: { id?: string; floor?: MuseFloorEntry[]; pieces?: MusePiece[]; mutatum?: string } = {},
+  opts: {
+    id?: string; floor?: MuseFloorEntry[]; pieces?: MusePiece[]; mutatum?: string;
+    keptRolls?: MuseKeptRoll[];
+  } = {},
 ): MuseSessionView {
   return {
     id: opts.id ?? 'ses-1',
@@ -597,6 +605,7 @@ function session(
     fragments,
     floor: opts.floor ?? fragments.map((f) => entry(f)),
     pieces: opts.pieces ?? [],
+    keptRolls: opts.keptRolls ?? [],
     natum: '2026-01-01T00:00:00.000Z',
     mutatum: opts.mutatum ?? '2026-01-02T00:00:00.000Z',
   }
@@ -3274,6 +3283,7 @@ function setupSession(setup: MuseSetup): MuseSessionView {
     fragments: [],
     floor: [],
     pieces: [],
+    keptRolls: [],
     setup,
     natum: '2026-01-01T00:00:00.000Z',
     mutatum: '2026-01-02T00:00:00.000Z',
@@ -3560,6 +3570,66 @@ test('buildTrainingAffinesPayload: merges onto the caller\'s existing record ins
   assert.deepEqual(payload, { baseModel: 'klein-4b', steps: 1500, trigger: 'new', someOtherFlag: true });
 });
 
+// ---------------------------------------------------------------------------
+// Kept rolls (noema-329) — the one durable act of a rolling sitting
+//
+// Rolling is free and a roll in progress is uncommitted work, so the report the
+// screen is showing and the edits made to its text are the screen's own. Keeping is
+// the explicit act: it is written to the session, and the panel is rendered from the
+// session rather than from a local list, so a kept roll is still there when the
+// session is opened again.
+//
+// Fixtures invented throughout.
+// ---------------------------------------------------------------------------
+
+test('a keep sends the prompt the user read and the verdict it was rolled at', () => {
+  // The EDITED text, because that is the prompt on screen when the keep is pressed.
+  assert.deepEqual(keptRollRequest('a lone figure, edited', false), { prompt: 'a lone figure, edited', paid: false })
+  assert.deepEqual(keptRollRequest('  spaced  ', true), { prompt: 'spaced', paid: true })
+
+  // The verdict is carried, never re-derived: it belongs to the roll, and the floor
+  // and the nozzle it was rolled against both move afterwards.
+  assert.equal(keptRollRequest('a lone figure', true).paid, true)
+})
+
+test('a keep is refused with no session to write against, and with nothing to keep', () => {
+  const s = session([frag('subject', 'a fox')])
+  assert.equal(keepBlocked(null, 'a lone figure'), true, 'no session, no ledger to keep against')
+  assert.equal(keepBlocked(s, '   '), true, 'an empty prompt is nothing to keep')
+  assert.equal(keepBlocked(s, 'a lone figure'), false)
+})
+
+test('the kept panel reads the session, so a kept roll comes back with it', () => {
+  const fox = frag('subject', 'a fox')
+
+  // NON-VACUITY: reading a screen-local `kept` array instead of the session would
+  // return nothing here — the session below is exactly what a fresh mount receives,
+  // and the local array a mount starts with is empty.
+  const resumed = session([fox], {
+    keptRolls: [
+      { prompt: 'a fox, ink wash', paid: false },
+      { prompt: 'a fox, dusk glow', paid: true },
+    ],
+  })
+  assert.deepEqual(
+    keptRollsOf(resumed).map((k) => k.prompt),
+    ['a fox, ink wash', 'a fox, dusk glow'],
+    'oldest first, as they were kept',
+  )
+  assert.equal(keptCount(resumed), 2, 'and the heading counts what the session holds')
+
+  // A session that has kept nothing renders an empty panel, not an error.
+  assert.deepEqual(keptRollsOf(session([fox])), [])
+  assert.equal(keptCount(session([fox])), 0)
+
+  // No session yet, and a session stored before the field existed, both read as empty.
+  assert.deepEqual(keptRollsOf(null), [])
+  assert.equal(keptCount(undefined), 0)
+  const preField = { ...session([fox]) } as Partial<MuseSessionView>
+  delete preField.keptRolls
+  assert.deepEqual(keptRollsOf(preField as MuseSessionView), [], 'absent reads as empty')
+})
+
 // ── Activity bands (noema-326) ────────────────────────────────────────────────
 
 test('partitionActivity: a running row lands in running, never in finished', () => {
@@ -3659,4 +3729,3 @@ test('activityDoorHref: a row without the door fields its kind needs renders wit
   assert.equal(activityDoorHref(activityRow({ kind: 'generation', door: {} })), undefined)
   assert.equal(activityDoorHref(activityRow({ kind: 'generation' })), undefined)
 })
-

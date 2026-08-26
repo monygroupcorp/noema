@@ -99,6 +99,11 @@ export type MuseSession = {
    * setup section below for what it deliberately cannot hold.
    */
   setup?: MuseSetup
+  /**
+   * The rolls the user explicitly kept — prompt text and its paid/free verdict.
+   * Append-only. ABSENT MEANS EMPTY; see the kept-rolls section below.
+   */
+  keptRolls?: readonly KeptRoll[]
 }
 
 /** The floor state every fragment starts on: in the draw, at even odds. */
@@ -444,6 +449,91 @@ export function withSetup(session: MuseSession, raw: unknown): MuseSession {
     return rest
   }
   return { ...session, setup }
+}
+
+// --- Kept rolls --------------------------------------------------------------
+//
+// Rolling is free and a roll in progress is uncommitted work: the rolls a session
+// produces, and the edits made to their text, are the sitting's own and stay in the
+// browser. KEEPING one is different. It is an explicit act — the user has read a
+// prompt and said this one is worth having — and an explicit act that a navigation
+// erases is an act the product did not honour. So a kept roll, and only a kept roll,
+// gets a home on the session.
+//
+// A KEPT ROLL IS NOT A PIECE. A piece is an entry in the ledger and names a run that
+// produced media; a kept roll names no run, because nothing has been fired. The two
+// are recorded separately because they are different facts, and folding one into the
+// other would mean either inventing a run id or storing prompt text on a shape that
+// has no field for it.
+//
+// THE LIST IS APPEND-ONLY AND THERE IS NO REMOVE. Keeping the same prompt twice is
+// the user's business and stores two entries: the alternative is a de-dupe rule that
+// silently discards an act the user made on purpose. Removing a kept roll is a
+// separate gesture with a separate decision behind it and is deliberately not built
+// here.
+
+/**
+ * One roll the user kept: the prompt as it stood, and whether firing it would be paid.
+ *
+ * EXACTLY TWO FIELDS. The verdict rides along because it is not recoverable later —
+ * whether a roll is paid is decided by the fragments it drew and the nozzle it was
+ * rolled against, both of which move — while everything else about a roll (its index,
+ * its lineage, the report it came from) belongs to the sitting that produced it and
+ * means nothing once that sitting is over.
+ */
+export interface KeptRoll {
+  /** The prompt as the user kept it, edits included. */
+  prompt: string
+  /** Whether firing this prompt would be a paid run. */
+  paid: boolean
+}
+
+/**
+ * Kept rolls as they will be stored, read out of an untrusted value one entry and one
+ * field at a time.
+ *
+ * ANYTHING THAT IS NOT A WELL-FORMED ENTRY IS DROPPED, never repaired. A prompt that
+ * is not a non-empty string is not a prompt, and a `paid` that is not a boolean is not
+ * a verdict — defaulting either one would store a kept roll the user never kept, or
+ * label a paid prompt free. Unknown keys are dropped because the fields are read by
+ * name rather than spread, which is the same discipline `normalizeSetup` follows and
+ * for the same reason: a caller must not be able to attach state to a session by
+ * sending it.
+ *
+ * A non-array input normalizes to the empty list. Absent ≡ empty everywhere.
+ */
+export function normalizeKeptRolls(raw: unknown): KeptRoll[] {
+  if (!Array.isArray(raw)) return []
+  const out: KeptRoll[] = []
+  for (const candidate of raw) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const entry = candidate as Record<string, unknown>
+    if (typeof entry.prompt !== 'string') continue
+    const prompt = entry.prompt.trim()
+    if (!prompt) continue
+    if (typeof entry.paid !== 'boolean') continue
+    out.push({ prompt, paid: entry.paid })
+  }
+  return out
+}
+
+/**
+ * Append one kept roll to the session's list.
+ *
+ * Pure like every other mutator here, and normalize-guarded: the roll offered is read
+ * through `normalizeKeptRolls`, so a malformed one returns the session unchanged
+ * rather than landing a half-formed entry. A duplicate prompt is appended, not
+ * collapsed — see the section note.
+ */
+export function keepRoll(session: MuseSession, roll: unknown): MuseSession {
+  const [kept] = normalizeKeptRolls([roll])
+  if (!kept) return session
+  return { ...session, keptRolls: [...(session.keptRolls ?? []), kept] }
+}
+
+/** The session's kept rolls. Absent reads as the empty list, everywhere. */
+export function keptRollsOf(session: MuseSession): readonly KeptRoll[] {
+  return session.keptRolls ?? []
 }
 
 // --- Widening the floor ------------------------------------------------------
