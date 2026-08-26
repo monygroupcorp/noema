@@ -25,9 +25,9 @@
   /* SPACING scale (4px base) — compose from these, never magic numbers */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:48px; --s10:64px;
   /* TYPE scale */
-  --fs-xs:11px; --fs-sm:12.5px; --fs-base:14px; --fs-md:16px; --fs-lg:19px; --fs-xl:22px; --fs-2xl:28px;
+  --fs-xs:11px; --fs-sm:12.5px; --fs-s:13px; --fs-base:14px; --fs-m:15px; --fs-md:16px; --fs-lg:19px; --fs-xl:22px; --fs-2xl:28px;
   /* RADII */
-  --r-sm:6px; --r:10px; --r-lg:14px; --r-pill:999px;
+  --r-sm:8px; --r:10px; --r-lg:14px; --r-pill:999px;
   /* Z-INDEX */
   --z-nav:40; --z-pop:60; --z-overlay:80;
   /* BREAKPOINTS (reference; @media uses literals): sm 680 · md 760 · lg 1080 */
