@@ -1,5 +1,54 @@
 # Changelog
 
+## [5.17.0](https://github.com/monygroupcorp/noema/compare/v5.16.0...v5.17.0) (2026-08-26)
+
+
+### Features
+
+* **api:** GET /v1/me/activity — one owner-scoped read of in-flight and settled runs ([485544d](https://github.com/monygroupcorp/noema/commit/485544def0b64b6348436852072b29d3acf0385f))
+* **api:** GET /v1/me/activity — one owner-scoped read of in-flight and settled runs ([88bdfda](https://github.com/monygroupcorp/noema/commit/88bdfda653f079c3d4a8a1bf0ed613b4b1b2dd7c))
+* **crystal:** add a GPT Image generation modus, de-canonise the DALL·E 3 lane ([d81047d](https://github.com/monygroupcorp/noema/commit/d81047daea6be27dc8c238230e5f9fc9695a3ba6))
+* **crystal:** add a GPT Image generation modus, de-canonise the DALL·E 3 lane ([2f65e99](https://github.com/monygroupcorp/noema/commit/2f65e99f55f69a8cd3fe07c210d8271607ac14f0))
+* **dataset:** show the active captionset's caption under each tile ([ec57f35](https://github.com/monygroupcorp/noema/commit/ec57f352b4f6cd36e2c96a5d8e731291bbd4f60c))
+* **dataset:** show the active captionset's caption under each tile ([2de8086](https://github.com/monygroupcorp/noema/commit/2de8086d1e4ff4538990d524784ebde18a38ff7a))
+* **derive:** persist training form as per-modus affines ([f29649f](https://github.com/monygroupcorp/noema/commit/f29649fe4c80c4b43ec98e79e08b8efcad00be59))
+* **derive:** persist training form as per-modus affines ([adeefdd](https://github.com/monygroupcorp/noema/commit/adeefdddd40a4d8d82acdcfc9bea98539adc2081))
+* **muse:** keeping a roll is a durable act ([affe046](https://github.com/monygroupcorp/noema/commit/affe0462673710fe3df8e3222ed80c0f94542bfa))
+* **muse:** keeping a roll is a durable act ([2f82115](https://github.com/monygroupcorp/noema/commit/2f821158bc06ecc1a453710257795069a05e57d1))
+* **status:** the Activity screen earns its name ([a91d1b8](https://github.com/monygroupcorp/noema/commit/a91d1b8be6813320ed7f31bef5c2acab51d99f82))
+* **status:** the Activity screen earns its name ([5ca7ad8](https://github.com/monygroupcorp/noema/commit/5ca7ad848dd6edc20c2853ba889eedc25c8a5c6c))
+* **web-app:** add the route walk screenshot harness ([393431f](https://github.com/monygroupcorp/noema/commit/393431fae47fd4156677549d24056347d1539e8f))
+* **web-app:** the route walk — Playwright screenshot harness over every web route, axe-core riding it ([eb5bb36](https://github.com/monygroupcorp/noema/commit/eb5bb3677aef0780f0dda492d885902b556b5816))
+* **web:** add token-drift stylelint gate ([39041b8](https://github.com/monygroupcorp/noema/commit/39041b8e972fa83c0e724ae7b5b75fe21b3517bb))
+* **web:** add token-drift stylelint gate ([5458abd](https://github.com/monygroupcorp/noema/commit/5458abd4e0b7a03ac17c6a35acaa4663bf847a35))
+* **web:** collapse TEE status copy to one roadmap line ([9c5fe52](https://github.com/monygroupcorp/noema/commit/9c5fe521fcf38fa6cc501eac4e28b24383204912))
+* **web:** home leads with real activity, not the local chat list ([dc96565](https://github.com/monygroupcorp/noema/commit/dc96565e4a80f6436899b18184b8b3884733d35f))
+
+
+### Bug Fixes
+
+* **crystal:** declare the aditus ports the cursors already read ([143a3d7](https://github.com/monygroupcorp/noema/commit/143a3d7161793dea969971465c2d269283e87f1f))
+* **crystal:** declare the aditus ports the cursors already read ([42b7e85](https://github.com/monygroupcorp/noema/commit/42b7e85acb0da996790c6d5c5ee64f4dc0e6552a))
+* **crystal:** read only declared ports on the ApiCursor image generation rail ([61ef7c0](https://github.com/monygroupcorp/noema/commit/61ef7c0e57f0c8aec1741ab43af6eca92901a2bf))
+* **crystal:** read only declared ports on the ApiCursor image generation rail ([6f6cf6a](https://github.com/monygroupcorp/noema/commit/6f6cf6aebf9dc6a06527df295adb4d9312f0ba6e))
+* **crystal:** refuse undeclared aditus keys at the run-submit boundary ([54a0ccb](https://github.com/monygroupcorp/noema/commit/54a0ccb87a8eb5a6e56d347b93df270d091c360b))
+* **crystal:** refuse undeclared aditus keys at the run-submit boundary ([af8a81b](https://github.com/monygroupcorp/noema/commit/af8a81ba1f7e40deda2b3d66b66d769b11d93903))
+* **crystal:** stamp training owner from the resolved caller ([033e816](https://github.com/monygroupcorp/noema/commit/033e8168a5216ad5cb9b7da083206eb8bac9d6cf))
+* **crystal:** stamp training owner from the resolved caller ([57b2feb](https://github.com/monygroupcorp/noema/commit/57b2febe3c664aec9110f53bca7cbb89251f961d))
+* drop duplicate ActivityRow/ActivityKind type imports from merge ([17ddae7](https://github.com/monygroupcorp/noema/commit/17ddae707dfd5243e072995f4aa878d9d4d38e2b))
+* **ledger:** mint change at reserve time so a reservation holds only its ceiling ([62ce91f](https://github.com/monygroupcorp/noema/commit/62ce91f1fec8b994274bcdaf00a8cb8ba15ba7d2))
+* **ledger:** mint change at reserve time so a reservation holds only its ceiling ([5ff4fdb](https://github.com/monygroupcorp/noema/commit/5ff4fdb27d08a8a46e376eca9b55c31cfe49746c))
+* **muse:** persist garden chip curation on the session floor ([1fe3e56](https://github.com/monygroupcorp/noema/commit/1fe3e5627dd6c60262214c6aea14c72be7eff4d0))
+* regenerate app lockfile with npm 10 — optional platform entries missing, CI npm ci refused ([68eebd6](https://github.com/monygroupcorp/noema/commit/68eebd64d0546e5ebdfb76370f3d94a7519509d9))
+* regenerate app lockfile with npm 10 — optional platform entries missing, CI npm ci refused ([fa5df08](https://github.com/monygroupcorp/noema/commit/fa5df082c46ad25dc3318a595e14a38c4eff9386))
+* **web:** carry a caption run's id in the URL so it can be re-attached ([305a3f5](https://github.com/monygroupcorp/noema/commit/305a3f58946f8597d5fc17c51d8ba7aaece7819b))
+* **web:** make the dataset garden's fragment chips read-only ([29bc1c4](https://github.com/monygroupcorp/noema/commit/29bc1c4e86239dde890d863328f5a8ae128eb669))
+* **web:** make the dataset garden's fragment chips read-only ([5da49b4](https://github.com/monygroupcorp/noema/commit/5da49b4389985d0883eba3ef1f52b849dced3acd))
+* **web:** resume curation queue from server-derived review state ([c89007d](https://github.com/monygroupcorp/noema/commit/c89007d1c71d503f1c6e2542bff7715902b59f41))
+* **web:** resume curation queue from server-derived review state ([5ff6733](https://github.com/monygroupcorp/noema/commit/5ff67330b8ea733651465b4353cbf8e247cfc458))
+* **web:** split live-attempt copy from between-attempts retry copy on the training run screen ([a913330](https://github.com/monygroupcorp/noema/commit/a91333026fff2d802e1d7930c45c112ddbc9de2e))
+* **web:** split live-attempt copy from between-attempts retry copy on the training run screen ([fce7314](https://github.com/monygroupcorp/noema/commit/fce7314902051755888f1a0dbb0f00e610683c08))
+
 ## [5.16.0](https://github.com/monygroupcorp/noema/compare/v5.15.0...v5.16.0) (2026-08-25)
 
 
