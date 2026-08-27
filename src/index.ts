@@ -32,6 +32,9 @@ import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
 import { createStorageRouter } from './allocutio/api/storageRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
+import { createDepositsAdminRouter } from './api/internal/depositsAdminRouter.js'
+import { alchemyRpc, runBootReconcile } from './crystal/DepositReconciler.js'
+import { MongoScanCursor } from './crystal/MongoScanCursor.js'
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
 import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
@@ -1658,6 +1661,31 @@ async function main(): Promise<void> {
   runDepositSweep()
   const depositSweepTimer = setInterval(runDepositSweep, DEPOSIT_SWEEP_INTERVAL_MS)
   depositSweepTimer.unref?.()
+
+  // Deposit reconciliation (noema-348): the sweep above re-processes deposits we RECORDED; this
+  // reads the vault's own logs back from the chain, so a deposit whose webhook delivery never
+  // arrived is still found and credited through the same core. Boot-time catch-up (window-bounded
+  // from the persisted cursor, idempotent, fire-and-forget) plus an operator route for healing a
+  // known gap on demand. Needs the RPC key — without it the reconciler is not wired, and the
+  // webhook remains the only path, which is the condition this warning names.
+  if (ALCHEMY_API_KEY) {
+    const scanCursor = new MongoScanCursor(mongo.db(DB_NAME).collection('deposit_scan_cursor'))
+    void scanCursor.ensureIndexes().catch(err => log.warn('deposit scan cursor: ensureIndexes failed', { error: String(err) }))
+    const reconcilerDeps = {
+      webhook: alchemyDeps,
+      rpc: alchemyRpc(ALCHEMY_API_KEY),
+      cursor: scanCursor,
+    }
+    app.use('/internal/v1', express.json(), createDepositsAdminRouter({
+      reconciler: reconcilerDeps,
+      servedChainIds: Object.keys(ALCHEMY_VAULT_ADDRESSES),
+      ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
+    }))
+    void runBootReconcile(reconcilerDeps, Object.keys(ALCHEMY_VAULT_ADDRESSES))
+      .catch(err => log.warn('deposit reconcile failed', { error: String(err) }))
+  } else {
+    log.warn('Alchemy RPC key unset (ALCHEMY_API_KEY / ALCHEMY_KEY) — deposit reconciliation is NOT running, so a deposit whose webhook delivery is missed stays unrecorded. Configure before real deposits.')
+  }
 
   // Training finality at the completion webhook (Slice E): a remote (pod) training run
   // completes here — host the pod-uploaded LoRA in R2 + register it as an Intella. Gated on
