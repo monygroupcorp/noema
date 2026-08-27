@@ -429,12 +429,31 @@ export async function reconcileVaultDeposits(
 }
 
 /**
- * Boot-time catch-up, fire-and-forget, one report line per chain: the range scanned, what was
- * healed, and the conservation verdict. Every deploy runs one, which is the shape of the outages
- * that have actually happened (a webhook silently not delivering until someone notices).
+ * Chains with a scan in flight in THIS process. A pass that finds one skips that chain rather than
+ * stacking a second scan on it. This is about provider load and log sanity, NOT correctness: the
+ * rail is idempotent either way (the tx-hash short-circuit makes a re-processed log a no-op, and
+ * the cursor only advances behind a fully processed chunk), so two overlapping scans would still
+ * credit exactly once — they would simply pay twice for the same `eth_getLogs` pages and interleave
+ * two sets of report lines.
  */
-export async function runBootReconcile(deps: DepositReconcilerDeps, chainIds: string[]): Promise<void> {
+const scansInFlight = new Set<string>()
+
+/**
+ * One cursor-driven pass over the served chains, one report line per chain: the range scanned, what
+ * was healed, and the conservation verdict. No explicit window is ever passed, so the cursor
+ * advances and a long historical range finishes itself pass by pass.
+ *
+ * A pass that aborts part-way (the per-call RPC timeout during a wide backfill) needs no recovery
+ * here: the cursor kept the progress of every chunk that completed and the next pass resumes from
+ * it. There is no retry inside a pass.
+ */
+export async function runReconcileScan(deps: DepositReconcilerDeps, chainIds: string[]): Promise<void> {
   for (const chainId of chainIds) {
+    if (scansInFlight.has(chainId)) {
+      log.info('deposit reconcile: a scan is already in flight for this chain — skipping', { chainId })
+      continue
+    }
+    scansInFlight.add(chainId)
     try {
       const report = await reconcileVaultDeposits(deps, { chainId })
       log.info('deposit reconcile complete', {
@@ -449,6 +468,60 @@ export async function runBootReconcile(deps: DepositReconcilerDeps, chainIds: st
       })
     } catch (err) {
       log.warn('deposit reconcile failed', { chainId, error: String(err) })
+    } finally {
+      scansInFlight.delete(chainId)
     }
   }
+}
+
+/**
+ * Boot-time catch-up, fire-and-forget. Every deploy runs one, which is the shape of the outages
+ * that have actually happened (a webhook silently not delivering until someone notices).
+ */
+export async function runBootReconcile(deps: DepositReconcilerDeps, chainIds: string[]): Promise<void> {
+  return runReconcileScan(deps, chainIds)
+}
+
+// ---------------------------------------------------------------------------
+// The patrol timer
+// ---------------------------------------------------------------------------
+
+/** Period between patrol passes when `DEPOSIT_RECONCILE_INTERVAL_MS` is unset. */
+export const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Resolve the patrol period from the environment. Unset (or empty) → the default above. `0`, a
+ * negative value, or anything that is not a number → `0`, which the caller reads as "no timer":
+ * the boot scan and the operator route then carry reconciliation between them.
+ */
+export function resolveReconcileIntervalMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_RECONCILE_INTERVAL_MS
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0
+  return parsed
+}
+
+/**
+ * Start the patrol: every `intervalMs`, one cursor-driven pass over the served chains. The boot
+ * scan covers the gap a restart opens; this covers the gap BETWEEN deploys, where a missed webhook
+ * delivery would otherwise wait for the next boot to be healed.
+ *
+ * `intervalMs <= 0` disables the timer and returns `null` after saying so once. The handle is
+ * `unref`'d so the patrol never holds the process open.
+ */
+export function startReconcileTimer(
+  deps: DepositReconcilerDeps,
+  chainIds: string[],
+  intervalMs: number,
+): NodeJS.Timeout | null {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    log.warn('deposit reconcile timer disabled (DEPOSIT_RECONCILE_INTERVAL_MS is 0 or not a positive number) — reconciliation runs on boot and on the operator route only')
+    return null
+  }
+  const timer = setInterval(() => {
+    void runReconcileScan(deps, chainIds).catch(err => log.warn('deposit reconcile tick failed', { error: String(err) }))
+  }, intervalMs)
+  timer.unref?.()
+  log.info('deposit reconcile timer started', { intervalMs, chainIds })
+  return timer
 }
