@@ -1,9 +1,8 @@
 /* standalone marketing surface — no app shell; built for weight, not softness */
-.landing-page{display:flex;flex-direction:column;min-height:100vh;overflow-x:hidden;
-  --px-section:clamp(24px,5.5vw,88px);   /* scales with viewport; generous on wide screens */
-  --py-section:clamp(72px,8.5vw,128px);  /* vertical rhythm; roomy so the spine breathes
-                                            and each section reads as its own beat */
-}
+/* --px-section / --py-section (section rhythm: generous on wide screens, roomy vertical
+   spine) are declared globally in styles/app.css so every consumer resolves the same
+   token instead of each carrying its own copy. */
+.landing-page{display:flex;flex-direction:column;min-height:100vh;overflow-x:hidden}
 .topnav{display:flex;align-items:center;justify-content:space-between;padding:15px 26px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(8px);z-index:10}
 .topnav .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:-.01em;font-size:15px}
 .topnav .brand .dot{width:16px;height:16px;display:block}
