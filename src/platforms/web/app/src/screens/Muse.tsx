@@ -22,9 +22,11 @@ import {
   decomposeCaptionsetId,
   decomposeFailureNote,
   decomposePlanNote,
+  decomposeRunParam,
   decomposeWorkload,
   launchCaptionJob,
   launchDecomposeJob,
+  withDecomposeRunParam,
 } from '../lib/training';
 import {
   admitPiece,
@@ -316,7 +318,7 @@ export function Muse() {
   const { id } = useParams();
   const navigate = useNavigate();
   // The session this visit names, if it names one. Absent = the bare resume door.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const sessionParam = searchParams.get(SESSION_PARAM);
   const [datasets, setDatasets] = useState<DatasetT[] | null>(null);
 
@@ -809,10 +811,59 @@ export function Muse() {
   // fragments this garden is built from. Offered from the empty state because that is where
   // a user who has just captioned arrives. Which captionset runs, whether the action can be
   // offered at all, and when the button is armed are all decided in `lib/training.ts`.
+  //
+  // The pass is WATCHED, not awaited. A decompose dispatches and keeps going server-side, so
+  // this holds a run id rather than a boolean, carries it in `?run=` the way the caption screen
+  // carries its pass (noema-321) so navigating away does not lose a run that is still spending,
+  // and re-reads the dataset when the run goes terminal.
   const [decomposeSet, setDecomposeSet] = useState<string | null>(null);
   const [trigger, setTrigger] = useState('');
-  const [decomposing, setDecomposing] = useState(false);
+  const [decomposeRun, setDecomposeRun] = useState<string | null>(() => decomposeRunParam(searchParams));
+  const [decomposeStarting, setDecomposeStarting] = useState(false);
   const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const decomposeMountChecked = useRef(false);
+
+  const decomposeStream = useRunStream(decomposeRun ?? undefined);
+  const decomposeTerminal = decomposeStream.terminal;
+  const decomposing = decomposeStarting || (decomposeRun !== null && decomposeTerminal === null);
+
+  // A `?run=` carried in on mount gets ONE validating fetch — a run that is gone or was never
+  // this caller's must clear rather than leave the screen showing a pass that is not running.
+  // `useRunStream`'s poll fallback reads a persistent 404 as "still pending", so the check
+  // belongs here rather than there.
+  useEffect(() => {
+    if (decomposeMountChecked.current) return;
+    decomposeMountChecked.current = true;
+    const carried = decomposeRun;
+    if (!carried) return;
+    let live = true;
+    api.getRun(carried).catch(() => {
+      if (!live) return;
+      setDecomposeRun(null);
+      setSearchParams((prev) => withDecomposeRunParam(prev, null), { replace: true });
+      setDecomposeMsg({ ok: false, text: 'that decompose is gone or not yours' });
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The pass landing. Fragments are written onto the DATASET, so the garden fills through a
+  // re-read of the record rather than through the run's own exitus.
+  useEffect(() => {
+    if (!decomposeRun || decomposeTerminal === null) return;
+    if (decomposeTerminal === 'failed') {
+      setDecomposeMsg({ ok: false, text: `decompose failed: ${decomposeStream.error ?? 'no reason reported'}` });
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
+      if (!live) return;
+      setDatasets(ds);
+      setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
+    })();
+    return () => { live = false; };
+  }, [decomposeRun, decomposeTerminal, decomposeStream.error]);
   // noema-278 — the whole-set path, off by default and offered from BOTH decompose controls on
   // this screen. An item that already carries fragments has been through the extractor, and a
   // decompose spends one model call per item it runs, so the default pass is the new work only.
@@ -935,16 +986,17 @@ export function Muse() {
     }
   }
 
-  // A decompose is synchronous and metered: the request stays open until the last caption is
-  // written, and every caption is one chat call. So the button locks for the whole pass, the
-  // state on screen says what is actually happening rather than spinning, and a failure keeps
-  // its text. When it returns, the dataset is re-read so the garden fills without a refresh.
+  // A decompose is metered and it runs OFF-REQUEST: the dispatch comes back with a run id and
+  // every caption is one chat call from there on. So the button locks for as long as the run is
+  // live rather than for as long as a request is open, the state on screen says what is actually
+  // happening, and a failure keeps its text. The watch above re-reads the dataset when the run
+  // goes terminal, so the garden fills without a refresh.
   async function doDecompose(dataset: DatasetT) {
     const captionsetId = decomposeCaptionsetId(dataset, decomposeSet);
     // With `redo` the workload is the whole pass, so the pending count is not what gates it.
     const pending = redoAll ? undefined : decomposeWorkload(dataset, captionsetId).pending;
     if (!canFireDecompose({ captionsetId, inFlight: decomposing, pending })) return;
-    setDecomposing(true);
+    setDecomposeStarting(true);
     setDecomposeMsg(null);
     try {
       const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, trigger, redo: redoAll });
@@ -952,15 +1004,17 @@ export function Muse() {
         setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
         return;
       }
-      const { datasets: ds } = await api.listDatasetsFull();
-      setDatasets(ds);
-      setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
+      // The dispatch is done, the pass is not: attach to the run and let the watch above finish
+      // the story. The id goes into the URL in the same breath, before anything can navigate away.
+      setDecomposeRun(run.id);
+      setSearchParams((prev) => withDecomposeRunParam(prev, run.id), { replace: true });
+      setDecomposeMsg({ ok: true, text: `decompose started · run ${run.id.slice(0, 8)}` });
     } catch (e) {
       // Same reading the dataset screen does: a refusal because one is already running, or
       // because there is nothing left to decompose, is a status rather than a failure.
       setDecomposeMsg({ ok: false, text: decomposeFailureNote(String((e as Error).message)) });
     } finally {
-      setDecomposing(false);
+      setDecomposeStarting(false);
     }
   }
 
@@ -1910,7 +1964,7 @@ export function Muse() {
                 </div>
                 <div className="muse-decompose-note mono">
                   {decomposeGate ?? (decomposing
-                    ? 'reading every caption left to decompose — one pass per caption, this stays open until the last one is written'
+                    ? `reading every caption left to decompose — one pass per caption, and it keeps going on our side whether or not this page is open${decomposeRun ? ` · run ${decomposeRun.slice(0, 8)}, ${decomposeStream.elapsedSec}s elapsed` : ''}`
                     : decomposePlanNote(decomposeWork, redoAll))}
                 </div>
                 {decomposeMsg && <div className="muse-decompose-note mono">{decomposeMsg.text}</div>}

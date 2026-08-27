@@ -594,9 +594,17 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // dispatch. Registered unconditionally so a deployment with no chat key refuses a decompose
   // with the cursor's own named error instead of an unresolvable ministerium; it reuses the
   // `datasets` store constructed above rather than opening a second one.
+  //
+  // A decompose dispatches ASYNC and finishes off-request, and no webhook comes back for it
+  // — the pass has no pod — so the cursor settles its own run. That is what `actorum` and
+  // `completor` are here for. `completor` is a lazy closure for the same reason the pod
+  // rail's launch-failure sink below is one: it is constructed further down this function,
+  // and the accessor is called at the END of a pass, long after wiring has finished.
   cursorum.register(MUSE_DECOMPOSE_MINISTERIUM, new MuseDecomposeCursor({
     datasets,
     providers: (config.apiProviders ?? []).map(({ provider, apiKey }) => ({ provider, apiKey })),
+    actorum,
+    completor: () => completor,
   }))
 
   // Muse steer (`modus.muse-steer`) — the same chat rail again, and again its OWN ministerium,
