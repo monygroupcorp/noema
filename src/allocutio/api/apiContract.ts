@@ -577,6 +577,7 @@ const GeneratioSchema: JsonSchema = {
       properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
       required: ['attestedAt'],
     },
+    privateOutputs: { type: 'boolean', description: 'Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise.' },
   },
 }
 
@@ -2344,7 +2345,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'PUT',
       path: '/me/generatio',
-      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace.",
+      summary: "Replace the caller's cross-cutting generation defaults (style, negative prompt, output format, telegram delivery, auto-apply models, spicy mode, private generation). Applied at cast time under the affines precedence chain. Enabling spicyMode requires a recorded 18+ attestation on file (else auth.forbidden); a recorded attestation is preserved across a replace. Enabling privateOutputs requires a deployment with a private-outputs bucket (else internal.unavailable).",
       auth: true,
       request: GeneratioSchema,
       response: { type: 'object', properties: { generatio: GeneratioSchema }, required: ['generatio'] },

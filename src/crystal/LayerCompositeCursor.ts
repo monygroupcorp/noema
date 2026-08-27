@@ -3,7 +3,9 @@ import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
 import type { LayerCompositeEngine } from './LayerCompositeEngine.js'
 import type { MediaFetcher } from './MediaFetcher.js'
+import { privateMarker, privateWritePrefix } from './MediaFetcher.js'
 import type { Uploader } from './R2Uploader.js'
+import { randomUUID } from 'node:crypto'
 
 // =============================================================================
 // LayerCompositeCursor — the host-side "layer-composite" runtime
@@ -29,6 +31,10 @@ export class LayerCompositeCursor implements Cursor {
       engine: LayerCompositeEngine
       fetcher: MediaFetcher
       uploader: Uploader
+      /** The private-outputs store (noema-347). Present only where the deployment configures a
+       *  private bucket; absent, a private run cannot be composited host-side and is refused
+       *  rather than written to the public bucket. */
+      privateUploader?: Uploader
     },
   ) {}
 
@@ -53,6 +59,19 @@ export class LayerCompositeCursor implements Cursor {
     if (height !== undefined) opts.height = height
 
     const png = await this.deps.engine.composite(buffers, opts)
+
+    // A private run — by its dispatch stamp, or because a layer we just read is private —
+    // writes to the private store and yields a marker, never a URL.
+    const prefix = privateWritePrefix(actum, urls)
+    if (prefix) {
+      if (!this.deps.privateUploader) {
+        throw new Error('layer-composite: this run is private but no private-outputs store is configured')
+      }
+      const key = `${prefix}${randomUUID()}.png`
+      await this.deps.privateUploader.put(key, png, 'image/png')
+      return { kind: 'sync', exitus: { exitus: { image: privateMarker(key) }, impetus: 0n } }
+    }
+
     const url = await this.deps.uploader.put(`composites/${actum.id}.png`, png, 'image/png')
 
     return { kind: 'sync', exitus: { exitus: { image: url }, impetus: 0n } }

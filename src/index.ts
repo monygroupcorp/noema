@@ -117,7 +117,7 @@ import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
 import { MongoPetitio } from './crystal/MongoPetitio.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
-import { httpMediaFetcher } from './crystal/MediaFetcher.js'
+import { httpMediaFetcher, registerPrivateMediaResolver } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { makeCaptionFinalizer, urlCaptionHarvestReader, makeCaptionExitusResolver, composeExitusResolvers } from './crystal/captionFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -289,6 +289,21 @@ const R2_EXPORTS_BUCKET = process.env.R2_EXPORTS_BUCKET
 const EXPORTS_R2: R2Config | undefined =
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_EXPORTS_BUCKET
     ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_EXPORTS_BUCKET! }
+    : undefined
+
+// Dedicated PRIVATE bucket for private generation (noema-347) — the same pattern as the exports
+// bucket above, for the same reason. A caller who turns private generation on is told their
+// outputs are visible only to them, so those objects must NOT land in R2_OUTPUTS_BUCKET, the
+// PUBLIC bucket (bound to R2_PUBLIC_URL) that serves the unauthenticated feed/editions.
+// Deliberately NO `publicUrl`: the object has no public handle at all, so a short-lived
+// presigned GET is the only way to read it and the expiry is a real control. Distinct bucket,
+// same R2 account/credentials; the bucket itself must NOT be bound to a public domain (infra/R2
+// config, off-repo). Unset → the feature is dark: the preference cannot be enabled (the write is
+// refused) and every run generates public. It is never a fallback to the public bucket.
+const R2_PRIVATE_OUTPUTS_BUCKET = process.env.R2_PRIVATE_OUTPUTS_BUCKET
+const PRIVATE_OUTPUTS_R2: R2Config | undefined =
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_PRIVATE_OUTPUTS_BUCKET
+    ? { endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY!, bucket: R2_PRIVATE_OUTPUTS_BUCKET! }
     : undefined
 
 /**
@@ -503,6 +518,29 @@ async function main(): Promise<void> {
     ? new InstallCoordinator(new ModelInstaller({ intellarum: intellae, materiae, clientFor: warmInstallClientFor }))
     : undefined
 
+  // Private generation (noema-347), startup wiring. The private-outputs store is the ONLY way to
+  // read an object the runs wrote there, so it is registered as the process-wide resolver for
+  // `noema-private://` markers: every host-side read path that already takes a MediaFetcher —
+  // the CSAM/moderation gate, batch triage, image embeddings — keeps working on a private output
+  // with no change of its own. The gate is fail-closed, so this seam is what stops a private
+  // output from being unmoderatable. Unregistered when no private bucket is configured: a marker
+  // then fails loudly rather than falling through to the network.
+  const privateOutputsStore = PRIVATE_OUTPUTS_R2 ? new R2Uploader(PRIVATE_OUTPUTS_R2) : undefined
+  if (privateOutputsStore) {
+    registerPrivateMediaResolver({
+      async fetch(key: string): Promise<Buffer> {
+        // Self-presign, then read. The bucket has no public binding; this URL is minted for our
+        // own immediate use and lapses in a minute.
+        const url = await privateOutputsStore.getSignedDownloadUrl(key, { expiresIn: 60 })
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`private media fetch failed: ${res.status}`)
+        return Buffer.from(await res.arrayBuffer())
+      },
+    })
+  } else {
+    log.warn('R2_PRIVATE_OUTPUTS_BUCKET unset — private generation DISABLED (the preference cannot be enabled and every run generates public). Refusing to host private outputs in the public outputs bucket.')
+  }
+
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
     dbName: DB_NAME,
@@ -510,6 +548,10 @@ async function main(): Promise<void> {
     materiae,   // pre-created, shared with SecurePodClient
     hospitia,   // pre-created, shared with SecurePodClient + TelegramAllocutio
     terminatePod: podTerminator,
+    // Private generation (noema-347): the dedicated bucket, and the preferences store the
+    // dispatch site reads the caller's choice from.
+    ...(PRIVATE_OUTPUTS_R2 ? { privateOutputsR2: PRIVATE_OUTPUTS_R2 } : {}),
+    consuetudinum,
     ...(runpodClient && RUNPOD_WEBHOOK_URL ? {
       runpodClient,
       runpodWebhookUrl: RUNPOD_WEBHOOK_URL,
@@ -958,6 +1000,10 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     modos: ring.modos,
     consuetudinum,
+    // Private generation (noema-347): presence gates the preference (a toggle the deployment
+    // cannot honour is refused, not silently downgraded) and presigns markers on an owner-scoped
+    // run read.
+    ...(privateOutputsStore ? { privateOutputs: { store: privateOutputsStore } } : {}),
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
     datasets: ring.datasets,
