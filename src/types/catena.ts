@@ -81,7 +81,39 @@ export type DepositumStatus =
   | 'detectum'      // transaction seen in mempool or block, not yet confirmed
   | 'confirmatum'   // sufficient block confirmations
   | 'processatum'   // converted to a Signum in the ledger
+  | 'praesolutum'   // settled on the pre-cutover plane — recorded here, never credited here
   | 'fractum'       // processing failed — no Signum issued
+
+/**
+ * Praesolutio — the record of a deposit that was priced and credited on the PRE-CUTOVER plane.
+ * "praesolutio" = a discharge made beforehand (Latin, 3rd decl. f., from praesolvere).
+ *
+ * A `praesolutum` Depositum is a HISTORICAL RECORD, not a claim. The funder was credited by the
+ * earlier stack at receipt; the fields below are that stack's own numbers, carried across so this
+ * plane can see what happened without reaching into the earlier ledger. Nothing here is a balance
+ * and nothing here is spendable — writing it moves no points and issues no Signum.
+ *
+ * The money-bearing values are decimal STRINGS, not bigints: they are provenance, never an input
+ * to this plane's credit math, and `MongoDepositum.toDoc` serializes only the top-level bigints
+ * (`valor`, `usdFmv`) — a nested bigint would not survive the driver. Every numeric field is
+ * optional and is stored ABSENT when the source record does not carry it; none is ever invented.
+ */
+export interface Praesolutio {
+  /** Identifier of the pre-cutover credit-ledger row that settled this deposit. */
+  ledgerRef: string
+  /** Points credited on the pre-cutover plane at the time, as that ledger recorded them. */
+  punctaCredita?: string
+  /** Gross USD basis given at the time, in MICRO-USD, as a decimal string. */
+  grossUsdFmv?: string
+  /** Gross USD after the deposit-side adjustment, in MICRO-USD, as a decimal string. */
+  adjustedGrossUsdFmv?: string
+  /** USD credited to the funder at the time, in MICRO-USD, as a decimal string. */
+  creditedUsd?: string
+  /** The funding rate applied at the time, as the pre-cutover ledger recorded it. */
+  fundingRate?: number
+  /** When this record was completed onto the Depositum. */
+  recordatum: Date
+}
 
 /**
  * Depositum — a detected on-chain deposit to CreditVault.
@@ -135,6 +167,14 @@ export interface Depositum {
    * FK → Petitio. Set if this deposit fulfilled a magic-amount link request.
    */
   petitioId?: string
+
+  /**
+   * Present ONLY on a `praesolutum` row: the pre-cutover settlement that already discharged this
+   * deposit. Its presence is the evidence that this plane owes nothing on the row — see
+   * `isSettledDepositum` in `src/api/webhooks/alchemyWebhook.ts`, which is what keeps every
+   * processing path off it.
+   */
+  praesolutio?: Praesolutio
 
   status: DepositumStatus
   /** "natum" = detected/born */
