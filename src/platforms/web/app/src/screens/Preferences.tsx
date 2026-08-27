@@ -124,6 +124,14 @@ export function Preferences() {
               </select></label>
           </div>
           <div className="pref-card">
+            <div className="pref-card-h"><Ic name="send" /><b>Private generation</b></div>
+            <label className="ac-row"><span className="ac-rk mono">private outputs</span>
+              <input type="checkbox" checked={gen.privateOutputs ?? false} onChange={(e) => commit({ ...genRef.current, privateOutputs: e.target.checked })} /></label>
+            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
+              <span className="hemi2 dashed" /> Outputs of new runs are visible only to you, through expiring links. Publishing or minting one later makes that copy public. Runs you have already made stay as they are.
+            </div>
+          </div>
+          <div className="pref-card">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
             <label className="ac-row"><span className="ac-rk mono">adult content</span>
               <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>

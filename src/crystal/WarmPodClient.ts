@@ -50,7 +50,7 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
     private readonly config: WarmPodConfig = {},
   ) {}
 
-  async submit(params: { input: unknown; webhook?: string; jobToken?: string; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (executio: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
+  async submit(params: { input: unknown; webhook?: string; jobToken?: string; r2?: R2Config; onPodActive?: (podId: string) => Promise<void>; onMetrics?: (executio: ActumExecutio) => Promise<void> }): Promise<{ id: string }> {
     const { id, externusId } = this.materia
     // Unique per-submission ID — reusing externusId would 409 on second job to same warm pod
     const jobId = `${externusId}-${Date.now()}`
@@ -68,7 +68,7 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       if (prog) recordProgressus(ctx.actumId, { ...prog, at: new Date() }).catch(err => log.warn('progressus record failed', { error: (err as Error).message }))
     }
 
-    this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.jobToken)
+    this._runBackground(params.input, params.webhook, jobId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.jobToken, params.r2)
       .catch(async (err) => {
         log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
         if (params.webhook && !runnerAcceptedJob) {
@@ -118,6 +118,9 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
     onRunnerAccepted: (accepted: boolean) => void,
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
     jobToken?: string,
+    /** Per-run object-store override (noema-347). A warm pod is reused across owners, so a
+     *  private run's bucket + key prefix MUST ride the submission — never the pod's own config. */
+    r2Override?: R2Config,
   ): Promise<void> {
     const { id, externusId } = this.materia
     const runnerBase = this._runnerBase()
@@ -134,7 +137,7 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       await this._waitForRunner(runnerBase)
       reachedRunner = true
 
-      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2, jobToken)
+      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, r2Override ?? this.config.r2, jobToken)
       onRunnerAccepted(true)
       log.info('job submitted to comfyrunner', { materiaId: id, externusId, jobId })
 
