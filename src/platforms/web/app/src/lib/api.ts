@@ -1737,6 +1737,6 @@ export interface MyDeposit {
   chainId: number | string;
   txHash: string;
   valor: string;
-  status: 'detectum' | 'confirmatum' | 'processatum' | 'fractum';
+  status: 'detectum' | 'confirmatum' | 'processatum' | 'praesolutum' | 'fractum';
   natum: string;
 }

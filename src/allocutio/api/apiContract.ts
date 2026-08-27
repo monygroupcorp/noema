@@ -1299,7 +1299,7 @@ const MyDepositsResponseSchema: JsonSchema = {
           chainId: { type: 'string' },
           txHash: { type: 'string', description: 'On-chain transaction hash.' },
           valor: { type: 'string', description: 'Amount in base units (wei / token-decimals), as a string.' },
-          status: { type: 'string', enum: ['detectum', 'confirmatum', 'processatum', 'fractum'], description: 'detectum (seen) · confirmatum (confirmed, awaiting/parked credit) · processatum (credited) · fractum (failed).' },
+          status: { type: 'string', enum: ['detectum', 'confirmatum', 'processatum', 'praesolutum', 'fractum'], description: 'detectum (seen) · confirmatum (confirmed, awaiting/parked credit) · processatum (credited) · praesolutum (settled on the pre-cutover plane — recorded here, never credited here) · fractum (failed).' },
           natum: { type: 'string', format: 'date-time', description: 'When the deposit was first detected.' },
         },
         required: ['id', 'chainId', 'txHash', 'valor', 'status', 'natum'],
