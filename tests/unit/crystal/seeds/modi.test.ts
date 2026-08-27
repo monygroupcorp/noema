@@ -184,7 +184,7 @@ test('modus.chatgpt is retained but de-canonised, and still hashes', () => {
   assert.ok(MODUS_CHATGPT.contentHash.length > 0)
 })
 
-test('dataset-decompose modus is a canon decompose job on its OWN ministerium (sync, usage-billed)', () => {
+test('dataset-decompose modus is a canon decompose job on its OWN ministerium (async, usage-billed)', () => {
   // Same assertion the caption modus carries, and for the same reason: `Cursorum` is a flat
   // Map<ministerium, Cursor> whose `register` is a bare set, so sharing a key with a hosted-API
   // provider would replace that provider's ApiCursor and send every chat/image dispatch into the
@@ -194,8 +194,9 @@ test('dataset-decompose modus is a canon decompose job on its OWN ministerium (s
     assert.notEqual(MODUS_DATASET_DECOMPOSE.ministerium, other.ministerium)
   }
   assert.equal(MODUS_DATASET_DECOMPOSE.genus, 'atomicus')
-  // The cursor loops the chat rail in-process and returns when the last caption is written.
-  assert.equal(MODUS_DATASET_DECOMPOSE.deliveryMode, 'sync')
+  // The cursor dispatches, then keeps running off-request; it settles its own run at the end
+  // of the pass (noema-338).
+  assert.equal(MODUS_DATASET_DECOMPOSE.deliveryMode, 'async')
   assert.equal(MODUS_DATASET_DECOMPOSE.canonica, true)
   // No fixed cost: the cursor reserves a ceiling from the caption count and settles the summed
   // real token cost — metered like any other run, with no free lane.
