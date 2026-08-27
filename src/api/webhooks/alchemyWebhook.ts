@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('alchemy-webhook')
-import type { Depositum, Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
+import type { Depositum, DepositumStatus, Depositorum, Petitionum, Testimoniorum } from '../../types/catena.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Redituum, RevenueOrigo } from '../../types/reditus.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
@@ -132,6 +132,26 @@ function creditImpetus(grossUsdFmv: bigint, token: string): bigint {
 const DEPOSIT_AUCTOR = 'alchemy-webhook'
 
 /**
+ * SETTLED — the deposit's credit is complete and NO path in this plane may process it again.
+ *
+ * Two states are settled, for two different reasons, and both are terminal:
+ *   • `processatum` — this plane issued the Signum. The existing tx-hash idempotency case.
+ *   • `praesolutum` — the deposit was priced and credited on the PRE-CUTOVER plane, and the row
+ *     records that (`Depositum.praesolutio`). This plane never credited it and never will: the
+ *     funder already holds the points, so issuing a Signum here would pay for the same deposit a
+ *     second time.
+ *
+ * The check exists because `praesolutum` rows carry a complete receipt-time basis. Every other
+ * guard on this path keys on a MISSING basis (`usdFmv === undefined`), so once a row is completed
+ * those guards stop holding it and the settled state is the only thing that does. It is asserted
+ * at both entry points to the crediting core — the payment handler that the webhook and the RPC
+ * reconciler share, and the retry sweep.
+ */
+export function isSettledDepositum(status: DepositumStatus): boolean {
+  return status === 'processatum' || status === 'praesolutum'
+}
+
+/**
  * A Mongo duplicate-key (E11000) error, detected structurally so this handler stays decoupled from
  * the driver (the Memory stores never throw it — their single-writer path is deduped by the
  * processatum short-circuit + this sweep only touching `confirmatum` rows).
@@ -243,6 +263,10 @@ export async function sweepConfirmatumDeposita(deps: DepositSweepDeps): Promise<
   let swept = 0
   let skipped = 0
   for (const depositum of parked) {
+    // Settled rows are never re-processed, whatever the store's filter returned. The list above
+    // asks for `confirmatum` only, so this is a second assertion rather than the first — the
+    // filter is the store's contract and this is the money path's own.
+    if (isSettledDepositum(depositum.status)) { skipped++; continue }
     if (depositum.token === undefined || depositum.usdFmv === undefined) {
       log.warn('deposit sweep: skipping legacy parked deposit missing receipt-time basis — heal via Alchemy re-delivery', {
         depositumId: depositum.id,
@@ -518,10 +542,13 @@ async function handlePaymentLog(
 
   const valor = BigInt(amount)
 
-  // Idempotency check
+  // Idempotency check. Both settled states short-circuit here: a deposit this plane already
+  // credited (`processatum`) and a deposit the pre-cutover plane already credited (`praesolutum`).
+  // Reaching past this for a settled row would fall through to the create branch below — a second
+  // Depositum, a second Reditus and a second Signum for one on-chain deposit.
   const existing = await deps.deposita.findByHash(txHash, chainId)
-  if (existing?.status === 'processatum') {
-    return false  // already fully processed — skip
+  if (existing && isSettledDepositum(existing.status)) {
+    return false  // already settled — skip
   }
 
   // OFAC screen the funding wallet BEFORE any credit is issued. A blocked payer's
