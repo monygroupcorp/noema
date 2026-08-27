@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.19.1](https://github.com/monygroupcorp/noema/compare/v5.19.0...v5.19.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **crystal:** price coin-listed deposit assets, and record deposits settled before the cutover ([3aca9ec](https://github.com/monygroupcorp/noema/commit/3aca9ec2723c50c6a5f07867ff6e2645b6a0f68d))
+* **crystal:** price coin-listed deposit assets, and record deposits settled before the cutover ([7b9e8cd](https://github.com/monygroupcorp/noema/commit/7b9e8cd629dc3efee0e8e334e05da6063d194486))
+* **crystal:** reconcile deposits on an interval, not only at boot ([31a5f09](https://github.com/monygroupcorp/noema/commit/31a5f09764b48a0fef2fd282d383daf1de9c1cdb))
+* **crystal:** reconcile deposits on an interval, not only at boot ([97957a4](https://github.com/monygroupcorp/noema/commit/97957a4644573bfef1139dafa67ddb0aac0e512c))
+
 ## [5.19.0](https://github.com/monygroupcorp/noema/compare/v5.18.0...v5.19.0) (2026-08-27)
 
 
