@@ -24,6 +24,11 @@
   --ease:cubic-bezier(.22,.61,.36,1); --dur-fast:120ms; --dur:160ms; --dur-slow:300ms;
   /* SPACING scale (4px base) — compose from these, never magic numbers */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:48px; --s10:64px;
+  /* Section rhythm — the marketing/landing surfaces' outer padding, wider than the --s*
+     ladder covers. Global so every screen sharing that grammar (landing, ceremony) resolves
+     the same declaration instead of each carrying its own copy. */
+  --px-section:clamp(24px,5.5vw,88px);
+  --py-section:clamp(72px,8.5vw,128px);
   /* TYPE scale */
   --fs-xs:11px; --fs-sm:12.5px; --fs-s:13px; --fs-base:14px; --fs-m:15px; --fs-md:16px; --fs-lg:19px; --fs-xl:22px; --fs-2xl:28px;
   /* RADII */
