@@ -1,8 +1,10 @@
-import type { Cursor, CursorResult } from '../types/cursus.js'
+import type { Actorum, ActumCompletor, Cursor, CursorResult, Exitus } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import type { Modus } from '../types/modus.js'
 import { isArchived } from '../types/dataset.js'
 import type { Captionset, Dataset, Datasets } from '../types/dataset.js'
+import { getTrace } from '../lib/trace.js'
+import { makeLogger } from '../lib/logger.js'
 import type { ApiProvider } from './apiProviders.js'
 import { chatImpetus } from './apiProviders.js'
 import { buildGarden, createChatExtractor, type FetchLike } from './muse/garden.js'
@@ -23,7 +25,11 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 // first provider call, settles the summed real token cost, appears in run
 // history, and has no separate lifecycle and no free lane.
 //
-// SEVEN PROPERTIES ARE LOAD-BEARING HERE:
+// It is also an ASYNC run. `run()` returns at dispatch and the per-caption loop
+// continues off-request — see ASYNC AT DISPATCH below — so the caller gets a run
+// id immediately and watches the run like any other.
+//
+// NINE PROPERTIES ARE LOAD-BEARING HERE:
 //
 //   OWN MINISTERIUM — `Cursorum` is a flat Map<ministerium, Cursor> whose
 //     `register` is a bare set. Registering this cursor under 'openai' would
@@ -49,6 +55,32 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 //     named error in `reserve()`, before anything is locked, rather than letting
 //     a run reach the wire and come back as an upstream 401 with credits held.
 //
+//   ASYNC AT DISPATCH — the loop is one awaited chat call per caption, serial and
+//     bounded only by the per-job cap, so a full pass is minutes to hours of wall
+//     clock. Holding the dispatching request open for it makes the run's duration
+//     the caller's HTTP timeout: a client whose fetch gives up reads a run that has
+//     already succeeded server-side as a failure. So `run()` prepares the pass —
+//     provider, dataset, captionset, work — while the caller is still waiting, then
+//     returns `{ kind:'async' }` and lets the loop continue off-request. Dispatch
+//     hands the run id back at that point and the client watches the run.
+//
+//     The handle is NOT stamped onto the actum. `externusJobId` is what enrolls a
+//     run in the pod in-flight sweep, and a decompose has no pod and no webhook, so
+//     a stamped run would be swept forever against a callback that cannot arrive.
+//     The value in the `CursorResult` is the run's own id and is read by nothing:
+//     `dispatchInceptio` ignores it on the async branch. `status` is left alone for
+//     the same reason.
+//
+//   SETTLES ITSELF — no webhook finishes this run. Every other async cursor here is
+//     completed by a pod's callback; a decompose has no pod, so the loop calls the
+//     `ActumCompletor` on its own. The SAME clamp-and-settle the sync return path
+//     used runs at loop completion — the summed real token cost, clamped to the
+//     reservation — and a loop that dies mid-pass settles through `fail()`, which
+//     releases the locked signa. Either way the run reaches a terminal state under
+//     its own power rather than waiting for the expiry reaper to guess. The completor
+//     arrives as a LAZY accessor because the container constructs it after this
+//     registration; the accessor is called minutes into a run, long after.
+//
 //   SINGLE FLIGHT PER DATASET — a decompose holds a reservation for its whole
 //     duration, so a second decompose started on top of a running one locks a
 //     second reservation against the same work. A dataset that already has a
@@ -57,9 +89,12 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 //     placed in `run()` instead would refuse only after the second run's credits
 //     were already held, which is the thing being fixed rather than a fix. The
 //     claim is taken in `run()` (so `reserve()` stays the read-only estimate its
-//     contract requires) and released in a `finally`, so a run that throws frees
-//     the dataset immediately rather than leaving it claimed. The claim lives on
-//     the cursor instance the container registers, so it is per-process.
+//     contract requires) and released in a `finally` around the WHOLE pass —
+//     including the settlement, and therefore long after `run()` has returned.
+//     Releasing it when `run()` returns would free the dataset while the loop is
+//     still spending on it, which is the double reservation the claim exists to
+//     prevent. The claim lives on the cursor instance the container registers, so
+//     it is per-process.
 //
 //   INCREMENTAL BY DEFAULT — a media item that already carries fragments is
 //     already decomposed, and `DatasetMediaItem.fragments` is the record of it:
@@ -82,10 +117,23 @@ import { CATEGORIES, type Fragment } from './muse/taxonomy.js'
 //     reaching it means the reservation stays locked for the whole expiry
 //     window for a run that stopped making progress in its first seconds.
 //
+//   HONEST TERMINUS — the actum's `expirat` is what lets the expiry reaper call a
+//     run dead and refund it. A serial pass of N captions can legitimately take
+//     N × the per-call deadline, which for a full job is hours — far past the
+//     inceptor's 15-minute default. A run off-request has no request to keep it
+//     visibly alive, so under the default the reaper would fail-and-refund a live
+//     decompose that is still writing fragments. `terminus()` therefore declares
+//     the pass's own length, and is clamped to `MAX_DECOMPOSE_TERMINUS_MS` so a
+//     large job cannot buy an unbounded deadline. Refund-on-death is not weakened
+//     by the longer window: SETTLES ITSELF is what ends a dead loop, and the reaper
+//     is only the outer backstop.
+//
 // Ring rules: `src/crystal` is platform-neutral. Nothing here reads
 // `process.env` — provider descriptors and their resolved keys arrive from the
 // container, exactly as they do for `ApiCursor`.
 // =============================================================================
+
+const log = makeLogger('cursor:musedecompose')
 
 /** The ministerium this cursor owns. Never 'openai' — see the header. */
 export const MUSE_DECOMPOSE_MINISTERIUM = 'musegarden'
@@ -121,6 +169,30 @@ export const DEFAULT_TOKENS_PER_CAPTION = 1500
  * expires — see BOUNDED CALL in the header.
  */
 export const DEFAULT_CHAT_CALL_TIMEOUT_MS = 60_000
+
+/**
+ * Slack added to a decompose's declared `terminus`, over and above the per-caption
+ * deadlines it is the sum of.
+ *
+ * The pass is more than its provider calls: resolving the dataset, writing each item's
+ * fragments back, and the settlement at the end all cost wall clock that no per-call
+ * deadline covers. A terminus set to exactly the call budget would expire a pass whose
+ * every call answered on time.
+ */
+export const DECOMPOSE_TERMINUS_MARGIN_MS = 5 * 60 * 1000
+
+/**
+ * Ceiling on the `terminus` a decompose may declare — three hours.
+ *
+ * A full job is one call per caption up to the per-job cap, so the honest length of the
+ * longest legal pass is hours rather than minutes. The ceiling is what stops that from
+ * becoming an unbounded deadline: a reservation held against a run that stopped making
+ * progress is released when the reaper reaches it, and this is the longest that can take.
+ * The inceptor clamps every cursor-declared terminus to its own `MAX_TERMINUS_MS`; this
+ * is the same bound stated where the number is chosen, so the declaration is honest on
+ * its own rather than only after someone else trims it.
+ */
+export const MAX_DECOMPOSE_TERMINUS_MS = 3 * 60 * 60 * 1000
 
 /**
  * A decompose was asked for on a dataset that already has one running.
@@ -170,6 +242,22 @@ export interface MuseDecomposeCursorDeps {
    * the cursor refuses (see FAIL CLOSED above).
    */
   providers: ChatProviderBinding[]
+  /**
+   * The actum store — re-read at settlement so the loop completes the record as it
+   * stands now rather than the snapshot `run()` was handed, which is minutes to hours
+   * old by then. Mirrors the pod rail's own launch-failure sink, which looks the actum
+   * up for the same reason.
+   */
+  actorum: Pick<Actorum, 'findById'>
+  /**
+   * The completor this run settles itself through — see SETTLES ITSELF in the header.
+   *
+   * A LAZY ACCESSOR rather than the instance, because the container constructs the
+   * completor after it registers this cursor. It is called at the end of a pass, long
+   * after wiring is finished, so the indirection costs nothing and is what lets the
+   * dependency point the way the lifecycle actually runs.
+   */
+  completor: () => ActumCompletor
   /** Injected transport — tests pass a fake; production leaves it to global `fetch`. */
   fetchImpl?: FetchLike
   /** Overrides `DEFAULT_MAX_DECOMPOSE_CAPTIONS`. */
@@ -187,6 +275,19 @@ export interface MuseDecomposeCursorDeps {
  * container order.
  */
 const PROVIDER_PREFERENCE = ['openrouter', 'openai', 'venice']
+
+/**
+ * A pass resolved down to what it will actually do, before the caller is released.
+ *
+ * Resolving up front is what keeps every refusal on the dispatching request: with the loop
+ * detached, an error raised inside it can only reach the run record, never the caller. A
+ * dataset that does not exist should still be a straight answer to the request that named it.
+ */
+interface PreparedPass {
+  binding: ChatProviderBinding
+  dataset: Dataset
+  work: Array<[string, string]>
+}
 
 export class MuseDecomposeCursor implements Cursor {
   constructor(private readonly deps: MuseDecomposeCursorDeps) {}
@@ -223,31 +324,126 @@ export class MuseDecomposeCursor implements Cursor {
   }
 
   /**
-   * Claim the dataset for the length of the run, then decompose it.
+   * Wall-clock budget for a decompose — see HONEST TERMINUS in the header.
    *
-   * The claim is what a later `reserve()` sees, and it is released in the `finally`
-   * whatever the run does — returns, throws, or times a call out. A terminal run
-   * therefore frees its dataset at the moment it ends rather than at the moment the
-   * expiry reaper notices it.
+   * The pass is serial, one deadline-bounded chat call per item of work, so its longest
+   * legal length is the work times that deadline. The margin covers what the per-call
+   * deadlines do not (the store reads, the fragment writes, the settlement), and the
+   * whole thing is clamped so a large job cannot buy an unbounded window.
+   *
+   * Deliberately NOT derived from `reserve()`: that returns impetus, and for a modus
+   * declaring `impetusFixum` it is a flat price — a price read as a duration would hand a
+   * long pass a deadline of a few seconds.
+   */
+  async terminus(_modus: Modus, aditus: Record<string, unknown>): Promise<number> {
+    const { work } = await this.resolveWork(aditus)
+    const perCall = this.deps.chatCallTimeoutMs ?? DEFAULT_CHAT_CALL_TIMEOUT_MS
+    const budget = work.length * perCall + DECOMPOSE_TERMINUS_MARGIN_MS
+    return Math.min(budget, MAX_DECOMPOSE_TERMINUS_MS)
+  }
+
+  /**
+   * Claim the dataset, prepare the pass, and hand the run back — the loop runs on.
+   *
+   * Everything that can refuse the job outright happens INSIDE this call, while the
+   * dispatching caller is still waiting: an unservable provider, a dataset or captionset
+   * that does not resolve, a caption naming no media item, a pass over the cap. Those
+   * still throw from `run()`, so `dispatchInceptio` fails the actum and the caller is told
+   * why, exactly as before.
+   *
+   * What does NOT happen inside this call is the loop. Once the pass is prepared the work
+   * is detached and `run()` returns `{ kind:'async' }`; the loop settles the run itself
+   * when it ends (SETTLES ITSELF). The claim is released by the loop, not here — see
+   * SINGLE FLIGHT PER DATASET for why releasing it at return would be the double
+   * reservation the claim exists to prevent.
    */
   async run(actum: Actum): Promise<CursorResult> {
     const datasetId = String(actum.aditus.dataset ?? '')
     const claimed = datasetId !== '' && !this.running.has(datasetId)
     if (claimed) this.running.add(datasetId)
+
+    let prepared: PreparedPass
     try {
-      return await this.decompose(actum)
-    } finally {
+      prepared = await this.prepare(actum.aditus)
+    } catch (err) {
+      // Nothing was detached, so nothing else will free the dataset.
       if (claimed) this.running.delete(datasetId)
+      throw err
+    }
+
+    // The identified owner, read from the trace context `dispatchInceptio` opened around
+    // this call. The completor threads it into vestigium indexing, and the sync return
+    // path used to hand it over from the inceptio; a detached loop has no inceptio, and
+    // the trace is where that identity already travels. Read HERE rather than in the loop
+    // so it is captured while the dispatching context is unambiguously the current one.
+    const trace = getTrace()
+    const auctor = trace?.animaId !== undefined ? { animaId: trace.animaId }
+      : trace?.commitment !== undefined ? { commitment: trace.commitment }
+      : undefined
+
+    // The detached pass. `runDetached` handles both of its own exits, so the guard here is the
+    // last resort for a wiring fault inside the handling itself: an unhandled rejection on a
+    // detached promise takes the process down, and one decompose must not be able to do that.
+    void this.runDetached(actum, prepared, auctor, claimed ? datasetId : null).catch((err) =>
+      log.error('muse decompose: the pass could not settle itself', {
+        actumId: actum.id, error: String(err),
+      }),
+    )
+
+    // Not stamped anywhere — see ASYNC AT DISPATCH. `dispatchInceptio` ignores this value
+    // on the async branch; it is the run's own id so that a log line reading it names the run.
+    return { kind: 'async', externusJobId: actum.id }
+  }
+
+  /**
+   * The pass, off-request: decompose, then settle — or fail — under this run's own power.
+   *
+   * This is the whole reason the cursor takes a completor. No webhook is coming: a
+   * decompose has no pod and nothing external will finish it, so a loop that ended and did
+   * not settle would leave the payer's credits locked until the expiry reaper released them.
+   * Both exits go through the completor, and the claim is released after the settlement so
+   * a second decompose cannot start against a reservation that is still being settled.
+   */
+  private async runDetached(
+    actum: Actum,
+    prepared: PreparedPass,
+    auctor: { animaId: string } | { commitment: string } | undefined,
+    claimId: string | null,
+  ): Promise<void> {
+    try {
+      const exitus = await this.decompose(actum, prepared)
+      await this.deps.completor().complete(await this.fresh(actum), exitus, auctor)
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err)
+      // `fail()` releases the locked signa and stamps the actum `fractus`. It re-reads the
+      // record and returns early on one already terminal, so racing the expiry reaper here
+      // cannot double-release. A settle that itself fails must not mask the original error,
+      // which is already on the run's own record path — swallow it and leave the reaper as
+      // the last backstop.
+      await this.deps.completor().fail(await this.fresh(actum), message).catch(() => {})
+    } finally {
+      if (claimId) this.running.delete(claimId)
     }
   }
 
-  private async decompose(actum: Actum): Promise<CursorResult> {
-    const aditus = actum.aditus
-    // The reservation ActumInceptor locked — the upper bound run() must not exceed.
-    const reserved = actum.impetus
+  /** The actum as it stands now — the snapshot `run()` was handed is a whole pass old. */
+  private async fresh(actum: Actum): Promise<Actum> {
+    return (await this.deps.actorum.findById(actum.id).catch(() => null)) ?? actum
+  }
 
+  /** Everything the pass needs, resolved before the caller is released. */
+  private async prepare(aditus: Record<string, unknown>): Promise<PreparedPass> {
     const binding = this.pickProvider(aditus)
     const { dataset, work } = await this.resolveWork(aditus)
+    return { binding, dataset, work }
+  }
+
+  private async decompose(actum: Actum, prepared: PreparedPass): Promise<Exitus> {
+    const aditus = actum.aditus
+    // The reservation ActumInceptor locked — the upper bound the settlement must not exceed.
+    const reserved = actum.impetus
+
+    const { binding, dataset, work } = prepared
 
     const trigger = typeof aditus.trigger === 'string' ? aditus.trigger.trim() : ''
     const model = typeof aditus.model === 'string' && aditus.model.trim() ? aditus.model.trim() : undefined
@@ -296,13 +492,15 @@ export class MuseDecomposeCursor implements Cursor {
       written += fragments.length
     }
 
+    // The settlement, unchanged by the move off-request: the summed REAL token cost,
+    // clamped to the reservation the inceptor locked. The clamp is what keeps the cursor
+    // cost contract (`run().impetus ≤ reserve()`) true on this rail as well — it is now
+    // asserted at the completor rather than returned to the dispatcher, and the completor
+    // rejects an overcharge outright.
     const impetus = chatImpetus(tokens, binding.provider.pricing.chatImpetusPer1kTokens)
     return {
-      kind: 'sync',
-      exitus: {
-        exitus: { decomposed, fragments: written },
-        impetus: impetus > reserved ? reserved : impetus,
-      },
+      exitus: { decomposed, fragments: written },
+      impetus: impetus > reserved ? reserved : impetus,
     }
   }
 
