@@ -1,5 +1,35 @@
 # Changelog
 
+## [5.19.0](https://github.com/monygroupcorp/noema/compare/v5.18.0...v5.19.0) (2026-08-27)
+
+
+### Features
+
+* **muse:** lock fragments, vary around a roll, and step back through the mining tree ([5df702b](https://github.com/monygroupcorp/noema/commit/5df702bb18cae1b91b99fcbab303639dfa34ff0f))
+* **muse:** lock fragments, vary around a roll, and step back through the mining tree ([4ebd35f](https://github.com/monygroupcorp/noema/commit/4ebd35f9dfe4616fee9157d3e363b93aade65ced))
+* private generation, phase 1 — an account-level private outputs toggle ([b680bb4](https://github.com/monygroupcorp/noema/commit/b680bb4e9ddd427eece0f0444cb1d709f6744e07))
+* **web:** promote 13/15px type steps and retune radius token ([0de0a8e](https://github.com/monygroupcorp/noema/commit/0de0a8e90803729fbaf413ab91d0822f82cebbc7))
+* **web:** promote 13/15px type steps and retune radius token ([b94b4bf](https://github.com/monygroupcorp/noema/commit/b94b4bfc41bec6ced8fb248dec66ad19e3e232fb))
+* **web:** un-gate the TEE roadmap line on the dashboard ([b393877](https://github.com/monygroupcorp/noema/commit/b39387788da0839def410372ccd4cac60fe52fbd))
+* **web:** un-gate the TEE roadmap line on the dashboard ([25a9e4c](https://github.com/monygroupcorp/noema/commit/25a9e4ce5d426e00734e26d38a1c2aba5f8c16bb))
+
+
+### Bug Fixes
+
+* **crystal:** decompose dispatches async and settles its own run ([0cdad93](https://github.com/monygroupcorp/noema/commit/0cdad9388a8228c5660497288479f88d041bd2c0))
+* **crystal:** decompose modus declares async, conservation tests get their own file ([1ec2a3b](https://github.com/monygroupcorp/noema/commit/1ec2a3be5e96884b81c0f9deb31ace10c08a10d3))
+* **crystal:** decompose modus declares async, conservation tests get their own file ([395e25b](https://github.com/monygroupcorp/noema/commit/395e25b93101214272f502cfa813e4b816bf457b))
+* **deposits:** reconcile vault deposits from the chain's own logs ([ffc150e](https://github.com/monygroupcorp/noema/commit/ffc150e65537b96da43d605e5416adbbc68b4732))
+* **deposits:** reconcile vault deposits from the chain's own logs ([af1c7be](https://github.com/monygroupcorp/noema/commit/af1c7be6c5dbe8430af6362fae582b87b8ddcc71))
+* rename decompose activity door label to 'view cutting floor' ([2956d2c](https://github.com/monygroupcorp/noema/commit/2956d2cac835c4eb931c3b68848364547ae95cdd))
+* rename decompose activity door label to 'view cutting floor' ([9816332](https://github.com/monygroupcorp/noema/commit/9816332d0a8ed1d7bce79d49c7c444282fc36e4b))
+* **web:** privacy and cookie policies describe the shipped service ([3ede15b](https://github.com/monygroupcorp/noema/commit/3ede15bf4b48322b63300276a658c476da4f42df))
+* **web:** privacy and cookie policies describe the shipped service ([cafdb41](https://github.com/monygroupcorp/noema/commit/cafdb41bcd59e84b5bda2308ca82e80bf05093fd))
+* **web:** resolve ceremony.css section-rhythm token lint residual ([61f89b2](https://github.com/monygroupcorp/noema/commit/61f89b2370f98a94158e2190aa5038d75e2e25e5))
+* **web:** resolve ceremony.css section-rhythm token lint residual ([6b93202](https://github.com/monygroupcorp/noema/commit/6b932020f83814069d1fb6c7119378f4acbd61f1))
+* **web:** widen token-lint importFrom to include app.css aliases ([00500a9](https://github.com/monygroupcorp/noema/commit/00500a9c48753f1b1698f61c97179a9f746f3d52))
+* **web:** widen token-lint importFrom to include app.css aliases ([3ead7b5](https://github.com/monygroupcorp/noema/commit/3ead7b56c0103202c6e9646b5d483ff1db35e355))
+
 ## [5.18.0](https://github.com/monygroupcorp/noema/compare/v5.17.0...v5.18.0) (2026-08-26)
 
 
