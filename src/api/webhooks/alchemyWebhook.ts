@@ -18,11 +18,11 @@ import type { SanctionsScreen } from '../../compliance/SanctionsScreen.js'
 // keccak256 of the canonical event signature
 // ---------------------------------------------------------------------------
 
-const TOPIC_PAYMENT          = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
-const TOPIC_NFT_RECEIVED     = '0x5302f22244b41ec8834e043efcb52482aa21c2a460a047422c4ae3df50bd44a9'
+export const TOPIC_PAYMENT          = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
+export const TOPIC_NFT_RECEIVED     = '0x5302f22244b41ec8834e043efcb52482aa21c2a460a047422c4ae3df50bd44a9'
 const TOPIC_ERC1155          = '0x72d4fe4bd1118f3ff78811cc440bf989b6e515157dab466890aaed7c87ffb78c'
 // keccak256("AnonymousDeposit(bytes32,address,uint256)")
-const TOPIC_ANON_DEPOSIT     = '0x879aadcc0b21da25bde4bcf799cb142a02d0135f66a1328fef12c8b78636c58d'
+export const TOPIC_ANON_DEPOSIT     = '0x879aadcc0b21da25bde4bcf799cb142a02d0135f66a1328fef12c8b78636c58d'
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -310,7 +310,14 @@ function servesChain(vaultAddresses: Record<string, string>, chainId: string): b
 // Internal payload shapes
 // ---------------------------------------------------------------------------
 
-interface AlchemyLog {
+/**
+ * One CreditVault log, in the shape the Alchemy GraphQL webhook delivers it.
+ *
+ * Exported because it is also the INPUT CONTRACT of `processVaultLogs`: the RPC reconciler
+ * (`src/crystal/DepositReconciler.ts`) synthesises this same shape from `eth_getLogs` output so
+ * both entry points feed one processing core — there is no second crediting path.
+ */
+export interface AlchemyLog {
   account: { address: string }  // GraphQL: logs { account { address } }
   topics: string[]
   data: string
@@ -396,64 +403,94 @@ export async function handleAlchemyWebhook(
       return { status: 400, body: { success: false, processed: 0, skipped: 0, message: 'Missing event.data.block.logs' } }
     }
 
-    const vaultAddress = deps.vaultAddresses[req.chainId]?.toLowerCase()
+    log.info('alchemy webhook received', { chainId: req.chainId, logCount: logs.length })
 
-    let processed = 0
-    let skipped = 0
-
-    log.info('alchemy webhook received', { chainId: req.chainId, logCount: logs.length, vaultAddress })
-
-    // 3. Process each log
-    for (const entry of logs as AlchemyLog[]) {
-      const logAddress = entry.account?.address?.toLowerCase()
-
-      log.info('alchemy log', { logAddress, vaultAddress, topic0: entry.topics?.[0] })
-
-      // Skip logs not targeting our vault. Absence on EITHER side is a skip, never a match:
-      // a log with no `account.address` and a chain with no vault address are both `undefined`,
-      // and `undefined !== undefined` is false — so an equality test alone treats "we know
-      // neither address" as "the addresses agree" and admits the log. Require both to be
-      // present, then require them to be equal.
-      if (!vaultAddress || !logAddress || logAddress !== vaultAddress) {
-        skipped++
-        continue
-      }
-
-      const topic0 = entry.topics?.[0]
-
-      if (topic0 === TOPIC_PAYMENT) {
-        const didProcess = await handlePaymentLog(entry, req.chainId, vaultAddress, deps)
-        if (didProcess) {
-          processed++
-        } else {
-          skipped++
-        }
-      } else if (topic0 === TOPIC_NFT_RECEIVED) {
-        const didProcess = await handleNftLog(entry, req.chainId, deps)
-        if (didProcess) {
-          processed++
-        } else {
-          skipped++
-        }
-      } else if (topic0 === TOPIC_ANON_DEPOSIT) {
-        const didProcess = await handleAnonymousDepositLog(entry, req.chainId, deps)
-        if (didProcess) {
-          processed++
-        } else {
-          skipped++
-        }
-      } else if (topic0 === TOPIC_ERC1155) {
-        skipped++
-      } else {
-        skipped++
-      }
-    }
+    // 3. Process each log through the shared core (also used by the RPC reconciler).
+    const { processed, skipped } = await processVaultLogs(logs as AlchemyLog[], req.chainId, deps)
 
     return { status: 200, body: { success: true, processed, skipped } }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { status: 500, body: { success: false, processed: 0, skipped: 0, message } }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared processing core
+// ---------------------------------------------------------------------------
+
+/**
+ * Process a batch of CreditVault logs for one chain — the SINGLE crediting path.
+ *
+ * Both entry points run through here and share every downstream rule: the vault-address filter,
+ * the topic dispatch, pricing, OFAC screening, attribution via `resolveWalletAnima`, `confirmatum`
+ * parking for unlinked wallets, revenue booking, and the tx-hash idempotency short-circuit.
+ *
+ *   • `handleAlchemyWebhook` — logs delivered by Alchemy, admitted by the chain + HMAC gates.
+ *   • `reconcileVaultDeposits` (`src/crystal/DepositReconciler.ts`) — logs read back from the
+ *     chain over a block window. No HMAC applies there: the evidence is fetched from the RPC by
+ *     us rather than posted to us, so the admission gates are the caller's, and everything from
+ *     this function down is identical.
+ *
+ * Callers must pass a chain this deployment serves; the vault-address filter below is the
+ * backstop that makes an unserved chain process nothing regardless.
+ */
+export async function processVaultLogs(
+  logs: AlchemyLog[],
+  chainId: string,
+  deps: AlchemyWebhookDeps,
+): Promise<{ processed: number; skipped: number }> {
+  const vaultAddress = deps.vaultAddresses[chainId]?.toLowerCase()
+
+  let processed = 0
+  let skipped = 0
+
+  for (const entry of logs) {
+    const logAddress = entry.account?.address?.toLowerCase()
+
+    log.info('alchemy log', { logAddress, vaultAddress, topic0: entry.topics?.[0] })
+
+    // Skip logs not targeting our vault. Absence on EITHER side is a skip, never a match:
+    // a log with no `account.address` and a chain with no vault address are both `undefined`,
+    // and `undefined !== undefined` is false — so an equality test alone treats "we know
+    // neither address" as "the addresses agree" and admits the log. Require both to be
+    // present, then require them to be equal.
+    if (!vaultAddress || !logAddress || logAddress !== vaultAddress) {
+      skipped++
+      continue
+    }
+
+    const topic0 = entry.topics?.[0]
+
+    if (topic0 === TOPIC_PAYMENT) {
+      const didProcess = await handlePaymentLog(entry, chainId, vaultAddress, deps)
+      if (didProcess) {
+        processed++
+      } else {
+        skipped++
+      }
+    } else if (topic0 === TOPIC_NFT_RECEIVED) {
+      const didProcess = await handleNftLog(entry, chainId, deps)
+      if (didProcess) {
+        processed++
+      } else {
+        skipped++
+      }
+    } else if (topic0 === TOPIC_ANON_DEPOSIT) {
+      const didProcess = await handleAnonymousDepositLog(entry, chainId, deps)
+      if (didProcess) {
+        processed++
+      } else {
+        skipped++
+      }
+    } else if (topic0 === TOPIC_ERC1155) {
+      skipped++
+    } else {
+      skipped++
+    }
+  }
+
+  return { processed, skipped }
 }
 
 // ---------------------------------------------------------------------------
