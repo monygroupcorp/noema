@@ -998,9 +998,10 @@ The authenticated caller's own deposits, scoped to their linked wallets — real
               "detectum",
               "confirmatum",
               "processatum",
+              "praesolutum",
               "fractum"
             ],
-            "description": "detectum (seen) · confirmatum (confirmed, awaiting/parked credit) · processatum (credited) · fractum (failed)."
+            "description": "detectum (seen) · confirmatum (confirmed, awaiting/parked credit) · processatum (credited) · praesolutum (settled on the pre-cutover plane — recorded here, never credited here) · fractum (failed)."
           },
           "natum": {
             "type": "string",
