@@ -33,7 +33,7 @@ import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
 import { createStorageRouter } from './allocutio/api/storageRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
 import { createDepositsAdminRouter } from './api/internal/depositsAdminRouter.js'
-import { alchemyRpc, runBootReconcile } from './crystal/DepositReconciler.js'
+import { alchemyRpc, runBootReconcile, resolveReconcileIntervalMs, startReconcileTimer } from './crystal/DepositReconciler.js'
 import { MongoScanCursor } from './crystal/MongoScanCursor.js'
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
@@ -1683,6 +1683,17 @@ async function main(): Promise<void> {
     }))
     void runBootReconcile(reconcilerDeps, Object.keys(ALCHEMY_VAULT_ADDRESSES))
       .catch(err => log.warn('deposit reconcile failed', { error: String(err) }))
+
+    // The patrol (noema-352): boot alone heals only the gap a restart opens, so a missed delivery
+    // between deploys would wait for the next boot. Every DEPOSIT_RECONCILE_INTERVAL_MS the timer
+    // runs the same cursor-driven pass — no explicit window, so the cursor advances and a long
+    // historical range finishes itself tick by tick. Unset = the module default; `0` or a
+    // non-number disables the timer (boot + operator route only), named once at startup.
+    startReconcileTimer(
+      reconcilerDeps,
+      Object.keys(ALCHEMY_VAULT_ADDRESSES),
+      resolveReconcileIntervalMs(process.env.DEPOSIT_RECONCILE_INTERVAL_MS),
+    )
   } else {
     log.warn('Alchemy RPC key unset (ALCHEMY_API_KEY / ALCHEMY_KEY) — deposit reconciliation is NOT running, so a deposit whose webhook delivery is missed stays unrecorded. Configure before real deposits.')
   }
