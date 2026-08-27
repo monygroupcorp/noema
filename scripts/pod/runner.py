@@ -263,6 +263,34 @@ _CONTENT_TYPES = {
 }
 
 
+def _r2_key(r2: dict, filename: str, ext: str) -> str:
+    """The object key for one upload.
+
+    Default: the public `outputs/<epoch_ms>-<filename>` naming. When the job body carries a
+    `keyPrefix` (an owner-scoped namespace), the object is named `<prefix><uuid>.<ext>` instead
+    — the original filename is not part of the key, so the path leaks nothing about the run.
+    """
+    prefix = r2.get("keyPrefix")
+    if prefix:
+        suffix = f".{ext}" if ext else ""
+        return f"{prefix}{uuid.uuid4()}{suffix}"
+    return f"outputs/{int(time.time() * 1000)}-{filename}"
+
+
+def _r2_result(r2: dict, key: str) -> dict:
+    """What we hand back for one uploaded object.
+
+    A bucket bound to a public base URL yields a URL. A bucket with NO `publicUrl` has no
+    public binding at all, so there is no URL to build — we return the KEY and let the host
+    decide how (and to whom) to hand out a link. No `r2.dev` fallback: guessing a public
+    hostname for a bucket that was deliberately given none would publish the object.
+    """
+    base = r2.get("publicUrl")
+    if not base:
+        return {"key": key}
+    return {"url": f"{base.rstrip('/')}/{key}"}
+
+
 def _upload_to_r2(r2: dict, path: str) -> dict:
     try:
         import boto3
@@ -272,13 +300,12 @@ def _upload_to_r2(r2: dict, path: str) -> dict:
                           aws_secret_access_key=r2["secretAccessKey"], region_name="auto")
     filename = os.path.basename(path)
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    key = f"outputs/{int(time.time() * 1000)}-{filename}"
+    key = _r2_key(r2, filename, ext)
     with open(path, "rb") as f:
         client.put_object(Bucket=r2["bucket"], Key=key, Body=f,
                           ContentType=_CONTENT_TYPES.get(ext, "application/octet-stream"))
-    base = r2.get("publicUrl", f"https://{r2['bucket']}.r2.dev").rstrip("/")
     log.info(f"uploaded {filename} → {key}")
-    return {"url": f"{base}/{key}"}
+    return _r2_result(r2, key)
 
 
 def _send_webhook(url: str, payload: dict) -> None:

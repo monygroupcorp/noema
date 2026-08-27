@@ -284,6 +284,15 @@ export interface Actum {
  * these metrics back off the actum to build the wide analytics event.
  */
 export interface ActumExecutio {
+  /**
+   * Private generation (noema-347): this run's outputs were dispatched to the private-outputs
+   * bucket, so the completion path stores opaque markers rather than URLs.
+   *
+   * A per-RUN fact stamped at dispatch, NOT a preference read at completion — the preference
+   * can change while a run is in flight, and a warm pod is shared across owners, so privacy
+   * can never ride the pod. Absent/false reads as a public run everywhere.
+   */
+  privateOutputs?: boolean
   /** Pod creation → RunPod API reporting RUNNING with an SSH port. Absent on warm reuse. */
   provisionMs?: number
   /** Actum start → sshd actually accepting connections. */

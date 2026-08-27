@@ -11,6 +11,7 @@ import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { projectExitus } from '../../execution/projectExitus.js'
+import { privateMarker } from '../../crystal/MediaFetcher.js'
 import { modoHostFor } from '../../ledger/rates.js'
 import { resolveModelRoyaltyPayees } from '../../ledger/resolveModelPayees.js'
 
@@ -97,6 +98,35 @@ export interface WebhookResult {
 interface RunPodOutputItem {
   url?: string
   path?: string
+  /** The object KEY, reported instead of `url` when the run's bucket has no public binding
+   *  (noema-347 private generation) — there is no URL for the runner to build. */
+  key?: string
+}
+
+/**
+ * Rewrite a private run's pod outputs so nothing fetchable is ever persisted.
+ *
+ * A run dispatched to the private-outputs bucket gets object KEYS back; each becomes an opaque
+ * `noema-private://<key>` marker, carried through `projectExitus` under the same declared exitus
+ * porta keys (the marker keeps the extension, so media-type resolution is unchanged). An
+ * `http(s)` item on such a run is DROPPED rather than stored: it would be a durable, fetchable
+ * handle to output the caller asked to keep private, and the private path has no use for one.
+ */
+function toPrivateOutputs(
+  items: Array<RunPodOutputItem | string>,
+): Array<RunPodOutputItem | string> {
+  const out: Array<RunPodOutputItem | string> = []
+  for (const item of items) {
+    if (typeof item === 'string') continue
+    if (typeof item.key === 'string' && item.key.length > 0) {
+      const { key: _key, url: _url, ...rest } = item
+      out.push({ ...rest, url: privateMarker(item.key) })
+      continue
+    }
+    if (typeof item.url === 'string' && /^https?:\/\//i.test(item.url)) continue
+    out.push(item)
+  }
+  return out
 }
 
 interface RunPodPayload {
@@ -171,7 +201,11 @@ export async function handleExecutionWebhook(
 
     if (status === 'COMPLETED') {
       const executionTime = payload.executionTime ?? 0
-      const outputItems = payload.output ?? []
+      // Private generation (noema-347): the run's OWN dispatch stamp decides — never a
+      // preference re-read here, which would race a mid-flight preference change.
+      const outputItems = actum.executio?.privateOutputs
+        ? toPrivateOutputs(payload.output ?? [])
+        : (payload.output ?? [])
 
       // Resolve the flow's exitus schema once — used to key the outputs under the
       // DECLARED exitus Porta names (projectExitus), and reused below for royalty

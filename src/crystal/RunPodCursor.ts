@@ -11,7 +11,9 @@ import { getTrace } from '../lib/trace.js'
 import type { AuctorKey } from '../flow/types.js'
 import { ownerKeyOf } from './ownerKey.js'
 import { tierOf, reservationImpetus, GENERIC_RESERVE_IMPETUS } from '../ledger/rates.js'
-import { isCompiledSpec } from './comfyrunnerClient.js'
+import { isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
+import { privateOutputKeyPrefix } from './MediaFetcher.js'
+import type { Consuetudinum } from '../types/consuetudo.js'
 import { makeLogger } from '../lib/logger.js'
 import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
 
@@ -63,6 +65,13 @@ export interface RunPodClient {
     jobToken?: string
     /** See ProvisioningContext — passed for hosting/economic bookkeeping. */
     provisioningContext?: ProvisioningContext
+    /**
+     * PER-RUN object-store override (noema-347 private generation). When present it replaces the
+     * client's construction-time `r2` for THIS submission only, carrying the private bucket and
+     * the run's owner-scoped `keyPrefix`. It must ride the submit rather than the client because
+     * a warm pod is reused across owners — a pod can never itself be "the private one".
+     */
+    r2?: R2Config
     /**
      * Called when the active pod changes — i.e. when a retry provisions a new pod.
      * Callers should update actum.externusJobId to the new podId so the DB always
@@ -116,6 +125,20 @@ interface Config {
   /** TTL (ms) for a minted job token. Default 6h — long enough for a cold pod to boot, download,
    *  and run; short enough that a leaked token expires with the job. */
   jobTokenTtlMs?: number
+  /**
+   * Private generation (noema-347): the DEDICATED private-outputs bucket — no `publicUrl`, so
+   * nothing written there is publicly reachable. Present only when the deployment configures one.
+   * ABSENT → private generation is dark on this deployment and every run dispatches public; the
+   * cursor never falls back to the public bucket for a run it resolved as private, because there
+   * is nothing to fall back to (the whole point of the dedicated bucket).
+   */
+  privateOutputsR2?: R2Config
+  /**
+   * Account preferences source — read at dispatch to resolve THIS caller's `privateOutputs`
+   * choice. Read here, at the one dispatch site that holds the run's owner, and stamped on the
+   * actum; every later stage reads the stamp, never the preference (which can change mid-run).
+   */
+  consuetudinum?: Pick<Consuetudinum, 'resolveGeneratio'>
 }
 
 export class RunPodCursor implements Cursor {
@@ -192,6 +215,22 @@ export class RunPodCursor implements Cursor {
     const runOwnerKey = runOwner ? ownerKeyOf(runOwner) : undefined
     const { hash, input } = await this.compile(modus, actum.aditus, actum.pinnedModels, runOwnerKey)
 
+    // Private generation (noema-347), resolved HERE because this is the dispatch site that holds
+    // the run's owner. Three conditions, all required: the deployment has a private-outputs
+    // bucket, the run has an owner to scope the key namespace to, and that owner's stored
+    // preference says private. An absent preference reads PUBLIC — the default is unchanged.
+    const privateR2 = this.config.privateOutputsR2
+    const privateOutputs = !!privateR2 && !!runOwner && !!runOwnerKey &&
+      (await this.config.consuetudinum?.resolveGeneratio(runOwner).catch(() => undefined))?.privateOutputs === true
+    // The per-run store override: the private bucket under this owner's hashed namespace. Any
+    // `publicUrl` is stripped on the way out — a private run's objects have no public handle by
+    // construction, so the runner returns KEYS and the host decides who ever gets a link.
+    let r2Override: R2Config | undefined
+    if (privateOutputs && privateR2 && runOwnerKey) {
+      const { publicUrl: _unusedPublicUrl, ...privateBase } = privateR2
+      r2Override = { ...privateBase, keyPrefix: privateOutputKeyPrefix(runOwnerKey) }
+    }
+
     // BYO-secrets Phase C: mint the per-job pod credential so the pod can fetch this owner's gated
     // private weights through our proxy (the Compiler rewrote those urls + flagged them `gated`).
     // Only when both a mint fn is configured AND the run has an owner (anon-no-purse runs can't own
@@ -231,6 +270,17 @@ export class RunPodCursor implements Cursor {
     // (the cursor's measured pod wall-clock) and the settled total at completion.
     // We stash ONLY non-identity values on the actum — host identity is re-derived
     // from Hospitium at emit time (see ActumCompletor).
+    //
+    // The private-generation stamp rides the SAME executio object for the same reason: it is a
+    // dispatch-time fact about this run. The completion webhook reads the stamp to decide
+    // marker-vs-URL, so it never has to re-resolve a preference that may have changed since.
+    const privacyStamp = privateOutputs ? { privateOutputs: true } : {}
+    if (privateOutputs) {
+      // NOT best-effort, and BEFORE submit: the completion callback can arrive the moment the pod
+      // has the job, and it decides marker-vs-URL from this stamp. A run dispatched to the private
+      // bucket with no stamp on the record is a broken run, so fail here instead.
+      await this.actorum.update(actum.id, { executio: { ...(actum.executio ?? {}), ...privacyStamp } })
+    }
     if (materia && this.config.hospitia) {
       const hospitium = await this.config.hospitia.findByMateriaId(materia.id).catch(() => null)
       const tier = tierOf(hostKey, hospitium)
@@ -238,6 +288,7 @@ export class RunPodCursor implements Cursor {
         materiamId: materia.id,
         executio: {
           ...(actum.executio ?? {}),
+          ...privacyStamp,
           pricingTier: tier,
         },
       }).catch(() => {})
@@ -266,13 +317,14 @@ export class RunPodCursor implements Cursor {
       input,
       webhook: withCallbackNonce(this.config.webhookUrl, callbackNonce),
       ...(jobToken ? { jobToken } : {}),
+      ...(r2Override ? { r2: r2Override } : {}),
       provisioningContext: provCtx,
       onPodActive: async (newPodId) => {
         // Retry pod is now active — update so boot recovery and reconciliation see the right pod
         await this.actorum.update(actum.id, { externusJobId: newPodId }).catch(() => {})
       },
       onMetrics: async (executio) => {
-        // MERGE, never replace — the dispatch stamp ({pricingTier})
+        // MERGE, never replace — the dispatch stamps ({pricingTier, privateOutputs})
         // lives in the same executio object and would be wiped by a naïve overwrite
         // from the client's pod-telemetry view. The client always sends the full
         // accumulated snapshot of *its* fields; we preserve the dispatch fields.
