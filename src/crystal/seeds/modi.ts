@@ -437,9 +437,9 @@ export const MODUS_DATASET_DECOMPOSE: Modus = make({
   // decomposer. The provider registrations stay exactly as they are; this arm owns its own key.
   ministerium: 'musegarden',
 
-  // The cursor loops the chat rail in-process and returns when the last caption is written —
-  // no pod, no completion webhook.
-  deliveryMode: 'sync',
+  // The cursor dispatches, then keeps running off-request; it settles its own run at the end
+  // of the pass rather than on the dispatching call's return path (noema-338).
+  deliveryMode: 'async',
   canonica: true,
   // No impetusFixum: cost is the summed real token cost of one chat call per caption. The cursor
   // reserves a ceiling from the caption count and settles down to actual usage, so a decompose is
