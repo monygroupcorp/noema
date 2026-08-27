@@ -50,6 +50,7 @@ import {
 } from '../../crystal/MandatumRunner.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
+import { isPrivateMarker, privateKeyOf } from '../../crystal/MediaFetcher.js'
 import { v4 as uuidv4 } from 'uuid'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
@@ -229,6 +230,10 @@ const PLATFORM_ANIMA_ID = process.env.PLATFORM_ANIMA_ID ?? 'platform'
  *  boot and up to 3 RunPod WS-probe re-provision rounds (~5 min each). */
 const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 60_000)
 
+/** TTL of a presigned read link for a private output. Long enough to load a page and open the
+ *  original; short enough that a copied link is not a durable handle to private media. */
+const PRIVATE_PRESIGN_TTL_SECONDS = 15 * 60
+
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
   inceptor: { initiate: ActumInceptor['initiate'] }
@@ -261,6 +266,18 @@ export interface CrystalApiDeps {
   modos?: ModoStore
   /** Optional owner-keyed verb→flow rebinds; falls through to CANON_VERBS when absent. */
   consuetudinum?: Consuetudinum
+  /**
+   * Private generation (noema-347) — the dedicated private-outputs store. Its presence is what
+   * makes the `privateOutputs` preference settable at all: with no such bucket the toggle would
+   * be a promise the deployment cannot keep, so the write is refused rather than silently
+   * downgraded to the public bucket. It also presigns a marker back into a short-lived link on
+   * an owner-scoped run read.
+   */
+  privateOutputs?: {
+    store: { getSignedDownloadUrl(key: string, opts?: { expiresIn?: number }): Promise<string> }
+    /** TTL (seconds) for a presigned read link. Default 900 (15 min). */
+    presignTtlSeconds?: number
+  }
   /** Compositus engine (ADR-0008) — lets `invokeFlow` dispatch a compositus (spell)
    *  modus, not just atomics. Absent → compositus modi throw at dispatch. */
   compositusCursor?: DispatchDeps['compositusCursor']
@@ -962,6 +979,10 @@ export class CrystalApi {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
     const run = toRunDetail(a)
+    // Private generation (noema-347): a private run stores opaque markers, resolved to
+    // short-lived presigned links HERE — after, and only after, the ownership check above.
+    // Ownership is the single gate; the SSE snapshot reads this same projection.
+    if (run.exitus) run.exitus = await this._presignPrivateExitus(run.exitus)
     // The order, when there is one, rides on the run: a client polling a failed training
     // learns from the SAME response that it is scheduled to be attempted again, and learns it
     // from a field — never by reading the failure sentence.
@@ -1060,6 +1081,34 @@ export class CrystalApi {
     if (entry.createdAt !== undefined) row.createdAt = new Date(entry.createdAt).toISOString()
     if (entry.settledAt !== undefined) row.settledAt = new Date(entry.settledAt).toISOString()
     return row
+  }
+
+  /**
+   * Resolve every `noema-private://` marker in a run's exitus into a short-lived presigned GET.
+   *
+   * CALLED ONLY behind an ownership check — this hands out a working, if expiring, link to a
+   * private object, so the caller must already have been established as the run's owner. There
+   * is deliberately no second key-shape check here: ownership IS the gate, and a redundant
+   * owner-hash-prefix comparison would only mask a failure of the real one.
+   *
+   * A marker we cannot presign (no store configured, or the store refuses) is left as-is: an
+   * opaque, non-fetchable string. Degrading to a marker is correct; degrading to a public URL
+   * would not be.
+   */
+  private async _presignPrivateExitus(exitus: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const cfg = this.deps.privateOutputs
+    const entries = Object.entries(exitus)
+    if (!entries.some(([, v]) => isPrivateMarker(v))) return exitus
+    if (!cfg) return exitus
+    const expiresIn = cfg.presignTtlSeconds ?? PRIVATE_PRESIGN_TTL_SECONDS
+    const out: Record<string, unknown> = { ...exitus }
+    for (const [k, v] of entries) {
+      const key = isPrivateMarker(v) ? privateKeyOf(v) : undefined
+      if (key === undefined) continue
+      const signed = await cfg.store.getSignedDownloadUrl(key, { expiresIn }).catch(() => null)
+      if (signed) out[k] = signed
+    }
+    return out
   }
 
   /** A run is owned by an auctor iff:
@@ -1450,6 +1499,12 @@ export class CrystalApi {
     const ref: ArtifactRef = { kind: opts.artifact.kind, id: opts.artifact.id }
     const owned = await this._assertOwnsArtifact(auctor, ref)
 
+    // Private generation (noema-347): a private output is refused here rather than re-hosted.
+    // Publishing one means copying the bytes OUT of the private bucket into a public surface —
+    // a deliberate act with its own consent moment, which lands in a later phase. Until then the
+    // honest answer is a refusal, not a quiet republish of media the caller marked private.
+    await this._assertPublishableOutput(ref)
+
     // License gate (compliance): the public catalog is a COMMERCIAL surface, so a model may only be
     // PROMOTED there (visibility !== 'private') if its license clears commercial use. `familia` can't
     // carry this — FLUX schnell (Apache ✅) and dev (Non-Commercial ❌) are both 'flux' — so it keys
@@ -1686,6 +1741,25 @@ export class CrystalApi {
 
   /** Run the moderation gate (public surfaces only) then the adapter publish,
    *  recording the outcome on the Editio. Pending → published | rejected | failed. */
+  /**
+   * Refuse to publish an artifact whose produced output is private (noema-347).
+   *
+   * Guards the whole publication lane: the synchronous `publish` entry (where the caller sees the
+   * typed refusal) and the durable settle below (where a row that predates this guard, or one
+   * whose run went private after the fact, is failed rather than re-hosted).
+   */
+  private async _assertPublishableOutput(ref: ArtifactRef): Promise<void> {
+    const output = await this._artifactOutput(ref)
+    if (!output) return
+    if (!Object.values(output).some((v) => isPrivateMarker(v))) return
+    throw new ApiError(
+      'internal.unavailable',
+      'Publishing a private output is not available yet. Turn off private generation and run it again to publish.',
+      503,
+      { retryable: false },
+    )
+  }
+
   private async _settlePublication(editioId: string): Promise<void> {
     const editiones = this.deps.editiones
     if (!editiones) return
@@ -1693,6 +1767,11 @@ export class CrystalApi {
     if (!e || e.status !== 'pending') return
 
     const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id, by: e.by }
+    // Belt to `publish`'s braces: a pending row whose output is private never reaches an adapter.
+    if (artifact.output && Object.values(artifact.output).some((v) => isPrivateMarker(v))) {
+      await editiones.update(editioId, { status: 'failed' })
+      return
+    }
     // The curation/CSAM gate runs before anything goes live for (a) a public media surface
     // (feed/marketplace) and (b) a PUBLIC MODEL PROMOTION — an intella becoming resolvable on
     // the shared catalogue (visibility !== 'private'). A model has no media surface, so its
@@ -3968,6 +4047,17 @@ export class CrystalApi {
     // No attestation on file ⇒ spicyMode cannot be enabled (for anon or named callers alike).
     if (merged.spicyMode === true && !merged.ageAttestation) {
       throw Errors.authForbidden('Enabling spicy mode requires a recorded 18+ age attestation.')
+    }
+    // Private generation (noema-347) is only settable where the deployment has a private-outputs
+    // bucket. Refusing here is the point: the alternative — accepting the preference and writing
+    // to the public bucket anyway — would record a promise the deployment cannot keep.
+    if (merged.privateOutputs === true && !this.deps.privateOutputs) {
+      throw new ApiError(
+        'internal.unavailable',
+        'Private generation is not available on this deployment.',
+        503,
+        { retryable: false },
+      )
     }
     await this.deps.consuetudinum.setGeneratio(auctor, merged)
     return merged

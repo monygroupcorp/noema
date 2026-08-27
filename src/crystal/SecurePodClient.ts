@@ -364,6 +364,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
     webhook?: string
     jobToken?: string
     provisioningContext?: ProvisioningContext
+    /** Per-run object-store override — replaces the construction-time `r2` for this job only
+     *  (noema-347: the private-outputs bucket plus the run's owner-scoped key prefix). */
+    r2?: R2Config
     onPodActive?: (podId: string) => Promise<void>
     onMetrics?: (executio: ActumExecutio) => Promise<void>
   }): Promise<{ id: string }> {
@@ -405,7 +408,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     let runnerAcceptedJob = false
     const runWithRetry = async () => {
       try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken)
+        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
       } catch (firstErr) {
         // Once comfyrunner accepted the job it OWNS the run and the webhook. A
         // dropped SSE stream after that point means we lost visibility, not that
@@ -454,7 +457,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
           // Update DB so the retry pod is tracked; webhook will fire with retryPodId
           await params.onPodActive?.(retryPodId).catch(() => {})
           try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken)
+            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
             return
           } catch (runErr) {
             if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
@@ -1068,6 +1071,8 @@ export class SecurePodClient implements RunPodClient, Procurator {
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
     provisioningContext?: ProvisioningContext,
     jobToken?: string,
+    /** Per-run object-store override — see submit(). Replaces `this.config.r2` for this job. */
+    r2Override?: R2Config,
   ): Promise<void> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
@@ -1113,7 +1118,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       signal('comfy-ready')
 
       const jobId = externusJobId ?? podId
-      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, this.config.r2, jobToken)
+      await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, r2Override ?? this.config.r2, jobToken)
       onRunnerAccepted?.(true)  // comfyrunner now owns the failure webhook
 
       const submitCtx = getTrace()

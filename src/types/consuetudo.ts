@@ -88,6 +88,14 @@ export interface Generatio {
    *  anon-capable AuctorKey that owns `spicyMode`, so it works for anon (Bursa/commitment) and named
    *  (Anima) callers alike. */
   ageAttestation?: { attestedAt: number }
+  /** Private generation (noema-347). When ON, the outputs of NEW runs are written to a dedicated
+   *  bucket with no public binding; the run record stores an opaque marker instead of a URL, and
+   *  the owner reads them through short-lived presigned links. Default-absent reads as OFF
+   *  everywhere (outputs are public), and the setting is forward-only — objects already written
+   *  stay where they are. Anon-capable (keyed by AuctorKey). Enabling requires the deployment to
+   *  have a private-outputs bucket configured; without one the write is refused rather than
+   *  silently downgraded to the public bucket. */
+  privateOutputs?: boolean
 }
 
 /** One verb→modus binding row (for the read side — `listBindings`). */

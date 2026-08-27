@@ -10,7 +10,12 @@ export interface R2Config {
   accessKeyId: string
   secretAccessKey: string
   bucket: string
+  /** Public base URL this bucket is bound to. ABSENT = the bucket has no public binding, so the
+   *  runner returns the object KEY for each upload instead of synthesising a URL nobody serves. */
   publicUrl?: string
+  /** Key prefix for this job's uploads — e.g. an owner-scoped private namespace. Absent → the
+   *  runner's default `outputs/<epoch_ms>-<filename>` naming. */
+  keyPrefix?: string
 }
 
 const log = makeLogger('cursor:comfyrunner')

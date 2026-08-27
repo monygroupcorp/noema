@@ -1205,6 +1205,9 @@ export interface Generatio {
   // One-time self-declared 18+ attestation (a click-through fact, NOT KYC). Required on file before
   // spicyMode may be enabled. Recorded via POST /v1/me/attestation.
   ageAttestation?: { attestedAt: number };
+  // Private generation (noema-347). When ON, the outputs of NEW runs are visible only to you, via
+  // expiring links; default-absent = OFF. Forward-only — it never moves what already exists.
+  privateOutputs?: boolean;
 }
 // BYO gated-origin credential providers (mirror the server `SecretProvider` union).
 export type SecretProvider = 'civitai' | 'huggingface';

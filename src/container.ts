@@ -242,6 +242,18 @@ export interface ContainerConfig {
   /** R2 config for warm-pod jobs so they upload to durable storage (not pod-proxy URLs). */
   runpodR2?: import('./crystal/SecurePodClient.js').R2Config
   /**
+   * Private generation (noema-347): the DEDICATED private-outputs bucket — deliberately no
+   * `publicUrl`, so nothing written there is publicly reachable and a presigned GET is the only
+   * handle. Absent → private generation is dark on this deployment (the preference cannot be
+   * enabled, and every run dispatches public). It is NEVER a fallback for `runpodR2`.
+   */
+  privateOutputsR2?: import('./crystal/SecurePodClient.js').R2Config
+  /**
+   * Account preferences, read at DISPATCH to resolve the caller's `privateOutputs` choice for a
+   * run. Passed through to RunPodCursor, which is the one dispatch site holding the run's owner.
+   */
+  consuetudinum?: import('./types/consuetudo.js').Consuetudinum
+  /**
    * Local ai-toolkit training (build #5, ministerium 'aitoolkit'). Present only on a box
    * with a GPU + the `stationthis-klein` image + a host-mounted `aitk_db.db`. Registers the
    * `AitoolkitTrainingCursor`; absent in prod (no local trainer) → no registration.
@@ -549,6 +561,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
         },
         ...(config.admitWarm ? { admitWarm: config.admitWarm } : {}),
         ...(config.mintJobToken ? { mintJobToken: config.mintJobToken } : {}),
+        // Private generation (noema-347): both are required for a run to dispatch private — the
+        // bucket to write to, and the preferences to read the caller's choice from.
+        ...(config.privateOutputsR2 ? { privateOutputsR2: config.privateOutputsR2 } : {}),
+        ...(config.consuetudinum ? { consuetudinum: config.consuetudinum } : {}),
         deployments,
         hospitia,
       },
@@ -660,15 +676,20 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
     const uploader = new R2Uploader(config.runpodR2)
+    // The private-outputs store for host-side writers — a SEPARATE bucket, never a view of the
+    // public one. Absent → a private run refuses host-side compositing rather than writing public.
+    const privateUploader = config.privateOutputsR2 ? new R2Uploader(config.privateOutputsR2) : undefined
     cursorum.register('composite', new LayerCompositeCursor({
       engine: new JimpLayerCompositeEngine(),
       fetcher: httpMediaFetcher,
       uploader,
+      ...(privateUploader ? { privateUploader } : {}),
     }))
     cursorum.register('ffmpeg', new FfmpegCursor({
       engine: new SpawnFfmpegEngine(),
       fetcher: httpMediaFetcher,
       uploader,
+      ...(privateUploader ? { privateUploader } : {}),
     }))
     // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
     publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
