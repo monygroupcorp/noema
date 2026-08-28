@@ -5,6 +5,7 @@ import {
   runConcierge,
   maxToolIterations,
   buildSystemPrompt,
+  FORCED_FINAL_INSTRUCTION,
   type ConciergeDeps,
   type ConciergeContext,
 } from '../../../../src/allocutio/api/ConciergeAgent.js'
@@ -328,11 +329,13 @@ test('status is wired, owner-scoped, and its result reaches the model', async ()
 })
 
 // ---------------------------------------------------------------------------
-// (f) Hitting maxToolIterations terminates with a reply, not an infinite loop.
+// (f) Hitting maxToolIterations terminates, bounded: the tool loop runs exactly
+// the cap, then EXACTLY ONE closing call. No re-entry, no unbounded spin.
 // ---------------------------------------------------------------------------
-test('hitting maxToolIterations terminates with a reply', async () => {
+test('hitting maxToolIterations terminates after exactly one closing call', async () => {
   const { api } = makeApi()
-  // Always returns a tool call — never a final answer.
+  // Always returns a tool call — never a final answer. The closing call gets the
+  // same scripted response; its tool calls must be ignored, not executed.
   const client = scriptedClient([
     chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
   ])
@@ -340,8 +343,133 @@ test('hitting maxToolIterations terminates with a reply', async () => {
   const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'loop forever')
 
   assert.equal(result.kind, 'reply')
-  assert.equal(client.count(), maxToolIterations) // bounded — exactly the cap, no more
-  assert.equal(result.tokenUsage.totalTokens, maxToolIterations) // summed 1 per call
+  // Bounded — the cap's worth of tool turns plus the single closing call, no more.
+  assert.equal(client.count(), maxToolIterations + 1)
+  assert.equal(result.tokenUsage.totalTokens, maxToolIterations + 1) // summed 1 per call
+})
+
+// ---------------------------------------------------------------------------
+// (f2) noema-363: reaching the cap with context already gathered does NOT discard
+// that work. The agent asks the model once more with tools disabled and returns
+// THAT answer; the fixed reply is only the fallback.
+// ---------------------------------------------------------------------------
+test('cap reached with gathered context: the closing call answers, tools disabled', async () => {
+  const { api, spy } = makeApi()
+  const proposalJson = JSON.stringify({
+    kind: 'proposal',
+    modusId: 'flux.txt2img',
+    aditus: { prompt: 'a neon alley' },
+    pinnedModels: [],
+    embellishedPrompt: 'a neon alley, rain-slick, cinematic',
+    rationale: 'the option you picked, priced at 100 impetus',
+  })
+  // The first maxToolIterations responses churn on tool calls; the closing call
+  // (response index maxToolIterations) finally answers.
+  const client = scriptedClient([
+    ...Array.from({ length: maxToolIterations }, () =>
+      chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
+    ),
+    chatResult({ content: proposalJson, tokenUsage: { totalTokens: 7 } }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'option one, please')
+
+  // The gathered work became an answer, not the canned string.
+  assert.equal(result.kind, 'proposal')
+  if (result.kind !== 'proposal') return
+  assert.equal(result.modusId, 'flux.txt2img')
+  assert.equal(result.embellishedPrompt, 'a neon alley, rain-slick, cinematic')
+  assert.equal(spy.quoteCalls.length, 1) // finalize ran: the authoritative quote was computed
+  assert.equal(result.tokenUsage.totalTokens, maxToolIterations + 7) // closing call is metered
+
+  // Exactly one closing call, and it carried NO tool surface — the cap's invariant
+  // survives: the closing call cannot invoke a tool.
+  assert.equal(client.count(), maxToolIterations + 1)
+  const closingCall = client.calls[maxToolIterations]
+  assert.ok(
+    closingCall.tools === undefined || closingCall.tools.length === 0,
+    'the closing call must carry no tools',
+  )
+  // ...and it carried the accumulated history plus an explicit close-out instruction.
+  const closingRoles = closingCall.messages.map((m) => m.role)
+  assert.ok(closingRoles.includes('tool'), 'the closing call keeps the gathered tool results')
+  const last = closingCall.messages[closingCall.messages.length - 1]
+  assert.equal(last.role, 'system')
+  assert.equal(last.content, FORCED_FINAL_INSTRUCTION)
+})
+
+// ---------------------------------------------------------------------------
+// (f3) The closing call cannot reach a tool even if the model asks for one: with
+// tools omitted, any tool_calls on its response are ignored, never executed.
+// ---------------------------------------------------------------------------
+test('tool calls returned by the closing call are ignored, not executed', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    ...Array.from({ length: maxToolIterations }, () =>
+      chatResult({
+        toolCalls: [{ id: 'm1', name: 'search_models', arguments: '{"q":"neon"}' }],
+        finishReason: 'tool_calls',
+        tokenUsage: { totalTokens: 1 },
+      }),
+    ),
+    // The closing call answers AND asks for another tool it was not given.
+    chatResult({
+      content: JSON.stringify({ kind: 'reply', text: 'Which of the two do you want?' }),
+      toolCalls: [{ id: 'm2', name: 'search_models', arguments: '{"q":"neon"}' }],
+      tokenUsage: { totalTokens: 1 },
+    }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'something neon')
+
+  assert.equal(result.kind, 'reply')
+  if (result.kind !== 'reply') return
+  assert.equal(result.text, 'Which of the two do you want?')
+  // Only the in-loop searches ran; the closing call's tool request executed nothing.
+  assert.equal(spy.listModelsCalls.length, maxToolIterations)
+  assert.equal(client.count(), maxToolIterations + 1) // and no re-entry into the loop
+})
+
+// ---------------------------------------------------------------------------
+// (f4) The fixed reply survives as the fallback: a closing call that throws still
+// terminates the turn with something addressed to the user.
+// ---------------------------------------------------------------------------
+test('a failing closing call falls back to the fixed reply', async () => {
+  const { api } = makeApi()
+  let calls = 0
+  const runToolChat: ConciergeDeps['runToolChat'] = async () => {
+    calls++
+    if (calls > maxToolIterations) throw new Error('upstream unavailable')
+    return chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } })
+  }
+
+  const result = await runConcierge(baseDeps(runToolChat, api), baseCtx(), 'loop forever')
+
+  assert.equal(result.kind, 'reply')
+  if (result.kind !== 'reply') return
+  assert.match(result.text, /allotted steps/)
+  assert.equal(calls, maxToolIterations + 1) // the failure is not retried
+  assert.equal(result.tokenUsage.totalTokens, maxToolIterations)
+})
+
+// ---------------------------------------------------------------------------
+// (f5) noema-363: the system prompt tells the model to reply in the user's
+// language. Prompt text only — this asserts the instruction is present, not the
+// model's actual behavior (untestable without a live LLM).
+// ---------------------------------------------------------------------------
+test('system prompt instructs replying in the language the user writes in', () => {
+  const prompt = buildSystemPrompt(baseCtx())
+  assert.match(prompt, /Reply in the language the user is writing in/)
+})
+
+// ---------------------------------------------------------------------------
+// (f6) noema-363: the system prompt discourages re-searching the catalog, which
+// is what spent the tool budget before a proposal could be made.
+// ---------------------------------------------------------------------------
+test('system prompt discourages repeating a search already run', () => {
+  const prompt = buildSystemPrompt(baseCtx())
+  assert.match(prompt, /Read the catalog ONCE/)
+  assert.match(prompt, /prefer proposing over searching again/)
 })
 
 // ---------------------------------------------------------------------------
