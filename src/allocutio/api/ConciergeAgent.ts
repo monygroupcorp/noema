@@ -12,8 +12,8 @@
 //     chosen loras/pinnedModels + an authoritative quote; the critique/ADJUSTED
 //     case is the SAME `proposal` kind, distinguished only by an optional
 //     `priorRunId` + `delta` note (NOT a third kind), OR
-//   - `{ kind: 'reply', text }` — a plain conversational reply (also the loop's
-//     non-convergence fallback when the iteration cap is hit).
+//   - `{ kind: 'reply', text }` — a plain conversational reply (also what the
+//     forced closing turn usually produces when the iteration cap is reached).
 //
 // It is a pure-logic, dependency-injected LEAF: it receives `runToolChat`
 // (noema-093 / OpenRouterToolClient) + its transport deps, a `CrystalApi`
@@ -33,7 +33,11 @@
 //       path, so `embellishedPrompt` here is the user's CORE prompt enriched only —
 //       the style is never prepended here.
 //   (c) It NEVER runs the loop unbounded: `maxToolIterations` is a finite,
-//       non-optional cap; hitting it terminates with a `reply`, never a spin.
+//       non-optional cap. Reaching it ends the tool loop and makes EXACTLY ONE
+//       closing call with no tool set, so the model answers from the context it
+//       already gathered. The closing call cannot invoke a tool and cannot
+//       re-enter the loop; a fixed reply covers the case where it errors or comes
+//       back empty. Total model calls per turn are therefore at most cap + 1.
 // =============================================================================
 
 import type {
@@ -303,6 +307,12 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     '  never claim to have run anything — the user confirms (GO) separately, elsewhere.',
     '- Ground EVERY flow and model choice in a tool call. Never invent a flow id or a model id/trigger word;',
     '  read them from list_flows / describe_flow / search_models first.',
+    '- Read the catalog ONCE, then commit. After you have listed the flows and searched the models you need,',
+    '  prefer proposing over searching again: repeating a search you have already run returns the same',
+    '  result and spends a step you need for the proposal. If a search comes back thin, propose the best',
+    '  available option (or ask ONE specific question) rather than re-querying.',
+    '- Reply in the language the user is writing in. Match their language for every reply, rationale, and',
+    '  question; the prompt you build for the image/video model stays in English.',
     '- Before finalizing a proposal, call quote so you know the real price. Your rationale MUST state that',
     '  price plainly — the amount and its unit — and briefly say what it buys; never bury or omit the cost.',
     '- Embellishment is VISIBLE and EDITABLE (Fooocus-style transparency), never a silent DALL-E-style rewrite.',
@@ -332,6 +342,23 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     'the system sets it from context on the adjust case.',
   ].filter((l) => l !== '').join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// The close-out instruction for the forced final turn (invariant (c)). Appended
+// once, after the tool loop has spent its cap, on a request that carries no tool
+// set at all.
+// ---------------------------------------------------------------------------
+export const FORCED_FINAL_INSTRUCTION = [
+  'You have used all of your tool steps for this turn. No more tools are available — this is your',
+  'final message and it must answer the user now, from what you have already gathered.',
+  'Do not say you ran out of steps and do not ask the user to start over.',
+  'If you have enough to route the request, emit the PROPOSAL object using the flow, models, and inputs',
+  'you already read; fill any input the user did not specify with a sensible value and say so in the',
+  'rationale. If you genuinely cannot route it, emit the REPLY object with the single most useful',
+  'question — one question, specific, answerable in a few words.',
+  'Reply in the language the user is writing in. Use the same OUTPUT CONTRACT as before: one JSON object,',
+  'no prose around it.',
+].join('\n')
 
 // ---------------------------------------------------------------------------
 // Tool execution — dispatch a named tool call to its read-only handler.
@@ -599,8 +626,34 @@ export async function runConcierge(
     return finalize(result.content ?? '', usage, deps, ctx)
   }
 
-  // Iteration cap reached without convergence (invariant (c)): terminate with a reply,
-  // never an unbounded loop.
+  // Iteration cap reached (invariant (c)). The tool loop is over, but the context
+  // gathered inside it — catalog reads, quotes, the user's own stated choice — is the
+  // work of the turn and is what an answer should be built from. Make EXACTLY ONE more
+  // model call with NO tool set and an explicit close-out instruction, and return its
+  // answer through the normal `finalize` path. This call is outside the loop: it cannot
+  // re-enter it, and with `tools` omitted from the request there is no tool for it to
+  // invoke, so the bound holds at cap + 1 calls.
+  messages.push({ role: 'system', content: FORCED_FINAL_INSTRUCTION })
+
+  try {
+    const closing = await deps.runToolChat(deps.toolClient, {
+      ...(deps.model !== undefined ? { model: deps.model } : {}),
+      messages,
+      // `tools` is DELIBERATELY omitted — the client sends no `tools` key at all when it
+      // is undefined, so the closing call has no tool surface. Any `toolCalls` on the
+      // response are ignored; they are never executed.
+    })
+    accumulate(usage, closing.tokenUsage)
+    const content = closing.content ?? ''
+    if (content.trim() !== '') {
+      return finalize(content, usage, deps, ctx)
+    }
+  } catch {
+    // Fall through to the fixed reply below.
+  }
+
+  // The closing call errored or returned nothing to say: a fixed reply, so the turn
+  // always terminates with something addressed to the user.
   return {
     kind: 'reply',
     text:
