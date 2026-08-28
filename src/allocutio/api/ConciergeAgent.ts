@@ -119,10 +119,86 @@ export interface ConciergeProposal {
 export interface ConciergeReply {
   kind: 'reply'
   text: string
+  /** Optional in-app destination this reply points at. Validated against
+   *  CONCIERGE_ROUTES before it leaves the agent; the client renders a link,
+   *  the USER clicks — the agent never navigates and never writes. */
+  destination?: { path: string; label: string }
   tokenUsage: ConciergeTokenUsage
 }
 
 export type ConciergeResult = ConciergeProposal | ConciergeReply
+
+// ---------------------------------------------------------------------------
+// NAVIGATE — the destination allowlist + validator (noema-367). Signed-in
+// product screens only, copied from the web app's router
+// (src/platforms/web/app/src/App.tsx). Marketing/legal pages, the admin
+// workspace, and every auth/identity screen (onboarding, keyring, the ZK
+// vault, the sign-up ceremony) are excluded on purpose — the concierge never
+// steers auth or identity, and a wrong link here is a UI dead end, not a
+// write, so the allowlist stays conservative.
+// ---------------------------------------------------------------------------
+export const CONCIERGE_ROUTES: readonly string[] = [
+  '/app',
+  '/chat',
+  '/datasets',
+  '/datasets/:id',
+  '/datasets/:id/caption',
+  '/datasets/:id/derive',
+  '/train/run/:id',
+  '/models',
+  '/teams',
+  '/sponsorships',
+  '/collections',
+  '/collections/:id',
+  '/collections/:id/garden',
+  '/collections/:id/rules',
+  '/collections/:id/run',
+  '/collections/:id/curation',
+  '/collections/:id/export',
+  '/card',
+  '/catalog',
+  '/feed',
+  '/projects',
+  '/projects/:id',
+  '/run',
+  '/canvas',
+  '/space',
+  '/profile',
+  '/status',
+  '/account',
+  '/account/:section',
+  '/preferences',
+  '/funding',
+  '/studio',
+]
+
+/** One compiled matcher per allowlisted pattern: `:param` segments must be filled
+ *  by a concrete, non-empty, `/`-free id. */
+const ROUTE_MATCHERS: ReadonlyArray<{ pattern: string; re: RegExp }> = CONCIERGE_ROUTES.map((pattern) => ({
+  pattern,
+  re: new RegExp(
+    '^' + pattern.split('/').map((seg) => (seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/') + '$',
+  ),
+}))
+
+/** Validates a proposed in-app destination against CONCIERGE_ROUTES. Invalid input
+ *  (external URL, scheme, `//`, query/hash, an unlisted path, or an empty `:param`)
+ *  returns `undefined` — the destination is DROPPED, never an error and never a
+ *  pass-through; the reply text still delivers on its own. */
+export function validateDestination(
+  d: unknown,
+): { path: string; label: string } | undefined {
+  if (typeof d !== 'object' || d === null) return undefined
+  const obj = d as Record<string, unknown>
+  const path = obj.path
+  const label = obj.label
+  if (typeof path !== 'string' || typeof label !== 'string' || label.trim() === '') return undefined
+  if (!path.startsWith('/')) return undefined
+  if (path.includes('//') || path.includes('?') || path.includes('#')) return undefined
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path)) return undefined // scheme, e.g. "https:" or "javascript:"
+  if (!ROUTE_MATCHERS.some(({ re }) => re.test(path))) return undefined
+  return { path, label }
+}
 
 /** The caller's context for one turn. `spicyMode` is the adult-content gate the model
  *  catalog respects (Q2 seam). `generatio` is informational (style is NOT applied here).
@@ -419,10 +495,16 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     '   "pinnedModels":["<intellaId or slug>",...],"embellishedPrompt":"<core prompt enriched, NO style prefix>",',
     '   "rationale":"<why this flow/models/embellishment, stating the price plainly (amount + unit) and what it buys>",',
     '   "delta":"<what changed vs prior run, only when adjusting>"}',
-    '  {"kind":"reply","text":"<plain conversational answer>"}',
+    '  {"kind":"reply","text":"<plain conversational answer>","destination":{"path":"<in-app path>","label":"<link text>"}}',
     'Set exactly one of modusId / verb on a proposal. Do NOT include a "quote" field — the system computes the',
     'authoritative quote for your chosen flow + aditus and attaches it. Do NOT include a "priorRunId" field —',
     'the system sets it from context on the adjust case.',
+    'The "destination" field on a reply is OPTIONAL — omit it unless it earns its place. Offer one only when',
+    'the user wants a screen your tools cannot serve directly (setting up a dataset, starting training, the',
+    'muse workspace, managing a collection) — never for something you can already answer or route as a',
+    'proposal. Fill any ":id" segment ONLY with an id you read this turn via a tool result; never invent one.',
+    'In-app paths only, never an external URL. If you offer a destination and it is invalid, the system',
+    'drops it silently and your text still reaches the user, so it is never a reason to withhold the reply.',
   ].filter((l) => l !== '').join('\n')
 }
 
@@ -639,7 +721,10 @@ async function finalize(
   }
 
   if (obj.kind === 'reply' && typeof obj.text === 'string') {
-    return { kind: 'reply', text: obj.text, tokenUsage }
+    // Invalid/unlisted/external destinations are DROPPED, never surfaced as an
+    // error — the reply text still delivers exactly as if none was offered.
+    const destination = validateDestination(obj.destination)
+    return { kind: 'reply', text: obj.text, ...(destination ? { destination } : {}), tokenUsage }
   }
 
   // Recognized JSON but not our contract — surface it as a reply verbatim.

@@ -3,9 +3,27 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { isExampleCleared, clearExample } from '../lib/chatExample';
-import { api, newTurnKey, type ConciergeProposal, type ColloquiumSummary } from '../lib/api';
+import { api, newTurnKey, type ConciergeProposal, type ConciergeReply, type ColloquiumSummary } from '../lib/api';
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
+
+// NAVIGATE (noema-367): `destination` isn't part of `lib/api.ts`'s ConciergeReply
+// shape yet (that file deliberately holds local types, not a backend import — see
+// `git log -- src/platforms/web/app/src/lib/api.ts`), so it's widened locally here
+// rather than by editing that shared file. Belt-and-suspenders: render only when
+// the path is in-app (starts with "/"); the agent-side allowlist is the real gate.
+type ReplyWithDestination = ConciergeReply & { destination?: { path: string; label: string } };
+function DestinationLink({ destination, onGo }: { destination: { path: string; label: string }; onGo: (path: string) => void }) {
+  if (!destination.path.startsWith('/')) return null;
+  return (
+    <button
+      style={{ marginTop: '6px', fontSize: '12px', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+      onClick={() => onGo(destination.path)}
+    >
+      {destination.label} →
+    </button>
+  );
+}
 
 // ── Two honest signals ────────────────────────────────────────────────────────
 // hemisphere = what NOEMA can SEE (lit remote · ring TEE/your-server)
@@ -275,7 +293,18 @@ export function Chat() {
         ...m,
         result.kind === 'proposal'
           ? { who: 'concierge', body: <ProposalCard proposal={result as ConciergeProposal} onAdjust={adjust} /> }
-          : { who: 'concierge', body: result.text, prov: [provFor(sel, 'text')] },
+          : {
+              who: 'concierge',
+              body: (
+                <>
+                  {result.text}
+                  {(result as ReplyWithDestination).destination && (
+                    <DestinationLink destination={(result as ReplyWithDestination).destination!} onGo={navigate} />
+                  )}
+                </>
+              ),
+              prov: [provFor(sel, 'text')],
+            },
       ]);
       // A new thread now exists (or an existing one advanced) — refresh history so it lists.
       if (createdThread) void refreshThreads();
