@@ -49,8 +49,11 @@ export class CollectioCursor {
    * of a server restart. Call once after container creation, before the server
    * starts accepting requests.
    *
-   * Does NOT re-dispatch pieces — in-flight acta will complete via
-   * onActumCompleta() which will then dispatch the next batch as normal.
+   * A collection with acta still in flight needs no push here — those acta
+   * complete via onActumCompleta(), which dispatches the next batch as normal.
+   * A collection with nothing in flight and nothing awaiting review has no such
+   * event coming, so if its budget is not yet spent, rehydrate re-enters the
+   * fan-out for it (see the orphan check below).
    */
   async rehydrate(): Promise<void> {
     const agensList = await this.collectiones.listByStatus('agens')
@@ -58,7 +61,24 @@ export class CollectioCursor {
     for (const collectio of agensList) {
       // Already tracked (e.g. rehydrate called twice) — skip
       if (this.states.has(collectio.id)) continue
-      this.states.set(collectio.id, await this._reconstructState(collectio))
+      const state = await this._reconstructState(collectio)
+      this.states.set(collectio.id, state)
+
+      // Orphan re-dispatch. An agens collection that is unpaused, has no acta
+      // in flight and none awaiting review, and has not reached its dispatch
+      // budget, has no completion or approval event left to advance it — the
+      // fan-out has to be re-entered here or the collection never progresses.
+      // The in-flight and pending-review guards keep this off the common path,
+      // so a collection whose acta are still running is advanced only by their
+      // own completions and is never double-dispatched.
+      if (
+        !state.paused &&
+        state.running.size === 0 &&
+        state.pendingReview.size === 0 &&
+        state.nextIndex < collectio.numerus + collectio.reiectae
+      ) {
+        await this._dispatch(collectio.id)
+      }
     }
   }
 
@@ -99,6 +119,24 @@ export class CollectioCursor {
       pendingReview,
       usedDna,
     }
+  }
+
+  /**
+   * The in-memory state for a Collectio, reconstructing and tracking it when
+   * this process has none — the case for every collection after a restart, and
+   * for one whose state was cleared when it settled. Returns null only when the
+   * Collectio record itself is gone.
+   */
+  private async _loadState(collectioId: string): Promise<CollectioState | null> {
+    const existing = this.states.get(collectioId)
+    if (existing) return existing
+
+    const collectio = await this.collectiones.find(collectioId)
+    if (!collectio) return null
+
+    const state = await this._reconstructState(collectio)
+    this.states.set(collectioId, state)
+    return state
   }
 
   /** Start executing a Collectio — marks it agens, begins dispatching pieces. */
@@ -259,17 +297,25 @@ export class CollectioCursor {
    * Pause dispatching new pieces (in-flight pieces continue). Persisted on the
    * Collectio record (`pausatum`) so the pause survives a restart — see
    * `_reconstructState`.
+   *
+   * In-memory state is reconstructed from the persisted record when this
+   * process has none for the collection, so a pause issued after a restart
+   * lands on live state rather than on nothing.
    */
   async pause(collectioId: string): Promise<void> {
-    const state = this.states.get(collectioId)
-    if (state) state.paused = true
     await this.collectiones.update(collectioId, { pausatum: new Date() })
+    const state = await this._loadState(collectioId)
+    if (state) state.paused = true
   }
 
-  /** Resume dispatching after a pause. Clears the persisted `pausatum`. */
+  /**
+   * Resume dispatching after a pause. Clears the persisted `pausatum` and
+   * re-enters the fan-out, reconstructing in-memory state from the persisted
+   * record when this process has none — the case after a restart.
+   */
   async resume(collectioId: string): Promise<void> {
     await this.collectiones.update(collectioId, { pausatum: undefined })
-    const state = this.states.get(collectioId)
+    const state = await this._loadState(collectioId)
     if (!state) return
     state.paused = false
     await this._dispatch(collectioId)
