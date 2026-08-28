@@ -1061,3 +1061,241 @@ test('onActumCompleta called twice for same actumId is no-op on second call', as
   const countAfter = collectiones.updates.filter(u => u.patch.completae !== undefined).length
   assert.equal(countAfter - countBefore, 1, 'completae should only be incremented once')
 })
+
+// ── Restart liveness ──────────────────────────────────────────────────────────
+//
+// Every test below builds a FRESH CollectioCursor over stores that already hold a
+// collection — the shape of a process restart, where the persisted record and acta
+// survive and only the cursor's in-memory state map is gone.
+
+function seedActum(overrides: Partial<Actum> & { id: string }): Actum {
+  return {
+    modusId: 'm',
+    modusVersiono: '1',
+    aditus: {},
+    status: 'nascens',
+    impetus: 0n,
+    signaConsumed: [],
+    inceptum: new Date(),
+    expirat: new Date(Date.now() + 60_000),
+    ...overrides,
+  } as Actum
+}
+
+test('resume() after a restart reconstructs state and dispatches', async () => {
+  const collectio = makeCollectio({
+    id: 'col-resume-restart',
+    status: 'agens',
+    pausatum: new Date(),
+    acta: ['a0'],
+    numerus: 4,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+  actorum.store.set('a0', seedActum({ id: 'a0', status: 'completus' }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  // No rehydrate() — resume alone has to bring the collection back to life.
+  await cursor.resume('col-resume-restart')
+
+  assert.equal(collectiones.store.get('col-resume-restart')?.pausatum, undefined, 'pausatum cleared')
+  assert.equal(inceptor.calls.length, 2, 'resume should dispatch up to concurrentia after a restart')
+  assert.equal(inceptor.calls[0].aditus._pieceIndex, 1, 'nextIndex reconstructed from persisted acta')
+})
+
+test('pause() after a restart reconstructs state alongside persisting pausatum', async () => {
+  const collectio = makeCollectio({
+    id: 'col-pause-restart',
+    status: 'agens',
+    acta: ['a0'],
+    numerus: 4,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+  actorum.store.set('a0', seedActum({ id: 'a0', status: 'agens' }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  await cursor.pause('col-pause-restart')
+
+  assert.ok(
+    collectiones.store.get('col-pause-restart')?.pausatum instanceof Date,
+    'pausatum persisted',
+  )
+  // The in-flight actum is tracked, which is only true if state was reconstructed:
+  // this is the routing the webhook handler needs to find the owning collection.
+  assert.equal(
+    cursor.findCollectioIdForActum('a0'),
+    'col-pause-restart',
+    'the persisted in-flight actum should be in the reconstructed running set',
+  )
+})
+
+test('rehydrate() dispatches an agens collection left with nothing in flight', async () => {
+  // Two orphan shapes: every persisted actum settled, and none dispatched at all.
+  const settled = makeCollectio({
+    id: 'col-orphan-settled',
+    status: 'agens',
+    acta: ['s0'],
+    numerus: 3,
+    concurrentia: 2,
+  })
+  const none = makeCollectio({
+    id: 'col-orphan-none',
+    status: 'agens',
+    acta: [],
+    numerus: 1,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(settled)
+  collectiones.store.set(none.id, { ...none })
+
+  const actorum = makeActorum()
+  actorum.store.set('s0', seedActum({ id: 's0', status: 'completus' }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  await cursor.rehydrate()
+
+  const indexes = inceptor.calls.map(c => c.aditus._pieceIndex)
+  assert.equal(inceptor.calls.length, 3, 'two pieces for the settled orphan, one for the untouched one')
+  assert.deepEqual(indexes, [1, 2, 0], 'settled orphan resumes at nextIndex 1; the other starts at 0')
+})
+
+test('rehydrate() does NOT dispatch when acta are in flight or awaiting review', async () => {
+  // Free concurrency slots and unspent budget on both — the only thing holding
+  // dispatch back is that an event is still coming for each collection.
+  const inFlight = makeCollectio({
+    id: 'col-inflight',
+    status: 'agens',
+    acta: ['f0', 'f1'],
+    numerus: 6,
+    concurrentia: 4,
+  })
+  const awaiting = makeCollectio({
+    id: 'col-awaiting',
+    status: 'agens',
+    acta: ['p0'],
+    numerus: 6,
+    concurrentia: 4,
+    reviewEnabled: true,
+  })
+  const collectiones = makeCollectionum(inFlight)
+  collectiones.store.set(awaiting.id, { ...awaiting })
+
+  const actorum = makeActorum()
+  actorum.store.set('f0', seedActum({ id: 'f0', status: 'nascens' }))
+  actorum.store.set('f1', seedActum({ id: 'f1', status: 'agens' }))
+  actorum.store.set('p0', seedActum({
+    id: 'p0',
+    status: 'completus',
+    exitus: { reviewOutcome: 'pending' },
+  }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  await cursor.rehydrate()
+
+  assert.equal(inceptor.calls.length, 0, 'rehydrate must not dispatch alongside in-flight or pending-review acta')
+
+  // The in-flight collection still advances the normal way, from its own completions.
+  await cursor.onActumCompleta('col-inflight', 'f0', true)
+  assert.equal(
+    inceptor.calls.length,
+    3,
+    'a completion refills the free concurrency slots from the reconstructed nextIndex',
+  )
+  assert.deepEqual(inceptor.calls.map(c => c.aditus._pieceIndex), [2, 3, 4])
+})
+
+test('resume() after a restart carries the reconstructed DNA ledger', async () => {
+  const tractus: Tractus[] = [
+    {
+      porta: 'stilus',
+      label: 'Stilus',
+      valores: [
+        { value: 'v-alpha', label: 'Alpha', rarity: 1 },
+        { value: 'v-beta', label: 'Beta', rarity: 1 },
+        { value: 'v-gamma', label: 'Gamma', rarity: 1 },
+      ],
+    },
+  ]
+  const collectio = makeCollectio({
+    id: 'col-resume-dna',
+    status: 'agens',
+    pausatum: new Date(),
+    dna: true,
+    tractus,
+    acta: ['d0', 'd1'],
+    numerus: 3,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+  // The fingerprints stamped at dispatch time — the ledger's only persisted form.
+  actorum.store.set('d0', seedActum({
+    id: 'd0', status: 'completus', aditus: { _dna: 'stilus=Alpha' },
+  }))
+  actorum.store.set('d1', seedActum({
+    id: 'd1', status: 'completus', aditus: { _dna: 'stilus=Beta' },
+  }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  await cursor.resume('col-resume-dna')
+
+  assert.equal(inceptor.calls.length, 1, 'one piece of budget left')
+  assert.equal(
+    inceptor.calls[0].aditus._dna,
+    'stilus=Gamma',
+    'the surviving piece must take the one combination the persisted acta did not use',
+  )
+})
+
+test('resume() after a restart carries the reconstructed pending-review set', async () => {
+  const collectio = makeCollectio({
+    id: 'col-resume-review',
+    status: 'agens',
+    pausatum: new Date(),
+    reviewEnabled: true,
+    acta: ['r0', 'r1'],
+    numerus: 2,
+    concurrentia: 2,
+  })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+  actorum.store.set('r0', seedActum({
+    id: 'r0', status: 'completus', exitus: { reviewOutcome: 'pending' },
+  }))
+  actorum.store.set('r1', seedActum({ id: 'r1', status: 'agens' }))
+
+  const inceptor = makeInceptor()
+  const cursor = new CollectioCursor(inceptor.dispatch, collectiones, actorum, {})
+
+  await cursor.resume('col-resume-review')
+  assert.equal(inceptor.calls.length, 0, 'budget already spent — nothing new to dispatch')
+
+  // r1 finishes and joins review; r0 was already there.
+  await cursor.onActumCompleta('col-resume-review', 'r1', true)
+  await cursor.approveActum('col-resume-review', 'r1')
+  assert.equal(
+    collectiones.store.get('col-resume-review')?.status,
+    'agens',
+    'the collection is not settled while the pre-restart actum still awaits review',
+  )
+
+  await cursor.approveActum('col-resume-review', 'r0')
+  assert.equal(
+    collectiones.store.get('col-resume-review')?.status,
+    'completa',
+    'settles once every piece — including the pre-restart one — is approved',
+  )
+})
