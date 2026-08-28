@@ -5,10 +5,11 @@
 // Given a user message + conversation history + the caller's context (spicyMode,
 // generatio, bindings, an optional prior run for the critique/adjusted case), this
 // module runs a BOUNDED (<= maxToolIterations) LLM tool-use loop over EXACTLY the
-// twelve READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
+// seventeen READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
 // `search_models`/`list_models`, `quote`, `get_run`, `list_runs`, `status`,
 // `list_collections`, `get_collection`, `list_studios`, `get_studio`,
-// `list_fundamenta`) and emits a discriminated result:
+// `list_fundamenta`, `list_datasets`, `get_dataset`, `list_activity`,
+// `list_muse_sessions`, `get_muse_session`) and emits a discriminated result:
 //   - `{ kind: 'proposal', ... }` — a chosen flow + filled/embellished aditus +
 //     chosen loras/pinnedModels + an authoritative quote; the critique/ADJUSTED
 //     case is the SAME `proposal` kind, distinguished only by an optional
@@ -24,7 +25,7 @@
 //
 // HARD INVARIANTS (the entire risk surface of this module):
 //   (a) It NEVER exposes a spend handler to the LLM and never calls a spend method
-//       — the tool surface is the twelve read-only handlers only; `run_flow`,
+//       — the tool surface is the seventeen read-only handlers only; `run_flow`,
 //       `provision_studio`, and `collect` are never registered, and this module
 //       never calls `invokeFlow`/`runFlow`/`provisionStudio`/`collect`/`createRun`.
 //       (Mechanically enforced by the item's `verify` grep.) It proposes; the user
@@ -65,6 +66,11 @@ import {
   listStudiosTool,
   getStudioTool,
   listFundamentaTool,
+  listDatasetsTool,
+  getDatasetTool,
+  listActivityTool,
+  listMuseSessionsTool,
+  getMuseSessionTool,
   type McpResult,
 } from './mcp/tools.js'
 
@@ -229,7 +235,7 @@ export interface ConciergeDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Tool surface (invariant (a)) — EXACTLY the twelve read-only discovery handlers,
+// Tool surface (invariant (a)) — EXACTLY the seventeen read-only discovery handlers,
 // wrapped as OpenRouterToolSpec[]. `run_flow`/`provision_studio`/`collect` (and any
 // other spend method) are DELIBERATELY absent; adding one here would breach the
 // item's `verify` grep and the propose-never-spend house rule.
@@ -407,6 +413,89 @@ const TOOL_SPECS: OpenRouterToolSpec[] = [
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_datasets',
+      description:
+        "List the caller's own datasets (thin summaries: id, name, image count, updated). Owner-scoped. " +
+        'Call this before proposing a training run, or to find a dataset the user references loosely ' +
+        'before calling get_dataset.',
+      parameters: {
+        type: 'object',
+        properties: {
+          cursor: { type: 'string', description: 'opaque page cursor from a prior list_datasets call' },
+          limit: { type: 'integer', description: 'page size, default 20, max 100' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_dataset',
+      description:
+        "Fetch one of the caller's own datasets by id — full media list and caption sets. Owner-scoped " +
+        "(never another owner's dataset). This is how you fill a correct training proposal. Large media/" +
+        'caption lists are capped in the result with a truncated marker.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'dataset id' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_activity',
+      description:
+        "The caller's own activity, in-flight AND settled, newest first. Owner-scoped. Use this to answer " +
+        '"is my run stuck" or "what is happening right now" — list_runs only covers settled history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: 'page size, default 20, max 100' },
+          cursor: { type: 'string', description: 'opaque page cursor from a prior list_activity call' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_muse_sessions',
+      description:
+        "The caller's own Muse sessions broken off one dataset, most recently changed first. Owner-scoped. " +
+        'Use this to find a muse-driving session the user references loosely before calling ' +
+        'get_muse_session.',
+      parameters: {
+        type: 'object',
+        properties: { datasetId: { type: 'string', description: 'dataset id the sessions broke off from' } },
+        required: ['datasetId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_muse_session',
+      description:
+        "Read-only view of one of the caller's own Muse sessions — its floor, kept pieces, and setup. " +
+        "Owner-scoped (never another owner's session). Use this when the user references a specific " +
+        'muse-driving session.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'muse session id' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 /** The canonical read-only tool-name set, derived from TOOL_SPECS itself plus the `list_models`
@@ -458,12 +547,20 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     'HOUSE RULES:',
     '- You PROPOSE, you never SPEND. You have read-only discovery tools only (list_flows, describe_flow,',
     '  search_models, quote, get_run, list_runs, status, list_collections, get_collection, list_studios,',
-    '  get_studio, list_fundamenta). There is NO run/collect/provision tool and you must never claim to',
-    '  have run anything — the user confirms (GO) separately, elsewhere.',
+    '  get_studio, list_fundamenta, list_datasets, get_dataset, list_activity, list_muse_sessions,',
+    '  get_muse_session). There is NO run/collect/provision tool and you must never claim to have run',
+    '  anything — the user confirms (GO) separately, elsewhere.',
     '- You can see the caller\'s own saved collections and provisioned studios (list_collections/',
     '  get_collection, list_studios/get_studio), and the compute-substrate catalog (list_fundamenta). Use',
     '  them to answer questions about what the user has saved or running, or to ground a studio discussion',
     '  in a real fundamentum id — never invent one.',
+    '- You can see the caller\'s own datasets (list_datasets/get_dataset), activity in-flight AND settled',
+    '  (list_activity — use it for "is my run stuck", list_runs only covers settled history), and Muse',
+    '  sessions (list_muse_sessions/get_muse_session). Use get_dataset to fill a correct training proposal',
+    '  from the dataset\'s real media/captions rather than guessing. When an answer ends at a screen these',
+    '  tools cannot serve directly (e.g. filling in a training proposal from a dataset, resuming a muse',
+    '  session), offer the matching destination — e.g. "/datasets/:id/derive" after describing a training',
+    '  proposal built from that dataset.',
     '- Ground EVERY flow and model choice in a tool call. Never invent a flow id or a model id/trigger word;',
     '  read them from list_flows / describe_flow / search_models first.',
     '- Read the catalog ONCE, then commit. After you have listed the flows and searched the models you need,',
@@ -593,6 +690,28 @@ async function executeTool(
       return textOf(await getStudioTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
     case 'list_fundamenta':
       return textOf(await listFundamentaTool(deps.api))
+    case 'list_datasets':
+      return textOf(
+        await listDatasetsTool(deps.api, ctx.auctor, {
+          cursor: args.cursor as string | undefined,
+          limit: args.limit as number | undefined,
+        }),
+      )
+    case 'get_dataset':
+      return textOf(await getDatasetTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
+    case 'list_activity':
+      return textOf(
+        await listActivityTool(deps.api, ctx.auctor, {
+          limit: args.limit as number | undefined,
+          cursor: args.cursor as string | undefined,
+        }),
+      )
+    case 'list_muse_sessions':
+      return textOf(
+        await listMuseSessionsTool(deps.api, ctx.auctor, { datasetId: String(args.datasetId ?? '') }),
+      )
+    case 'get_muse_session':
+      return textOf(await getMuseSessionTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
     default:
       return `ERROR unknown.tool: ${name} is not an available tool`
   }
