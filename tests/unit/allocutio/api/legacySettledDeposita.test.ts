@@ -36,6 +36,7 @@ import {
   countToString,
   readExpect,
   coinListedAddresses,
+  candidateSelector,
   type LegacyCreditRow,
 } from '../../../../scripts/migrations/2026_08_record_legacy_settled_deposita.js'
 
@@ -416,4 +417,18 @@ test('migration: the candidate assets are exactly the configured coin listings, 
   const configured = Object.values(COINGECKO_ASSETS).flatMap(m => Object.keys(m))
   assert.deepEqual(coinListedAddresses().sort(), configured.map(a => a.toLowerCase()).sort())
   assert.equal(coinListedAddresses().includes(OTHER_TOKEN), false)
+})
+
+test('migration: the candidate selector nests no operator document inside $in — the server rejects that whole find', () => {
+  const sel = candidateSelector(['0xAbCd', OTHER_TOKEN]) as Record<string, unknown>
+  assert.equal(sel.status, 'confirmatum')
+  assert.deepEqual(sel.usdFmv, { $exists: false })
+  // The failure this guards: `token: { $in: [{ $regex: … }] }` → MongoServerError
+  // "cannot nest $ under $in" in prod, 2026-08-27. Regex matches must join via $or.
+  assert.equal('$in' in sel, false)
+  assert.equal(!('token' in sel), true)
+  const or = sel.$or as Array<{ token: { $regex: string; $options: string } }>
+  assert.equal(or.length, 2)
+  assert.deepEqual(or[0].token, { $regex: '^0xAbCd$', $options: 'i' })
+  assert.deepEqual(or[1].token, { $regex: `^${OTHER_TOKEN}$`, $options: 'i' })
 })

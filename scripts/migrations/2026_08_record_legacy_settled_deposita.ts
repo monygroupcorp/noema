@@ -105,6 +105,19 @@ export function hexEquals(value: string): { $regex: string; $options: string } {
   return { $regex: `^${literal(value)}$`, $options: 'i' }
 }
 
+/**
+ * The candidate selector, buildable without a connection so the suite can hold its shape.
+ * A `{ $regex }` document may not sit inside `$in` (`cannot nest $ under $in` — the server
+ * rejects the whole find), so the per-address matches are joined with `$or` instead.
+ */
+export function candidateSelector(addresses: string[]): Record<string, unknown> {
+  return {
+    status: 'confirmatum',
+    usdFmv: { $exists: false },
+    $or: addresses.map(a => ({ token: hexEquals(a) })),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The decision core (pure — no I/O, covered directly by the suite)
 // ---------------------------------------------------------------------------
@@ -261,11 +274,7 @@ async function main(): Promise<void> {
       return
     }
 
-    const candidates = await live.find({
-      status: 'confirmatum',
-      usdFmv: { $exists: false },
-      token: { $in: addresses.map(a => hexEquals(a)) },
-    }).toArray()
+    const candidates = await live.find(candidateSelector(addresses)).toArray()
 
     const at = new Date()
     const recordable: Array<{ index: number; id: unknown; doc: Record<string, unknown>; set: Record<string, unknown> }> = []
