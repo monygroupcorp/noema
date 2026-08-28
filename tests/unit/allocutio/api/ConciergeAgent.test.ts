@@ -51,6 +51,11 @@ interface ApiSpy {
   getRunCalls: Array<{ auctor: unknown; id: string }>
   listRunsCalls: Array<{ auctor: unknown; opts: unknown }>
   statusCalls: Array<{ auctor: unknown }>
+  listCollectionsCalls: Array<{ auctor: unknown }>
+  getCollectionCalls: Array<{ auctor: unknown; id: string }>
+  listStudiosCalls: Array<{ auctor: unknown }>
+  getStudioCalls: Array<{ auctor: unknown; id: string }>
+  listFundamentaCalls: number
 }
 
 function makeApi(): { api: CrystalApi; spy: ApiSpy } {
@@ -61,6 +66,11 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
     getRunCalls: [],
     listRunsCalls: [],
     statusCalls: [],
+    listCollectionsCalls: [],
+    getCollectionCalls: [],
+    listStudiosCalls: [],
+    getStudioCalls: [],
+    listFundamentaCalls: 0,
   }
   const mock = {
     listFlows: async () => {
@@ -102,6 +112,27 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
     status: async (auctor: unknown) => {
       spy.statusCalls.push({ auctor })
       return { balanceImpetus: '500', balanceUsd: 0.5, gens: [], studios: [], joinable: [], takenAt: 'now' }
+    },
+    // noema-365: SEE rung 1 — collections/studios/fundamenta discovery, owner-scoped like get_run.
+    listCollections: async (auctor: unknown) => {
+      spy.listCollectionsCalls.push({ auctor })
+      return [{ id: 'coll_1', label: 'a saved grid' }]
+    },
+    getCollection: async (auctor: unknown, id: string) => {
+      spy.getCollectionCalls.push({ auctor, id })
+      return { id, label: 'a saved grid' }
+    },
+    listStudios: async (auctor: unknown) => {
+      spy.listStudiosCalls.push({ auctor })
+      return [{ id: 'studio_1', state: 'ready' }]
+    },
+    getStudio: async (auctor: unknown, id: string) => {
+      spy.getStudioCalls.push({ auctor, id })
+      return { id, state: 'ready' }
+    },
+    listFundamenta: async () => {
+      spy.listFundamentaCalls++
+      return [{ id: 'flux', versio: '1' }]
     },
   }
   return { api: mock as unknown as CrystalApi, spy }
@@ -253,7 +284,20 @@ test('the tool surface contains no spend tools', async () => {
   const names = (client.calls[0].tools ?? []).map((t) => t.function.name)
   assert.deepEqual(
     names.sort(),
-    ['describe_flow', 'get_run', 'list_flows', 'list_runs', 'quote', 'search_models', 'status'],
+    [
+      'describe_flow',
+      'get_collection',
+      'get_run',
+      'get_studio',
+      'list_collections',
+      'list_flows',
+      'list_fundamenta',
+      'list_runs',
+      'list_studios',
+      'quote',
+      'search_models',
+      'status',
+    ],
   )
   for (const spend of ['run_flow', 'provision_studio', 'collect', 'runFlow', 'invokeFlow']) {
     assert.ok(!names.includes(spend), `spend tool ${spend} must not be exposed`)
@@ -326,6 +370,100 @@ test('status is wired, owner-scoped, and its result reaches the model', async ()
   const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 's1')
   assert.ok(toolResultMsg)
   assert.ok(String(toolResultMsg!.content).includes('500'))
+})
+
+// ---------------------------------------------------------------------------
+// (j) noema-365: SEE rung 1 — list_collections, get_collection, list_studios,
+// get_studio, and list_fundamenta are wired into the tool loop, owner-scoped
+// where the handler is, and their results reach the model.
+// ---------------------------------------------------------------------------
+test('list_collections is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({ toolCalls: [{ id: 'lc1', name: 'list_collections', arguments: '{}' }], finishReason: 'tool_calls' }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you have one saved collection' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what collections do I have?')
+
+  assert.equal(spy.listCollectionsCalls.length, 1)
+  assert.deepEqual(spy.listCollectionsCalls[0], { auctor })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lc1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('coll_1'))
+})
+
+test('get_collection is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'gc1', name: 'get_collection', arguments: JSON.stringify({ id: 'coll_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'that is your saved grid' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'tell me about coll_1')
+
+  assert.equal(spy.getCollectionCalls.length, 1)
+  assert.deepEqual(spy.getCollectionCalls[0], { auctor, id: 'coll_1' })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'gc1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('coll_1'))
+})
+
+test('list_studios is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({ toolCalls: [{ id: 'ls1', name: 'list_studios', arguments: '{}' }], finishReason: 'tool_calls' }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you have one studio running' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what studios do I have?')
+
+  assert.equal(spy.listStudiosCalls.length, 1)
+  assert.deepEqual(spy.listStudiosCalls[0], { auctor })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'ls1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('studio_1'))
+})
+
+test('get_studio is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'gs1', name: 'get_studio', arguments: JSON.stringify({ id: 'studio_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'studio_1 is ready' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'is studio_1 ready?')
+
+  assert.equal(spy.getStudioCalls.length, 1)
+  assert.deepEqual(spy.getStudioCalls[0], { auctor, id: 'studio_1' })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'gs1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('studio_1'))
+})
+
+test('list_fundamenta is wired and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({ toolCalls: [{ id: 'lf1', name: 'list_fundamenta', arguments: '{}' }], finishReason: 'tool_calls' }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'flux is available' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'what base models can I provision?')
+
+  assert.equal(spy.listFundamentaCalls, 1)
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lf1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('flux'))
 })
 
 // ---------------------------------------------------------------------------
