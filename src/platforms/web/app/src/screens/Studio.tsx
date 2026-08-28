@@ -5,13 +5,12 @@ import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { api } from '../lib/api';
 import type { Fundamentum, StudioView } from '../lib/api';
+import { formatImpetus } from '../lib/format';
 
 function mmss(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
-
-const cr = (impetus: string) => `${Number(impetus).toLocaleString()} cr`;
 
 // The screen's one live studio: newest non-terminated (the API lists the caller's live ones).
 const pickLive = (studios: StudioView[]) => studios.find((s) => s.status !== 'terminated') ?? null;
@@ -184,7 +183,7 @@ export function Studio() {
               </div>
               <div className="stat">
                 <div className="l">Budget</div>
-                <div className="n">{cr(studio.budgetImpetus)}</div>
+                <div className="n">{formatImpetus(studio.budgetImpetus)}</div>
                 <div className="d">hard session cap</div>
               </div>
               <div className="stat">

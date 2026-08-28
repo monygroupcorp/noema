@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, type ConciergeProposal, type FlowDescription, type ModelCard } from '../lib/api';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
 import { mediaFromOutput } from '../lib/media';
+import { formatQuote } from '../lib/format';
 import { Lightbox } from './Lightbox';
 
 // ── ProposalCard — renders one concierge `ConciergeProposal` (noema-099) ──────
@@ -166,6 +167,7 @@ export function ProposalCard({ proposal, onAdjust }: {
 
   const flowLabel = proposal.modusId ?? proposal.verb ?? '—';
   const media = mediaFromOutput(runStream.exitus);
+  const { amount: quoteAmount, recipientShort } = formatQuote(proposal.quote);
 
   return (
     <div className="proposal-card">
@@ -187,7 +189,12 @@ export function ProposalCard({ proposal, onAdjust }: {
       )}
 
       <div className="pc-foot">
-        <span className="pc-quote">~{proposal.quote.impetus} credits</span>
+        <div className="pc-quote-block">
+          <span className="pc-quote">~{quoteAmount}</span>
+          <span className="pc-recipient" title={proposal.quote.recipient}>
+            <span className="pc-recipient-label">recipient</span> {recipientShort}
+          </span>
+        </div>
         <button className="ghost pc-adjust" onClick={() => onAdjust(runId)}>adjust</button>
         <button className="pc-go" disabled={dispatching} onClick={go}>{dispatching ? 'dispatching…' : 'GO'}</button>
       </div>
@@ -231,7 +238,10 @@ export function ProposalCard({ proposal, onAdjust }: {
         .pc-models{display:flex;flex-wrap:wrap;gap:6px}
         .pc-model-chip{font-size:.78em;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--accent,#888) 15%,transparent)}
         .pc-foot{display:flex;align-items:center;gap:10px;margin-top:2px}
-        .pc-quote{font-size:.85em;opacity:.75;margin-right:auto}
+        .pc-quote-block{display:flex;flex-direction:column;gap:1px;margin-right:auto}
+        .pc-quote{font-size:.85em;opacity:.75}
+        .pc-recipient{font-size:.7em;opacity:.5;display:flex;gap:4px;align-items:center}
+        .pc-recipient-label{text-transform:uppercase;letter-spacing:.03em}
         .pc-go{padding:6px 16px;border-radius:8px;font-weight:600}
         .pc-err{color:var(--error,#c33);font-size:.85em}
         .pc-run{font-size:.85em;opacity:.85;display:flex;gap:8px;align-items:center}
