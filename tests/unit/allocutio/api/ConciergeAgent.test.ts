@@ -56,6 +56,11 @@ interface ApiSpy {
   listStudiosCalls: Array<{ auctor: unknown }>
   getStudioCalls: Array<{ auctor: unknown; id: string }>
   listFundamentaCalls: number
+  listDatasetsCalls: Array<{ auctor: unknown; opts: unknown }>
+  getDatasetCalls: Array<{ auctor: unknown; id: string }>
+  listActivityCalls: Array<{ auctor: unknown; opts: unknown }>
+  listMuseSessionsCalls: Array<{ auctor: unknown; datasetId: string }>
+  getMuseSessionCalls: Array<{ auctor: unknown; id: string }>
 }
 
 function makeApi(): { api: CrystalApi; spy: ApiSpy } {
@@ -71,6 +76,11 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
     listStudiosCalls: [],
     getStudioCalls: [],
     listFundamentaCalls: 0,
+    listDatasetsCalls: [],
+    getDatasetCalls: [],
+    listActivityCalls: [],
+    listMuseSessionsCalls: [],
+    getMuseSessionCalls: [],
   }
   const mock = {
     listFlows: async () => {
@@ -133,6 +143,27 @@ function makeApi(): { api: CrystalApi; spy: ApiSpy } {
     listFundamenta: async () => {
       spy.listFundamentaCalls++
       return [{ id: 'flux', versio: '1' }]
+    },
+    // noema-368: SEE rung 3 — datasets/activity/muse discovery, owner-scoped like get_run.
+    listDatasetSummaries: async (auctor: unknown, opts: Record<string, unknown> = {}) => {
+      spy.listDatasetsCalls.push({ auctor, opts })
+      return { datasets: [{ id: 'ds_1', name: 'a dataset', images: 12 }] }
+    },
+    getDataset: async (auctor: unknown, id: string) => {
+      spy.getDatasetCalls.push({ auctor, id })
+      return { id, name: 'a dataset', media: [], captionsets: [] }
+    },
+    listActivity: async (auctor: unknown, opts: Record<string, unknown> = {}) => {
+      spy.listActivityCalls.push({ auctor, opts })
+      return { activity: [{ actumId: 'act_1', kind: 'generation', modusId: 'flux.txt2img', status: 'running' }] }
+    },
+    listMuseSessions: async (auctor: unknown, datasetId: string) => {
+      spy.listMuseSessionsCalls.push({ auctor, datasetId })
+      return [{ id: 'muse_1', owner: 'anima_owner', motherDatasetId: datasetId }]
+    },
+    getMuseSession: async (auctor: unknown, id: string) => {
+      spy.getMuseSessionCalls.push({ auctor, id })
+      return { id, owner: 'anima_owner', motherDatasetId: 'ds_1' }
     },
   }
   return { api: mock as unknown as CrystalApi, spy }
@@ -287,11 +318,16 @@ test('the tool surface contains no spend tools', async () => {
     [
       'describe_flow',
       'get_collection',
+      'get_dataset',
+      'get_muse_session',
       'get_run',
       'get_studio',
+      'list_activity',
       'list_collections',
+      'list_datasets',
       'list_flows',
       'list_fundamenta',
+      'list_muse_sessions',
       'list_runs',
       'list_studios',
       'quote',
@@ -464,6 +500,105 @@ test('list_fundamenta is wired and its result reaches the model', async () => {
   const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lf1')
   assert.ok(toolResultMsg)
   assert.ok(String(toolResultMsg!.content).includes('flux'))
+})
+
+// ---------------------------------------------------------------------------
+// (k) noema-368: SEE rung 3 — list_datasets, get_dataset, list_activity,
+// list_muse_sessions, and get_muse_session are wired into the tool loop,
+// owner-scoped where the handler is, and their results reach the model.
+// ---------------------------------------------------------------------------
+test('list_datasets is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({ toolCalls: [{ id: 'ld1', name: 'list_datasets', arguments: '{}' }], finishReason: 'tool_calls' }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you have one dataset' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what datasets do I have?')
+
+  assert.equal(spy.listDatasetsCalls.length, 1)
+  assert.equal(spy.listDatasetsCalls[0].auctor, auctor)
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'ld1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('ds_1'))
+})
+
+test('get_dataset is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'gd1', name: 'get_dataset', arguments: JSON.stringify({ id: 'ds_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'that dataset has 12 images' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'tell me about ds_1')
+
+  assert.equal(spy.getDatasetCalls.length, 1)
+  assert.deepEqual(spy.getDatasetCalls[0], { auctor, id: 'ds_1' })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'gd1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('ds_1'))
+})
+
+test('list_activity is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({ toolCalls: [{ id: 'la1', name: 'list_activity', arguments: '{}' }], finishReason: 'tool_calls' }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'one run is in flight' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'is my run stuck?')
+
+  assert.equal(spy.listActivityCalls.length, 1)
+  assert.equal(spy.listActivityCalls[0].auctor, auctor)
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'la1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('act_1'))
+})
+
+test('list_muse_sessions is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'lm1', name: 'list_muse_sessions', arguments: JSON.stringify({ datasetId: 'ds_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'you have one muse session' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'what muse sessions do I have on ds_1?')
+
+  assert.equal(spy.listMuseSessionsCalls.length, 1)
+  assert.deepEqual(spy.listMuseSessionsCalls[0], { auctor, datasetId: 'ds_1' })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lm1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('muse_1'))
+})
+
+test('get_muse_session is wired, owner-scoped, and its result reaches the model', async () => {
+  const { api, spy } = makeApi()
+  const auctor = { animaId: 'anima_owner' }
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [{ id: 'gm1', name: 'get_muse_session', arguments: JSON.stringify({ id: 'muse_1' }) }],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'that session is on the floor' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx({ auctor }), 'tell me about muse_1')
+
+  assert.equal(spy.getMuseSessionCalls.length, 1)
+  assert.deepEqual(spy.getMuseSessionCalls[0], { auctor, id: 'muse_1' })
+  const toolResultMsg = client.calls[1].messages.find((m) => m.role === 'tool' && m.tool_call_id === 'gm1')
+  assert.ok(toolResultMsg)
+  assert.ok(String(toolResultMsg!.content).includes('muse_1'))
 })
 
 // ---------------------------------------------------------------------------
