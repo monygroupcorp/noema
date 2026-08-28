@@ -1,5 +1,31 @@
 # Changelog
 
+## [5.20.0](https://github.com/monygroupcorp/noema/compare/v5.19.1...v5.20.0) (2026-08-28)
+
+
+### Features
+
+* **concierge-gym:** add referee to replay and verdict a submitted deck entry ([eac24d7](https://github.com/monygroupcorp/noema/commit/eac24d73ed605b6b59697f4af964c526f76fbc23))
+* concierge-walk — a scripted headless session over the anonymous bursa rail ([f13e6a8](https://github.com/monygroupcorp/noema/commit/f13e6a87e8464ada612e9ed1d0551e73d9cd79aa))
+* **concierge:** NAVIGATE — reply carries a validated destination, the client renders the link ([8670b38](https://github.com/monygroupcorp/noema/commit/8670b386ffc31116b4a359393e935ee7eaa958b6))
+* **concierge:** NAVIGATE — reply carries a validated destination, the client renders the link ([e79e461](https://github.com/monygroupcorp/noema/commit/e79e46176932313577431b24103bf2708a430346))
+* **concierge:** register collection/studio/fundamenta discovery tools ([3074526](https://github.com/monygroupcorp/noema/commit/30745267de8c571118d4acb8ca495e02a1edbee4))
+* **concierge:** register collection/studio/fundamenta discovery tools ([8a806d2](https://github.com/monygroupcorp/noema/commit/8a806d2c1855bc24e128b3e12bca997f728a1017))
+
+
+### Bug Fixes
+
+* **concierge:** answer from gathered context when the tool-iteration cap is reached ([8798b5a](https://github.com/monygroupcorp/noema/commit/8798b5a73b28d786ad422f8431069fa2801dcc8b))
+* **concierge:** answer from gathered context when the tool-iteration cap is reached ([885e1ad](https://github.com/monygroupcorp/noema/commit/885e1adb81a601983bead097c978b3eaab4aeb61))
+* **concierge:** derive the read-only tool set from one export ([710deec](https://github.com/monygroupcorp/noema/commit/710deec20624023bf2cb75e021a96d4c59a94ee7))
+* **concierge:** make the proposal quote read as a price ([0cae931](https://github.com/monygroupcorp/noema/commit/0cae931492b00401ad0e459b41e19beb5dc33a5f))
+* **concierge:** make the proposal quote read as a price ([7e0f72c](https://github.com/monygroupcorp/noema/commit/7e0f72c4979ba218ae5dbc297c9bd8fd34de1922))
+* **crystal:** keep a collection dispatching across a process restart ([9a29a6a](https://github.com/monygroupcorp/noema/commit/9a29a6a9af3370204cca21d0b627a662b91aad96))
+* **crystal:** keep a collection dispatching across a process restart ([4b04251](https://github.com/monygroupcorp/noema/commit/4b04251dbbb98d397d3203e6298bb8722fb33d08))
+* **crystal:** legacy-settlement migration find rejected whole — $regex nested under $in ([75c0d4d](https://github.com/monygroupcorp/noema/commit/75c0d4d33cc0574ff665834e2314cb3bafe48a05))
+* **crystal:** the legacy-settlement migration's candidate find was rejected whole by the server ([a7134d1](https://github.com/monygroupcorp/noema/commit/a7134d1b9e8221a2a33af1ee97afe59f366e3659))
+* surface in-flight and pending-review state on the canonic run screen ([af8ab43](https://github.com/monygroupcorp/noema/commit/af8ab43a6b7c38d8626f3bc41be77e916601b881))
+
 ## [5.19.1](https://github.com/monygroupcorp/noema/compare/v5.19.0...v5.19.1) (2026-08-27)
 
 
