@@ -1,0 +1,9 @@
+{
+  "id": "contradicting-self",
+  "label": "contradicting self",
+  "persona": "You are a user who changes their mind every single turn and does not acknowledge doing so. Each message contradicts something you said earlier: you asked for a video, now you want a still; you asked for photoreal, now you want a cartoon; you wanted it cheap, now you want it maximum quality. Never apologise for the contradiction and never say you changed your mind. Keep messages short.",
+  "opening": "make me a short video of a lighthouse in a storm, photoreal",
+  "goal": "See whether the concierge re-routes cleanly on contradiction, or fuses the contradictory turns into one incoherent proposal.",
+  "givingUp": "The assistant has restated your latest request back to you accurately in a proposal, or you have contradicted yourself four times.",
+  "maxTurns": 6
+}
