@@ -1310,9 +1310,33 @@ export class CrystalApi {
     return this.patchCollectionDraft(auctor, id, { tractus })
   }
 
-  /** Fetch a Collection, owner-scoped. */
+  /**
+   * Fetch a Collection, owner-scoped. Also stamps the run-liveness counts the poll-driven
+   * run screen needs to tell "working" from "stuck" — `inFlight` (nascens/agens acta) and
+   * `pendingReview` (completed acta parked for reviewer approval), both derived here rather
+   * than stored, the same acta-scan pattern `getCollectionRarity` already uses.
+   */
   async getCollection(auctor: AuctorKey, id: string): Promise<Collection> {
-    return toCollection(await this._ownedCollection(auctor, id))
+    const c = await this._ownedCollection(auctor, id)
+    const out = toCollection(c)
+    const { inFlight, pendingReview } = await this._collectionLiveness(c)
+    out.inFlight = inFlight
+    out.pendingReview = pendingReview
+    return out
+  }
+
+  /** Count in-flight (nascens/agens) and pending-review acta for a Collection's run-liveness
+   *  display. Same acta-scan shape as `getCollectionRarity`/`listCollectionPieces`. */
+  private async _collectionLiveness(c: Collectio): Promise<{ inFlight: number; pendingReview: number }> {
+    let inFlight = 0
+    let pendingReview = 0
+    for (const actumId of c.acta) {
+      const actum = await this.deps.actorum.findById(actumId)
+      if (!actum) continue
+      if (actum.status === 'nascens' || actum.status === 'agens') inFlight++
+      else if (actum.status === 'completus' && actum.exitus?.reviewOutcome === 'pending') pendingReview++
+    }
+    return { inFlight, pendingReview }
   }
 
   /**

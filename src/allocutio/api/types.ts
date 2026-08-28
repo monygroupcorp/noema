@@ -251,6 +251,13 @@ export interface Collection {
   /** Dispatching new pieces is held (in-flight pieces still finish). Present + `true`
    *  only while paused — absent means running normally. Survives a restart. */
   paused?: boolean
+  /** Acta dispatched but not yet settled (nascens/agens) — provisioning or executing.
+   *  Derived on read from the acta list, not stored. Only populated by `getCollection`
+   *  (the run screen's poll target); absent elsewhere (e.g. `listCollections`). */
+  inFlight?: number
+  /** Completed acta held for reviewer approval (`reviewOutcome: 'pending'`) — not yet
+   *  counted in `completed`. Derived on read; only populated by `getCollection`. */
+  pendingReview?: number
   /** Pieces completed so far (approved, when review is on). */
   completed: number
   /** Pieces that failed to generate so far. */
