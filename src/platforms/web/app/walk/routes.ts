@@ -6,8 +6,8 @@
 // re-parses the real route table on every run rather than caching a snapshot.
 //
 // Portability: the only App.tsx-specific code is `extractFromAppTsx` below. Porting this
-// harness to another repo (noesis, oci) means swapping that one function for an adapter that
-// reads that repo's router table — everything else (fixtures, CLI, the walker) is generic.
+// harness to another codebase means swapping that one function for an adapter that
+// reads that codebase's router table — everything else (fixtures, CLI, the walker) is generic.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
