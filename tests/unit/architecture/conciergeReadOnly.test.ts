@@ -41,6 +41,11 @@ const READ_ONLY_TOOLS = new Set([
   'list_studios',
   'get_studio',
   'list_fundamenta',
+  'list_datasets',
+  'get_dataset',
+  'list_activity',
+  'list_muse_sessions',
+  'get_muse_session',
 ])
 
 /** MCP tool wrappers that spend, write, or provision. Importing any of them into the agent puts it
