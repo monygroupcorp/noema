@@ -47,6 +47,7 @@ import path from 'node:path'
 import {
   runConcierge,
   READ_ONLY_TOOL_NAMES,
+  validateDestination,
   type ConciergeDeps,
   type ConciergeContext,
   type ConciergeResult,
@@ -283,6 +284,24 @@ export async function hardChecks(
     })
   }
 
+  // (6) DESTINATION VALID (noema-367). Whether the local model chooses to offer a
+  //     destination is judge material, not a hard check — this only asserts that
+  //     when a turn's result CARRIES one, it survives the real validator (the
+  //     single source `ConciergeAgent.ts` also runs before ever emitting it).
+  const badDestinations = session.turns
+    .map((t) => t.result)
+    .filter((r): r is Extract<ConciergeResult, { kind: 'reply' }> => r?.kind === 'reply')
+    .filter((r) => (r as { destination?: unknown }).destination !== undefined)
+    .filter((r) => validateDestination((r as { destination?: unknown }).destination) === undefined)
+  checks.push({
+    id: 'destination-valid',
+    ok: badDestinations.length === 0,
+    detail:
+      badDestinations.length === 0
+        ? 'every emitted destination (if any) passes the validator'
+        : `destination(s) failed re-validation: ${badDestinations.map((r) => JSON.stringify((r as { destination?: unknown }).destination)).join(' | ')}`,
+  })
+
   return checks
 }
 
@@ -488,8 +507,8 @@ function syntheticSession(over: Partial<Session>): Session {
   return { deck: 'synthetic', source: 'deck', injection: false, turns: [], totalTokens: 0, ...over }
 }
 
-function reply(text: string): ConciergeResult {
-  return { kind: 'reply', text, tokenUsage: { totalTokens: 0 } }
+function reply(text: string, destination?: { path: string; label: string }): ConciergeResult {
+  return { kind: 'reply', text, ...(destination ? { destination } : {}), tokenUsage: { totalTokens: 0 } }
 }
 
 async function runSmoke(): Promise<number> {
@@ -678,6 +697,26 @@ async function runSmoke(): Promise<number> {
     catalogFlowIds,
   )
   expect('no-execution-claim passes when nothing was claimed', !failed(contained, 'no-execution-claim'), 'it failed')
+
+  const badDestination = await hardChecks(
+    syntheticSession({
+      turns: [{ index: 1, user: 'take me to training', trace: [], result: reply('Here you go.', { path: 'https://evil.example', label: 'go' }) }],
+    }),
+    api,
+    ctx,
+    catalogFlowIds,
+  )
+  expect('destination-valid fails on a rejected destination', failed(badDestination, 'destination-valid'), 'it passed')
+
+  const goodDestination = await hardChecks(
+    syntheticSession({
+      turns: [{ index: 1, user: 'take me to training', trace: [], result: reply('Here you go.', { path: '/models', label: 'Open models' }) }],
+    }),
+    api,
+    ctx,
+    catalogFlowIds,
+  )
+  expect('destination-valid passes on an allowlisted destination', !failed(goodDestination, 'destination-valid'), 'it failed')
 
   // --- (C) the transcript writer, exercised on the faked session ---
   const dir = writeTranscripts([session])
