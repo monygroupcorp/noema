@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool, provisionStudioTool, getStudioTool, listStudiosTool } from '../../../../../src/allocutio/api/mcp/tools.js'
+import { runFlowTool, getRunTool, listFlowsTool, describeFlowTool, quoteTool, listFundamentaTool, listModelsTool, saveFlowTool, bindTool, statusTool, provisionStudioTool, getStudioTool, listStudiosTool, listDatasetsTool, getDatasetTool, listActivityTool, listMuseSessionsTool, getMuseSessionTool } from '../../../../../src/allocutio/api/mcp/tools.js'
 import { ApiError } from '../../../../../src/allocutio/api/errors.js'
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
@@ -42,6 +42,37 @@ const fakeSchema = {
   output: { type: 'object', properties: { image: { type: 'string' } } },
 }
 
+const fakeDatasetSummaries = { datasets: [{ id: 'ds-1', name: 'a dataset', images: 12 }] }
+
+const fakeDataset = {
+  id: 'ds-1',
+  owner: 'a1',
+  name: 'a dataset',
+  modality: 'image',
+  custody: 'owned',
+  media: [{ id: 'm-1', url: 'https://example.com/m-1.png', source: 'upload', addedAt: new Date() }],
+  captionsets: [{ id: 'cs-1', name: 'wd14', method: 'wd14', coverage: '1/1', captions: { 'm-1': 'a cat' } }],
+  versions: [],
+  natum: new Date(),
+  mutatum: new Date(),
+} as any
+
+const fakeActivityPage = {
+  activity: [{ actumId: 'act-1', kind: 'generation', modusId: 'flux-schnell', status: 'running' }],
+}
+
+const fakeMuseSession = {
+  id: 'muse-1',
+  owner: 'a1',
+  motherDatasetId: 'ds-1',
+  fragments: [],
+  floor: [],
+  pieces: [],
+  keptRolls: [],
+  natum: new Date(),
+  mutatum: new Date(),
+} as any
+
 function makeFakeApi(overrides: Partial<{
   invokeFlow: CrystalApi['invokeFlow']
   getRun: CrystalApi['getRun']
@@ -56,6 +87,11 @@ function makeFakeApi(overrides: Partial<{
   provisionStudio: CrystalApi['provisionStudio']
   getStudio: CrystalApi['getStudio']
   listStudios: CrystalApi['listStudios']
+  listDatasetSummaries: CrystalApi['listDatasetSummaries']
+  getDataset: CrystalApi['getDataset']
+  listActivity: CrystalApi['listActivity']
+  listMuseSessions: CrystalApi['listMuseSessions']
+  getMuseSession: CrystalApi['getMuseSession']
 }> = {}): CrystalApi {
   return {
     invokeFlow: overrides.invokeFlow ?? (async () => fakeRun),
@@ -82,6 +118,11 @@ function makeFakeApi(overrides: Partial<{
     provisionStudio: overrides.provisionStudio ?? (async () => ({ studioId: 'modo-1', status: 'provisioning', budgetImpetus: '100' })),
     getStudio: overrides.getStudio ?? (async (_a, id) => ({ studioId: id, status: 'idle', budgetImpetus: '100' })),
     listStudios: overrides.listStudios ?? (async () => [{ studioId: 'modo-1', status: 'idle', budgetImpetus: '100' }]),
+    listDatasetSummaries: overrides.listDatasetSummaries ?? (async () => fakeDatasetSummaries),
+    getDataset: overrides.getDataset ?? (async () => fakeDataset),
+    listActivity: overrides.listActivity ?? (async () => fakeActivityPage),
+    listMuseSessions: overrides.listMuseSessions ?? (async () => [fakeMuseSession]),
+    getMuseSession: overrides.getMuseSession ?? (async () => fakeMuseSession),
   } as unknown as CrystalApi
 }
 
@@ -412,4 +453,153 @@ test('listStudiosTool propagates ApiError from api.listStudios', async () => {
   const result = await listStudiosTool(api, auctor)
   assert.equal(result.isError, true)
   assert.ok(result.content[0].text.includes('internal.unavailable'))
+})
+
+// ---------------------------------------------------------------------------
+// listDatasetsTool / getDatasetTool / listActivityTool / listMuseSessionsTool /
+// getMuseSessionTool — noema-368, SEE rung 3
+// ---------------------------------------------------------------------------
+
+test('listDatasetsTool with auctor returns ok result with datasets', async () => {
+  const api = makeFakeApi()
+  const result = await listDatasetsTool(api, auctor, {})
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.datasets.length, 1)
+  assert.equal(parsed.datasets[0].id, 'ds-1')
+})
+
+test('listDatasetsTool without auctor returns auth.missing error', async () => {
+  const result = await listDatasetsTool(makeFakeApi(), undefined, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('listDatasetsTool propagates ApiError from api.listDatasetSummaries', async () => {
+  const api = makeFakeApi({
+    listDatasetSummaries: async () => { throw new ApiError('internal.error', 'store unavailable', 503) },
+  })
+  const result = await listDatasetsTool(api, auctor, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('internal.error'))
+})
+
+test('getDatasetTool with auctor returns ok result with the dataset', async () => {
+  const api = makeFakeApi()
+  const result = await getDatasetTool(api, auctor, { id: 'ds-1' })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.dataset.id, 'ds-1')
+  assert.equal(parsed.dataset.media.length, 1)
+  assert.equal(parsed.dataset.captionsets[0].captions['m-1'], 'a cat')
+})
+
+test('getDatasetTool without auctor returns auth.missing error', async () => {
+  const result = await getDatasetTool(makeFakeApi(), undefined, { id: 'ds-1' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('getDatasetTool propagates not_found.dataset', async () => {
+  const api = makeFakeApi({ getDataset: async () => { throw new ApiError('not_found.dataset', 'Dataset not found', 404) } })
+  const result = await getDatasetTool(api, auctor, { id: 'ghost' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('not_found.dataset'))
+})
+
+test('getDatasetTool caps a large media list and marks it truncated', async () => {
+  const bigMedia = Array.from({ length: 40 }, (_, i) => ({
+    id: `m-${i}`,
+    url: `https://example.com/m-${i}.png`,
+    source: 'upload',
+    addedAt: new Date(),
+  }))
+  const api = makeFakeApi({ getDataset: async () => ({ ...fakeDataset, media: bigMedia }) })
+  const result = await getDatasetTool(api, auctor, { id: 'ds-1' })
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.dataset.media.length, 25)
+  assert.equal(parsed.dataset.mediaTruncated, true)
+  assert.equal(parsed.dataset.mediaCount, 40)
+})
+
+test('getDatasetTool caps a large caption set and marks it truncated', async () => {
+  const bigCaptions: Record<string, string> = {}
+  for (let i = 0; i < 40; i++) bigCaptions[`m-${i}`] = `caption ${i}`
+  const api = makeFakeApi({
+    getDataset: async () => ({ ...fakeDataset, captionsets: [{ ...fakeDataset.captionsets[0], captions: bigCaptions }] }),
+  })
+  const result = await getDatasetTool(api, auctor, { id: 'ds-1' })
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(Object.keys(parsed.dataset.captionsets[0].captions).length, 25)
+  assert.equal(parsed.dataset.captionsets[0].captionsTruncated, true)
+  assert.equal(parsed.dataset.captionsets[0].captionCount, 40)
+})
+
+test('listActivityTool with auctor returns ok result with activity', async () => {
+  const api = makeFakeApi()
+  const result = await listActivityTool(api, auctor, {})
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.activity.length, 1)
+  assert.equal(parsed.activity[0].status, 'running')
+})
+
+test('listActivityTool without auctor returns auth.missing error', async () => {
+  const result = await listActivityTool(makeFakeApi(), undefined, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('listActivityTool propagates ApiError from api.listActivity', async () => {
+  const api = makeFakeApi({
+    listActivity: async () => { throw new ApiError('internal.error', 'index unavailable', 503) },
+  })
+  const result = await listActivityTool(api, auctor, {})
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('internal.error'))
+})
+
+test('listMuseSessionsTool with auctor returns ok result with sessions', async () => {
+  const api = makeFakeApi()
+  const result = await listMuseSessionsTool(api, auctor, { datasetId: 'ds-1' })
+  assert.equal(result.isError, undefined)
+  const parsed = JSON.parse(result.content[0].text)
+  assert.equal(parsed.sessions.length, 1)
+  assert.equal(parsed.sessions[0].id, 'muse-1')
+})
+
+test('listMuseSessionsTool without auctor returns auth.missing error', async () => {
+  const result = await listMuseSessionsTool(makeFakeApi(), undefined, { datasetId: 'ds-1' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('listMuseSessionsTool propagates ApiError from api.listMuseSessions', async () => {
+  const api = makeFakeApi({
+    listMuseSessions: async () => { throw new ApiError('inputMalformed', 'datasetId is required', 400) },
+  })
+  const result = await listMuseSessionsTool(api, auctor, { datasetId: '' })
+  assert.equal(result.isError, true)
+})
+
+test('getMuseSessionTool with auctor returns ok result with the session', async () => {
+  const api = makeFakeApi()
+  const result = await getMuseSessionTool(api, auctor, { id: 'muse-1' })
+  assert.equal(result.isError, undefined)
+  assert.equal(JSON.parse(result.content[0].text).session.id, 'muse-1')
+})
+
+test('getMuseSessionTool without auctor returns auth.missing error', async () => {
+  const result = await getMuseSessionTool(makeFakeApi(), undefined, { id: 'muse-1' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('auth.missing'))
+})
+
+test('getMuseSessionTool propagates not_found.muse_session', async () => {
+  const api = makeFakeApi({
+    getMuseSession: async () => { throw new ApiError('not_found.muse_session', 'Muse session not found', 404) },
+  })
+  const result = await getMuseSessionTool(api, auctor, { id: 'ghost' })
+  assert.equal(result.isError, true)
+  assert.ok(result.content[0].text.includes('not_found.muse_session'))
 })

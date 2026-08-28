@@ -11,7 +11,7 @@
 // unauthenticated.
 // =============================================================================
 
-import type { CrystalApi, SaveFlowOpts, CollectOpts, ListRunsOpts } from '../CrystalApi.js'
+import type { CrystalApi, SaveFlowOpts, CollectOpts, ListRunsOpts, ListActivityOpts } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import type { IntelligensGenus } from '../../../types/intelligendi.js'
 import { ApiError } from '../errors.js'
@@ -296,6 +296,115 @@ export async function listStudiosTool(
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
     return ok({ studios: await api.listStudios(auctor) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Datasets, activity, and Muse sessions — SEE rung 3
+// ---------------------------------------------------------------------------
+
+/** Arrays this large are capped for tool output — the result feeds a bounded local
+ *  model on a step budget, and a full media/caption dump is a self-inflicted context
+ *  wipe. No existing handler needed this idiom; 25 + a `truncated` marker is the floor. */
+const TOOL_ARRAY_CAP = 25
+
+function capArray<T>(items: T[]): { items: T[]; truncated?: true } {
+  if (items.length <= TOOL_ARRAY_CAP) return { items }
+  return { items: items.slice(0, TOOL_ARRAY_CAP), truncated: true }
+}
+
+export async function listDatasetsTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { cursor?: string; limit?: number } = {},
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.listDatasetSummaries(auctor, args))
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+/** Full dataset incl. captionsets — how the agent fills a training aditus. Media and
+ *  per-captionset caption text are capped (see `capArray`): a dataset can carry
+ *  hundreds of media items and full caption strings, which would blow the tool's
+ *  context budget uncapped. */
+export async function getDatasetTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { id: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    const dataset = await api.getDataset(auctor, args.id)
+    const media = capArray(dataset.media)
+    const captionsets = dataset.captionsets.map((cs) => {
+      const entries = Object.entries(cs.captions ?? {})
+      const cappedEntries = capArray(entries)
+      return {
+        ...cs,
+        captions: Object.fromEntries(cappedEntries.items),
+        ...(cappedEntries.truncated ? { captionsTruncated: true, captionCount: entries.length } : {}),
+      }
+    })
+    return ok({
+      dataset: {
+        ...dataset,
+        media: media.items,
+        ...(media.truncated ? { mediaTruncated: true, mediaCount: dataset.media.length } : {}),
+        captionsets,
+      },
+    })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+/** In-flight + settled activity, newest first — closes the get_run/list_runs
+ *  settled-only gap ("is my run stuck"). */
+export async function listActivityTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: ListActivityOpts = {},
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok(await api.listActivity(auctor, args))
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+export async function listMuseSessionsTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { datasetId: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ sessions: await api.listMuseSessions(auctor, args.datasetId) })
+  } catch (e) {
+    if (e instanceof ApiError) return errResult(e.code, e.message)
+    return errResult('internal.error', String(e))
+  }
+}
+
+/** Read-only view of one Muse session's floor/pieces state. */
+export async function getMuseSessionTool(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  args: { id: string },
+): Promise<McpResult> {
+  if (!auctor) return errResult('auth.missing', 'authentication required')
+  try {
+    return ok({ session: await api.getMuseSession(auctor, args.id) })
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))
