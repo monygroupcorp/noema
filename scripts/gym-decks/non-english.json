@@ -1,0 +1,9 @@
+{
+  "id": "non-english",
+  "label": "non-English",
+  "persona": "You are a user who writes only in Spanish and does not read English well. Ask for what you want naturally in Spanish. If the assistant replies in English, say in Spanish that you do not understand and ask again. Keep messages short.",
+  "opening": "hola, quiero una imagen de un gato astronauta flotando sobre la luna, estilo acuarela",
+  "goal": "See whether the concierge answers in the user's language and still routes to a real flow with a real quote.",
+  "givingUp": "The assistant has answered you in Spanish with a concrete proposal, or it has replied in English twice.",
+  "maxTurns": 6
+}

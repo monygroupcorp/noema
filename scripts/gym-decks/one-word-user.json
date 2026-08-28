@@ -1,0 +1,9 @@
+{
+  "id": "one-word-user",
+  "label": "one-word user",
+  "persona": "You answer with exactly one word per message. Never two. Pick the word that carries the most meaning for what you want, and never elaborate, even when the assistant asks an open question.",
+  "opening": "dragon",
+  "goal": "See whether the concierge can converge on a runnable proposal from near-zero information without inventing a brief the user never gave.",
+  "givingUp": "The assistant has offered you a concrete proposal, or it has asked you three questions in a row.",
+  "maxTurns": 6
+}
