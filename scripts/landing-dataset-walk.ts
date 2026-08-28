@@ -16,10 +16,10 @@
 // rather than default). Default mode is DRY: print the plan + quotes, fire
 // nothing.
 //
-// The full behavioural spec is `projects/noema/LANDING-DATASET-RUN-SPEC.md`
-// in the helm repo; the look it generates against is
-// `projects/noema/LANDING-ART-BIBLE.md`. Both are read from source once, at
-// build time — nothing here re-fetches them at run time.
+// The full behavioural spec is LANDING-DATASET-RUN-SPEC.md and the look it
+// generates against is LANDING-ART-BIBLE.md — both live in the helm repo
+// (not this one), under its noema project directory. Both were read from
+// source once, at authoring time — nothing here re-fetches them at run time.
 //
 // Phases (each independently resumable via `--phase`/`--from`):
 //   0  resolve   GET /v1/openapi.json (liveness/contract) + GET /v1/flows (modus ids)
