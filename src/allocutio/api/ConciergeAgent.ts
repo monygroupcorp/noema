@@ -333,6 +333,16 @@ const TOOL_SPECS: OpenRouterToolSpec[] = [
   },
 ]
 
+/** The canonical read-only tool-name set, derived from TOOL_SPECS itself plus the `list_models`
+ *  alias `executeTool` also accepts for `search_models`. Registering a tool in TOOL_SPECS IS
+ *  updating this set — nothing here is hand-maintained. Every other module that needs to know
+ *  the concierge's read-only tool surface (the gym, its sibling test assertions) imports THIS
+ *  rather than keeping its own copy. */
+export const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...TOOL_SPECS.map((spec) => spec.function.name),
+  'list_models',
+])
+
 // ---------------------------------------------------------------------------
 // System prompt (Q3 first draft — the exact text is the operator-reserved PR-review
 // carve-out, DOCTRINE §4). Encodes the house rules; refine at PR.
