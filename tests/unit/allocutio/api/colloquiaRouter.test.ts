@@ -19,6 +19,7 @@ import {
   DEFAULT_CONCIERGE_TURN_CAP_IMPETUS as CAP,
   type ColloquiaRouterDeps,
 } from '../../../../src/allocutio/api/colloquiaRouter.js'
+import { READ_ONLY_TOOL_NAMES as READ_ONLY_TOOLS } from '../../../../src/allocutio/api/ConciergeAgent.js'
 import { chatImpetus } from '../../../../src/crystal/apiProviders.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Colloquium, Dictum } from '../../../../src/types/colloquium.js'
@@ -30,22 +31,6 @@ import type {
   OpenRouterToolSpec,
   OpenRouterToolCall,
 } from '../../../../src/allocutio/api/OpenRouterToolClient.js'
-
-const READ_ONLY_TOOLS = new Set([
-  'list_flows',
-  'describe_flow',
-  'search_models',
-  'list_models',
-  'quote',
-  'get_run',
-  'list_runs',
-  'status',
-  'list_collections',
-  'get_collection',
-  'list_studios',
-  'get_studio',
-  'list_fundamenta',
-])
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 

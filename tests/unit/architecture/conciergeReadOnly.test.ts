@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
+import { READ_ONLY_TOOL_NAMES } from '../../../src/allocutio/api/ConciergeAgent.js'
+
 // The ConciergeAgent's first hard invariant is that it PROPOSES and never SPENDS: its whole tool
 // surface is the read-only discovery handlers, and it never reaches a spend method. That
 // invariant was held by a runtime test (colloquiaRouter's "can never be induced to emit a spend
@@ -11,12 +13,20 @@ import path from 'node:path'
 // and fails on the edit itself — the import, the reference, or the extra tool spec — which is the
 // form the breach would actually take.
 //
-// Scope: ConciergeAgent.ts only. Every other module is free to import spend tools; that is what
-// the dispatch path is for.
+// Scope: ConciergeAgent.ts only, EXCEPT the last test below, which confirms a known downstream
+// consumer (the gym) derives its own notion of "read-only" from ConciergeAgent's export instead
+// of re-hardcoding a copy that can silently drift (noema-366). Every other module is free to
+// import spend tools; that is what the dispatch path is for.
 
 const AGENT = path.join(process.cwd(), 'src', 'allocutio', 'api', 'ConciergeAgent.ts')
+const GYM = path.join(process.cwd(), 'scripts', 'concierge-gym.ts')
 
-/** The twelve read-only discovery handlers, plus the `list_models` alias the executor documents. */
+/** This guard's OWN confirmed allowlist — the twelve read-only discovery handlers, plus the
+ *  `list_models` alias the executor documents. Deliberately NOT sourced from ConciergeAgent's
+ *  export: the guard below cross-checks the export against this list so that a name ADDED to
+ *  the export (a legitimate new tool, or a spend tool slipped into TOOL_SPECS) still requires a
+ *  human to update this list before the guard goes green again — it never rubber-stamps the
+ *  export it partly reads. */
 const READ_ONLY_TOOLS = new Set([
   'list_flows',
   'describe_flow',
@@ -99,5 +109,33 @@ test('ConciergeAgent registers no tool spec outside the read-only set', () => {
     cases.filter((n) => !READ_ONLY_TOOLS.has(n)),
     [],
     `executeTool may only dispatch read-only discovery tools. Cases: ${cases.join(', ')}`,
+  )
+
+  // Cross-check against ConciergeAgent's own exported canonical set (asserts against the SAME
+  // export, not just this file's independent source-text parse). Equality, not subset: if
+  // TOOL_SPECS gains ANY name — legitimate tool or a fake spend-named one — the export changes
+  // and this list must be updated deliberately to match, or the guard stays red.
+  assert.deepEqual(
+    [...READ_ONLY_TOOL_NAMES].sort(),
+    [...READ_ONLY_TOOLS].sort(),
+    `ConciergeAgent's exported canonical read-only set no longer matches this guard's confirmed ` +
+      `allowlist. Exported: ${[...READ_ONLY_TOOL_NAMES].sort().join(', ')} | Guard: ` +
+      `${[...READ_ONLY_TOOLS].sort().join(', ')}`,
+  )
+})
+
+test('concierge-gym derives its read-only tool set from the canonical export (no local copy)', () => {
+  const code = stripComments(readFileSync(GYM, 'utf8'))
+  assert.match(
+    code,
+    /import\s*\{[^}]*\bREAD_ONLY_TOOL_NAMES\b[^}]*\}\s*from\s*['"]\.\.\/src\/allocutio\/api\/ConciergeAgent\.js['"]/,
+    'scripts/concierge-gym.ts must import READ_ONLY_TOOL_NAMES from ConciergeAgent rather than ' +
+      'declaring its own read-only tool list — that is the exact copy that drifted (noema-366).',
+  )
+  assert.doesNotMatch(
+    code,
+    /new Set\(\s*\[\s*['"]list_flows['"]/,
+    'scripts/concierge-gym.ts appears to hardcode a read-only tool list literal again instead of ' +
+      'importing the canonical export.',
   )
 })
