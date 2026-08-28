@@ -31,10 +31,7 @@ npm run walk
 `WALK_BASE_URL` can point at a local dev server, staging, or prod — the harness doesn't care.
 `WALK_EMAIL`/`WALK_PASSWORD` are optional: without them the walk still runs, as an anonymous
 session (many screens work anon; auth-gated ones capture whatever the anon/redirect state
-renders, which is a real observation, not a failure). The fleet's own account for this is
-`an internal account` (credential file `an internal path`); as of this item's build that
-credential is expired — rotating it gates the first *live* run against a real target, not this
-build.
+renders, which is a real observation, not a failure).
 
 The login session is cached to a gitignored `walk/.storage-state.json` local to the machine
 running the walk; delete it to force a fresh sign-in.

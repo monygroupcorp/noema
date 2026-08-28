@@ -2,7 +2,7 @@
 //
 // Fixture ids for every parameterized route. `walk/routes.ts` FAILS LOUDLY (throws) when it
 // finds a route with a `:param` that has no entry here — a silently-skipped route reads as
-// coverage that isn't there (a known pitfall). When a new parameterized route lands in
+// coverage that isn't there. When a new parameterized route lands in
 // `App.tsx`, add its fixture here or the census (and the walk) refuse to run.
 //
 // Keys are the route's path TEMPLATE exactly as written in `App.tsx` (e.g. "/datasets/:id"),

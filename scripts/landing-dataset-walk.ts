@@ -16,10 +16,6 @@
 // rather than default). Default mode is DRY: print the plan + quotes, fire
 // nothing.
 //
-// The full behavioural spec is `an internal spec`
-// internally; the look it generates against is
-// `an internal doc`. Both are read from source once, at
-// build time — nothing here re-fetches them at run time.
 //
 // Phases (each independently resumable via `--phase`/`--from`):
 //   0  resolve   GET /v1/openapi.json (liveness/contract) + GET /v1/flows (modus ids)
