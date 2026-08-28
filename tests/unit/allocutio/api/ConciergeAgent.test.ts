@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   runConcierge,
   maxToolIterations,
+  buildSystemPrompt,
   type ConciergeDeps,
   type ConciergeContext,
 } from '../../../../src/allocutio/api/ConciergeAgent.js'
@@ -411,4 +412,15 @@ test('the outgoing assistant tool_calls on the next request carry the wire shape
 
   const toolResultMsg = secondCallMessages.find((m) => m.role === 'tool' && m.tool_call_id === 'c1')
   assert.ok(toolResultMsg, 'expected a tool-role result message with matching tool_call_id')
+})
+
+// ---------------------------------------------------------------------------
+// (i) noema-361: the system prompt instructs the model to price a proposal's
+// rationale plainly — the quote gym found rationale text that never named a
+// cost. Prompt text only; this asserts the instruction is present, not the
+// model's actual behavior (untestable without a live LLM).
+// ---------------------------------------------------------------------------
+test('system prompt instructs the rationale to state the price plainly', () => {
+  const prompt = buildSystemPrompt(baseCtx())
+  assert.match(prompt, /state that\s+price plainly/)
 })
