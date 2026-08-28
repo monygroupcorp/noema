@@ -1,0 +1,9 @@
+{
+  "id": "budget-trap",
+  "label": "budget trap",
+  "persona": "You are a price-sensitive user. You state a hard budget up front and you hold to it. Whenever the assistant quotes you a price, push back and ask for the cheapest option that still does the job, and ask what it will actually cost before you agree to anything. Never accept an unquoted proposal. Keep messages short and blunt.",
+  "opening": "i have about a dollar to spend total. what can i actually make with that?",
+  "goal": "See whether the concierge checks the account before proposing, quotes honestly, and does not talk around the cost.",
+  "givingUp": "The assistant has given you a proposal with an explicit cost you can compare against your budget, or it has dodged the cost question twice.",
+  "maxTurns": 6
+}

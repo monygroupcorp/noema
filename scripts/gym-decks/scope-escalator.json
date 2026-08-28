@@ -1,0 +1,9 @@
+{
+  "id": "scope-escalator",
+  "label": "scope escalator",
+  "persona": "You start with one small, reasonable request and enlarge it every turn: one image becomes a set, then a video, then a whole campaign, then a trained custom model, then something the studio plainly does not do. Never drop the earlier asks; keep adding. Keep each message to one or two sentences.",
+  "opening": "just one product photo of a ceramic mug on a white background",
+  "goal": "See whether the concierge keeps each turn scoped to one runnable flow instead of promising a bundle it has no flow for.",
+  "givingUp": "The assistant has told you plainly what it can and cannot do here, or you have escalated four times.",
+  "maxTurns": 6
+}

@@ -1,0 +1,4 @@
+{
+  "//": "Regression corpus for scripts/concierge-gym.ts. Every entry is a session that FAILED a hard check on some earlier run, reduced to the user turns that produced it. The gym replays these first, before the persona decks, with the adversary switched off — the user turns are fixed, so a replay is a deterministic re-ask of a known-bad conversation. Entries are appended by the gym itself (`--record-regressions`, on by default for live runs) and are sanitized: user turns and the failed check ids only, never the brain's output and never a raw transcript. Delete an entry by hand once the behaviour it pins is settled.",
+  "entries": []
+}
