@@ -78,11 +78,13 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'status',
 ])
 
-const DEFAULT_BRAIN_URL = 'http://127.0.0.1:11434/v1'
-const DEFAULT_BRAIN_MODEL = 'qwen3.8:27b'
+// Exported: scripts/concierge-gym-referee.ts reuses the same local-brain wiring
+// rather than duplicating endpoint/model defaults.
+export const DEFAULT_BRAIN_URL = 'http://127.0.0.1:11434/v1'
+export const DEFAULT_BRAIN_MODEL = 'qwen3.8:27b'
 const DEFAULT_ADVERSARY_MODEL = 'escha-qwen38:27b'
 /** Local OpenAI-compatible servers ignore the bearer key; send a constant, never a real one. */
-const LOCAL_PLACEHOLDER_KEY = 'local'
+export const LOCAL_PLACEHOLDER_KEY = 'local'
 /** The adversary emits this exact token when its deck's giving-up condition is met. */
 const DONE_TOKEN = '[[DONE]]'
 const DEFAULT_MAX_TURNS = 6
@@ -134,7 +136,10 @@ function loadRegressions(): RegressionEntry[] {
   return raw.entries ?? []
 }
 
-function appendRegression(entry: RegressionEntry): void {
+// Exported: the referee (scripts/concierge-gym-referee.ts) appends a verified
+// FIND through this same path, so a referee-sourced entry is indistinguishable
+// from one the gym recorded itself.
+export function appendRegression(entry: RegressionEntry): void {
   const raw = JSON.parse(readFileSync(REGRESSION_PATH, 'utf8')) as Record<string, unknown> & {
     entries?: RegressionEntry[]
   }
@@ -358,7 +363,9 @@ function renderAssistant(result: ConciergeResult | undefined, error?: string): s
 // -----------------------------------------------------------------------------
 // One session.
 // -----------------------------------------------------------------------------
-interface SessionOpts {
+// Exported: the referee drives the same scripted-replay path the gym uses for
+// regression entries — a submitted arena entry IS a regression-shaped replay.
+export interface SessionOpts {
   deck: Deck
   api: CrystalApi
   brain: ConciergeDeps
@@ -369,7 +376,7 @@ interface SessionOpts {
   meter: { total: number; limit?: number }
 }
 
-async function runSession(opts: SessionOpts): Promise<Session> {
+export async function runSession(opts: SessionOpts): Promise<Session> {
   const { deck, brain, ctx, scriptedTurns, adversary, meter } = opts
   const maxTurns = scriptedTurns?.length ?? deck.maxTurns ?? DEFAULT_MAX_TURNS
   const session: Session = {
@@ -876,7 +883,13 @@ async function main(): Promise<void> {
   process.exit(failures === 0 && aborted === undefined ? 0 : 1)
 }
 
-main().catch((e) => {
-  console.error('concierge-gym: fatal error', e)
-  process.exit(1)
-})
+// Entrypoint guard (same convention as scripts/migrations/*.ts): this module is
+// now also IMPORTED, by scripts/concierge-gym-referee.ts, for its exported
+// session runner and hard checks. Without this guard, importing it would also
+// run its own CLI `main()` against the importer's argv.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error('concierge-gym: fatal error', e)
+    process.exit(1)
+  })
+}
