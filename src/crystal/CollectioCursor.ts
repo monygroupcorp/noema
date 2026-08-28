@@ -2,6 +2,7 @@ import type { Collectio, Collectionum } from '../types/collectio.js'
 import type { Actorum, Inceptio } from '../types/cursus.js'
 import type { Actum } from '../types/actum.js'
 import { selectForPiece } from './TraitMixer.js'
+import { dispatchFailureActumId } from '../execution/dispatchInceptio.js'
 
 // =============================================================================
 // CollectioCursor — batch fan-out orchestrator
@@ -333,6 +334,7 @@ export class CollectioCursor {
 
     const totalPieces = collectio.numerus + collectio.reiectae
     const syncDone: string[] = []
+    let failedDispatches = 0
 
     while (
       state.running.size < collectio.concurrentia &&
@@ -373,7 +375,36 @@ export class CollectioCursor {
         by: collectio.by,
       }
 
-      const result = await this.dispatch(inceptio)
+      let result
+      try {
+        result = await this.dispatch(inceptio)
+      } catch (err) {
+        // A dispatch that threw is a piece this collection does not get. Two things
+        // have to happen here or the collection loses track of it:
+        //
+        //  1. If an actum was persisted before the throw, its id comes back on the
+        //     error. Append it to `acta` so the run the collection paid to initiate is
+        //     a visible member of the collection, settled like any other terminal
+        //     piece. Its signa were already released by the dispatch itself.
+        //  2. Count it in `fractae` and carry on. No completion event is coming for
+        //     this piece — it never entered `running`, so neither the webhook nor
+        //     `onActumCompleta` will ever advance the collection on its behalf.
+        //
+        // The piece consumes its slot in the dispatch budget: a failed piece is
+        // failed, and no replacement is dispatched for it (that is what `reiectae`
+        // does, for reviewer rejections only).
+        failedDispatches += 1
+        const failedActumId = dispatchFailureActumId(err)
+        const current = await this.collectiones.find(collectioId)
+        if (current) {
+          await this.collectiones.update(collectioId, {
+            fractae: current.fractae + 1,
+            ...(failedActumId ? { acta: [...current.acta, failedActumId] } : {}),
+          })
+        }
+        continue
+      }
+
       const actum = result.actum
       state.running.add(actum.id)
 
@@ -394,6 +425,12 @@ export class CollectioCursor {
     for (const actumId of syncDone) {
       await this.onActumCompleta(collectioId, actumId, true)
     }
+
+    // A piece whose dispatch threw produces no completion event, so this is the only
+    // place that can settle the collection on its behalf. Without it a collection whose
+    // dispatches all fail stays `agens` forever with nothing in flight — no pieces, no
+    // terminal state, and nothing to tell anyone it is finished.
+    if (failedDispatches > 0) await this._checkDone(collectioId)
   }
 
   /** Check if the Collectio is done and mark it completa if so. */

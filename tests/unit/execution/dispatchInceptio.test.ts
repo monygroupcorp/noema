@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dispatchInceptio } from '../../../src/execution/dispatchInceptio.js'
+import { dispatchInceptio, dispatchFailureActumId } from '../../../src/execution/dispatchInceptio.js'
 import type { DispatchDeps } from '../../../src/execution/dispatchInceptio.js'
 import type { Inceptio } from '../../../src/types/cursus.js'
 import type { Actum } from '../../../src/types/actum.js'
@@ -42,6 +42,8 @@ interface Spies {
   initiateArgs: Inceptio[]
   completeCalls: number
   indexRecords: ActumIndex[]
+  /** Every completor.fail() the dispatch made — the release of the locked signa. */
+  failCalls: Array<{ actumId: string; signaConsumed: string[]; error: string }>
 }
 
 function makeDeps(
@@ -80,7 +82,14 @@ function makeDeps(
           impetus: exitus.impetus,
         }
       },
-      fail: async (actum, error) => ({ ...actum, status: 'fractus' as const, error }),
+      fail: async (actum, error) => {
+        spies.failCalls.push({
+          actumId: actum.id,
+          signaConsumed: actum.signaConsumed,
+          error,
+        })
+        return { ...actum, status: 'fractus' as const, error }
+      },
     },
   }
   if (opts.withIndex) {
@@ -94,7 +103,7 @@ function makeDeps(
 }
 
 function makeSpies(): Spies {
-  return { initiateArgs: [], completeCalls: 0, indexRecords: [] }
+  return { initiateArgs: [], completeCalls: 0, indexRecords: [], failCalls: [] }
 }
 
 function makeInceptio(overrides: Partial<Inceptio> = {}): Inceptio {
@@ -307,7 +316,18 @@ test('noema-078: an already-established outer trace is reused, not shadowed by a
   }
 })
 
-test('throws when modus is not found after initiation', async () => {
+// ---------------------------------------------------------------------------
+// noema-359: every post-initiate throw releases the signa the initiation locked
+// and hands the persisted actum id back to the caller.
+//
+// Once `inceptor.initiate` returns, an Actum exists and its signa are LOCKED. Any
+// throw after that point is a terminal run, so these tests assert the RELEASE (the
+// completor.fail call carrying the actum's locked signa), not merely that a throw
+// happened — deleting the release leaves the throw intact and would keep a
+// throw-only assertion green.
+// ---------------------------------------------------------------------------
+
+test('modus not found after initiation: throws, and releases the locked signa', async () => {
   const spies = makeSpies()
   const deps = makeDeps(
     { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
@@ -322,6 +342,127 @@ test('throws when modus is not found after initiation', async () => {
   await assert.rejects(
     () => dispatchInceptio(deps, makeInceptio()),
     /not found after initiation/,
+  )
+
+  assert.equal(spies.failCalls.length, 1, 'the persisted actum was settled, not left nascens')
+  assert.equal(spies.failCalls[0].actumId, 'actum-1')
+  assert.deepEqual(
+    spies.failCalls[0].signaConsumed,
+    ['sig-1'],
+    'the signa locked at initiation were the ones released',
+  )
+})
+
+test('cursor resolution failure: throws, and releases the locked signa', async () => {
+  const spies = makeSpies()
+  const deps = makeDeps(
+    { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
+    spies,
+  )
+  deps.cursorum = {
+    register: () => {},
+    resolve: () => { throw new Error('No cursor registered for ministerium') },
+  }
+
+  await assert.rejects(
+    () => dispatchInceptio(deps, makeInceptio()),
+    /No cursor registered/,
+  )
+
+  assert.equal(spies.failCalls.length, 1, 'the persisted actum was settled, not left nascens')
+  assert.equal(spies.failCalls[0].actumId, 'actum-1')
+  assert.deepEqual(spies.failCalls[0].signaConsumed, ['sig-1'])
+})
+
+test('cursor run failure: throws, and releases the locked signa', async () => {
+  const spies = makeSpies()
+  const deps = makeDeps(
+    { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
+    spies,
+  )
+  deps.cursorum = {
+    register: () => {},
+    resolve: () => ({
+      reserve: async () => 100n,
+      run: async () => { throw new Error('pod refused the job') },
+    }),
+  }
+
+  await assert.rejects(
+    () => dispatchInceptio(deps, makeInceptio()),
+    /pod refused the job/,
+  )
+
+  assert.equal(spies.failCalls.length, 1)
+  assert.deepEqual(spies.failCalls[0].signaConsumed, ['sig-1'])
+})
+
+test('a post-initiate failure carries the persisted actum id back to the caller', async () => {
+  const spies = makeSpies()
+  const deps = makeDeps(
+    { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
+    spies,
+  )
+  deps.cursorum = {
+    register: () => {},
+    resolve: () => { throw new Error('No cursor registered for ministerium') },
+  }
+
+  const err = await dispatchInceptio(deps, makeInceptio()).then(
+    () => { throw new Error('expected the dispatch to throw') },
+    (e: unknown) => e,
+  )
+
+  assert.equal(dispatchFailureActumId(err), 'actum-1')
+  // The error itself is unchanged: same type, same message, and the id is not
+  // enumerable so it does not surface in serialisation or key iteration.
+  assert.ok(err instanceof Error)
+  assert.match((err as Error).message, /No cursor registered/)
+  assert.deepEqual(Object.keys(err as object), [])
+})
+
+test('a failure BEFORE any actum exists carries no actum id', async () => {
+  const spies = makeSpies()
+  const deps = makeDeps(
+    { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
+    spies,
+  )
+  deps.inceptor = {
+    initiate: (async () => { throw new Error('insufficient balance') }) as DispatchDeps['inceptor']['initiate'],
+  }
+
+  const err = await dispatchInceptio(deps, makeInceptio()).then(
+    () => { throw new Error('expected the dispatch to throw') },
+    (e: unknown) => e,
+  )
+
+  assert.match((err as Error).message, /insufficient balance/)
+  assert.equal(
+    dispatchFailureActumId(err),
+    undefined,
+    'nothing was persisted, so there is nothing for the caller to account for',
+  )
+  assert.equal(spies.failCalls.length, 0, 'no actum to settle')
+})
+
+test('a settle failure does not replace the original error', async () => {
+  const spies = makeSpies()
+  const deps = makeDeps(
+    { kind: 'sync', exitus: { exitus: {}, impetus: 100n } },
+    spies,
+  )
+  deps.cursorum = {
+    register: () => {},
+    resolve: () => { throw new Error('No cursor registered for ministerium') },
+  }
+  deps.completor = {
+    ...deps.completor,
+    fail: async () => { throw new Error('ledger unavailable') },
+  }
+
+  await assert.rejects(
+    () => dispatchInceptio(deps, makeInceptio()),
+    /No cursor registered/,
   )
 })
 
