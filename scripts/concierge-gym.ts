@@ -14,7 +14,7 @@
 // `concierge-harness.ts`): the real merged ConciergeAgent, the real canonical
 // seed catalog held in memory, traced tool calls. NO server, NO database, NO
 // deployed endpoint, NO spend path — every tool the agent can reach is one of
-// its seven read-only discovery handlers, and this script asserts exactly that.
+// its read-only discovery handlers, and this script asserts exactly that.
 //
 //   npx tsx scripts/concierge-gym.ts                 # local brain + local adversary
 //   npx tsx scripts/concierge-gym.ts --deck vague-brief
@@ -46,6 +46,7 @@ import path from 'node:path'
 
 import {
   runConcierge,
+  READ_ONLY_TOOL_NAMES,
   type ConciergeDeps,
   type ConciergeContext,
   type ConciergeResult,
@@ -63,20 +64,12 @@ import type { CrystalApi } from '../src/allocutio/api/CrystalApi.js'
 import { buildSeededCrystalApi, tracedRunToolChat, type TraceEntry } from './concierge-harness.js'
 
 // -----------------------------------------------------------------------------
-// The read-only tool surface. This is the SAME seven handlers ConciergeAgent
-// registers (plus the `list_models` alias its executor documents); a traced call
-// to anything else is a hard failure, not a note.
+// The read-only tool surface. Re-exported from ConciergeAgent's own canonical
+// export rather than kept as a local copy — registering a tool there is what
+// updates this set; a traced call to anything outside it is a hard failure,
+// not a note.
 // -----------------------------------------------------------------------------
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  'list_flows',
-  'describe_flow',
-  'search_models',
-  'list_models',
-  'quote',
-  'get_run',
-  'list_runs',
-  'status',
-])
+export const READ_ONLY_TOOLS: ReadonlySet<string> = READ_ONLY_TOOL_NAMES
 
 // Exported: scripts/concierge-gym-referee.ts reuses the same local-brain wiring
 // rather than duplicating endpoint/model defaults.
@@ -203,7 +196,7 @@ export async function hardChecks(
   const checks: CheckResult[] = []
 
   // (1) TOOL SURFACE. Every tool call the agent made this session is one of the
-  //     seven read-only discovery handlers. This is the invariant the whole
+  //     read-only discovery handlers. This is the invariant the whole
   //     harness exists to hold; deleting it is what the self-test catches.
   const offTrace = session.turns
     .flatMap((t) => t.trace)
