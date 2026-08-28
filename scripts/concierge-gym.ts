@@ -123,11 +123,25 @@ export interface RegressionEntry {
   failed: string[]
 }
 
+/** Required string fields every deck must carry; a missing or empty one is a load-time error, not a silent skip. */
+const REQUIRED_DECK_FIELDS: readonly (keyof Deck)[] = ['id', 'label', 'persona', 'opening', 'goal', 'givingUp']
+
+function validateDeck(file: string, raw: unknown): Deck {
+  const obj = raw as Partial<Record<keyof Deck, unknown>>
+  for (const field of REQUIRED_DECK_FIELDS) {
+    const v = obj[field]
+    if (typeof v !== 'string' || v.trim() === '') {
+      throw new Error(`concierge-gym: deck ${file} is missing required field '${field}'`)
+    }
+  }
+  return obj as Deck
+}
+
 function loadDecks(filter?: string): Deck[] {
   const files = readdirSync(DECKS_DIR)
     .filter((f) => f.endsWith('.json') && f !== 'regression.json')
     .sort()
-  const decks = files.map((f) => JSON.parse(readFileSync(path.join(DECKS_DIR, f), 'utf8')) as Deck)
+  const decks = files.map((f) => validateDeck(f, JSON.parse(readFileSync(path.join(DECKS_DIR, f), 'utf8'))))
   return filter ? decks.filter((d) => d.id === filter) : decks
 }
 

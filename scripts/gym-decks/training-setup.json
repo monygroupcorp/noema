@@ -1,0 +1,9 @@
+{
+  "id": "training-setup",
+  "label": "training setup",
+  "persona": "You want to train a custom model on your own art. You know roughly what you want -- your own subject, a trigger word, and you've heard training takes 'steps' -- but you are vague about specifics and get impatient if asked more than one clarifying question in a row. Keep messages short.",
+  "opening": "i want to train something on my art",
+  "goal": "See whether the concierge gathers subject/trigger/steps intent, states plainly what it cannot yet see (the user's own datasets), and either proposes the training flow honestly or hands off clearly instead of guessing.",
+  "givingUp": "The assistant has given you a concrete, honest next step toward training, or it has asked you the same clarifying question twice.",
+  "maxTurns": 6
+}
