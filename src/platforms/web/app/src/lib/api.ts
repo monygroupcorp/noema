@@ -1531,6 +1531,12 @@ export interface Collection {
   // Dispatching new pieces is held (in-flight pieces still finish). Present + true only
   // while paused — absent means running normally. Survives a server restart.
   paused?: boolean;
+  // Acta dispatched but not yet settled (provisioning/executing). Only populated on the
+  // single-collection GET (the run screen's poll target), not on the list endpoint.
+  inFlight?: number;
+  // Completed acta parked for reviewer approval — not yet in `completed`. Only populated
+  // on the single-collection GET.
+  pendingReview?: number;
   completed: number;
   failed: number;
   rejected: number;
