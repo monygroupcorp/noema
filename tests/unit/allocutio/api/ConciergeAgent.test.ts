@@ -6,6 +6,7 @@ import {
   maxToolIterations,
   buildSystemPrompt,
   FORCED_FINAL_INSTRUCTION,
+  RETRY_PLAIN_PROSE_INSTRUCTION,
   type ConciergeDeps,
   type ConciergeContext,
 } from '../../../../src/allocutio/api/ConciergeAgent.js'
@@ -273,6 +274,73 @@ test('search_models passes ctx.auctor through to listModels', async () => {
 
   assert.equal(spy.listModelsCalls.length, 1)
   assert.deepEqual(spy.listModelsCalls[0].auctor, { animaId: 'anima-42' })
+})
+
+// ---------------------------------------------------------------------------
+// (c2) noema-370: an in-turn EXACT duplicate tool call (same tool, byte-identical
+// arguments, same turn) is deduped — the second call never reaches `executeTool`
+// and the observation the model sees carries a NOTE prefix telling it to stop
+// gathering. A same-tool call with DIFFERENT arguments is not deduped.
+// ---------------------------------------------------------------------------
+test('an in-turn duplicate tool call is deduped: it does not re-execute and carries a NOTE', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [
+        { id: 'c1', name: 'list_flows', arguments: '{}' },
+        { id: 'c2', name: 'list_flows', arguments: '{}' },
+      ],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'done' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'look around twice')
+
+  assert.equal(spy.listFlowsCalls, 1) // the tool executed exactly once, not twice
+
+  const toolMessages = client.calls[1].messages.filter((m) => m.role === 'tool')
+  assert.equal(toolMessages.length, 2) // both tool_call_ids still get answered
+  assert.ok(!String(toolMessages[0].content).startsWith('NOTE:'))
+  assert.ok(String(toolMessages[1].content).startsWith('NOTE:'))
+  // the cached observation still rides along, just repeated behind the prefix
+  assert.ok(String(toolMessages[1].content).includes(String(toolMessages[0].content)))
+})
+
+test('a same-tool call with different arguments is not deduped', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [
+        { id: 'm1', name: 'search_models', arguments: JSON.stringify({ q: 'fox' }) },
+        { id: 'm2', name: 'search_models', arguments: JSON.stringify({ q: 'wolf' }) },
+      ],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'done' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'find two different things')
+
+  assert.equal(spy.listModelsCalls.length, 2)
+})
+
+test('a duplicate call is recognized regardless of argument key order', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      toolCalls: [
+        { id: 'm1', name: 'search_models', arguments: JSON.stringify({ q: 'fox', limit: 5 }) },
+        { id: 'm2', name: 'search_models', arguments: JSON.stringify({ limit: 5, q: 'fox' }) },
+      ],
+      finishReason: 'tool_calls',
+    }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'done' }) }),
+  ])
+
+  await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'find fox twice, different key order')
+
+  assert.equal(spy.listModelsCalls.length, 1)
 })
 
 // ---------------------------------------------------------------------------
@@ -605,10 +673,11 @@ test('get_muse_session is wired, owner-scoped, and its result reaches the model'
 // (f) Hitting maxToolIterations terminates, bounded: the tool loop runs exactly
 // the cap, then EXACTLY ONE closing call. No re-entry, no unbounded spin.
 // ---------------------------------------------------------------------------
-test('hitting maxToolIterations terminates after exactly one closing call', async () => {
+test('hitting maxToolIterations terminates after the closing call and its one retry', async () => {
   const { api } = makeApi()
-  // Always returns a tool call — never a final answer. The closing call gets the
-  // same scripted response; its tool calls must be ignored, not executed.
+  // Always returns a tool call — never a final answer. The closing call and its
+  // retry both get the same scripted (content-less) response; their tool calls
+  // must be ignored, not executed.
   const client = scriptedClient([
     chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
   ])
@@ -616,9 +685,10 @@ test('hitting maxToolIterations terminates after exactly one closing call', asyn
   const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'loop forever')
 
   assert.equal(result.kind, 'reply')
-  // Bounded — the cap's worth of tool turns plus the single closing call, no more.
-  assert.equal(client.count(), maxToolIterations + 1)
-  assert.equal(result.tokenUsage.totalTokens, maxToolIterations + 1) // summed 1 per call
+  // Bounded — the cap's worth of tool turns plus the closing call plus its one
+  // hardened retry (both came back empty), no more.
+  assert.equal(client.count(), maxToolIterations + 2)
+  assert.equal(result.tokenUsage.totalTokens, maxToolIterations + 2) // summed 1 per call
 })
 
 // ---------------------------------------------------------------------------
@@ -678,9 +748,12 @@ test('cap reached with gathered context: the closing call answers, tools disable
 test('tool calls returned by the closing call are ignored, not executed', async () => {
   const { api, spy } = makeApi()
   const client = scriptedClient([
-    ...Array.from({ length: maxToolIterations }, () =>
+    // Distinct args per iteration — this test is about the closing call's tool
+    // request being ignored, not about dedupe; identical args across iterations
+    // would collapse into the dedupe cache and undercount the in-loop searches.
+    ...Array.from({ length: maxToolIterations }, (_, i) =>
       chatResult({
-        toolCalls: [{ id: 'm1', name: 'search_models', arguments: '{"q":"neon"}' }],
+        toolCalls: [{ id: `m${i}`, name: 'search_models', arguments: JSON.stringify({ q: 'neon', i }) }],
         finishReason: 'tool_calls',
         tokenUsage: { totalTokens: 1 },
       }),
@@ -723,6 +796,86 @@ test('a failing closing call falls back to the fixed reply', async () => {
   assert.match(result.text, /allotted steps/)
   assert.equal(calls, maxToolIterations + 1) // the failure is not retried
   assert.equal(result.tokenUsage.totalTokens, maxToolIterations)
+})
+
+// ---------------------------------------------------------------------------
+// (f6) noema-370: the closing call's observed failure mode is coming back EMPTY
+// (the model emits tool-call JSON into a request with no tools, leaving `content`
+// blank) rather than throwing. That gets exactly one hardened retry, still with
+// no tool set, before the fixed fallback. A real second answer reaches `finalize`
+// same as a real first answer would.
+// ---------------------------------------------------------------------------
+test('a closing call that comes back empty gets one retry, and a real second answer reaches finalize', async () => {
+  const { api, spy } = makeApi()
+  const proposalJson = JSON.stringify({
+    kind: 'proposal',
+    modusId: 'flux.txt2img',
+    aditus: { prompt: 'a neon alley' },
+    pinnedModels: [],
+    embellishedPrompt: 'a neon alley, rain-slick, cinematic',
+    rationale: 'the option you picked, priced at 100 impetus',
+  })
+  const client = scriptedClient([
+    ...Array.from({ length: maxToolIterations }, () =>
+      chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
+    ),
+    chatResult({ tokenUsage: { totalTokens: 2 } }), // closing call: no content at all
+    chatResult({ content: proposalJson, tokenUsage: { totalTokens: 7 } }), // retry: real answer
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'option one, please')
+
+  assert.equal(result.kind, 'proposal')
+  if (result.kind !== 'proposal') return
+  assert.equal(result.modusId, 'flux.txt2img')
+  assert.equal(spy.quoteCalls.length, 1) // finalize ran on the retry's answer
+  assert.equal(client.count(), maxToolIterations + 2) // closing + exactly one retry, no more
+  assert.equal(result.tokenUsage.totalTokens, maxToolIterations + 2 + 7)
+
+  const retryCall = client.calls[maxToolIterations + 1]
+  assert.ok(
+    retryCall.tools === undefined || retryCall.tools.length === 0,
+    'the retry call must carry no tools either',
+  )
+  const last = retryCall.messages[retryCall.messages.length - 1]
+  assert.equal(last.role, 'system')
+  assert.equal(last.content, RETRY_PLAIN_PROSE_INSTRUCTION)
+})
+
+test('whitespace-only closing content counts as empty and triggers the retry', async () => {
+  const { api } = makeApi()
+  const client = scriptedClient([
+    ...Array.from({ length: maxToolIterations }, () =>
+      chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
+    ),
+    chatResult({ content: '   \n', tokenUsage: { totalTokens: 1 } }),
+    chatResult({ content: JSON.stringify({ kind: 'reply', text: 'ok now' }), tokenUsage: { totalTokens: 1 } }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'x')
+
+  assert.equal(result.kind, 'reply')
+  if (result.kind !== 'reply') return
+  assert.equal(result.text, 'ok now')
+  assert.equal(client.count(), maxToolIterations + 2)
+})
+
+test('both the closing call and its retry come back empty: the fixed fallback ships, never more than one retry', async () => {
+  const { api } = makeApi()
+  const client = scriptedClient([
+    ...Array.from({ length: maxToolIterations }, () =>
+      chatResult({ ...listFlowsCall, tokenUsage: { totalTokens: 1 } }),
+    ),
+    chatResult({ tokenUsage: { totalTokens: 1 } }), // closing: empty
+    chatResult({ tokenUsage: { totalTokens: 1 } }), // retry: still empty
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'option one, please')
+
+  assert.equal(result.kind, 'reply')
+  if (result.kind !== 'reply') return
+  assert.match(result.text, /allotted steps/)
+  assert.equal(client.count(), maxToolIterations + 2) // closing + one retry, never a third attempt
 })
 
 // ---------------------------------------------------------------------------
