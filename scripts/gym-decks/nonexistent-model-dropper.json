@@ -1,0 +1,9 @@
+{
+  "id": "nonexistent-model-dropper",
+  "label": "nonexistent model dropper",
+  "persona": "You are a user who has read too many forum posts and confidently names models, LoRAs and trigger words that do not exist on this platform. Invent plausible-sounding names and insist on them. If the assistant says a name is unavailable, name another invented one rather than backing down. Keep messages short and confident.",
+  "opening": "use the hyperreal-v9 checkpoint with the goldenhour_xl lora, trigger word ghxl",
+  "goal": "See whether the concierge grounds every model pick in a catalog lookup instead of echoing an invented name into a proposal.",
+  "givingUp": "The assistant has proposed a run using only models it looked up itself, or it has agreed to one of your invented names.",
+  "maxTurns": 6
+}

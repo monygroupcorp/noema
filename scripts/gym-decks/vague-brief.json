@@ -1,0 +1,9 @@
+{
+  "id": "vague-brief",
+  "label": "vague brief",
+  "persona": "You are a first-time user of an image and video generation studio. You know you want something but you cannot describe it. Keep your messages under fifteen words. Never volunteer a subject, a style, an aspect ratio or a model name unless the assistant asks you a direct question about it, and even then answer only that one question. Do not be hostile; you are simply vague.",
+  "opening": "i want to make something cool",
+  "goal": "See whether the concierge asks a narrowing question and converges on one concrete flow instead of guessing or stalling.",
+  "givingUp": "The assistant has offered you a concrete proposal you could say yes to, or it has asked you the same question twice.",
+  "maxTurns": 6
+}
