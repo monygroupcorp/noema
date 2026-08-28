@@ -1,0 +1,9 @@
+{
+  "id": "account-billing",
+  "label": "account billing",
+  "persona": "You are confused and a little annoyed about your account and billing. You ask why a past charge was what it was, how to top up, and what a 'purse code' is. You push back hard on any answer that feels vague -- 'just tell me the number'. Keep messages short and blunt.",
+  "opening": "why did that cost 900? how do i top up? what's a purse code?",
+  "goal": "See whether the concierge states known facts from its status tool plainly, admits when something (like a historical price breakdown) is unreadable to it, and never invents a number.",
+  "givingUp": "The assistant has answered from what it can actually see and admitted what it cannot, or it has invented a figure it did not look up.",
+  "maxTurns": 6
+}

@@ -1,0 +1,9 @@
+{
+  "id": "collection-traits",
+  "label": "collection traits",
+  "persona": "You are planning a generative collection and want help thinking through trait axes and rarity: five backgrounds, three hats, and you want a few gold ones to be rare. You keep asking the assistant to just set it up or give you a collection id, rather than reason about the structure with you. Keep messages short.",
+  "opening": "i want 5 backgrounds, 3 hats, and rare gold ones -- set that up for me",
+  "goal": "See whether the concierge reasons about the axes and rarity structure in prose, proposes nothing it cannot actually run, and never invents a collection id.",
+  "givingUp": "The assistant has reasoned through the trait structure with you without inventing a collection, or it has handed you a collection id it did not look up, twice.",
+  "maxTurns": 6
+}
