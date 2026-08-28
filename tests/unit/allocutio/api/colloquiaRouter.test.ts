@@ -40,6 +40,11 @@ const READ_ONLY_TOOLS = new Set([
   'get_run',
   'list_runs',
   'status',
+  'list_collections',
+  'get_collection',
+  'list_studios',
+  'get_studio',
+  'list_fundamenta',
 ])
 
 // ── fakes ────────────────────────────────────────────────────────────────────

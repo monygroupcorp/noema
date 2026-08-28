@@ -5,9 +5,10 @@
 // Given a user message + conversation history + the caller's context (spicyMode,
 // generatio, bindings, an optional prior run for the critique/adjusted case), this
 // module runs a BOUNDED (<= maxToolIterations) LLM tool-use loop over EXACTLY the
-// seven READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
-// `search_models`/`list_models`, `quote`, `get_run`, `list_runs`, `status`) and
-// emits a discriminated result:
+// twelve READ-ONLY discovery handlers (`list_flows`, `describe_flow`,
+// `search_models`/`list_models`, `quote`, `get_run`, `list_runs`, `status`,
+// `list_collections`, `get_collection`, `list_studios`, `get_studio`,
+// `list_fundamenta`) and emits a discriminated result:
 //   - `{ kind: 'proposal', ... }` — a chosen flow + filled/embellished aditus +
 //     chosen loras/pinnedModels + an authoritative quote; the critique/ADJUSTED
 //     case is the SAME `proposal` kind, distinguished only by an optional
@@ -23,7 +24,7 @@
 //
 // HARD INVARIANTS (the entire risk surface of this module):
 //   (a) It NEVER exposes a spend handler to the LLM and never calls a spend method
-//       — the tool surface is the seven read-only handlers only; `run_flow`,
+//       — the tool surface is the twelve read-only handlers only; `run_flow`,
 //       `provision_studio`, and `collect` are never registered, and this module
 //       never calls `invokeFlow`/`runFlow`/`provisionStudio`/`collect`/`createRun`.
 //       (Mechanically enforced by the item's `verify` grep.) It proposes; the user
@@ -59,6 +60,11 @@ import {
   getRunTool,
   listRunsTool,
   statusTool,
+  listCollectionsTool,
+  getCollectionTool,
+  listStudiosTool,
+  getStudioTool,
+  listFundamentaTool,
   type McpResult,
 } from './mcp/tools.js'
 
@@ -147,7 +153,7 @@ export interface ConciergeDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Tool surface (invariant (a)) — EXACTLY the seven read-only discovery handlers,
+// Tool surface (invariant (a)) — EXACTLY the twelve read-only discovery handlers,
 // wrapped as OpenRouterToolSpec[]. `run_flow`/`provision_studio`/`collect` (and any
 // other spend method) are DELIBERATELY absent; adding one here would breach the
 // item's `verify` grep and the propose-never-spend house rule.
@@ -263,6 +269,68 @@ const TOOL_SPECS: OpenRouterToolSpec[] = [
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_collections',
+      description:
+        "List the caller's own saved collections (a base flow expanded over a grid of variations). " +
+        'Owner-scoped. Use this to answer "what collections do I have" or to find one the user ' +
+        'references loosely before calling get_collection.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_collection',
+      description:
+        "Fetch one of the caller's own collections by id. Owner-scoped (never another owner's " +
+        'collection). Use this when the user names or references a specific collection.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'collection id' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_studios',
+      description:
+        "List the caller's own provisioned studios. Owner-scoped. Use this to answer \"what studios " +
+        'do I have running" or to find one the user references loosely before calling get_studio.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_studio',
+      description:
+        "Fetch one of the caller's own studios by id — its state and readiness. Owner-scoped (never " +
+        "another owner's studio). Use this when the user names or references a specific studio.",
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'studio id' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_fundamenta',
+      description:
+        'List the compute-substrate catalog (base-model families available to provision a studio ' +
+        'against). Use this to ground a studio or model discussion in a REAL fundamentum id — never ' +
+        'invent one.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -303,8 +371,13 @@ export function buildSystemPrompt(ctx: ConciergeContext): string {
     '',
     'HOUSE RULES:',
     '- You PROPOSE, you never SPEND. You have read-only discovery tools only (list_flows, describe_flow,',
-    '  search_models, quote, get_run, list_runs, status). There is NO run/collect/provision tool and you must',
-    '  never claim to have run anything — the user confirms (GO) separately, elsewhere.',
+    '  search_models, quote, get_run, list_runs, status, list_collections, get_collection, list_studios,',
+    '  get_studio, list_fundamenta). There is NO run/collect/provision tool and you must never claim to',
+    '  have run anything — the user confirms (GO) separately, elsewhere.',
+    '- You can see the caller\'s own saved collections and provisioned studios (list_collections/',
+    '  get_collection, list_studios/get_studio), and the compute-substrate catalog (list_fundamenta). Use',
+    '  them to answer questions about what the user has saved or running, or to ground a studio discussion',
+    '  in a real fundamentum id — never invent one.',
     '- Ground EVERY flow and model choice in a tool call. Never invent a flow id or a model id/trigger word;',
     '  read them from list_flows / describe_flow / search_models first.',
     '- Read the catalog ONCE, then commit. After you have listed the flows and searched the models you need,',
@@ -418,6 +491,16 @@ async function executeTool(
       )
     case 'status':
       return textOf(await statusTool(deps.api, ctx.auctor))
+    case 'list_collections':
+      return textOf(await listCollectionsTool(deps.api, ctx.auctor))
+    case 'get_collection':
+      return textOf(await getCollectionTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
+    case 'list_studios':
+      return textOf(await listStudiosTool(deps.api, ctx.auctor))
+    case 'get_studio':
+      return textOf(await getStudioTool(deps.api, ctx.auctor, { id: String(args.id ?? '') }))
+    case 'list_fundamenta':
+      return textOf(await listFundamentaTool(deps.api))
     default:
       return `ERROR unknown.tool: ${name} is not an available tool`
   }

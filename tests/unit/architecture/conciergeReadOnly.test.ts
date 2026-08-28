@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 // The ConciergeAgent's first hard invariant is that it PROPOSES and never SPENDS: its whole tool
-// surface is the seven read-only discovery handlers, and it never reaches a spend method. That
+// surface is the read-only discovery handlers, and it never reaches a spend method. That
 // invariant was held by a runtime test (colloquiaRouter's "can never be induced to emit a spend
 // tool" case) plus a grep that lived in an item's verify block rather than in the repo. A runtime
 // test can only observe the tools a scripted model happened to call; this guard reads the source
@@ -16,7 +16,7 @@ import path from 'node:path'
 
 const AGENT = path.join(process.cwd(), 'src', 'allocutio', 'api', 'ConciergeAgent.ts')
 
-/** The seven read-only discovery handlers, plus the `list_models` alias the executor documents. */
+/** The twelve read-only discovery handlers, plus the `list_models` alias the executor documents. */
 const READ_ONLY_TOOLS = new Set([
   'list_flows',
   'describe_flow',
@@ -26,6 +26,11 @@ const READ_ONLY_TOOLS = new Set([
   'get_run',
   'list_runs',
   'status',
+  'list_collections',
+  'get_collection',
+  'list_studios',
+  'get_studio',
+  'list_fundamenta',
 ])
 
 /** MCP tool wrappers that spend, write, or provision. Importing any of them into the agent puts it
