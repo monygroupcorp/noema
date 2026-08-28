@@ -1,12 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useAssistTarget, usePromptAssist } from '../state/promptAssist';
 import { buildPrompt } from '../lib/promptExamples';
-import { api, newTurnKey, type ConciergeProposal, type ConciergeResult, type ColloquiumSummary } from '../lib/api';
+import { api, newTurnKey, type ConciergeProposal, type ConciergeReply, type ConciergeResult, type ColloquiumSummary } from '../lib/api';
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
 import { pickConciergeThread } from '../lib/conciergeThread';
+
+// NAVIGATE (noema-367): `destination` isn't part of `lib/api.ts`'s ConciergeReply
+// shape yet (that file deliberately holds local types, not a backend import — see
+// `git log -- src/platforms/web/app/src/lib/api.ts`), so it's widened locally here
+// rather than by editing that shared file. Belt-and-suspenders: render only when
+// the path is in-app (starts with "/"); the agent-side allowlist is the real gate.
+type ReplyWithDestination = ConciergeReply & { destination?: { path: string; label: string } };
+function DestinationLink({ destination, onGo }: { destination: { path: string; label: string }; onGo: (path: string) => void }) {
+  if (!destination.path.startsWith('/')) return null;
+  return (
+    <button
+      className="cbody"
+      style={{ marginTop: '6px', fontSize: '12px', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+      onClick={() => onGo(destination.path)}
+    >
+      {destination.label} →
+    </button>
+  );
+}
 
 // Thread history in the compact dock (noema-111). The dock renders only the LATEST turn (not a
 // full transcript), so "resume" here means: continue the picked thread on the next send, and show
@@ -43,6 +62,7 @@ function agentDictumToResult(corpus: string): ConciergeResult {
 export function Concierge({ hasContext }: { hasContext: boolean }) {
   const target = useAssistTarget();
   const location = useLocation();
+  const navigate = useNavigate();
   const { clear } = usePromptAssist();
   const [open, setOpen] = useState(false);
   const [brief, setBrief] = useState('');
@@ -257,7 +277,14 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
             {idleResult && (
               idleResult.kind === 'proposal'
                 ? <ProposalCard proposal={idleResult} onAdjust={idleAdjust} />
-                : <div className="ex"><div className="extext">{idleResult.text}</div></div>
+                : (
+                  <div className="ex">
+                    <div className="extext">{idleResult.text}</div>
+                    {(idleResult as ReplyWithDestination).destination && (
+                      <DestinationLink destination={(idleResult as ReplyWithDestination).destination!} onGo={navigate} />
+                    )}
+                  </div>
+                )
             )}
 
             {idleSending && (
