@@ -35,11 +35,12 @@
 //       path, so `embellishedPrompt` here is the user's CORE prompt enriched only —
 //       the style is never prepended here.
 //   (c) It NEVER runs the loop unbounded: `maxToolIterations` is a finite,
-//       non-optional cap. Reaching it ends the tool loop and makes EXACTLY ONE
-//       closing call with no tool set, so the model answers from the context it
-//       already gathered. The closing call cannot invoke a tool and cannot
-//       re-enter the loop; a fixed reply covers the case where it errors or comes
-//       back empty. Total model calls per turn are therefore at most cap + 1.
+//       non-optional cap. Reaching it ends the tool loop and makes a closing
+//       call with no tool set, so the model answers from the context it already
+//       gathered. The closing call cannot invoke a tool and cannot re-enter the
+//       loop; if it comes back empty, ONE hardened retry (still no tool set) is
+//       made before a fixed reply covers the case where both come back empty or
+//       either errors. Total model calls per turn are therefore at most cap + 2.
 // =============================================================================
 
 import type {
@@ -623,6 +624,18 @@ export const FORCED_FINAL_INSTRUCTION = [
 ].join('\n')
 
 // ---------------------------------------------------------------------------
+// The retry instruction for a closing call that came back empty (invariant (c)).
+// Appended once, only when the closing call's content is empty/whitespace — the
+// observed failure is the model emitting tool-call JSON into a request that has
+// no tools, leaving `content` blank. Forbids that outright instead of repeating
+// the close-out instruction verbatim.
+// ---------------------------------------------------------------------------
+export const RETRY_PLAIN_PROSE_INSTRUCTION = [
+  'Plain prose only. Do NOT emit JSON, tool calls, or code fences.',
+  "Answer the user's request now from the information above, in the user's language.",
+].join('\n')
+
+// ---------------------------------------------------------------------------
 // Tool execution — dispatch a named tool call to its read-only handler.
 // The `search_models`/`list_models` executor implements the Q2 spicy seam: it calls
 // `api.listModels({ ...args, includeAdult: ctx.spicyMode, auctor: ctx.auctor })` DIRECTLY,
@@ -631,6 +644,30 @@ export const FORCED_FINAL_INSTRUCTION = [
 // the caller's own imported models (noema-116) — `listModels` owner-scopes strictly, so a
 // caller only ever sees canonical + THEIR OWN, never another owner's private imports.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Stable serialization for the in-turn tool-call dedupe cache: two calls with the
+// same keys in different order must produce the same string. Recurses through
+// plain objects and arrays; primitives serialize as JSON.stringify would.
+// ---------------------------------------------------------------------------
+function canonicalizeArgs(value: unknown): string {
+  return JSON.stringify(sortForCanonicalization(value))
+}
+
+function sortForCanonicalization(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortForCanonicalization)
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    )
+    const sorted: Record<string, unknown> = {}
+    for (const [k, v] of entries) sorted[k] = sortForCanonicalization(v)
+    return sorted
+  }
+  return value
+}
+
 function textOf(r: McpResult): string {
   const body = r.content.map((c) => c.text).join('\n')
   return r.isError ? `ERROR ${body}` : body
@@ -872,6 +909,13 @@ export async function runConcierge(
     hasCompletion: false,
   }
 
+  // Per-turn cache for in-turn duplicate tool calls, keyed by (tool name, canonicalized
+  // arguments). State can change BETWEEN turns, so this is never carried across turns —
+  // it lives only inside this call. Every registered tool is read-only (the seventeen-
+  // handler set at invariant (a)), so it is safe to apply to the whole surface; a future
+  // non-read tool class must be exempted from this cache before it is registered.
+  const dedupeCache = new Map<string, string>()
+
   for (let iteration = 0; iteration < maxToolIterations; iteration++) {
     const result = await deps.runToolChat(deps.toolClient, {
       ...(deps.model !== undefined ? { model: deps.model } : {}),
@@ -913,7 +957,18 @@ export async function runConcierge(
           })
           continue
         }
-        const out = await executeTool(tc.name, parsedArgs, deps, ctx)
+        const dedupeKey = `${tc.name}:${canonicalizeArgs(parsedArgs)}`
+        const cached = dedupeCache.get(dedupeKey)
+        let out: string
+        if (cached !== undefined) {
+          out =
+            'NOTE: you already made this exact call this turn; same result repeated below. ' +
+            'Stop gathering — answer or propose from what you already have.\n' +
+            cached
+        } else {
+          out = await executeTool(tc.name, parsedArgs, deps, ctx)
+          dedupeCache.set(dedupeKey, out)
+        }
         messages.push({ role: 'tool', tool_call_id: tc.id, content: out })
       }
       continue
@@ -925,11 +980,14 @@ export async function runConcierge(
 
   // Iteration cap reached (invariant (c)). The tool loop is over, but the context
   // gathered inside it — catalog reads, quotes, the user's own stated choice — is the
-  // work of the turn and is what an answer should be built from. Make EXACTLY ONE more
-  // model call with NO tool set and an explicit close-out instruction, and return its
-  // answer through the normal `finalize` path. This call is outside the loop: it cannot
+  // work of the turn and is what an answer should be built from. Make a model call
+  // with NO tool set and an explicit close-out instruction, and return its answer
+  // through the normal `finalize` path. This call is outside the loop: it cannot
   // re-enter it, and with `tools` omitted from the request there is no tool for it to
-  // invoke, so the bound holds at cap + 1 calls.
+  // invoke. If it comes back empty — the observed failure is the model emitting
+  // tool-call JSON into a request that has no tools, leaving `content` blank — make
+  // EXACTLY ONE hardened retry, still with no tool set, before falling back to the
+  // fixed reply. The bound holds at cap + 2 calls worst case.
   messages.push({ role: 'system', content: FORCED_FINAL_INSTRUCTION })
 
   try {
@@ -941,7 +999,19 @@ export async function runConcierge(
       // response are ignored; they are never executed.
     })
     accumulate(usage, closing.tokenUsage)
-    const content = closing.content ?? ''
+    let content = closing.content ?? ''
+
+    if (content.trim() === '') {
+      messages.push({ role: 'system', content: RETRY_PLAIN_PROSE_INSTRUCTION })
+      const retry = await deps.runToolChat(deps.toolClient, {
+        ...(deps.model !== undefined ? { model: deps.model } : {}),
+        messages,
+        // Still no `tools` key — the retry cannot invoke a tool either.
+      })
+      accumulate(usage, retry.tokenUsage)
+      content = retry.content ?? ''
+    }
+
     if (content.trim() !== '') {
       return finalize(content, usage, deps, ctx)
     }
