@@ -11,6 +11,46 @@ const CELLS = 60;
 const SEG = ['var(--accent)', 'var(--good)', 'var(--slate)', 'var(--gold)', 'var(--grey)'];
 const mix = (v: string) => `color-mix(in srgb, ${v} 62%, transparent)`;
 
+export const STALL_MESSAGE = 'nothing is running — this run appears stalled';
+export const STALL_HINT = 'Pause, then Resume, retries dispatch';
+
+export function inFlightLine(n: number): string {
+  return `${n.toLocaleString()} ${n === 1 ? 'piece' : 'pieces'} in flight · a machine is provisioning — first piece typically lands in a few minutes`;
+}
+
+export function pendingReviewLine(n: number): string {
+  return `${n.toLocaleString()} ${n === 1 ? 'piece' : 'pieces'} awaiting review`;
+}
+
+export type RunLivenessState = 'stalled' | 'inflight' | 'normal';
+
+// Classifies the run screen's between-poll banner from the collection's own payload — pure,
+// no DOM. Three invisible-until-now states (noema-358): 'inflight' (dispatched, nothing
+// settled yet — pod still provisioning), 'stalled' (actively running, but dispatch produced
+// NOTHING — the noema-357 case, otherwise indistinguishable from 'inflight'), and 'normal'
+// (settling has started, or the run isn't active). pendingReview is independent of state —
+// it can be nonzero in any of them.
+export function runLiveness(c: {
+  status: string;
+  paused?: boolean;
+  completed: number;
+  failed: number;
+  rejected: number;
+  inFlight?: number;
+  pendingReview?: number;
+}): { state: RunLivenessState; inFlight: number; pendingReview: number } {
+  const inFlight = c.inFlight ?? 0;
+  const pendingReview = c.pendingReview ?? 0;
+  const settled = c.completed + c.failed + c.rejected;
+  const active = (c.status === 'pending' || c.status === 'running') && !c.paused;
+  let state: RunLivenessState = 'normal';
+  if (active && settled === 0) {
+    if (c.status === 'running' && inFlight === 0 && pendingReview === 0) state = 'stalled';
+    else if (inFlight > 0) state = 'inflight';
+  }
+  return { state, inFlight, pendingReview };
+}
+
 export function CanonicRun() {
   const { id } = useParams();
   const [c, setC] = useState<Collection | null>(null);
@@ -58,6 +98,7 @@ export function CanonicRun() {
   const paused = !!c.paused;
   const done = c.status === 'complete';
   const settled = c.completed + c.failed + c.rejected;
+  const live = runLiveness(c);
   const pct = c.total ? Math.min(100, (c.completed / c.total) * 100) : 0;
   const lit = Math.round((pct / 100) * CELLS);
   const name = c.nomen || 'collection';
@@ -72,7 +113,18 @@ export function CanonicRun() {
         </div>
 
         <div className="cj-run cr-run">
-          <div className="cr-hero"><b>{c.completed.toLocaleString()}</b> <span>/ {c.total.toLocaleString()} pieces{active ? ' · generating' : ''}</span></div>
+          <div className="cr-hero"><b>{c.completed.toLocaleString()}</b> <span>/ {c.total.toLocaleString()} pieces{active && live.state !== 'stalled' ? ' · generating' : ''}</span></div>
+          {live.state === 'stalled' && (
+            <div className="warn" style={{ gridColumn: '1 / -1' }}>{STALL_MESSAGE} — {STALL_HINT}.</div>
+          )}
+          {live.state === 'inflight' && (
+            <div className="hint mono" style={{ gridColumn: '1 / -1' }}>{inFlightLine(live.inFlight)}</div>
+          )}
+          {live.pendingReview > 0 && (
+            <div className="hint mono" style={{ gridColumn: '1 / -1' }}>
+              {pendingReviewLine(live.pendingReview)} · <Link to={`/collections/${id}/curation`}>review now</Link>
+            </div>
+          )}
           <div className="cr-progress">
             <div className="cj-bar"><span style={{ width: `${pct}%` }} /></div>
             <div className="cr-prow mono">
