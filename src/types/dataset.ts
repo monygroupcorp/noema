@@ -168,8 +168,10 @@ export interface Dataset {
   owner: string
   /**
    * FK -> Sodalitas. Team-sharing OVERLAY: when present, every member of the named team may
-   * READ this dataset (`getDataset`, both list routes) and CONTRIBUTE to it (append media,
-   * attach/edit captionsets). Absent -> owner-only, which is every dataset written before this
+   * READ this dataset (`getDataset`, both list routes), CONTRIBUTE to it (append media,
+   * attach/edit captionsets) and NAME IT AS A RUN'S INPUT (`Datasets.findOwned`, the seam
+   * `_assertOwnedAditus` resolves a run's dataset reference through — ADR-0014 question 2,
+   * ruled by rth 2026-08-31). Absent -> owner-only, which is every dataset written before this
    * field existed.
    *
    * An overlay, NOT a second owner: `owner` stays the single scalar animaId it has always been,
@@ -314,30 +316,35 @@ export interface Datasets {
   create(input: Omit<Dataset, 'id' | 'natum' | 'mutatum'>): Promise<Dataset>
   find(id: string): Promise<Dataset | null>
   /**
-   * Resolve a dataset by id THAT THIS OWNER MAY NAME — the access predicate lives in the
+   * Resolve a dataset by id THAT THIS CALLER MAY NAME — the access predicate lives in the
    * query, so a dataset the caller may not name is never loaded and there is no fetched
    * record for a later comparison to be skipped on.
    *
-   * The predicate is: the caller owns it, OR its access kind is `public` (the single-axis
-   * Access union). A `Dataset` carries no access field today, so the public arm matches
-   * nothing yet; it is written in the query so that adding the field is a schema change
-   * rather than a re-derivation of who may read what.
+   * The predicate is: the caller owns it, OR it is shared with one of `sodalitasIds`, OR its
+   * access kind is `public` (the single-axis Access union). A `Dataset` carries no access
+   * field today, so the public arm matches nothing yet; it is written in the query so that
+   * adding the field is a schema change rather than a re-derivation of who may read what.
+   *
+   * `sodalitasIds` — FK[] -> Sodalitas, the teams the caller is a member of, resolved at the
+   * API layer from the AUTHENTICATED caller and never from a request parameter. It rides in as
+   * an argument rather than being looked up per record so the predicate stays in the query, the
+   * same reason `DatasetListOpts.sodalitasIds` does. Absent/empty -> owner-only, which is the
+   * behaviour every caller in no team has always had.
    *
    * Returns null when no such dataset exists FOR THIS CALLER — the caller cannot tell a
    * dataset that is not theirs from one that does not exist, so ids stay non-enumerable.
    *
-   * DELIBERATELY NARROWER than the read gate: this seam is what `_assertOwnedAditus` resolves a
-   * dataset REFERENCE ON A RUN through, and it does NOT honour the `sodalitasId` team overlay.
-   * A team member can read and contribute to a shared dataset but cannot yet name it as a run's
-   * input. That asymmetry is known and is the open question ADR-0014 puts to rth — widening it
-   * is a ruling about whose compute trains on whose data, not a read decision.
+   * This is the seam `_assertOwnedAditus` resolves a dataset REFERENCE ON A RUN through, so it
+   * now admits the same team-shared dataset the read gate admits (ADR-0014 question 2, ruled by
+   * rth 2026-08-31). Membership is read live off the team store at that moment and is never
+   * snapshotted, so losing membership closes the reference again on the next run.
    *
    * OPTIONAL on the interface so a store double is not obliged to implement it. A store that
    * does not is a store that cannot affirm access, and the run entry point refuses the
    * reference rather than admitting it (the fail-closed convention `_ownedStudio` follows
    * when no Conductor is wired).
    */
-  findOwned?(id: string, owner: string): Promise<Dataset | null>
+  findOwned?(id: string, owner: string, sodalitasIds?: string[]): Promise<Dataset | null>
   list(opts: DatasetListOpts): Promise<DatasetListPage>
   listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage>
   /** Append media to a dataset. APPEND-ONLY: the supplied items are added after the media

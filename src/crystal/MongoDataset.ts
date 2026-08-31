@@ -79,15 +79,29 @@ export class MongoDataset implements Datasets {
    * who may read what. Team sharing (`sodalitasId`) did NOT light those arms up: sharing with a
    * named fellowship and publishing to everyone are different decisions.
    *
-   * And this seam deliberately does not honour the team overlay either — it is the gate a RUN's
-   * dataset reference resolves through (`_assertOwnedAditus`), so widening it would let a member
-   * spend on someone else's data. See `Datasets.findOwned` and ADR-0014's open question.
+   * The team overlay IS honoured here: this is the gate a RUN's dataset reference resolves
+   * through (`_assertOwnedAditus`), and a member of the team a dataset is shared with may name
+   * it (ADR-0014 question 2, ruled by rth 2026-08-31). `sodalitasIds` are the CALLER's teams,
+   * resolved at the API layer from the authenticated caller and never from a request parameter;
+   * with none the clause is the bare `{ owner }` arm this read has always had.
    */
-  async findOwned(id: string, owner: string): Promise<Dataset | null> {
-    const doc = await this.col.findOne({
-      id,
-      $or: [{ owner }, { access: 'public' }, { 'access.kind': 'public' }],
-    })
+  async findOwned(id: string, owner: string, sodalitasIds?: string[]): Promise<Dataset | null> {
+    const teamIds = sodalitasIds ?? []
+
+    // ACCESS, in the query — `_page`'s clause with the same arms, for the same reason.
+    const access: Filter<Document> = {
+      $or: [
+        { owner },
+        ...(teamIds.length > 0 ? [{ sodalitasId: { $in: teamIds } }] : []),
+        { access: 'public' },
+        { 'access.kind': 'public' },
+      ],
+    }
+
+    // The id predicate and the access clause are composed under `$and` rather than written onto
+    // one object — `_page`'s rule: the access predicate is an `$or`, so any other `$or` clause
+    // added beside it would silently replace it, and the one it replaced is the access gate.
+    const doc = await this.col.findOne({ $and: [{ id }, access] })
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 

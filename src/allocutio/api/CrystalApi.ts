@@ -3586,11 +3586,26 @@ export class CrystalApi {
    * not usable, never whether an id exists behind it, so ids stay non-enumerable — the same
    * property `_ownedStudio`'s `not_found.studio` refusal preserves.
    *
+   * THE TEAM OVERLAY, RESOLVED AT DISPATCH. A dataset reference resolves for the owner OR for a
+   * member of the team the dataset is shared with (ADR-0014 question 2, ruled by rth
+   * 2026-08-31). The caller's team ids come from `_callerTeamIds` — the same helper the read
+   * path uses, from the same authenticated caller — and are CLOSED OVER in the lookup below.
+   * They never reach the Actum and are never threaded through execution: an Actum is
+   * identity-blind by design, so this call is the whole of the gate. Membership is read live at
+   * this moment and never snapshotted, so a member removed from the team cannot start a new run
+   * against the dataset; runs already dispatched are unaffected, which is the same property the
+   * read path has.
+   *
    * FAIL CLOSED. Datasets and corpora both key their owner on an `animaId`, so an anonymous
    * (commitment/bursa) caller can never resolve one and every reference they name is refused;
-   * a deployment with no store wired cannot affirm access and refuses for the same reason. The
-   * one value that is not a reference passes through untouched: an inline manifest on a corpus
-   * port is content the caller supplied, not a name for someone's record.
+   * a deployment with no store wired cannot affirm access and refuses for the same reason. With
+   * no team store wired `_callerTeamIds` is empty, and an empty set of team ids is owner-only —
+   * so the overlay adds nothing it cannot affirm. The one value that is not a reference passes
+   * through untouched: an inline manifest on a corpus port is content the caller supplied, not a
+   * name for someone's record.
+   *
+   * DATASETS ONLY. The corpus lookup is unchanged: `Corpus` carries no `sodalitasId`, so there
+   * is no team overlay on it to honour and the ruling says nothing about one.
    *
    * Declared ports ONLY. Nothing else in the aditus is read, rewritten or stripped, so the
    * internal channels that ride an aditus (`_attributes`, `__capability`) are untouched.
@@ -3608,10 +3623,15 @@ export class CrystalApi {
     const datasets = this.deps.datasets
     const corpora = this.deps.corpora
 
+    // Resolved once, here, only when there is a dataset seam that can use it — the teams of the
+    // caller doing the dispatching, never of anyone the aditus names.
+    const canResolveDataset = Boolean(owner && datasets?.findOwned)
+    const sodalitasIds = canResolveDataset ? await this._callerTeamIds(auctor) : []
+
     const lookups: OwnedResourceLookups = {
       inline: raw => parseManifest(raw) !== null,
       ...(owner && datasets?.findOwned
-        ? { dataset: (id: string) => datasets.findOwned!(id, owner) }
+        ? { dataset: (id: string) => datasets.findOwned!(id, owner, sodalitasIds) }
         : {}),
       ...(owner && corpora ? { corpus: (id: string) => corpora.findOwned(id, owner) } : {}),
     }
