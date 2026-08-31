@@ -116,26 +116,75 @@ export function computeBootCostImpetus(billedMs: number, costPerHrUsd: number): 
 // price — the user is charged what the run actually costs.
 
 /**
- * Safety factor applied to a modelled reservation estimate. The estimate is fitted from
- * observed p95 wall-clock, so a 2× headroom covers a run slower than the fitted sample
- * without pushing a modelled flow anywhere near the generic bound below.
+ * Safety factor applied to a modelled reservation estimate.
+ *
+ * The two failure modes are not symmetric, and this factor is sized for the worse one:
+ *
+ *   too LARGE  — the hold is bigger than the run needs. Every impetus comes back at
+ *                settlement, so nothing is spent; the cost is that the hold occupies
+ *                purse headroom while it stands, which bounds how many runs of the flow
+ *                can be in flight at once (see `reserveHeadroomImpetus`).
+ *   too SMALL  — settlement measures a cost above the hold and `ActumCompletor` throws
+ *                `Cursor overcharge`, so the run fails at the END, after the pod time has
+ *                already been consumed. The caller gets nothing for compute that was
+ *                really spent, and in a fan-out the failure lands mid-flight.
+ *
+ * An over-reservation is recoverable and an under-reservation is not, so the factor stays
+ * generous: 2× the fitted estimate.
+ *
+ * What that 2× has to absorb, on the pod path: the billed window is the runner's own job
+ * clock, and it opens BEFORE the weights are on disk — custom-node install, ComfyUI
+ * restart and the full weight pull are all inside it, ahead of graph execution. Those
+ * stages are network- and registry-bound rather than compute-bound, so they are the widest
+ * part of the distribution and the part a fitted sample is least able to bound. Doubling
+ * the whole estimate lets the download stage run better than twice as slow as the fit
+ * before the reservation is breached.
  */
 export const RESERVE_SAFETY_FACTOR = 2
 
 /**
- * The reservation for a pod flow that carries no `Modus.pretium` curve — the fallback
- * every un-modelled flow uses.
+ * The reservation for a pod flow that carries no `Modus.pretium` curve — the bound every
+ * un-modelled flow uses.
  *
- * Derivation: 2 × the observed cold-start p95 of 402 s, rounded up. Cold start is the
- * worst realistic case (it includes provisioning plus a full weight download), the 2×
- * factor covers a flow slower than any yet measured, and 900 sits above the highest cold
- * wall-clock on record (511 s) while staying well under the 1800 s job-timeout ceiling.
+ * Derivation: 2 × the observed cold-start p95 of 402 s, rounded up, taken across flows
+ * rather than within one. Cold start is the worst realistic case (it carries a full weight
+ * download inside the billed window), the 2× factor covers a flow slower than any yet
+ * measured, and 900 sits above the highest cold wall-clock on record (511 s) while staying
+ * well under the 1800 s job-timeout ceiling.
  *
- * PLACEHOLDER pending per-flow calibration. Most flows have too few completed runs to fit
- * a curve; as `acta` accumulates, flows should graduate to their own `pretium` and this
- * number should be re-derived from the then-current cold-start distribution.
+ * Cross-flow is what makes it coarse: one number has to bound a 512² image flow and a video
+ * flow with tens of gigabytes of weights, so it is set by the expensive end and every cheap
+ * flow that lands on it reserves far above its own cost. That is the cost of the fallback,
+ * not a defect in it — a flow escapes it by declaring its own `pretium` (see
+ * `Modus.pretium`), which is a per-flow act that happens flow by flow as each accumulates
+ * enough completed runs to fit a curve. Flows carrying a fitted curve today: `sd1-5`,
+ * `krea-turbo`. Everything else — including every video, audio and 3D flow — reserves here.
  */
 export const GENERIC_RESERVE_IMPETUS = 900n
+
+/**
+ * The purse headroom a fan-out needs, in impetus: the per-run reservation times the number
+ * of pieces it keeps in flight. A `Collectio` with `concurrentia` C holds C reservations
+ * simultaneously, so C × reserve — not the collection's eventual total cost — is what has
+ * to fit in the purse for the fan-out to reach full width.
+ *
+ * The cold-start term is PER CONCURRENT SLOT, not per collection. `Cursor.reserve()` runs
+ * before pod routing and cannot know whether a job will land warm, so every in-flight run
+ * holds the full cold case; and that is not merely conservative bookkeeping — C dispatches
+ * issued together all miss `Praefectus.findWarm` at the same instant and each provisions
+ * its own pod, so C cold starts really are paid. A model that amortised one cold start
+ * across a collection would under-reserve exactly the runs that pay one, which is the
+ * failure mode `RESERVE_SAFETY_FACTOR` exists to avoid.
+ *
+ * Consequence for calibration: a per-flow curve's `baseSeconds` must stay the flow's whole
+ * cold overhead. Shrinking it on the argument that most pieces in a large collection land
+ * warm is the amortisation this function rules out.
+ */
+export function reserveHeadroomImpetus(perRunReserve: bigint, concurrentia: number): bigint {
+  if (!Number.isFinite(concurrentia) || concurrentia <= 0) return 0n
+  if (perRunReserve <= 0n) return 0n
+  return perRunReserve * BigInt(Math.floor(concurrentia))
+}
 
 /**
  * The reservation implied by a flow's own cost curve, in impetus:
@@ -146,8 +195,9 @@ export const GENERIC_RESERVE_IMPETUS = 900n
  *
  * Always the COLD case — `reserve()` is called before pod routing, so it cannot know
  * whether the job will land on a warm pod; `baseSeconds` therefore carries the flow's own
- * provision + download + load overhead. There is no separate global provision/download
- * allowance: those stages are flow-specific and already inside `baseSeconds`.
+ * download + load overhead, the part of a cold run that falls inside the billed window.
+ * There is no separate global download allowance: that stage is flow-specific (it is the
+ * flow's own weight set) and already inside `baseSeconds`.
  *
  * Input resolution, per term: the run's own `aditus` value when it is a finite number,
  * else the flow's schema default (`Forma[key].default`) when that is a finite number. If

@@ -162,7 +162,7 @@ export interface GradusFons {
  * (ledger/rates.ts) for how they combine into a reservation.
  */
 export interface Pretium {
-  /** This flow's own fixed overhead: provision + weight download + model load. */
+  /** This flow's own fixed overhead: weight download + model load. */
   baseSeconds: number
   /** The per-inference-step part, multiplied by `aditus.steps`. */
   perStepSeconds?: number
@@ -264,19 +264,25 @@ export interface Modus {
    * "pretium" = price/cost in Latin — this flow's own COST MODEL, used to size the
    * up-front reservation for pod-based flows (which have no `impetusFixum`).
    *
-   * All fields are wall-clock SECONDS of execution:
-   *   baseSeconds          this flow's own fixed overhead — provision + weight
-   *                        download + model load, i.e. its cold-start wall-clock
-   *                        minus its execution time. Always the cold case:
-   *                        `reserve()` runs before pod routing, so it cannot know
-   *                        whether the job will land on a warm pod.
+   * All fields are BILLED SECONDS — the runner's own job clock, which is also the
+   * settlement unit on the pod path (one impetus per billed second):
+   *   baseSeconds          this flow's own fixed overhead — weight download + model
+   *                        load, i.e. its cold-run billed window minus its execution
+   *                        time. (Pod provisioning is outside that window and so is
+   *                        not in this term.) Always the cold case: `reserve()` runs
+   *                        before pod routing, so it cannot know whether the job will
+   *                        land on a warm pod — and concurrent dispatches routinely
+   *                        all miss the warm pool and each pay their own download, so
+   *                        this term is never amortised across a fan-out.
    *   perStepSeconds       the per-inference-step part, multiplied by `aditus.steps`.
    *   perMegapixelSeconds  the resolution-dependent part, multiplied by
    *                        `width × height / 1e6`.
    *
    * Optional and per-flow: declare it only for a flow with enough observed runs to
    * fit a curve. A flow without `pretium` falls back to `GENERIC_RESERVE_IMPETUS`
-   * (see `ledger/rates.ts`), so leaving it undefined is always safe.
+   * (see `ledger/rates.ts`), so leaving it undefined is always safe — but the generic
+   * bound is set by the most expensive flow on the platform, so a cheap flow left on
+   * it holds far more than it needs and caps how wide a fan-out over it can run.
    *
    * Definitional (it prices the flow), so it IS part of the contentHash. It rides the
    * `...rest` passthrough in `hashModus`, and the same passthrough in `MongoModorum`'s
