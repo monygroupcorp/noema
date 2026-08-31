@@ -93,7 +93,13 @@ import { Errors } from '../src/allocutio/api/errors.js'
 // Constants (spec §3 "Identity constants" + §4 "Phase A" + art bible §9)
 // =============================================================================
 
-const TRIGGER_WORD = process.env.LANDING_WALK_TRIGGER_WORD ?? 'nmahaus'
+// Spec §3 RULES the trigger as `noema` (rth, 2026-08-28; art bible §9 says the same). `nmahaus`
+// was the pre-ruling draft value and stayed as the default on the grounds that the ruling could
+// be applied as env config — but the trigger is written into every caption and is what the
+// trained Intella is addressed by, and the spec fixes it "before captioning; changing it later
+// invalidates the captionset". A default that silently trains the wrong trigger is the failure
+// this constant exists to prevent, so the default IS the ruling.
+const TRIGGER_WORD = process.env.LANDING_WALK_TRIGGER_WORD ?? 'noema'
 const DATASET_NAME = 'landing-house-look-v1'
 const COLLECTION_NAME = 'landing house look — candidates v1'
 // klein-4b is the spec's ruling (canon-training-modus.md preset alias, verified against
