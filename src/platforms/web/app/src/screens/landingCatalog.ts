@@ -57,6 +57,24 @@ export function summariseCatalog(flows: FlowSummary[], models: ModelCard[]): Cat
   };
 }
 
+/** What the public API contract says about itself. Counted from the served document rather
+ *  than written down, for the same reason the catalogue is. */
+export interface ApiSummary {
+  endpoints: number;
+  /** Whether the contract carries an MCP route — i.e. whether agents can drive this. */
+  mcp: boolean;
+}
+
+export function summariseApi(doc: unknown): ApiSummary | null {
+  const paths =
+    doc && typeof doc === 'object' && 'paths' in doc
+      ? (doc as { paths?: unknown }).paths
+      : undefined;
+  if (!paths || typeof paths !== 'object') return null;
+  const keys = Object.keys(paths as Record<string, unknown>);
+  return { endpoints: keys.length, mcp: keys.some((k) => k === '/mcp' || k.startsWith('/mcp/')) };
+}
+
 export type CatalogState = 'loading' | 'ready' | 'error';
 
 export interface LandingCatalog {
@@ -64,6 +82,9 @@ export interface LandingCatalog {
   summary: CatalogSummary | null;
   flows: FlowSummary[];
   models: ModelCard[];
+  /** null until it loads, and null for good if it cannot be read — the API block simply does
+   *  not render rather than claiming a shape of contract it did not see. */
+  api: ApiSummary | null;
 }
 
 /**
@@ -77,6 +98,23 @@ export function useLandingCatalog(): LandingCatalog {
   const [state, setState] = useState<CatalogState>('loading');
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [models, setModels] = useState<ModelCard[]>([]);
+  // named for the summary, not `api` — that is the client this module already imports
+  const [contract, setContract] = useState<ApiSummary | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    // The contract is fetched on its own so a missing document costs the API block and not the
+    // catalogue block.
+    fetch('/v1/openapi.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((doc) => {
+        if (live) setContract(summariseApi(doc));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -100,5 +138,6 @@ export function useLandingCatalog(): LandingCatalog {
     summary: state === 'ready' ? summariseCatalog(flows, models) : null,
     flows,
     models,
+    api: contract,
   };
 }

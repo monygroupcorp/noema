@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summariseCatalog } from './landingCatalog';
+import { summariseApi, summariseCatalog } from './landingCatalog';
 import type { FlowSummary, ModelCard } from '../lib/api';
 
 const flow = (over: Partial<FlowSummary>): FlowSummary => ({ id: 'f', ...over });
@@ -91,5 +91,27 @@ describe('summariseCatalog', () => {
     expect(s).toEqual({
       workflows: 0, verbs: [], modalities: [], models: 0, kinds: [], loras: 0, bases: [],
     });
+  });
+});
+
+describe('summariseApi', () => {
+  it('counts the endpoints the served contract actually declares', () => {
+    expect(summariseApi({ paths: { '/runs': {}, '/flows': {}, '/models': {} } })).toEqual({
+      endpoints: 3,
+      mcp: false,
+    });
+  });
+
+  it('notices an MCP route, which is what lets an agent drive the platform', () => {
+    expect(summariseApi({ paths: { '/runs': {}, '/mcp': {} } })?.mcp).toBe(true);
+    expect(summariseApi({ paths: { '/mcp/tools': {} } })?.mcp).toBe(true);
+    expect(summariseApi({ paths: { '/mcpanything': {} } })?.mcp).toBe(false);
+  });
+
+  it('returns null for anything that is not a contract, so nothing is rendered from a guess', () => {
+    expect(summariseApi(null)).toBeNull();
+    expect(summariseApi({})).toBeNull();
+    expect(summariseApi({ paths: 'nope' })).toBeNull();
+    expect(summariseApi('<!doctype html>')).toBeNull();
   });
 });
