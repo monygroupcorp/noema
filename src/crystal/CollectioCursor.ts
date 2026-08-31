@@ -12,11 +12,22 @@ import { dispatchFailureActumId } from '../execution/dispatchInceptio.js'
 // Tracks completion, handles review/revive flows, and marks the Collectio
 // completa when all pieces are settled.
 
+/**
+ * Step a piece counter down by one without ever going negative. The guards on
+ * `approveActum`/`rejectAndRevive` mean a decrement is only reached for a piece
+ * that really is held, so this floor is for the one case they cannot cover: a
+ * collection persisted before `pendentes` existed, whose held pieces were never
+ * counted up in the first place. A counter at 0 stays at 0 rather than going
+ * negative and breaking every sum taken over it.
+ */
+function decrement(n: number): number {
+  return n > 0 ? n - 1 : 0
+}
+
 export interface CollectioCursorConfig {
   /**
-   * When true, every completed actum gets reviewOutcome: 'pending' and waits
-   * for approval before the next piece is dispatched and before completae is
-   * incremented.
+   * When true, every completed actum gets reviewOutcome: 'pending' and is
+   * counted in `pendentes` — not `completae` — until a reviewer decides on it.
    */
   reviewEnabled?: boolean
 }
@@ -185,8 +196,13 @@ export class CollectioCursor {
   /**
    * Call when an Actum from this Collectio reaches completus or fractus.
    * Dispatches the next piece if capacity allows.
-   * When reviewEnabled, marks the completed actum's exitus with
-   * reviewOutcome: 'pending' and does NOT increment completae until approval.
+   *
+   * A piece that generated is counted the moment it settles, whether or not
+   * review is on — what differs is WHICH counter it lands in. With review on it
+   * is marked `reviewOutcome: 'pending'` and counted in `pendentes` (generated,
+   * awaiting a decision); with review off it goes straight to `completae`
+   * (generated and accepted). Either way the collection's own record shows the
+   * work: a held piece is never counted nowhere.
    */
   async onActumCompleta(
     collectioId: string,
@@ -208,13 +224,17 @@ export class CollectioCursor {
     // for collections that did not specify one (preserves "review on by default").
     const reviewEnabled = collectio.reviewEnabled ?? this.config.reviewEnabled
     if (success && reviewEnabled) {
-      // Mark pending review — do not increment completae yet
+      // Held for a reviewer: the piece is generated but not yet accepted, so it
+      // counts in `pendentes` rather than `completae`. Persisting it here is what
+      // makes a review-held run legible to a poller — the in-memory set below is
+      // this process's scheduling state, not the collection's record.
       state.pendingReview.add(actumId)
       const actum = await this.actorum.findById(actumId)
       const currentExitus = actum?.exitus ?? {}
       await this.actorum.update(actumId, {
         exitus: { ...currentExitus, reviewOutcome: 'pending' },
       })
+      await this.collectiones.update(collectioId, { pendentes: collectio.pendentes + 1 })
     } else if (success) {
       await this.collectiones.update(collectioId, { completae: collectio.completae + 1 })
     } else {
@@ -225,10 +245,19 @@ export class CollectioCursor {
     await this._dispatch(collectioId)
   }
 
-  /** Approve a pending-review actum. Increments Collectio.completae, dispatches next piece. */
+  /**
+   * Approve a held piece: it leaves `pendentes` and counts toward the target in
+   * `completae`. Dispatches the next piece.
+   *
+   * In-memory state is reconstructed from the persisted record when this process
+   * has none — a review decision arriving after a restart has to land on live
+   * state rather than on nothing (the same reason `pause`/`resume` do it).
+   * Only a piece actually held for review moves a counter: a repeat call, or one
+   * naming a piece that was never held, is a no-op rather than a second increment.
+   */
   async approveActum(collectioId: string, actumId: string): Promise<void> {
-    const state = this.states.get(collectioId)
-    if (!state) return
+    const state = await this._loadState(collectioId)
+    if (!state || !state.pendingReview.has(actumId)) return
 
     const actum = await this.actorum.findById(actumId)
     if (!actum) return
@@ -243,24 +272,33 @@ export class CollectioCursor {
     const collectio = await this.collectiones.find(collectioId)
     if (!collectio) return
 
-    await this.collectiones.update(collectioId, { completae: collectio.completae + 1 })
+    await this.collectiones.update(collectioId, {
+      completae: collectio.completae + 1,
+      pendentes: decrement(collectio.pendentes),
+    })
 
     await this._checkDone(collectioId)
     await this._dispatch(collectioId)
   }
 
   /**
-   * Reject a pending-review actum and re-run it with a fresh piece.
+   * Reject a held piece and re-run it with a fresh piece: it leaves `pendentes`
+   * for `reiectae`.
+   *
    * Sets exitus.reviewOutcome = 'rejected' on the original actum and bumps
    * `reiectae` — which extends the dispatch budget (numerus + reiectae) by one,
    * so the sequential fan-out generates one replacement piece. The replacement
    * gets the next free pieceIndex (always ≥ every original index), so it never
    * reproduces the rejected piece's selection — no nextIndex juggling needed.
    * A rejection is NOT a failure: it does not touch `fractae`.
+   *
+   * State is reconstructed and the held-piece guard applies exactly as in
+   * `approveActum` — a rejection extends the budget, so a repeated one would
+   * dispatch a piece the collection never asked for.
    */
   async rejectAndRevive(collectioId: string, actumId: string): Promise<void> {
-    const state = this.states.get(collectioId)
-    if (!state) return
+    const state = await this._loadState(collectioId)
+    if (!state || !state.pendingReview.has(actumId)) return
 
     const actum = await this.actorum.findById(actumId)
     if (!actum) return
@@ -277,7 +315,10 @@ export class CollectioCursor {
     if (!collectio) return
 
     // Rejection extends the dispatch budget by one → a replacement is generated.
-    await this.collectiones.update(collectioId, { reiectae: collectio.reiectae + 1 })
+    await this.collectiones.update(collectioId, {
+      reiectae: collectio.reiectae + 1,
+      pendentes: decrement(collectio.pendentes),
+    })
 
     await this._dispatch(collectioId)
   }

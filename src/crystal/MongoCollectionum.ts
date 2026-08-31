@@ -14,16 +14,18 @@ function toDoc(c: Partial<Collectio>): Record<string, unknown> {
 }
 
 function fromDoc(doc: Document): Collectio {
-  const { _id, impetusTotal, reiectae, ...rest } = doc as CollectioDoc & { _id: unknown }
-  // `reiectae` post-dates the first collections — default legacy docs to 0.
-  return { ...rest, reiectae: reiectae ?? 0, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
+  const { _id, impetusTotal, reiectae, pendentes, ...rest } = doc as CollectioDoc & { _id: unknown }
+  // `reiectae` and `pendentes` post-date the first collections — default legacy docs to 0. Both
+  // are arithmetic (the dispatch budget, and the piece-count identity), so undefined is not an
+  // option: it would poison every sum they take part in.
+  return { ...rest, reiectae: reiectae ?? 0, pendentes: pendentes ?? 0, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
 }
 
 export class MongoCollectionum implements Collectionum {
   constructor(private readonly col: Collection) {}
 
   async create(
-    input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>
+    input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal'>
   ): Promise<Collectio> {
     const collectio: Collectio = {
       ...input,
@@ -32,6 +34,7 @@ export class MongoCollectionum implements Collectionum {
       acta: [],
       completae: 0,
       fractae: 0,
+      pendentes: 0,
       reiectae: 0,
       impetusTotal: 0n,
     }
@@ -55,7 +58,7 @@ export class MongoCollectionum implements Collectionum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>
+    patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal' | 'completum' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>
   ): Promise<Collectio> {
     // `pausatum: undefined` means "clear the pause" (resume) — $unset it rather
     // than $set-ing an undefined value (which Mongo would otherwise reject/drop).

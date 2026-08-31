@@ -7419,9 +7419,17 @@ Promote a Muse session the caller owns into a DRAFT collection: the fragments st
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -7429,7 +7437,7 @@ Promote a Muse session the caller owns into a DRAFT collection: the fragments st
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -7453,6 +7461,7 @@ Promote a Muse session the caller owns into a DRAFT collection: the fragments st
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -8695,9 +8704,17 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -8705,7 +8722,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -8729,6 +8746,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -8960,9 +8978,17 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -8970,7 +8996,7 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -8994,6 +9020,7 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -9142,9 +9169,17 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -9152,7 +9187,7 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -9176,6 +9211,7 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -9326,9 +9362,17 @@ List the authenticated caller's Collections (owner-scoped).
               ]
             }
           },
+          "inFlight": {
+            "type": "number",
+            "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+          },
+          "pendingReview": {
+            "type": "number",
+            "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+          },
           "completed": {
             "type": "number",
-            "description": "Pieces completed so far (approved, when review is on)."
+            "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
           },
           "failed": {
             "type": "number",
@@ -9336,7 +9380,7 @@ List the authenticated caller's Collections (owner-scoped).
           },
           "rejected": {
             "type": "number",
-            "description": "Pieces a reviewer rejected so far (distinct from failed)."
+            "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
           },
           "cost": {
             "type": "string",
@@ -9360,6 +9404,7 @@ List the authenticated caller's Collections (owner-scoped).
           "total",
           "provenanceHash",
           "completed",
+          "pendingReview",
           "failed",
           "rejected"
         ]
@@ -9374,7 +9419,7 @@ List the authenticated caller's Collections (owner-scoped).
 
 ### GET /v1/collectiones/:id
 
-Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).
+Fetch one Collection by id — status, cost, and the piece counters. Every dispatched piece is in exactly one of `completed`, `pendingReview`, `failed`, `rejected` or `inFlight`, and `rejected` raises the dispatch budget by the piece it removed from the target, so `completed + pendingReview + failed + inFlight + outstanding = total`. Owner-scoped (404 if not yours).
 
 - **Auth:** required
 
@@ -9509,9 +9554,17 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -9519,7 +9572,7 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -9543,6 +9596,7 @@ Fetch one Collection by id — progress (completed/failed/total), status, cost. 
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -9863,9 +9917,17 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -9873,7 +9935,7 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -9897,6 +9959,7 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -10045,9 +10108,17 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -10055,7 +10126,7 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -10079,6 +10150,7 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -10227,9 +10299,17 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -10237,7 +10317,7 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -10261,6 +10341,7 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]
@@ -10409,9 +10490,17 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
             ]
           }
         },
+        "inFlight": {
+          "type": "number",
+          "description": "Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint."
+        },
+        "pendingReview": {
+          "type": "number",
+          "description": "Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off."
+        },
         "completed": {
           "type": "number",
-          "description": "Pieces completed so far (approved, when review is on)."
+          "description": "Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`."
         },
         "failed": {
           "type": "number",
@@ -10419,7 +10508,7 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         },
         "rejected": {
           "type": "number",
-          "description": "Pieces a reviewer rejected so far (distinct from failed)."
+          "description": "Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed)."
         },
         "cost": {
           "type": "string",
@@ -10443,6 +10532,7 @@ Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
         "total",
         "provenanceHash",
         "completed",
+        "pendingReview",
         "failed",
         "rejected"
       ]

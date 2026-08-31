@@ -140,13 +140,40 @@ export interface Collectio {
    */
   owners?: Array<{ animaId: string; weight: number }>
 
-  /** FK[] → Actum. The executions this collection spawned */
+  /** FK[] → Actum. The executions this collection spawned — every piece the
+   *  collection initiated and paid for, in dispatch order, whatever its outcome.
+   *  A piece is appended the moment it is dispatched, so a piece held for review
+   *  is a member of this list exactly like an auto-counted one. */
   acta: string[]
-  /** How many acta have reached completus AND count toward the target (approved
-   *  when review is on; all successes when it is off) */
+
+  // ── The piece counters ────────────────────────────────────────────────────
+  //
+  // Every DISPATCHED piece is in exactly one of the four states below: in flight
+  // (in neither counter yet), `pendentes`, `completae`, `fractae` or `reiectae`.
+  // A piece moves between them once and never back, except that `pendentes` is a
+  // waypoint: a held piece leaves it for `completae` (approved) or `reiectae`
+  // (rejected). With `numerus + reiectae` as the dispatch budget, that gives the
+  // identity a caller can rely on:
+  //
+  //   completae + pendentes + fractae + <in flight> + <not yet dispatched> = numerus
+  //
+  // `reiectae` cancels out of both sides — it raises the budget by exactly the
+  // piece it removed from the target, which is what "a rejection is not a
+  // failure, it is a re-roll" means arithmetically.
+
+  /** How many acta GENERATED AND ACCEPTED — a successful gen that counts toward
+   *  `numerus`. With review on, a piece reaches this counter only once a reviewer
+   *  approves it (until then it is in `pendentes`); with review off, every
+   *  success lands here directly. */
   completae: number
   /** How many acta have reached fractus (a genuine generation FAILURE) */
   fractae: number
+  /** How many pieces GENERATED AND AWAITING a reviewer's decision — a successful
+   *  gen held by `reviewEnabled` (`exitus.reviewOutcome: 'pending'`). Real,
+   *  paid-for work that has not yet been accepted or declined, so it counts
+   *  toward neither `completae` nor `fractae`. Approval moves the piece to
+   *  `completae`; rejection moves it to `reiectae`. Always 0 while review is off. */
+  pendentes: number
   /** How many pieces a reviewer REJECTED (a successful gen the reviewer declined —
    *  distinct from `fractae`). Each rejection extends the dispatch budget by one
    *  (a replacement piece is generated) and is the single source of that budget. */
@@ -165,8 +192,9 @@ export interface Collectio {
 
   /**
    * When true, every completed piece is held for review (`reviewOutcome: 'pending'`)
-   * and does NOT count toward `completae` until a reviewer approves it. Off → a
-   * successful gen auto-counts. Absent → the CollectioCursor's global default applies.
+   * and counts in `pendentes` — not `completae` — until a reviewer approves it.
+   * Off → a successful gen auto-counts. Absent → the CollectioCursor's global
+   * default applies.
    */
   reviewEnabled?: boolean
 
@@ -200,6 +228,6 @@ export interface Collectionum {
   find(id: string): Promise<Collectio | null>
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
-  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
-  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal' | 'completum' | 'nomen' | 'descriptio' | 'modusId' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>
+  create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
+  update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal' | 'completum' | 'nomen' | 'descriptio' | 'modusId' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>
 }

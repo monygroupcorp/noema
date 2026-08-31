@@ -132,6 +132,7 @@ function makeCollectio(over: Partial<Collectio> = {}): Collectio {
     acta: [],
     completae: 0,
     fractae: 0,
+    pendentes: 0,
     reiectae: 0,
     concurrentia: 2,
     impetusTotal: 0n,
@@ -149,4 +150,23 @@ test('toCollection: paused is absent when pausatum is unset (running normally)',
 test('toCollection: paused is true when pausatum is set', () => {
   const col = toCollection(makeCollectio({ pausatum: new Date('2026-07-10T00:00:00.000Z') }))
   assert.equal(col.paused, true)
+})
+
+// The piece counters are the collection's own bookkeeping, projected verbatim, so a caller
+// polling the run reads the same numbers the collection records. `completed` is "generated
+// and accepted"; `pendingReview` is "generated, awaiting a decision" — a run holding real
+// work is distinguishable from one that produced nothing (noema-376).
+test('toCollection: projects the held-for-review count alongside the other piece counters', () => {
+  const col = toCollection(makeCollectio({ numerus: 24, completae: 2, pendentes: 9, fractae: 1, reiectae: 3 }))
+  assert.equal(col.completed, 2)
+  assert.equal(col.pendingReview, 9)
+  assert.equal(col.failed, 1)
+  assert.equal(col.rejected, 3)
+  assert.equal(col.total, 24)
+})
+
+test('toCollection: a run with everything still held reports its work, not zero', () => {
+  const col = toCollection(makeCollectio({ numerus: 24, pendentes: 9 }))
+  assert.equal(col.completed, 0, 'nothing is accepted yet')
+  assert.equal(col.pendingReview, 9, 'but nine pieces exist and the record says so')
 })
