@@ -31,6 +31,13 @@
 .cat .cat-bars li{display:grid;grid-template-columns:9ch 1fr 3ch;align-items:center;gap:var(--s4)}
 .cat .cat-bars .k{font-size:var(--fs-base);color:var(--text)}
 .cat .cat-bars .bar{height:2px;background:var(--accent);opacity:.65;width:var(--w,0)}
+/* the bars draw themselves once, when the block arrives. Data that grows in front of you reads
+   as measured; data that is simply printed reads as typed. */
+@media (prefers-reduced-motion: no-preference){
+  .cat .cat-bars .bar{transform-origin:left center;animation:cat-draw var(--dur-slow) var(--ease) both;
+    animation-timeline:view();animation-range:entry 15% cover 32%}
+}
+@keyframes cat-draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .cat .cat-bars .n{color:var(--faint);font-size:var(--fs-xs);text-align:right}
 
 .cat .cat-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--s2)}

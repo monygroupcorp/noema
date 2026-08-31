@@ -6,6 +6,7 @@ import { PlateDeck } from './PlateDeck';
 import { ScrollStage } from './ScrollStage';
 import { LandingCatalog } from './LandingCatalog';
 import { LandingOpen } from './LandingOpen';
+import { LandingModes } from './LandingModes';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
@@ -227,7 +228,7 @@ export function PlateLab() {
           </div>
         </section>
 
-        {deck(platesIn('deck-coda'), 'A second run of work made in noema, passing', 'deck-coda')}
+        <LandingModes />
 
         <LandingOpen />
 

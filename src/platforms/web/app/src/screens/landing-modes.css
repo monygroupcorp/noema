@@ -1,0 +1,46 @@
+/* the rooms — what working here actually looks like. Real captures or a marked gap; never a
+   mockup, because a landing page that invents a product screen has invented the product. */
+.modes{padding:var(--py-section) 0}
+.modes .modes-in{max-width:1180px;margin:0 auto;padding:0 var(--px-section)}
+.modes h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s4);max-width:16ch}
+.modes .modes-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
+
+.modes .modes-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s6);margin-top:var(--s10)}
+.modes .mode{display:block;text-decoration:none;color:inherit}
+.modes .mode-shot{display:block;width:100%;aspect-ratio:16/10;border-radius:var(--r-lg);
+  overflow:hidden;object-fit:cover;object-position:top left;border:1px solid var(--hair);
+  background:var(--panel)}
+.modes .mode-empty{display:grid;place-items:center;border-style:dashed;border-color:var(--faint);
+  padding:var(--s5);text-align:center}
+.modes .mode-empty .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.05em;line-height:1.6}
+.modes .mode-meta{display:block;margin-top:var(--s4)}
+.modes .mode-meta h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s2)}
+.modes .mode-meta p{color:var(--muted);font-size:var(--fs-s);line-height:1.55;margin:0}
+.modes a.mode:hover .mode-shot{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+
+/* the run demonstration — the product's own states, walked. Labelled, and carrying none of the
+   numbers a real run reports, so it cannot be mistaken for one. */
+.modes .mode-run{position:relative;display:grid;grid-template-rows:auto auto auto 1fr auto;
+  gap:var(--s4);padding:var(--s6);background:var(--panel);border-style:solid}
+.modes .run-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
+.modes .run-flow{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
+.modes .run-chip{font-size:var(--fs-xs);letter-spacing:.08em;border-radius:var(--r-pill);
+  padding:2px var(--s3);border:1px solid var(--hair);color:var(--muted)}
+.modes .run-chip.st-running{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
+.modes .run-chip.st-complete{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,var(--hair))}
+.modes .run-prompt{color:var(--text);font-size:var(--fs-base);line-height:1.5}
+.modes .run-bar{height:2px;background:var(--hair);overflow:hidden}
+.modes .run-bar > span{display:block;height:100%;background:var(--accent);
+  transition:width var(--dur-slow) var(--ease)}
+.modes .run-out{border:1px solid var(--hair);border-radius:var(--r-sm);background:var(--raised);
+  min-height:0;display:grid;place-items:center;transition:border-color var(--dur) var(--ease)}
+.modes .run-out[data-done="true"]{border-color:color-mix(in srgb,var(--good) 40%,var(--hair))}
+/* --faint on --raised is 4.24:1 at this size, under AA. --muted clears it. */
+.modes .run-out .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em}
+/* in flow, not floated over the output — a label that collides with the thing it labels is
+   worse than no label, and this one has to stay readable. */
+.modes .run-mark{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.05em}
+
+@media(max-width:960px){.modes .modes-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:640px){.modes .modes-grid{grid-template-columns:1fr}}
