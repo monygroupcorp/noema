@@ -192,6 +192,7 @@ export function PlateLab() {
             <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
             <Link className="btn-ghost" to="/catalog">Browse the catalogue</Link>
           </span>
+          <span className="cand-more" aria-hidden="true" />
         </header>
 
         {deck(platesIn('deck'), 'A run of work made in noema, passing')}

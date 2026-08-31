@@ -13,12 +13,17 @@
 .lab-bar button.on{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
 
 /* ── the candidate ─────────────────────────────────────────────────────────────────────── */
-.cand{padding-bottom:var(--s10)}
+.cand{--nav-h:70px;padding-bottom:var(--s10)}
 .cand-nav{display:flex;align-items:center;justify-content:space-between;
-  padding:var(--s4) var(--px-section)}
+  padding:var(--s4) var(--px-section);height:var(--nav-h)}
 .cand-nav .right{display:flex;align-items:center;gap:var(--s3)}
 
-.cand-hero{max-width:1080px;margin:0 auto;padding:clamp(40px,9vh,110px) var(--px-section) 0;text-align:center}
+/* the hero owns the first screen and shares it with nothing. Everything below begins after a
+   deliberate scroll, which is what makes the deck's arrival an event rather than a continuation. */
+.cand-hero{position:relative;max-width:1080px;margin:0 auto;
+  min-height:calc(100svh - var(--nav-h));min-height:calc(100vh - var(--nav-h));
+  padding:var(--s9) var(--px-section) var(--s10);text-align:center;
+  display:grid;align-content:center;justify-content:stretch}
 .cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:var(--hero-leading,1.12);
   letter-spacing:-.04em;font-weight:600;margin:0;color:var(--text)}
 /* the shipped ad register — Martian Mono 800, uppercase. Kept switchable because retiring it
@@ -69,6 +74,19 @@
 .cand-nav .cand-navlinks a{color:var(--muted);font-size:var(--fs-base);text-decoration:none}
 .cand-nav .cand-navlinks a:hover{color:var(--text)}
 .cand-hero .cand-cta{display:flex;align-items:center;justify-content:center;gap:var(--s3);flex-wrap:wrap}
+/* the only thing in the hero that is not the message: a hairline that draws itself downward,
+   once a cycle, so the screen admits there is something under it without saying "scroll". */
+.cand-hero .cand-more{position:absolute;left:50%;bottom:var(--s9);width:1px;height:56px;
+  transform:translateX(-50%);overflow:hidden}
+.cand-hero .cand-more::after{content:"";position:absolute;inset:0;background:var(--accent);
+  opacity:.5}
+@media (prefers-reduced-motion: no-preference){
+  .cand-hero .cand-more::after{animation:cand-draw 2.8s var(--ease) infinite}
+}
+@keyframes cand-draw{
+  0%{transform:translateY(-100%)}
+  55%,100%{transform:translateY(100%)}
+}
 
 /* how it works — the sequence as a designed object, not three narrated boxes */
 .how{padding:var(--py-section) 0}
