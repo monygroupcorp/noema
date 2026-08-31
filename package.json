@@ -1,6 +1,6 @@
 {
   "name": "noema",
-  "version": "5.20.0",
+  "version": "5.21.0",
   "scripts": {
     "dev": "bash scripts/run-crystal.sh",
     "test": "npm run test:hermetic",
