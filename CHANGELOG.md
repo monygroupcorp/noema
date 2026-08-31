@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.21.0](https://github.com/monygroupcorp/noema/compare/v5.20.0...v5.21.0) (2026-08-31)
+
+
+### Features
+
+* **concierge:** SEE rung 3 — dataset/activity/muse discovery tools ([99fa552](https://github.com/monygroupcorp/noema/commit/99fa552358a755b23d31518054f265a917852707))
+* **concierge:** SEE rung 3 — dataset/activity/muse discovery tools ([419290d](https://github.com/monygroupcorp/noema/commit/419290d2b7b8900f7bec11cef0c46d497da18393))
+* **scripts:** add landing-dataset-walk driver for the house-look dataset run ([ed96f20](https://github.com/monygroupcorp/noema/commit/ed96f204b240ca757bb0bba6e0ea948a1f0365f9))
+* **scripts:** add landing-dataset-walk driver for the house-look dataset run ([313a836](https://github.com/monygroupcorp/noema/commit/313a836e8b87665208eb3050447f868f0b07df2f))
+
+
+### Bug Fixes
+
+* **allocutio:** dedupe in-turn tool calls and retry an empty closing call ([e2d37de](https://github.com/monygroupcorp/noema/commit/e2d37deb9c033535b24ca977499c6d32a4083ef6))
+* **allocutio:** dedupe in-turn tool calls and retry an empty closing call ([627a481](https://github.com/monygroupcorp/noema/commit/627a481dead7313e63cd1c4ec065f66710328252))
+* **execution:** release a run's reservation on every post-initiate dispatch failure ([2d30919](https://github.com/monygroupcorp/noema/commit/2d309196147f510d819808fdb97afab1358021e9))
+* **execution:** release a run's reservation on every post-initiate dispatch failure ([28feee9](https://github.com/monygroupcorp/noema/commit/28feee9abe8384fe66686b968ad095b3fb138d55))
+
 ## [5.20.0](https://github.com/monygroupcorp/noema/compare/v5.19.1...v5.20.0) (2026-08-28)
 
 
