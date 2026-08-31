@@ -50,6 +50,14 @@ const SPLIT = [
   { pct: '15%', who: 'to you, if both are yours', sub: 'a workflow built on your own trained identity' },
 ];
 
+/** The export destinations, from `EditioExport.tsx`. The bundle download works today; hosted
+ *  tokenURIs are real but gated behind content-safety review; minting deploys separately. The
+ *  page says which is which rather than flattening them into "mint your collection". */
+const EXPORT = [
+  { t: 'Take the bundle', d: 'Every approved piece and its metadata, as one download. Yours, nothing public.' },
+  { t: 'Or let us host the URIs', d: 'noema serves the tokenURIs while you deploy. A bridge, not permanent storage — migrate before you rely on it.' },
+];
+
 /** Where the page still has nothing honest to put. Rendered as marked gaps rather than filled
  *  with invented evidence — a fabricated testimonial is the one thing that cannot be walked
  *  back once it ships. */
@@ -210,6 +218,33 @@ export function PlateLab() {
         </section>
 
         {deck(platesIn('deck-coda'), 'A second run of work made in noema, passing', 'deck-coda')}
+
+        <section className="mint">
+          <div className="mint-in">
+            <div className="mint-copy">
+              <h2>Finished work, ready for market.</h2>
+              <p>
+                A collection leaves here as ERC-721 metadata — every approved piece, its traits,
+                and a tokenURI your own contract can point at. You deploy the contract; noema
+                does the part before it.
+              </p>
+              <ul className="mint-list">
+                {EXPORT.map((e) => (
+                  <li key={e.t}><span className="t">{e.t}</span><span className="d">{e.d}</span></li>
+                ))}
+              </ul>
+            </div>
+            <div className="mint-code" aria-label="How a hosted collection resolves">
+              <div className="mint-code-h mono">your contract</div>
+              <pre className="mono"><code>{`baseURI   <your collection>/
+tokenURI  <your collection>/<tokenId>.json`}</code></pre>
+              <div className="mint-code-f mono">
+                hosting is a bridge, not permanent storage — migrate to Arweave or IPFS before you
+                rely on these URIs
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section className="pay">
           <div className="pay-in">

@@ -71,6 +71,29 @@
 .how .how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
 .how .how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
 
+/* ready for market — the block that breaks the page's centred rhythm, and the one that shows
+   machinery instead of describing it. A visitor who reads the two lines of baseURI knows more
+   about what this does than three paragraphs would tell them. */
+.mint{padding:var(--py-section) 0}
+.mint .mint-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);
+  display:grid;grid-template-columns:1fr 1fr;gap:var(--s10);align-items:start}
+.mint h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s5);max-width:14ch}
+.mint .mint-copy > p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0}
+.mint .mint-list{list-style:none;margin:var(--s8) 0 0;padding:0;display:grid;gap:var(--s5)}
+.mint .mint-list li{border-top:1px solid var(--hair);padding-top:var(--s4)}
+.mint .mint-list .t{display:block;color:var(--text);font-size:var(--fs-md)}
+.mint .mint-list .d{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.55;margin-top:var(--s2)}
+
+.mint .mint-code{border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);
+  overflow:hidden}
+.mint .mint-code-h{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;
+  padding:var(--s4) var(--s6);border-bottom:1px solid var(--hair)}
+.mint .mint-code pre{margin:0;padding:var(--s7) var(--s6);overflow-x:auto}
+.mint .mint-code code{color:var(--accent-soft);font-size:var(--fs-s);line-height:1.9;white-space:pre}
+.mint .mint-code-f{color:var(--faint);font-size:var(--fs-xs);line-height:1.6;padding:var(--s5) var(--s6);
+  border-top:1px solid var(--hair);background:var(--bg)}
+
 /* royalties — the sentence neither benchmark can say, bound to the rates that pay it */
 .pay{padding:var(--py-section) 0}
 .pay .pay-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
@@ -120,6 +143,7 @@
   .cand-nav .cand-navlinks{display:none}
   .how .how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
   .pay .pay-split{grid-template-columns:1fr;gap:var(--s6)}
+  .mint .mint-in{grid-template-columns:1fr;gap:var(--s8)}
   .gaps .gaps-in{grid-template-columns:1fr}
   .cand-foot .cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
 }
