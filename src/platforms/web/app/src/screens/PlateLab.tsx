@@ -7,7 +7,7 @@ import { ScrollStage } from './ScrollStage';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
-const LEADS = [0.78, 0.86, 0.92];
+const STAGGERS = [0, 18, 36];
 const LEADINGS = [1.02, 1.12, 1.22];
 
 /** The information beats, each one locked to the viewport for as long as the reader stays. */
@@ -47,7 +47,7 @@ export function PlateLab() {
   const [font, setFont] = useState<'geist' | 'marquee'>('geist');
   const [leading, setLeading] = useState(1.12);
   const [crop, setCrop] = useState<PlateFormat>('2:1');
-  const [lead, setLead] = useState(0.86);
+  const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
 
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
@@ -61,7 +61,7 @@ export function PlateLab() {
       <PlateDeck
         slots={slots}
         format={className ? undefined : crop}
-        lead={lead}
+        stagger={stagger}
         progress={mode}
         label={label}
         className={className}
@@ -106,9 +106,9 @@ export function PlateLab() {
           ))}
         </span>
         <span className="lab-ctl">
-          <span className="mono">lead</span>
-          {LEADS.map((l) => (
-            <button key={l} className={l === lead ? 'on' : ''} onClick={() => setLead(l)}>{Math.round(l * 100)}%</button>
+          <span className="mono">stagger</span>
+          {STAGGERS.map((v) => (
+            <button key={v} className={v === stagger ? 'on' : ''} onClick={() => setStagger(v)}>{v}</button>
           ))}
         </span>
         <span className="lab-ctl">

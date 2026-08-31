@@ -11,9 +11,9 @@ interface PlateDeckProps {
   label: string;
   /** Card crop. Defaults to the run's own declared format; the lab overrides it to compare. */
   format?: PlateFormat;
-  /** Fraction of the banner width the leading card holds before the next one covers it.
-   *  Lower leaves a wider peek of the card behind. */
-  lead?: number;
+  /** How far each card in the pile is squared off from the one above it, in px. 0 stacks them
+   *  exactly, so nothing beneath is visible until the top card moves. */
+  stagger?: number;
   /** Where the run's progress comes from.
    *
    *  `lock` — inherit `--p` from an enclosing ScrollStage. The page holds still while the run
@@ -28,20 +28,19 @@ interface PlateDeckProps {
 /**
  * The deck — the landing page's one image mechanism.
  *
- * A full-bleed banner holding a fanned run of plates: the leading card takes most of the width,
- * the next one overlaps its right edge, and the rest stack behind that. Scrolling past the
- * banner slides the whole fan left, so each card in turn exits and the one behind it opens into
- * the lead. The images are never stood up in front of the reader; they pass while the reader is
- * on their way somewhere else.
+ * A stack of plates, squared up and staggered by a hair so the pile reads as a pile. Every card
+ * is already in place; the top one covers the rest. As the run advances the top card slides off
+ * to the left and uncovers the one beneath, which was there the whole time. Nothing arrives
+ * from off-screen, and the last card is never dealt away — it is what the reader is left with.
  *
- * The page's scroll is never intercepted, retimed, or snapped — the fan's position is read from
- * where the banner already is, so scrolling stays exactly as fast as the reader made it.
+ * The images are never stood up in front of the reader. They are uncovered, one at a time,
+ * while the reader is on their way somewhere else.
  *
- * Under `prefers-reduced-motion: reduce` the fan holds at its opening position. That is a
- * finished composition on its own: the lead card is fully visible and the run is legible behind
- * it, which is what the still has to be anyway.
+ * Under `prefers-reduced-motion: reduce` the pile holds squared up at its opening position,
+ * which is a finished composition on its own: one plate at full size with the pile beneath it
+ * falling away in value.
  */
-export function PlateDeck({ slots, label, format, lead = 0.86, progress = 'lock', className }: PlateDeckProps) {
+export function PlateDeck({ slots, label, format, stagger = 18, progress = 'lock', className }: PlateDeckProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,7 +56,7 @@ export function PlateDeck({ slots, label, format, lead = 0.86, progress = 'lock'
       const r = el.getBoundingClientRect();
       const vh = window.innerHeight || 1;
       // 0 as the banner's top reaches the bottom of the viewport, 1 as its bottom leaves the
-      // top: the fan's travel is exactly the reader's pass over it.
+      // top: the run's travel is exactly the reader's pass over it.
       const p = (vh - r.top) / (vh + r.height);
       el.style.setProperty('--p', String(Math.min(1, Math.max(0, p))));
     };
@@ -87,7 +86,7 @@ export function PlateDeck({ slots, label, format, lead = 0.86, progress = 'lock'
       window.removeEventListener('resize', onScroll);
       reduce.removeEventListener('change', apply);
     };
-  }, [slots.length, format, lead, progress]);
+  }, [slots.length, format, stagger, progress]);
 
   if (!slots.length) return null;
 
@@ -95,7 +94,7 @@ export function PlateDeck({ slots, label, format, lead = 0.86, progress = 'lock'
   const style = {
     '--deck-n': String(slots.length),
     '--deck-aspect': String(aspect),
-    '--deck-lead': String(lead),
+    '--deck-stagger': `${stagger}px`,
   } as CSSProperties;
 
   return (

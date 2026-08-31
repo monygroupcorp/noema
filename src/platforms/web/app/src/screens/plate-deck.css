@@ -1,45 +1,50 @@
-/* the deck — a fanned run of plates the reader scrolls past.
-   Geometry: the leading card holds --deck-lead of the banner width before the next card
-   covers it, so the card behind always shows an edge. The whole fan is one transform, so the
-   motion is a compositor job and the page's own scrolling is never touched. */
+/* the deck — a stack of plates the reader works down through.
+   Every card is already in place, squared up and staggered by a hair so the pile reads as a
+   pile. The top one covers the rest; as the run advances it slides off to the left and
+   uncovers the one beneath, which was there the whole time. Nothing arrives from off-screen.
+   The whole thing is transforms on absolutely positioned cards — no layout runs on scroll. */
 .deck{
-  --deck-n:1; --deck-aspect:2; --deck-lead:.78;
-  --deck-step:calc(100% * var(--deck-lead));    /* origin-to-origin spacing of the cards */
-  --deck-card-w:calc(var(--deck-step) * 1.06);  /* wider than the step — hence the overlap */
+  --deck-n:1;
+  --deck-aspect:2;
+  --deck-stagger:18px;                                        /* how far the pile is squared off by */
+  --deck-spread:calc((var(--deck-n) - 1) * var(--deck-stagger));
   position:relative;
-  overflow:hidden;
+  overflow:hidden;                                            /* clips the departing card */
   width:100%;
 }
 /* self-driven: the component writes its own progress onto the banner. In lock mode nothing is
    declared here, so `--p` is inherited from the enclosing stage. */
 .deck-pass{--p:0}
+
+/* height is the card's own crop plus the pile's offset, so the stack fills the banner exactly */
 .deck-track{
   position:relative;
   height:0;
-  padding-bottom:calc(var(--deck-card-w) / var(--deck-aspect));
-  /* travel ends with the last card's right edge on the banner's right edge — the run empties
-     into the frame rather than off it. */
-  --deck-travel:calc((var(--deck-n) - 1) * var(--deck-step) + var(--deck-card-w) - 100%);
-  transform:translate3d(calc(-1 * var(--p,0) * var(--deck-travel)),0,0);
-  will-change:transform;
+  padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-aspect) + var(--deck-spread));
 }
+
 .deck-card{
-  --i:0;   /* the card's position in the run, set per-instance by the component */
+  --i:0;                                       /* position in the run, set by the component */
+  --adv:calc(var(--p,0) * (var(--deck-n) - 1));/* how far the run has advanced, in cards */
+  --dp:clamp(0,calc(var(--adv) - var(--i)),1); /* this card's own departure, 0→1 */
+  --r:min(max(0,calc(var(--i) - var(--adv))),3);/* depth below the top, drawn 3 layers deep */
   position:absolute;
-  top:0;
-  left:calc(var(--i) * var(--deck-step));
-  width:var(--deck-card-w);
+  left:calc(var(--i) * var(--deck-stagger));
+  top:calc(var(--i) * var(--deck-stagger));
+  width:calc(100% - var(--deck-spread));
   aspect-ratio:var(--deck-aspect);
-  z-index:var(--i);
+  z-index:calc(100 - var(--i));
+  /* the departing card leaves to the left, far enough to clear its own offset and the frame */
+  transform:translate3d(calc(-1 * var(--dp) * (100% + var(--i) * var(--deck-stagger) + 6vw)),0,0);
+  /* the pile falls away in value, so depth reads before anything has moved */
+  filter:brightness(calc(1 - var(--r) * .14));
   border-radius:var(--r-lg);
   overflow:hidden;
-  /* the fan only reads as depth if each card's leading edge is visible against the one it
-     covers — one hairline and a short falloff, nothing more. */
-  box-shadow:-1px 0 0 var(--hair), -24px 0 40px -24px var(--bg);
+  box-shadow:-1px 0 0 var(--hair), -30px 0 50px -28px var(--bg);
 }
 .deck-card > .plate{border-radius:0}
 
-/* An unfilled run is all one flat value, which makes the fan invisible and the motion
+/* An unfilled run is all one flat value, which makes the pile invisible and the motion
    unreadable — so while the cards are empty they alternate ground and carry their position in
    the run. Both go away the moment real plates land. */
 .deck-card:nth-child(even) .plate-empty{background:var(--raised)}
@@ -47,10 +52,8 @@
 .deck-i{position:absolute;left:var(--s7);bottom:var(--s6);z-index:1;
   color:var(--hair-soft);font-size:clamp(64px,9vw,140px);line-height:.8;
   letter-spacing:-.04em;pointer-events:none}
-@media(max-width:640px){.deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}}
 
 @media(max-width:640px){
-  /* narrow: the lead card takes more of the width and the peek narrows, or the run reads as
-     two half-images and neither one lands. */
-  .deck{--deck-lead:.86}
+  .deck{--deck-stagger:8px}
+  .deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
 }
