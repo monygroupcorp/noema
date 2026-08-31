@@ -17,6 +17,8 @@ import { Nexus } from '../../../src/ledger/Nexus.js'
 import { studioSpendHook } from '../../../src/ledger/hooks/studioSpend.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { MemoryModo } from '../../../src/execution/MemoryModo.js'
+import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
+import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import type { Materia, MateriaStore, PodPolicy } from '../../../src/types/materia.js'
 import type { Hospitium, HospitiumStore, HostKey } from '../../../src/types/hospitium.js'
 
@@ -299,6 +301,54 @@ test('budget watchdog: no modos store wired → budget is not enforced (balance-
   const h = (await full.hospitia.findByMateriaId(MATERIA_ID))!
   const res = await censere(balanceOnly as CensusDeps, h, new Date(h.inceptum.getTime() + 60_000))
   assert.equal(res.drainEngaged, false, 'no modos → no budget drain')
+})
+
+// The budget the watchdog enforces is spent against the LEDGER, so the run spend it
+// weighs has to be the ledger's SETTLED figure — not the cursor's metered one. This
+// drives a real run through a real ActumCompletor into the session the watchdog then
+// reads, and picks a budget that only the settled figure crosses: if the guard were
+// still weighing the pre-settlement figure, the studio would run on past its budget.
+test('budget watchdog: the decision weighs the ledger-settled run spend, not the metered one', async () => {
+  const REPORTED = 60n          // what the cursor metered for the run
+  const TICK = 60n              // this tick's warm-time charge (1 impetus/s × 60 s)
+  // Sits above metered + tick and at/below settled + tick, so the two figures give
+  // OPPOSITE answers and the assertion below can only pass on the settled one.
+  const BUDGET = 180n
+
+  const deps = await makeBudgetDeps({ budget: BUDGET, impetusAccrued: 0n })
+
+  // A guest-tier run in this session: the warm surcharge puts the settled amount
+  // above the metered one. Reservation is generous so the cap does not also bind.
+  const acta = new MemoryActorum()
+  const signum = await deps.signorum.issue({
+    animaId: 'anima-runner', forma: 'integer', valor: 10_000n, auctor: 'test:seed',
+  })
+  const actum = await acta.create({
+    id: 'actum-budget-1', modusId: 'mod-1', modusVersiono: '1.0.0',
+    impetus: 10_000n, signaConsumed: [signum.id], aditus: {}, status: 'agens',
+    expirat: new Date(Date.now() + 60_000),
+    modoId: deps.modo.id,
+    executio: { pricingTier: 'guest' },
+  })
+  await deps.signorum.lock([signum.id], actum.id)
+
+  const completor = new ActumCompletor({ acta, signorum: deps.signorum, modos: deps.modos! })
+  const completed = await completor.complete(
+    actum, { exitus: {}, impetus: REPORTED, duratio: 60_000 },
+  )
+  const settled = completed.impetus
+
+  // The premise, stated against the ledger's own number rather than re-derived: the
+  // two candidate figures fall on opposite sides of this budget.
+  assert.ok(REPORTED + TICK < BUDGET, 'the metered figure would NOT have crossed the budget')
+  assert.ok(settled + TICK >= BUDGET, 'the settled figure DOES cross it')
+  assert.equal((await deps.modos!.findById(deps.modo.id))!.impetusAccrued, settled)
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+
+  assert.equal(res.charged, TICK, 'the warm-time tick billed as expected')
+  assert.equal(res.drainEngaged, true, 'the budget decision used the settled run spend')
 })
 
 // ── 8. Per-window billing from costPerHr (fidelity — rounds once, not per-second)

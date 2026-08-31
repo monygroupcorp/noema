@@ -58,10 +58,31 @@ export interface Modo {
   materiamId?: string
 
   /**
-   * Total impetus points accrued in this session so far.
-   * "impetus" = force/impulse in Latin — the points consumed.
-   * 1 point = $0.000337 = 1 second of RunPod SECURE pod-time.
-   * This is a running total; source of truth is the sum of actum.impetus.
+   * Total impetus points accrued by this session's runs so far.
+   * "impetus" = force/impulse in Latin. 1 point = $0.000337 = 1 second of
+   * RunPod SECURE pod-time.
+   *
+   * ── WHICH NUMBER THIS HOLDS: the SETTLED one ────────────────────────────
+   * The running sum of `Actum.impetus` AS SETTLED BY `ActumCompletor` — i.e.
+   * post-surcharge and post-reservation-cap, the same amount `signorum.settle`
+   * spent for each run. It is NOT the cursor's raw metered pod figure
+   * (`Exitus.impetus`), which is only the settlement's base term and diverges
+   * from it whenever a cap or a surcharge applies.
+   *
+   * Why charged, not consumed: this field is not telemetry. `Census` reads it
+   * as the session BUDGET guard (`costAccrued + impetusAccrued >= budget`),
+   * and a budget is an authorization to SPEND against the tessera — the only
+   * thing that can draw that authorization down is what the ledger actually
+   * charges. The other term in that same sum, `Hospitium.costAccrued`, is
+   * likewise a charged figure, so a consumed figure here would not even be
+   * commensurable with it. Metered pod consumption is recorded per run on
+   * `Actum.executio.baseImpetus`; read that when you want the raw cost basis.
+   *
+   * Consequently there is exactly ONE accrual site — `ActumCompletor.complete`,
+   * which is where the settled number comes into existence. Do not accrue from
+   * a cursor result at dispatch or from a webhook payload: the settled figure
+   * does not exist yet at either point, and a second derivation of it is a
+   * second answer.
    */
   impetusAccrued: bigint
 

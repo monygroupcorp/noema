@@ -15,7 +15,13 @@ export interface TesseraOpenResult {
 /**
  * TesseraCursor wraps an execution cursor and adds Modo session tracking.
  * On openModo(): creates the session record + issues a tessera Signum budget.
- * On run(): delegates to inner cursor, then updates Modo impetusAccrued + acta.
+ * On run(): delegates to inner cursor, then records the actum on the Modo.
+ *
+ * It does NOT accrue session spend. `Modo.impetusAccrued` holds the SETTLED
+ * figure, which does not exist yet when run() returns — the cursor's reported
+ * impetus is only settlement's base term, before any surcharge or the
+ * reservation cap. `ActumCompletor.complete` is the single accrual site, on
+ * both the sync rail (dispatchInceptio completes inline) and the async one.
  */
 export class TesseraCursor implements Cursor {
   constructor(
@@ -57,14 +63,9 @@ export class TesseraCursor implements Cursor {
     const result = await this.inner.run(actum, modo)
 
     if (modo) {
-      // Always track the actum, even for async — impetus is unknown until webhook fires
-      const patch: Parameters<typeof this.modos.update>[1] = {
-        acta: [...modo.acta, actum.id],
-      }
-      if (result.kind === 'sync') {
-        patch.impetusAccrued = modo.impetusAccrued + result.exitus.impetus
-      }
-      await this.modos.update(modo.id, patch)
+      // Track the actum on the session. Spend is NOT accrued here on either rail:
+      // the settled amount is decided by ActumCompletor, which is where it accrues.
+      await this.modos.update(modo.id, { acta: [...modo.acta, actum.id] })
     }
 
     return result

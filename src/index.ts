@@ -1735,7 +1735,6 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     modorum: ring.modorum,
     ...(exitusResolver ? { resolveExitus: exitusResolver } : {}),
-    modos: ring.modos,
     hospitia: ring.hospitia,
     deployments: ring.deployments,
     editiones: ring.editiones,

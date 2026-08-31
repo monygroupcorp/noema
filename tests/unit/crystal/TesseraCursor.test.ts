@@ -135,14 +135,18 @@ test('run delegates to inner cursor and returns CursorResult', async () => {
   assert.equal((result as Extract<typeof result, { kind: 'sync' }>).exitus.impetus, 60n)
 })
 
-test('run with modo updates impetusAccrued', async () => {
+test('run with modo does NOT accrue spend — the cursor figure is not the settled one', async () => {
+  // `Modo.impetusAccrued` holds what the ledger SETTLED (post-surcharge, post-cap).
+  // That number does not exist until ActumCompletor settles the run, so the cursor
+  // must leave the counter alone rather than write its own pre-settlement figure.
+  // Parity across both rails: tests/unit/execution/sessionSpendParity.test.ts.
   const modos = new MemoryModoStore()
   const cursor = new TesseraCursor(new StubCursor(), modos, new MemorySignorum())
   const { modo } = await cursor.openModo(1800n, { animaId: 'anima-abc' })
   const actum = makeActum({ id: 'actum-x', impetus: 60n })
   await cursor.run(actum, modo)
   const updated = await modos.findById(modo.id)
-  assert.equal(updated!.impetusAccrued, 60n)
+  assert.equal(updated!.impetusAccrued, 0n)
 })
 
 test('run with modo appends actumId to modo.acta', async () => {
@@ -160,7 +164,7 @@ test('run without modo does not throw', async () => {
   await assert.doesNotReject(() => cursor.run(makeActum()))
 })
 
-test('run accumulates impetusAccrued across multiple runs', async () => {
+test('run accumulates acta across multiple runs, and still no spend', async () => {
   const modos = new MemoryModoStore()
   const cursor = new TesseraCursor(new StubCursor(), modos, new MemorySignorum())
   const { modo } = await cursor.openModo(1800n, { animaId: 'anima-abc' })
@@ -168,8 +172,8 @@ test('run accumulates impetusAccrued across multiple runs', async () => {
   const m1 = await modos.findById(modo.id)
   await cursor.run(makeActum({ id: 'a2' }), m1!)
   const m2 = await modos.findById(modo.id)
-  // StubCursor returns 60n per run
-  assert.equal(m2!.impetusAccrued, 120n)
+  assert.deepEqual(m2!.acta, ['a1', 'a2'])
+  assert.equal(m2!.impetusAccrued, 0n, 'spend accrues at settlement, not at dispatch')
 })
 
 test('run with async result still appends actumId to modo.acta', async () => {

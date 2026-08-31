@@ -807,6 +807,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     vestigiorum,
     deployments,
     intellarum: new MongoIntella(db.collection('intellae')),
+    // Session spend accrues here, from the settled amount — the sole accrual site.
+    modos,
   })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
