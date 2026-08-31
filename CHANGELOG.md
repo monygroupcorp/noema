@@ -1,5 +1,27 @@
 # Changelog
 
+## [5.22.0](https://github.com/monygroupcorp/noema/compare/v5.21.0...v5.22.0) (2026-08-31)
+
+
+### Features
+
+* **datasets:** share a Dataset with a Sodalitas — team read + contribution ([6ab519c](https://github.com/monygroupcorp/noema/commit/6ab519cb4d0fedd2e0f5bcb24337b4709b01e457))
+* **datasets:** share a Dataset with a Sodalitas — team read + contribution ([ba79005](https://github.com/monygroupcorp/noema/commit/ba790054f1870c31f446e124abb226095fa517f4))
+* **scripts:** every candidate image is written to disk as it is fetched ([3bd0986](https://github.com/monygroupcorp/noema/commit/3bd0986b7f4d05446b67bf08e4a9a576b5b1c710))
+* **scripts:** the landing walk's grid is runtime config, and a quote is a reserve ([1aff6e4](https://github.com/monygroupcorp/noema/commit/1aff6e496b1da787eb22c29dfa8e2669e04ede83))
+
+
+### Bug Fixes
+
+* **collectio:** seed reiectae in MongoCollectio so a fired collection dispatches ([04f7fe8](https://github.com/monygroupcorp/noema/commit/04f7fe8c83e73fd5bbe02ebef43591a662453884))
+* **collectio:** seed reiectae in MongoCollectio so a fired collection dispatches ([de9ac9c](https://github.com/monygroupcorp/noema/commit/de9ac9ce3a6e2afd755e1e58a080cfa2980d9821))
+* **scripts:** a dry pass reports SKIP and says DRY, instead of failing checks it never ran ([0856f59](https://github.com/monygroupcorp/noema/commit/0856f59d2738912783179c991e463190408da726))
+* **scripts:** apply the noema-359 ruling — a failed dispatch is accounted, not lost ([81fba09](https://github.com/monygroupcorp/noema/commit/81fba0919e84f76b8772ea82f9c045d9fe5d21d5))
+* **scripts:** landing walk — ruled grid, reserve-not-price costing, and honest receipts ([fe653a2](https://github.com/monygroupcorp/noema/commit/fe653a2b08ccb837b5ee0c844d42488804289641))
+* **scripts:** the scene axis carries all sixteen ruled scenes, so 384 is reachable ([359a863](https://github.com/monygroupcorp/noema/commit/359a863ec1b6ccd33565b8c38835a586a1763ec9))
+* **scripts:** the smoke fixture answers /v1/me, so the headroom gate is proven ([e63c781](https://github.com/monygroupcorp/noema/commit/e63c7810c72f82fcb72219d0a254e5bf62d5e8d0))
+* **scripts:** the trigger word default is the ruled `noema`, not the draft `nmahaus` ([29ce65f](https://github.com/monygroupcorp/noema/commit/29ce65f522c876a1692e183dbe0abc3b6ea53f2a))
+
 ## [5.21.0](https://github.com/monygroupcorp/noema/compare/v5.20.0...v5.21.0) (2026-08-31)
 
 
