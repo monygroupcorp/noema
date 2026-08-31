@@ -31,10 +31,13 @@ import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio } from '../../../../src/types/cursus.js'
 import type { Corpus, Corpora, Corporum } from '../../../../src/types/corpus.js'
 import type { Dataset, Datasets } from '../../../../src/types/dataset.js'
+import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../../src/types/sodalitas.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 
 const MINE: AuctorKey = { animaId: 'anima-mine' }
 const OTHER_OWNER = 'anima-other'
+/** A caller in no team at all — the non-member the widened dataset gate must still refuse. */
+const STRANGER: AuctorKey = { animaId: 'anima-stranger' }
 /** An anonymous caller. Datasets and corpora both key their owner on an animaId. */
 const ANON: AuctorKey = { commitment: '0xcommitment' }
 
@@ -59,19 +62,51 @@ function corpus(over: Partial<Corpus> & { id: string; auctor: string }): Corpus 
   } as Corpus
 }
 
+/** A `Datasets` double that records what the run entry point asked it to resolve. */
+type RecordingDatasets = Datasets & { lookups: string[] }
+
 /** `findOwned` only — the one seam the run entry point uses. Mirrors the Mongo store's
- *  query predicate: the owner, or a record whose access kind is public. */
-function datasetStore(records: Dataset[]): Datasets {
+ *  query predicate: the owner, a dataset shared with one of the CALLER's teams, or a record
+ *  whose access kind is public. `lookups` records every id it was asked for, so a test can
+ *  assert that a run already dispatched is never resolved a second time. */
+function datasetStore(records: Dataset[]): RecordingDatasets {
+  const lookups: string[] = []
   return {
-    async findOwned(id: string, owner: string) {
+    lookups,
+    async findOwned(id: string, owner: string, sodalitasIds?: string[]) {
+      lookups.push(id)
       const d = records.find(r => r.id === id)
       if (!d) return null
       const access = (d as Dataset & { access?: unknown }).access
       const isPublic = access === 'public'
         || (typeof access === 'object' && access !== null && (access as { kind?: string }).kind === 'public')
-      return d.owner === owner || isPublic ? d : null
+      const shared = d.sodalitasId !== undefined && (sodalitasIds ?? []).includes(d.sodalitasId)
+      return d.owner === owner || shared || isPublic ? d : null
     },
-  } as unknown as Datasets
+  } as unknown as RecordingDatasets
+}
+
+/** The team primitive, unchanged — flat mutable membership, exactly `src/types/sodalitas.ts`.
+ *  Nothing here is dataset-aware: the overlay is `Collectio`'s reused, so the team store cannot
+ *  be the place a dataset test passes on a special case. */
+class MemorySodalitatum implements Sodalitatum {
+  constructor(private teams: Sodalitas[]) {}
+  async find(id: string): Promise<Sodalitas | null> { return this.teams.find(t => t.id === id) ?? null }
+  async listByMember(animaId: string): Promise<Sodalitates> {
+    return this.teams.filter(t => t.membra.includes(animaId))
+  }
+  async create(): Promise<Sodalitas> { throw new Error('not used') }
+  async update(id: string, patch: Partial<Pick<Sodalitas, 'membra' | 'nomen'>>): Promise<Sodalitas> {
+    const i = this.teams.findIndex(t => t.id === id)
+    assert.ok(i >= 0, `team ${id} exists`)
+    const next = { ...this.teams[i]!, ...patch }
+    this.teams[i] = next
+    return next
+  }
+}
+
+function team(id: string, membra: string[]): Sodalitas {
+  return { id, nomen: `team ${id}`, membra, auctor: membra[0] ?? OTHER_OWNER, natum: new Date(0) }
 }
 
 function corpusStore(records: Corpus[]): Corporum {
@@ -93,7 +128,10 @@ interface Harness {
   dispatched: () => Inceptio | undefined
 }
 
-function harness(modi: Modus[], stores: { datasets?: Datasets; corpora?: Corporum } = {}): Harness {
+function harness(
+  modi: Modus[],
+  stores: { datasets?: Datasets; corpora?: Corporum; sodalitatum?: Sodalitatum } = {},
+): Harness {
   let seen: Inceptio | undefined
   const deps = {
     modorum: { async find(id: string) { return modi.find(m => m.id === id) ?? null } },
@@ -111,9 +149,11 @@ function harness(modi: Modus[], stores: { datasets?: Datasets; corpora?: Corporu
 }
 
 /** Assert the run was refused as bad input, naming `field`, with nothing dispatched. */
-async function assertRefused(h: Harness, modusId: string, aditus: Record<string, unknown>, field: string): Promise<void> {
+async function assertRefused(
+  h: Harness, modusId: string, aditus: Record<string, unknown>, field: string, auctor: AuctorKey = MINE,
+): Promise<void> {
   await assert.rejects(
-    () => h.api.invokeFlow(MINE, { modusId }, aditus),
+    () => h.api.invokeFlow(auctor, { modusId }, aditus),
     (err: unknown) => {
       assert.ok(err instanceof ApiError, 'refused as a request error, not a 500')
       assert.equal(err.code, 'input.invalid_aditus')
@@ -317,5 +357,167 @@ test('training: an inline manifest still passes with no corpus store wired', asy
   const h = harness([modus(TRAINING)])
   await assertReachedDispatch(
     h, TRAINING, { dataset: manifest, triggerWord: 'trigword', baseModel: 'klein-4b', steps: 10 },
+  )
+})
+
+// ── noema-384: the team overlay on a run's DATASET reference ────────────────
+//
+// ADR-0014 question 2, ruled by rth 2026-08-31: a member may name a dataset shared with their
+// team as a run's input. The gate is still `_assertOwnedAditus` at DISPATCH, closed over the
+// dispatching caller — these tests pin that it widened exactly that far and no further.
+//
+// WHY THESE STAY IN THIS FILE: what widened is the declaration machinery's dataset lookup, not
+// a dataset route. A second file would be a second place to decide what "may name" means.
+
+const TEAM_ID = 'team-fellowship'
+/** Owned by a team-mate, shared with the team the member belongs to. */
+const SHARED = dataset({ id: 'ds-shared', owner: OTHER_OWNER, sodalitasId: TEAM_ID })
+/** Owned by the same team-mate, shared with nobody — the overlay is per dataset, not per person. */
+const UNSHARED = dataset({ id: 'ds-unshared', owner: OTHER_OWNER })
+/** Shared with a team the caller is NOT in. */
+const OTHER_TEAM = dataset({ id: 'ds-other-team', owner: OTHER_OWNER, sodalitasId: 'team-elsewhere' })
+
+/** The member's world: they are in `TEAM_ID`, the owner is too, the stranger is in nothing. */
+function teamHarness(): Harness & { datasets: RecordingDatasets } {
+  const datasets = datasetStore([SHARED, UNSHARED, OTHER_TEAM, OURS])
+  const sodalitatum = new MemorySodalitatum([
+    team(TEAM_ID, [OTHER_OWNER, 'anima-mine']),
+    team('team-elsewhere', [OTHER_OWNER]),
+  ])
+  return { ...harness([TEST_MODUS], { datasets, sodalitatum }), datasets }
+}
+
+test('team: a dataset shared with a team the caller belongs to resolves and dispatches', async () => {
+  const h = teamHarness()
+  const inceptio = await assertReachedDispatch(h, TEST_MODUS.id, { board: SHARED.id, note: 'hello' })
+  assert.deepEqual(inceptio.aditus, { board: SHARED.id, note: 'hello' }, 'the aditus reaches dispatch untouched')
+})
+
+test('team: no team identity travels with the Actum — the gate is dispatch time, not run time', async () => {
+  const h = teamHarness()
+  const inceptio = await assertReachedDispatch(h, TEST_MODUS.id, { board: SHARED.id })
+  const wire = JSON.stringify(inceptio)
+  assert.ok(!wire.includes(TEAM_ID), 'the team id is not attached to the inceptio')
+  assert.ok(!wire.toLowerCase().includes('sodalit'), 'nothing team-shaped is threaded through execution')
+})
+
+test('team: a non-member is refused, with the refusal an unshared dataset already gives', async () => {
+  await assertRefused(teamHarness(), TEST_MODUS.id, { board: SHARED.id }, 'board', STRANGER)
+  // Same code, same status, same field as an id that names nothing: a caller still cannot tell
+  // "not yours" from "does not exist", so ids stay non-enumerable.
+  await assertRefused(teamHarness(), TEST_MODUS.id, { board: 'ds-no-such-thing' }, 'board', STRANGER)
+})
+
+test('team: a team-mate\'s UNSHARED dataset stays owner-only', async () => {
+  await assertRefused(teamHarness(), TEST_MODUS.id, { board: UNSHARED.id }, 'board')
+})
+
+test('team: a dataset shared with a team the caller is not in is refused', async () => {
+  await assertRefused(teamHarness(), TEST_MODUS.id, { board: OTHER_TEAM.id }, 'board')
+})
+
+test('team: fail closed — with no team store wired a shared dataset is owner-only', async () => {
+  await assertRefused(
+    harness([TEST_MODUS], { datasets: datasetStore([SHARED, OURS]) }),
+    TEST_MODUS.id, { board: SHARED.id }, 'board',
+  )
+  // ...and the caller's own dataset still resolves, so the absence closed nothing it should not.
+  await assertReachedDispatch(
+    harness([TEST_MODUS], { datasets: datasetStore([SHARED, OURS]) }), TEST_MODUS.id, { board: OURS.id },
+  )
+})
+
+test('team: fail closed — an anonymous caller resolves no shared dataset either', async () => {
+  const h = teamHarness()
+  await assert.rejects(
+    () => h.api.invokeFlow(ANON, { modusId: TEST_MODUS.id }, { board: SHARED.id }),
+    (err: unknown) => err instanceof ApiError && err.code === 'input.invalid_aditus',
+  )
+  assert.equal(h.dispatched(), undefined, 'nothing was dispatched')
+})
+
+test('team: losing membership closes NEW dispatch; the run already dispatched is untouched', async () => {
+  const datasets = datasetStore([SHARED])
+  const teams = new MemorySodalitatum([team(TEAM_ID, [OTHER_OWNER, 'anima-mine'])])
+  const h = harness([TEST_MODUS], { datasets, sodalitatum: teams })
+
+  const dispatched = await assertReachedDispatch(h, TEST_MODUS.id, { board: SHARED.id })
+  const before = JSON.stringify(dispatched)
+  const lookupsAtDispatch = datasets.lookups.length
+
+  // The member is removed from the team. Membership is read live off the team store and is
+  // never snapshotted onto the dataset or onto the Actum, so this takes effect on the NEXT run
+  // and only there.
+  await teams.update(TEAM_ID, { membra: [OTHER_OWNER] })
+
+  await assert.rejects(
+    () => h.api.invokeFlow(MINE, { modusId: TEST_MODUS.id }, { board: SHARED.id }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError, 'refused as a request error, not a 500')
+      assert.equal(err.code, 'input.invalid_aditus')
+      assert.equal(err.httpStatus, 422)
+      return true
+    },
+  )
+
+  // The refused run reached no dispatch of its own: `dispatched()` still holds the FIRST one,
+  // byte for byte. Nothing revisited it, and nothing about the membership change reached it.
+  assert.equal(h.dispatched(), dispatched, 'no second inceptio')
+  assert.equal(JSON.stringify(h.dispatched()), before, 'the already-dispatched inceptio is unchanged')
+  assert.equal(
+    datasets.lookups.length, lookupsAtDispatch + 1,
+    'the dataset was resolved once per invocation — the dispatched run was never re-resolved',
+  )
+})
+
+// ── The live modi, on a shared dataset ──────────────────────────────────────
+
+const SHARED_CAPTIONED = dataset({
+  id: 'ds-shared-captioned', owner: OTHER_OWNER, sodalitasId: TEAM_ID,
+  captionsets: [{ id: 'cs-shared', name: 'shared', method: 'manual', coverage: '1/1' }],
+})
+
+function liveTeamHarness(): Harness {
+  return harness(
+    [modus(CAPTION), modus(DECOMPOSE)],
+    {
+      datasets: datasetStore([SHARED_CAPTIONED, THEIR_CAPTIONED]),
+      sodalitatum: new MemorySodalitatum([team(TEAM_ID, [OTHER_OWNER, 'anima-mine'])]),
+    },
+  )
+}
+
+test('caption: a member may name the team-shared dataset', async () => {
+  const inceptio = await assertReachedDispatch(liveTeamHarness(), CAPTION, { dataset: SHARED_CAPTIONED.id })
+  assert.equal(inceptio.aditus.dataset, SHARED_CAPTIONED.id)
+})
+
+test('caption: a dataset shared with nobody is still refused to the same member', async () => {
+  await assertRefused(liveTeamHarness(), CAPTION, { dataset: THEIR_CAPTIONED.id }, 'dataset')
+})
+
+test('decompose: a captionset resolves through the WIDENED parent, not on its own', async () => {
+  const inceptio = await assertReachedDispatch(
+    liveTeamHarness(), DECOMPOSE, { dataset: SHARED_CAPTIONED.id, captionset: 'cs-shared' },
+  )
+  assert.equal(inceptio.aditus.captionset, 'cs-shared')
+  // A captionset that is NOT on the shared dataset is still refused: the parent widened, the
+  // sub-resource check did not.
+  await assertRefused(
+    liveTeamHarness(), DECOMPOSE,
+    { dataset: SHARED_CAPTIONED.id, captionset: 'cs-theirs' },
+    'captionset',
+  )
+})
+
+test('corpus: the CORPUS reference did not widen — Corpus carries no team overlay', async () => {
+  const h = harness([modus(TRAINING)], {
+    corpora: corpusStore([corpus({ id: 'corpus-theirs', auctor: OTHER_OWNER })]),
+    sodalitatum: new MemorySodalitatum([team(TEAM_ID, [OTHER_OWNER, 'anima-mine'])]),
+  })
+  await assertRefused(
+    h, TRAINING,
+    { dataset: 'corpus-theirs', triggerWord: 'trigword', baseModel: 'klein-4b', steps: 10 },
+    'dataset',
   )
 })
