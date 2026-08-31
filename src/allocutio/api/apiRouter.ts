@@ -1370,7 +1370,9 @@ export function createApiRouter(deps: {
     }),
   )
 
-  // GET /v1/studios — the caller's live studios (auth required).
+  // GET /v1/studios — the caller's LIVE studios (auth required): in-flight and warm ones,
+  // not closed sessions or reaped pods. A studio that has since gone terminal drops off this
+  // list but stays readable by id below.
   router.get(
     '/studios',
     wrap(async (req, res) => {
@@ -1380,6 +1382,10 @@ export function createApiRouter(deps: {
   )
 
   // GET /v1/studios/:id — one of the caller's studios (owner-scoped; poll for ready).
+  // Ownership is the only gate: a studio the caller hosts reads back in every state,
+  // terminal included, so an id they are shown elsewhere (GET /v1/me/status, and the
+  // terminal view DELETE returns) is one they can address here. A stranger's read is
+  // `not_found.studio`, never `forbidden` — same convention as DELETE below.
   router.get(
     '/studios/:id',
     wrap(async (req, res) => {

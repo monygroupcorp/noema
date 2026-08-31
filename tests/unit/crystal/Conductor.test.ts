@@ -234,3 +234,48 @@ test('getStudio is owner-scoped by studioId — in-flight included, strangers re
   assert.equal(mine!.studioId, handle.studioId)
   assert.equal(await conductor.getStudio(handle.studioId, { animaId: 'intruder' }), null, 'stranger gets nothing — no leak')
 })
+
+// ── getStudio: liveness vs addressability ────────────────────────────────────
+// `find` and run-targeting ask whether a studio is LIVE; reading one by id asks whether it
+// is the caller's. Those are different questions over the same owner gate, and only the
+// liveness one may hide a studio the caller hosts.
+
+test('getStudio reads back an owned studio whose pod was reaped; find still lists live only', async () => {
+  const { conductor, materiae } = makeConductor()
+  const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
+
+  // The idle reaper / Census watchdog kills the pod; the session record stays stale-`idle`.
+  await materiae.update(handle!.materia!.id, { status: 'terminated' })
+
+  assert.equal(await conductor.getStudio(handle!.studioId, AUCTOR), null,
+    'the liveness question still answers no — a run may not bind a dead studio')
+  const read = await conductor.getStudio(handle!.studioId, AUCTOR, { includeTerminal: true })
+  assert.ok(read, 'the owner can still address the studio by id')
+  assert.equal(read!.materia?.status, 'terminated', 'it reports the terminal state rather than absence')
+  assert.equal((await conductor.find(AUCTOR)).length, 0, 'the live list is unchanged')
+})
+
+test('getStudio reads back an owned studio after claudere closed it', async () => {
+  const { conductor } = makeConductor({ terminate: async () => {} })
+  const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
+  assert.equal(await conductor.claudere(handle!.studioId, AUCTOR), true)
+
+  const read = await conductor.getStudio(handle!.studioId, AUCTOR, { includeTerminal: true })
+  assert.ok(read, 'DELETE returned a terminal view; a following read must not contradict it')
+  assert.equal(read!.modo.status, 'terminated')
+  assert.equal(await conductor.getStudio(handle!.studioId, AUCTOR), null, 'still not a live studio')
+})
+
+test('reading a terminal studio stays owner-only — a stranger cannot tell it from nothing', async () => {
+  const { conductor, materiae } = makeConductor()
+  const handle = await conductor.conducere(AUCTOR, { budget: 1000n })
+  await materiae.update(handle!.materia!.id, { status: 'terminated' })
+  const intruder: AuctorKey = { animaId: 'intruder' }
+
+  assert.equal(await conductor.getStudio(handle!.studioId, intruder, { includeTerminal: true }), null,
+    'another host\'s terminated studio is as absent as it ever was')
+  assert.equal(await conductor.getStudio('modo-nothing-here', intruder, { includeTerminal: true }), null,
+    'and an id with no studio behind it answers identically')
+  assert.equal(await conductor.getStudio('modo-nothing-here', AUCTOR, { includeTerminal: true }), null,
+    'the owner gets the same answer for an id they do not host — reading is not enumerating')
+})

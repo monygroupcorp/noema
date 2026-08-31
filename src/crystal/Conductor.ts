@@ -212,20 +212,50 @@ export class Conductor {
     return out
   }
 
-  /** One studio, owner-scoped by its session id — for `GET /v1/studios/:id`. */
-  async getStudio(studioId: string, auctor: AuctorKey): Promise<StudioHandle | null> {
+  /**
+   * One studio, owner-scoped by its session id.
+   *
+   * TWO QUESTIONS, ONE OWNER GATE. "Is this studio mine?" and "is it still live?" are
+   * separate; the caller says which it is asking:
+   *
+   *   - default (`includeTerminal` absent/false) — LIVENESS: a terminal studio resolves
+   *     to `null`, so a run cannot be bound to a closed session or a reaped pod. This is
+   *     what run-targeting (`POST /v1/runs { studioId }`) asks.
+   *   - `{ includeTerminal: true }` — ADDRESSABILITY: the studio resolves in any state and
+   *     reports that state through the shared `materiaStudioStatus` projection. This is what
+   *     `GET /v1/studios/:id` asks, so an id the owner is shown elsewhere (`/v1/me/status`,
+   *     and the terminal view `DELETE /v1/studios/:id` returns) is one they can read back.
+   *
+   * The ownership gate is the same either way and is the ONLY thing that hides a studio from
+   * a caller: an unknown session id and another host's studio both return `null` — which the
+   * API renders as `not_found.studio`, never `forbidden` — so a stranger cannot tell the two
+   * apart and session ids stay non-enumerable.
+   */
+  async getStudio(
+    studioId: string,
+    auctor: AuctorKey,
+    opts: { includeTerminal?: boolean } = {},
+  ): Promise<StudioHandle | null> {
     const h = await this.deps.hospitia.findByModoId(studioId).catch(() => null)
     if (!h || !hostKeyMatches(h.hostKey, auctor)) return null
-    return this._handleFor(studioId, h.materiaId)
+    return this._handleFor(studioId, h.materiaId, opts)
   }
 
-  /** Build a live studio handle from a session id + its (maybe-absent) pod. Returns
-   *  null when the session is terminated or its pod was reaped. */
-  private async _handleFor(modoId: string, materiaId?: string): Promise<StudioHandle | null> {
+  /** Build a studio handle from a session id + its (maybe-absent) pod. Returns null when the
+   *  session never existed, and — unless `includeTerminal` — when the session is terminated
+   *  or its pod was reaped. */
+  private async _handleFor(
+    modoId: string,
+    materiaId?: string,
+    opts: { includeTerminal?: boolean } = {},
+  ): Promise<StudioHandle | null> {
     const modo = await this.deps.modos.findById(modoId).catch(() => null)
-    if (!modo || modo.status === 'terminated') return null
+    if (!modo) return null
     const materia = materiaId ? await this.deps.materiae.findById(materiaId).catch(() => null) : null
-    if (materia && materia.status === 'terminated') return null
+    if (!opts.includeTerminal) {
+      if (modo.status === 'terminated') return null
+      if (materia && materia.status === 'terminated') return null
+    }
     return { studioId: modo.id, modo, ...(materia ? { materia } : {}) }
   }
 

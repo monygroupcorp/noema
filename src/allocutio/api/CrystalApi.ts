@@ -3555,6 +3555,10 @@ export class CrystalApi {
     if (!verdict.ok) throw Errors.invalidAditus({ field: verdict.field })
   }
 
+  /** Binding a run asks the LIVENESS question, so this keeps `getStudio`'s default (live-only)
+   *  predicate: a terminated session or a reaped pod is refused as `not_found.studio` and a run
+   *  is never bound to a dead studio. Reading a studio (`getStudio` above) asks a different
+   *  question and answers it separately. */
   private async _ownedStudio(auctor: AuctorKey, studioId: string): Promise<StudioHandle> {
     if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
     const handle = await this.deps.conductor.getStudio(studioId, auctor)
@@ -4403,11 +4407,22 @@ export class CrystalApi {
     return toStudioView(handle, budget)
   }
 
-  /** One of the caller's studios by id — owner-scoped (a stranger gets `not_found.studio`,
-   *  no leak). Works for an in-flight (provisioning) studio too. */
+  /**
+   * One of the caller's studios by id — owner-scoped (a stranger gets `not_found.studio`,
+   * no leak). Works for an in-flight (provisioning) studio too.
+   *
+   * Reading a studio asks whether it is ADDRESSABLE, not whether it is live, so ownership is
+   * the only gate: a studio the caller hosts resolves in every state a `Materia` can hold,
+   * terminal included, and reports that state through the shared `materiaStudioStatus`
+   * projection. That keeps this read consistent with the other two surfaces that speak the
+   * caller's studio ids — `/v1/me/status`, which lists a studio through the same status
+   * mapping, and `DELETE /v1/studios/:id`, which returns a terminal view rather than 404.
+   * Run-targeting is the liveness question and keeps the live-only predicate (`_ownedStudio`),
+   * so widening the read never widens what a run may bind to.
+   */
   async getStudio(auctor: AuctorKey, studioId: string): Promise<StudioView> {
     if (!this.deps.conductor) throw Errors.notFoundStudio(studioId)
-    const handle = await this.deps.conductor.getStudio(studioId, auctor)
+    const handle = await this.deps.conductor.getStudio(studioId, auctor, { includeTerminal: true })
     if (!handle) throw Errors.notFoundStudio(studioId)
     return toStudioView(handle, await this.deps.signorum.sessionBudget(studioId).catch(() => 0n))
   }

@@ -2436,14 +2436,14 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/studios',
-      summary: "List the authenticated caller's live hosted studios.",
+      summary: "List the authenticated caller's LIVE hosted studios. A studio that has gone terminal (released, or its pod reaped) drops off this list and stays readable at GET /v1/studios/:id.",
       auth: true,
       response: StudiosListSchema,
     },
     {
       method: 'GET',
       path: '/studios/:id',
-      summary: "Fetch one of the caller's studios by id (owner-scoped) — poll its status (provisioning → idle) after provisioning.",
+      summary: "Fetch one of the caller's studios by id (owner-scoped) — poll its status (provisioning → idle) after provisioning. Ownership is the only gate: a studio you host reads back in every state, terminated included, so an id GET /v1/me/status reports is addressable here. A studio you do not host returns not_found.studio, indistinguishable from an id with no studio behind it.",
       auth: true,
       response: StudioEnvelopeSchema,
     },
