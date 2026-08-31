@@ -560,13 +560,37 @@ function analyzeBitmap(width: number, height: number, getPixel: (x: number, y: n
   return { checks, pass: checks.every((c) => c.pass) }
 }
 
-async function analyzeImageUrl(url: string): Promise<{ checks: MechanicalCheck[]; pass: boolean }> {
+/** Where a run's candidate images are kept on disk.
+ *
+ *  The images ARE the paid artifact of this walk — the rejects as much as the selects, because a
+ *  reject is the curation gate's evidence and the only way to argue with a verdict later. The API
+ *  keeps the acta, but the driver should not depend on a signed output URL still resolving days
+ *  after the run, so every candidate is written down as it is fetched, before it is judged. */
+function imagesDir(runId: string): URL {
+  return new URL(`${runId}-images/`, stateDir())
+}
+
+/** Fetches a piece image, optionally writes it to disk, and runs the mechanical gate over it.
+ *  One fetch serves both: the bytes that were judged are the bytes that were saved. */
+async function analyzeImageUrl(url: string, saveAs?: URL): Promise<{ checks: MechanicalCheck[]; pass: boolean }> {
   const res = await fetch(url)
   if (!res.ok) throw new WalkFailure('curate.fetch', `could not fetch piece image ${url}: ${res.status}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
+  if (saveAs) {
+    await mkdir(new URL('.', saveAs), { recursive: true })
+    await writeFile(saveAs, bytes)
+  }
   const { Jimp } = await import('jimp')
   const img = await Jimp.read(Buffer.from(bytes))
   return analyzeBitmap(img.bitmap.width, img.bitmap.height, (x, y) => img.getPixelColor(x, y))
+}
+
+/** A browsable, sortable filename: the axes first so a directory listing groups by class and
+ *  scene, the actum id last so the file is still traceable to its run. */
+function imageFileName(subjectClass: string, scene: string, seed: number, actumId: string, url: string): string {
+  const ext = /\.(png|jpe?g|webp)(\?|$)/i.exec(url)?.[1]?.toLowerCase() ?? 'png'
+  const safe = (v: string): string => v.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()
+  return `${safe(subjectClass)}__${safe(scene)}__seed-${seed}__${actumId}.${ext === 'jpeg' ? 'jpg' : ext}`
 }
 
 // =============================================================================
@@ -853,7 +877,10 @@ async function phaseBCurate(client: Client, state: RunState): Promise<void> {
     let mechanical: { checks: MechanicalCheck[]; pass: boolean }
     try {
       if (!imageUrl) throw new WalkFailure('curate.no-image', `piece ${piece.actumId} has no output.image`)
-      mechanical = await analyzeImageUrl(imageUrl)
+      mechanical = await analyzeImageUrl(
+        imageUrl,
+        new URL(imageFileName(subjectClass, scene, seed, piece.actumId, imageUrl), imagesDir(state.runId)),
+      )
       consecutiveFailures = 0
     } catch (err) {
       consecutiveFailures++
