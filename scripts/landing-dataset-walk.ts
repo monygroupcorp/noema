@@ -1277,7 +1277,11 @@ async function buildSmokeAppAsync(induce: Induce): Promise<{ app: Express; close
       modusId: GEN_MODUS_ID,
       total: TOTAL_CANDIDATES,
       provenanceHash: 'sha256:smoke',
-      completed: dispatched ? pieces.length : 0,
+      // Every seeded piece is `review: 'pending'` — generated and awaiting a decision. That
+      // is `pendingReview`, not `completed`: `completed` is the accepted count, and nothing
+      // here has been through curation yet. The watch loop counts both toward "dispatched".
+      completed: 0,
+      pendingReview: dispatched ? pieces.length : 0,
       failed: 0,
       rejected: 0,
       inFlight: 0,
