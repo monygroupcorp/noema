@@ -2231,7 +2231,8 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
                   "type": "string"
                 },
                 "url": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
                 },
                 "source": {
                   "type": "string",
@@ -2471,7 +2472,8 @@ Create a Dataset from either v1 ingestion path — 'upload' (media already dropp
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -2679,7 +2681,8 @@ Contribute media to a dataset the caller owns OR is a team member of, via either
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -2886,7 +2889,8 @@ Attach a caption pass (caption text keyed by media id) to a dataset the caller o
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -3077,7 +3081,8 @@ Edit one caption within one caption pass on a dataset the caller owns or is a te
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -3250,7 +3255,8 @@ Archive a dataset the caller owns. Owner-only: a team member reads and contribut
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -3423,7 +3429,8 @@ Restore an archived dataset the caller owns — it returns to both dataset list 
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -3596,7 +3603,8 @@ Archive one media item on a dataset the caller owns. Owner-only: a team member c
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",
@@ -3769,7 +3777,8 @@ Restore one archived media item on a dataset the caller owns (owner-only, like t
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
               },
               "source": {
                 "type": "string",

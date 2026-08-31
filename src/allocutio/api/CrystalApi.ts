@@ -1129,19 +1129,32 @@ export class CrystalApi {
    * would not be.
    */
   private async _presignPrivateExitus(exitus: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const cfg = this.deps.privateOutputs
     const entries = Object.entries(exitus)
     if (!entries.some(([, v]) => isPrivateMarker(v))) return exitus
-    if (!cfg) return exitus
-    const expiresIn = cfg.presignTtlSeconds ?? PRIVATE_PRESIGN_TTL_SECONDS
     const out: Record<string, unknown> = { ...exitus }
     for (const [k, v] of entries) {
-      const key = isPrivateMarker(v) ? privateKeyOf(v) : undefined
-      if (key === undefined) continue
-      const signed = await cfg.store.getSignedDownloadUrl(key, { expiresIn }).catch(() => null)
+      const signed = await this._presignPrivateRef(v)
       if (signed) out[k] = signed
     }
     return out
+  }
+
+  /**
+   * Presign ONE private-output marker into a short-lived GET, or `undefined` when the value is
+   * not a marker, no private-outputs store is configured, or the store refuses.
+   *
+   * The single place a marker becomes a link. Both resolution seams — a run's `exitus`
+   * (`_presignPrivateExitus`) and a dataset's media (`_resolveDatasetMedia`) — go through it, so
+   * they cannot diverge on TTL, on failure handling, or on what counts as a marker. `undefined`
+   * means "leave the stored value alone": the caller keeps the opaque marker rather than
+   * substituting anything fetchable.
+   */
+  private async _presignPrivateRef(value: unknown): Promise<string | undefined> {
+    const cfg = this.deps.privateOutputs
+    const key = isPrivateMarker(value) ? privateKeyOf(value) : undefined
+    if (!cfg || key === undefined) return undefined
+    const expiresIn = cfg.presignTtlSeconds ?? PRIVATE_PRESIGN_TTL_SECONDS
+    return (await cfg.store.getSignedDownloadUrl(key, { expiresIn }).catch(() => null)) ?? undefined
   }
 
   /** A run is owned by an auctor iff:
@@ -2316,18 +2329,24 @@ export class CrystalApi {
     throw Errors.authForbidden('datasets require an identified account')
   }
 
-  /** Pull every http(s) URL value out of an Actum's opaque `exitus` — the generic v1
+  /** Pull every media REFERENCE out of an Actum's opaque `exitus` — the generic v1
    *  heuristic for "the media this run produced" (exitus has no fixed cross-modus
-   *  schema; `additionalProperties: true` in apiContract.ts's RunSchema). */
-  private _urlsFromExitus(exitus: Record<string, unknown> | undefined): string[] {
-    const urls: string[] = []
+   *  schema; `additionalProperties: true` in apiContract.ts's RunSchema).
+   *
+   *  A reference is either an `http(s)` URL or a `noema-private://` marker. Both are how a
+   *  completed run records its output: a public run stores the URL, and a run with private
+   *  outputs stores the marker (`src/crystal/MediaFetcher.ts`), which names the same object in
+   *  a bucket with no public binding. A scheme test that admitted only `http(s)` would read a
+   *  private run as having produced nothing. */
+  private _mediaRefsFromExitus(exitus: Record<string, unknown> | undefined): string[] {
+    const refs: string[] = []
     const visit = (v: unknown): void => {
-      if (typeof v === 'string' && /^https?:\/\//.test(v)) urls.push(v)
+      if (typeof v === 'string' && (/^https?:\/\//.test(v) || isPrivateMarker(v))) refs.push(v)
       else if (Array.isArray(v)) v.forEach(visit)
       else if (v && typeof v === 'object') Object.values(v).forEach(visit)
     }
     visit(exitus)
-    return urls
+    return refs
   }
 
   /**
@@ -2351,7 +2370,8 @@ export class CrystalApi {
     const owner = this._datasetOwner(auctor)
     const sodalitasIds = await this._datasetTeamIds(auctor)
     const { entries, nextCursor } = await this._datasetsStore().list({ owner, sodalitasIds, ...opts })
-    return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
+    const datasets = await Promise.all(entries.map((d) => this._resolveDatasetMedia(d)))
+    return { datasets, ...(nextCursor ? { nextCursor } : {}) }
   }
 
   /** List the thin `DatasetSummary[]` projection for the caller — the training-run
@@ -2379,6 +2399,34 @@ export class CrystalApi {
     return team?.membra.includes(auctor.animaId) ?? false
   }
 
+  /**
+   * Project a Dataset for a reader: every `noema-private://` media reference resolved into a
+   * short-lived presigned GET, everything else untouched.
+   *
+   * WHAT IS STORED IS THE MARKER. A presigned link lapses in minutes and a dataset is durable —
+   * persisting one would write a media reference that stops resolving while the record it sits
+   * on is still in use — so `_mintMedia` records the marker and resolution happens HERE, at read
+   * time. This is `_presignPrivateExitus`'s rule applied to the second record that carries a
+   * run's output: the marker is the durable reference, the link is the momentary view of it.
+   *
+   * CALLED ONLY behind the dataset access gate, and it never widens one. Every caller has
+   * already resolved through `getDataset`/`_ownedDatasetByOwner` (or the owner-scoped list
+   * query), which is where "may this caller reach this dataset" is decided; this method only
+   * projects what that gate already returned.
+   *
+   * A marker that cannot be presigned (no private-outputs store configured, or the store
+   * refuses) is left as the opaque marker it is — never degraded to a public URL, which would
+   * name the object in a bucket that has no public binding anyway.
+   */
+  private async _resolveDatasetMedia(d: Dataset): Promise<Dataset> {
+    if (!d.media.some((m) => isPrivateMarker(m.url))) return d
+    const media = await Promise.all(d.media.map(async (m) => {
+      const signed = await this._presignPrivateRef(m.url)
+      return signed ? { ...m, url: signed } : m
+    }))
+    return { ...d, media }
+  }
+
   /** Resolve a Dataset the caller may reach — theirs, or shared with a team they belong to —
    *  or 404 (a caller with no claim on it gets not_found, not forbidden, so ids stay
    *  non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/`_ownedCollection`).
@@ -2387,14 +2435,17 @@ export class CrystalApi {
    *  or edit a captionset) resolves through it, so a member works on the shared set. The
    *  DESTRUCTIVE verbs do not — archive/restore of the dataset and of one media item re-check
    *  `_ownedDatasetByOwner`, the same way `extendCollection` re-checks `_isFunder` on the one
-   *  verb a team member must not perform on the principal's behalf. */
+   *  verb a team member must not perform on the principal's behalf.
+   *
+   *  Private media is resolved into short-lived links AFTER the gate above, exactly as
+   *  `getRun` presigns a run's exitus after its ownership check. */
   async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
     this._datasetOwner(auctor)
     const d = await this._datasetsStore().find(id)
     if (!d || !(await this._ownsDataset(auctor, d))) {
       throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
     }
-    return d
+    return this._resolveDatasetMedia(d)
   }
 
   /** Resolve a Dataset this caller OWNS OUTRIGHT — the narrow gate the destructive dataset
@@ -2468,7 +2519,9 @@ export class CrystalApi {
 
     const media = input.source === undefined ? [] : await this._mintMedia(auctor, input, now)
 
-    return store.create({
+    // The record keeps the durable references it was minted with; the RESPONSE is a read, and
+    // reads resolve private markers into short-lived links.
+    return this._resolveDatasetMedia(await store.create({
       owner,
       ...(input.teamId !== undefined ? { sodalitasId: input.teamId } : {}),
       name: input.name,
@@ -2477,7 +2530,7 @@ export class CrystalApi {
       media,
       captionsets: [],
       versions: [{ v: '1.0.0', count: media.length, when: now }],
-    })
+    }))
   }
 
   /** Mint `DatasetMediaItem`s from either v1 ingestion shape. The ONE minting path: dataset
@@ -2518,10 +2571,18 @@ export class CrystalApi {
       const actumId = input.actumIds[i]
       if (!actum || !(await this._owns(auctor, actum))) throw Errors.notFoundRun(actumId)
       if (actum.status !== 'completus') throw Errors.inputMalformed(`Actum '${actumId}' has not completed`)
-      const urls = this._urlsFromExitus(actum.exitus)
-      for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now, ...addedBy })
+      // The REFERENCE is what lands on the record, verbatim — an `http(s)` URL for a public run
+      // and the `noema-private://` marker for a private one. A marker is durable and a presign
+      // is not (it lapses in minutes), and a dataset outlives both; the marker is resolved to a
+      // link on every owner-scoped read instead (`_resolveDatasetMedia`).
+      const refs = this._mediaRefsFromExitus(actum.exitus)
+      for (const url of refs) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now, ...addedBy })
     }
-    if (media.length === 0) throw Errors.inputMalformed('none of the referenced Acta produced usable media')
+    if (media.length === 0) {
+      throw Errors.inputMalformed(
+        'none of the referenced Acta recorded a media reference in their exitus (no http(s) URL and no private-output marker)',
+      )
+    }
     return media
   }
 
@@ -2558,7 +2619,7 @@ export class CrystalApi {
     const items = await this._mintMedia(auctor, body as IngestMediaInput, new Date())
     const updated = await this._datasetsStore().addMedia(d.id, items)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Attach (or replace) a captionset on a Dataset the caller may reach — its owner, or a
@@ -2593,7 +2654,7 @@ export class CrystalApi {
 
     const updated = await this._datasetsStore().addCaptionset(d.id, captionset)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Edit one caption of one captionset on a Dataset the caller may reach (a captionset is
@@ -2612,7 +2673,7 @@ export class CrystalApi {
 
     const updated = await this._datasetsStore().setCaption(d.id, captionsetId, mediaId, caption)
     if (!updated) throw new ApiError('not_found.dataset', `Captionset '${captionsetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /**
@@ -2635,7 +2696,7 @@ export class CrystalApi {
     const d = await this._ownedDatasetByOwner(auctor, datasetId)
     const updated = await this._datasetsStore().archiveDataset(d.id)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Restore an archived Dataset the caller owns — it returns to both list routes. Same
@@ -2646,7 +2707,7 @@ export class CrystalApi {
     const d = await this._ownedDatasetByOwner(auctor, datasetId)
     const updated = await this._datasetsStore().restoreDataset(d.id)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Archive ONE media item on a Dataset the caller owns. The item leaves the working set —
@@ -2660,7 +2721,7 @@ export class CrystalApi {
     const d = await this._ownedDatasetWithMedia(auctor, datasetId, mediaId)
     const updated = await this._datasetsStore().archiveMedia(d.id, mediaId)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Restore ONE archived media item on a Dataset the caller owns — it rejoins the working set
@@ -2669,7 +2730,7 @@ export class CrystalApi {
     const d = await this._ownedDatasetWithMedia(auctor, datasetId, mediaId)
     const updated = await this._datasetsStore().restoreMedia(d.id, mediaId)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
-    return updated
+    return this._resolveDatasetMedia(updated)
   }
 
   /** Resolve a Dataset the caller OWNS OUTRIGHT and assert the media id names an item on it —
