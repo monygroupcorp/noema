@@ -46,7 +46,7 @@ const BEATS = [
 export function PlateLab() {
   const [font, setFont] = useState<'geist' | 'marquee'>('geist');
   const [leading, setLeading] = useState(1.12);
-  const [crop, setCrop] = useState<PlateFormat>('2:1');
+  const [crop, setCrop] = useState<PlateFormat>('21:9');
   const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
 

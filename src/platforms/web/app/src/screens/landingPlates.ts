@@ -16,7 +16,7 @@
  *  deck banner is a wide crop — a 3:2 plate at deck width is taller than a banner should be,
  *  so which of the three wide ratios the deck runs at is a real decision about what the art
  *  gets shot for. The lab renders all three so it can be settled by looking. */
-export type PlateFormat = '3:2' | '4:5' | '1:1' | '16:9' | '2:1';
+export type PlateFormat = '3:2' | '4:5' | '1:1' | '16:9' | '2:1' | '21:9' | '3:1';
 
 /** The three subject classes the house look must hold across. The demonstration identity is
  *  a *look*, not a subject — these vary on purpose, and the grade is what unifies them. */
@@ -34,10 +34,15 @@ export const PLATE_ASPECT: Record<PlateFormat, number> = {
   '1:1': 1,
   '16:9': 16 / 9,
   '2:1': 2,
+  '21:9': 21 / 9,
+  '3:1': 3,
 };
 
-/** The wide crops a deck card can run at, in the order the lab offers them. */
-export const DECK_FORMATS = ['3:2', '16:9', '2:1'] as const satisfies readonly PlateFormat[];
+/** The wide crops a deck card can run at, in the order the lab offers them. Wider is cheaper as
+ *  well as more banner-like: at a fixed width, 21:9 is 14% fewer pixels than 2:1 and 3:1 is 33%
+ *  fewer, so the crop decision is a bandwidth decision too. 3:2 is absent on purpose — at full
+ *  banner width it is taller than a banner. */
+export const DECK_FORMATS = ['16:9', '2:1', '21:9', '3:1'] as const satisfies readonly PlateFormat[];
 
 export interface PlateSource {
   /** Desktop/master rendition. */
@@ -80,7 +85,7 @@ export const PLATES: PlateSlot[] = [
     id: 'deck-1',
     name: 'deck',
     section: 'deck',
-    format: '2:1',
+    format: '21:9',
     subject: 'figure',
     brief:
       'The card held longest, and the one the page opens its imagery on. Composed for a wide crop with the subject off-centre left, so it still reads while the right fifth is covered by the next card.',
@@ -90,7 +95,7 @@ export const PLATES: PlateSlot[] = [
     id: 'deck-2',
     name: 'deck',
     section: 'deck',
-    format: '2:1',
+    format: '21:9',
     subject: 'mechanical',
     brief: 'Arrives from behind the first card. Its left edge is seen before anything else of it, so the left edge has to be worth seeing.',
     source: null,
@@ -99,7 +104,7 @@ export const PLATES: PlateSlot[] = [
     id: 'deck-3',
     name: 'deck',
     section: 'deck',
-    format: '2:1',
+    format: '21:9',
     subject: 'illustrated',
     brief: 'The change of register at the middle of the run — drawn where the neighbours are photographed, same light, same grade.',
     source: null,
@@ -108,7 +113,7 @@ export const PLATES: PlateSlot[] = [
     id: 'deck-4',
     name: 'deck',
     section: 'deck',
-    format: '2:1',
+    format: '21:9',
     subject: 'figure',
     brief: 'Returns to the figure after the illustrated card, so the run reads as a loop rather than a list.',
     source: null,
@@ -117,7 +122,7 @@ export const PLATES: PlateSlot[] = [
     id: 'deck-5',
     name: 'deck',
     section: 'deck',
-    format: '2:1',
+    format: '21:9',
     subject: 'mechanical',
     brief: 'The card left standing when the banner exits. It is the last thing seen, so it carries the closing note of the run.',
     source: null,
@@ -129,7 +134,7 @@ export const PLATES: PlateSlot[] = [
     id: 'coda-1',
     name: 'coda',
     section: 'deck-coda',
-    format: '16:9',
+    format: '2:1',
     subject: 'illustrated',
     brief: 'Opens the second pass in the register the first one closed away from.',
     source: null,
@@ -138,7 +143,7 @@ export const PLATES: PlateSlot[] = [
     id: 'coda-2',
     name: 'coda',
     section: 'deck-coda',
-    format: '16:9',
+    format: '2:1',
     subject: 'figure',
     brief: 'Tighter crop than anything in the first run — the second pass is closer, not louder.',
     source: null,
@@ -147,7 +152,7 @@ export const PLATES: PlateSlot[] = [
     id: 'coda-3',
     name: 'coda',
     section: 'deck-coda',
-    format: '16:9',
+    format: '2:1',
     subject: 'mechanical',
     brief: 'Detail rather than whole object; the run has already established the object.',
     source: null,
@@ -156,7 +161,7 @@ export const PLATES: PlateSlot[] = [
     id: 'coda-4',
     name: 'coda',
     section: 'deck-coda',
-    format: '16:9',
+    format: '2:1',
     subject: 'illustrated',
     brief: 'The last image on the page. Quietest of the eight, and the one the closing action sits under.',
     source: null,
