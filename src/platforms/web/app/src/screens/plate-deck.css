@@ -1,0 +1,54 @@
+/* the deck — a fanned run of plates the reader scrolls past.
+   Geometry: the leading card holds --deck-lead of the banner width before the next card
+   covers it, so the card behind always shows an edge. The whole fan is one transform, so the
+   motion is a compositor job and the page's own scrolling is never touched. */
+.deck{
+  --p:0;                                        /* pass progress, written by the component */
+  --deck-n:1; --deck-aspect:2; --deck-lead:.78;
+  --deck-step:calc(100% * var(--deck-lead));    /* origin-to-origin spacing of the cards */
+  --deck-card-w:calc(var(--deck-step) * 1.06);  /* wider than the step — hence the overlap */
+  position:relative;
+  overflow:hidden;
+  width:100%;
+}
+.deck-track{
+  position:relative;
+  height:0;
+  padding-bottom:calc(var(--deck-card-w) / var(--deck-aspect));
+  /* travel ends with the last card's right edge on the banner's right edge — the run empties
+     into the frame rather than off it. */
+  --deck-travel:calc((var(--deck-n) - 1) * var(--deck-step) + var(--deck-card-w) - 100%);
+  transform:translate3d(calc(-1 * var(--p) * var(--deck-travel)),0,0);
+  will-change:transform;
+}
+.deck-card{
+  --i:0;   /* the card's position in the run, set per-instance by the component */
+  position:absolute;
+  top:0;
+  left:calc(var(--i) * var(--deck-step));
+  width:var(--deck-card-w);
+  aspect-ratio:var(--deck-aspect);
+  z-index:var(--i);
+  border-radius:var(--r-lg);
+  overflow:hidden;
+  /* the fan only reads as depth if each card's leading edge is visible against the one it
+     covers — one hairline and a short falloff, nothing more. */
+  box-shadow:-1px 0 0 var(--hair), -24px 0 40px -24px var(--bg);
+}
+.deck-card > .plate{border-radius:0}
+
+/* An unfilled run is all one flat value, which makes the fan invisible and the motion
+   unreadable — so while the cards are empty they alternate ground and carry their position in
+   the run. Both go away the moment real plates land. */
+.deck-card:nth-child(even) .plate-empty{background:var(--raised)}
+.deck-card .plate-empty{border-style:solid;border-color:var(--hair)}
+.deck-i{position:absolute;left:var(--s7);bottom:var(--s6);z-index:1;
+  color:var(--hair-soft);font-size:clamp(64px,9vw,140px);line-height:.8;
+  letter-spacing:-.04em;pointer-events:none}
+@media(max-width:640px){.deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}}
+
+@media(max-width:640px){
+  /* narrow: the lead card takes more of the width and the peek narrows, or the run reads as
+     two half-images and neither one lands. */
+  .deck{--deck-lead:.86}
+}

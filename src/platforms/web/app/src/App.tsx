@@ -116,7 +116,7 @@ export function App() {
       <Route path="/studio" element={<Studio />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
-      {PlateLab && <Route path="/lab/plates" element={lazyEl(<PlateLab />)} />}
+      {PlateLab && <Route path="/lab/landing" element={lazyEl(<PlateLab />)} />}
       <Route path="/ceremony" element={<Ceremony />} />
       {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). No email, so
           no verify/reset token pages; recovery is via backup channels bound in the profile. */}

@@ -11,6 +11,9 @@ interface PlateProps {
   /** Opt into the settle-in motion. Ignored under `prefers-reduced-motion: reduce`, where
    *  the plate is simply present and correct — see landing-plate.css. */
   resolve?: boolean;
+  /** Fill the parent instead of reserving the box. For layouts like the deck, where the
+   *  parent already reserves the card's geometry and the plate simply occupies it. */
+  fill?: boolean;
 }
 
 /**
@@ -20,10 +23,11 @@ interface PlateProps {
  * unlovely: nothing here should be able to pass for finished art, and no placeholder carries
  * caption copy, so nothing on this surface makes a claim.
  */
-export function LandingPlate({ slot, className, priority = false, resolve = false }: PlateProps) {
+export function LandingPlate({ slot, className, priority = false, resolve = false, fill = false }: PlateProps) {
   const style = { '--plate-aspect': String(PLATE_ASPECT[slot.format]) } as CSSProperties;
   const cls = [
     'plate',
+    fill ? 'plate-fill' : '',
     resolve ? 'plate-resolve' : '',
     slot.source ? '' : 'plate-empty',
     className ?? '',

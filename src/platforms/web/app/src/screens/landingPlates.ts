@@ -11,16 +11,20 @@
 // source whose pixel dimensions disagree with its declared format fails the unit test rather
 // than silently reshaping the layout it was measured into.
 
-/** The ruled formats. Master 3:2 landscape for hero plates, 4:5 portrait for supporting
- *  plates, 1:1 only for the collection-grid demonstration. */
-export type PlateFormat = '3:2' | '4:5' | '1:1';
+/** The formats a plate is composed for. 3:2 is the master landscape and 4:5 the portrait
+ *  supporting crop; 1:1 is the collection-grid tile. 16:9 and 2:1 exist because a card in the
+ *  deck banner is a wide crop — a 3:2 plate at deck width is taller than a banner should be,
+ *  so which of the three wide ratios the deck runs at is a real decision about what the art
+ *  gets shot for. The lab renders all three so it can be settled by looking. */
+export type PlateFormat = '3:2' | '4:5' | '1:1' | '16:9' | '2:1';
 
 /** The three subject classes the house look must hold across. The demonstration identity is
  *  a *look*, not a subject — these vary on purpose, and the grade is what unifies them. */
 export type SubjectClass = 'figure' | 'mechanical' | 'illustrated';
 
-/** Where a slot sits in the page's argument. */
-export type PlateSection = 'hero' | 'cross-subject' | 'collection';
+/** Where a slot sits in the page's argument. Both sections are deck runs: the page has one
+ *  image mechanism, and standing an image up in a box is not it. */
+export type PlateSection = 'deck' | 'deck-coda';
 
 /** Width / height. Slots reserve this ratio before any art exists, so the layout built now is
  *  the layout the finished plates land into. */
@@ -28,7 +32,12 @@ export const PLATE_ASPECT: Record<PlateFormat, number> = {
   '3:2': 3 / 2,
   '4:5': 4 / 5,
   '1:1': 1,
+  '16:9': 16 / 9,
+  '2:1': 2,
 };
+
+/** The wide crops a deck card can run at, in the order the lab offers them. */
+export const DECK_FORMATS = ['3:2', '16:9', '2:1'] as const satisfies readonly PlateFormat[];
 
 export interface PlateSource {
   /** Desktop/master rendition. */
@@ -59,102 +68,97 @@ export interface PlateSlot {
 }
 
 export const PLATES: PlateSlot[] = [
+  // The deck run. These are the images the page actually shows: a fanned banner the visitor
+  // scrolls past, where the leading card holds most of the width and the next one peeks over
+  // its right edge. The images are never stood up in front of the reader — they pass.
+  //
+  // The run is ordered, and the order is the composition: card 1 is the one seen longest and
+  // is effectively the hero, the last is the one left standing when the banner exits. Subject
+  // classes alternate so the claim that the look survives a change of subject is made by the
+  // motion itself rather than by a caption.
   {
-    id: 'hero',
-    name: 'hero',
-    section: 'hero',
-    format: '3:2',
+    id: 'deck-1',
+    name: 'deck',
+    section: 'deck',
+    format: '2:1',
     subject: 'figure',
     brief:
-      'One plate held still and alone, confident enough not to need a grid. Reserves a low-contrast region for the headline; the narrow crop keeps that region.',
+      'The card held longest, and the one the page opens its imagery on. Composed for a wide crop with the subject off-centre left, so it still reads while the right fifth is covered by the next card.',
+    source: null,
+  },
+  {
+    id: 'deck-2',
+    name: 'deck',
+    section: 'deck',
+    format: '2:1',
+    subject: 'mechanical',
+    brief: 'Arrives from behind the first card. Its left edge is seen before anything else of it, so the left edge has to be worth seeing.',
+    source: null,
+  },
+  {
+    id: 'deck-3',
+    name: 'deck',
+    section: 'deck',
+    format: '2:1',
+    subject: 'illustrated',
+    brief: 'The change of register at the middle of the run — drawn where the neighbours are photographed, same light, same grade.',
+    source: null,
+  },
+  {
+    id: 'deck-4',
+    name: 'deck',
+    section: 'deck',
+    format: '2:1',
+    subject: 'figure',
+    brief: 'Returns to the figure after the illustrated card, so the run reads as a loop rather than a list.',
+    source: null,
+  },
+  {
+    id: 'deck-5',
+    name: 'deck',
+    section: 'deck',
+    format: '2:1',
+    subject: 'mechanical',
+    brief: 'The card left standing when the banner exits. It is the last thing seen, so it carries the closing note of the run.',
     source: null,
   },
 
-  // The cross-subject row: one plate per class, the same grade on all three. This is the
-  // argument that the identity is the look rather than the subject, so all three slots are
-  // filled together or none of them are.
+  // The coda run. A second, smaller pass further down the page, so the imagery returns once
+  // without ever becoming a gallery. Shorter run, shorter cards, same mechanism.
   {
-    id: 'cross-figure',
-    name: 'supporting',
-    section: 'cross-subject',
-    format: '4:5',
-    subject: 'figure',
-    brief: 'Composed, mid-thought, gaze off-camera. Cold key, one warm practical, real skin.',
-    source: null,
-  },
-  {
-    id: 'cross-mechanical',
-    name: 'supporting',
-    section: 'cross-subject',
-    format: '4:5',
-    subject: 'mechanical',
-    brief: 'A built object with evident purpose and wear, with scale cues so it has mass.',
-    source: null,
-  },
-  {
-    id: 'cross-illustrated',
-    name: 'supporting',
-    section: 'cross-subject',
-    format: '4:5',
+    id: 'coda-1',
+    name: 'coda',
+    section: 'deck-coda',
+    format: '16:9',
     subject: 'illustrated',
-    brief: 'Drawn, not rendered: visible mark-making, held-back colour, large flat areas.',
+    brief: 'Opens the second pass in the register the first one closed away from.',
     source: null,
   },
-
-  // The collection grid: square tiles that read as one arrangement. The classes cycle so the
-  // grid itself carries the cross-subject claim at thumbnail size.
   {
-    id: 'collection-1',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
+    id: 'coda-2',
+    name: 'coda',
+    section: 'deck-coda',
+    format: '16:9',
     subject: 'figure',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
+    brief: 'Tighter crop than anything in the first run — the second pass is closer, not louder.',
     source: null,
   },
   {
-    id: 'collection-2',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
+    id: 'coda-3',
+    name: 'coda',
+    section: 'deck-coda',
+    format: '16:9',
     subject: 'mechanical',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
+    brief: 'Detail rather than whole object; the run has already established the object.',
     source: null,
   },
   {
-    id: 'collection-3',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
+    id: 'coda-4',
+    name: 'coda',
+    section: 'deck-coda',
+    format: '16:9',
     subject: 'illustrated',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
-    source: null,
-  },
-  {
-    id: 'collection-4',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
-    subject: 'figure',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
-    source: null,
-  },
-  {
-    id: 'collection-5',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
-    subject: 'mechanical',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
-    source: null,
-  },
-  {
-    id: 'collection-6',
-    name: 'collection',
-    section: 'collection',
-    format: '1:1',
-    subject: 'illustrated',
-    brief: 'Silhouette-legible at tile size; sits in the ground rather than on a card.',
+    brief: 'The last image on the page. Quietest of the eight, and the one the closing action sits under.',
     source: null,
   },
 ];

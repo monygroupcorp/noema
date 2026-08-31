@@ -1,22 +1,50 @@
-/* the plate lab — a dev-only surface for looking at the landing page's reserved geometry.
-   Plain by intent: it is an instrument, not a candidate design. */
-.plate-lab{max-width:1180px;margin:0 auto;padding:var(--s10) var(--px-section)}
-.plate-lab .lab-head h1{font-size:var(--fs-2xl);letter-spacing:-.03em;font-weight:600;margin:0 0 var(--s3)}
-.plate-lab .lab-head p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;max-width:620px;margin:0 0 var(--s3)}
-.plate-lab .lab-count{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.06em}
+/* the design lab — a dev-only surface for judging the landing page's image mechanism.
+   The bar is an instrument; everything under .cand is the candidate page being judged. */
+.lab-bar{position:sticky;top:0;z-index:var(--z-nav);display:flex;align-items:center;gap:var(--s5);
+  flex-wrap:wrap;padding:var(--s3) var(--s6);border-bottom:1px solid var(--hair);
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px)}
+.lab-bar .lab-tag{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase}
+.lab-bar .lab-meta{color:var(--faint);font-size:var(--fs-xs)}
+.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s2);margin-left:auto}
+.lab-bar .lab-ctl:not(:last-child){margin-left:0}
+.lab-bar .lab-ctl > .mono{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
+.lab-bar button{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);
+  background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s3);cursor:pointer}
+.lab-bar button.on{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
 
-.plate-lab .lab-sec{margin-top:var(--s10);padding-top:var(--s7);border-top:1px solid var(--hair)}
-.plate-lab .lab-sec h2{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s2)}
-.plate-lab .lab-note{color:var(--muted);font-size:var(--fs-s);line-height:1.6;max-width:620px;margin:0 0 var(--s6)}
-.plate-lab .lab-note code{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text)}
+/* ── the candidate ─────────────────────────────────────────────────────────────────────── */
+.cand{display:flex;flex-direction:column;gap:var(--py-section);padding-bottom:var(--s10)}
+.cand-nav{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--s4) var(--px-section);margin-bottom:calc(-1 * var(--py-section) + var(--s6))}
+.cand-nav .right{display:flex;align-items:center;gap:var(--s3)}
 
-.plate-lab .lab-hero{max-width:960px}
-.plate-lab .lab-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s4)}
-.plate-lab .lab-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3)}
-.plate-lab .lab-grid.narrow{grid-template-columns:repeat(2,1fr)}
-.plate-lab .lab-narrow{width:390px;max-width:100%;display:grid;gap:var(--s4)}
+.cand-hero{max-width:1080px;margin:0 auto;padding:clamp(40px,9vh,110px) var(--px-section) 0;text-align:center}
+.cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:1.02;letter-spacing:-.04em;font-weight:600;
+  margin:0;color:var(--text)}
+.cand-hero h1 .dim{color:var(--muted)}
+.cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
+.cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
+.cand-hero .cand-cta{display:block;margin-top:var(--s7)}
+/* app.css:1184 sets `.btn.lg{flex-direction:column}` — written for a stacked label/sub-label,
+   but the landing CTAs pass a trailing icon, so the arrow lands under the words. Corrected
+   locally here; the shared rule is a live defect on `/` and is not this file's to change. */
+.cand .btn.lg{flex-direction:row;gap:var(--s2)}
 
-@media(max-width:640px){
-  .plate-lab .lab-row{grid-template-columns:1fr}
-  .plate-lab .lab-grid{grid-template-columns:repeat(2,1fr)}
+/* the coda run is the quieter second pass — inset and shorter, so it returns without repeating */
+.deck-coda{max-width:1180px;margin:0 auto;border-radius:var(--r-lg)}
+
+.cand-sec{max-width:1080px;margin:0 auto;padding:0 var(--px-section);text-align:center}
+.cand-sec h2{font-size:clamp(26px,3.4vw,42px);letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4)}
+.cand-sub{color:var(--muted);font-size:clamp(14px,1.4vw,16px);line-height:1.6;max-width:520px;margin:0 auto}
+.cand-paths{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin-top:var(--s10);text-align:left}
+.cand-paths article{border-top:1px solid var(--hair);padding-top:var(--s5)}
+.cand-paths h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s3)}
+.cand-paths p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
+
+.cand-end{text-align:center;padding:0 var(--px-section)}
+.cand-end h2{font-size:clamp(26px,3.4vw,40px);letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s7)}
+
+@media(max-width:760px){
+  .cand-paths{grid-template-columns:1fr;gap:var(--s6)}
 }

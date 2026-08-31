@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DECK_FORMATS,
   PLATES,
   PLATE_ASPECT,
   isPlaceholder,
@@ -14,8 +15,8 @@ import {
 
 const slot = (over: Partial<PlateSlot> = {}): PlateSlot => ({
   id: 'test',
-  name: 'hero',
-  section: 'hero',
+  name: 'deck',
+  section: 'deck',
   format: '3:2',
   subject: 'figure',
   brief: 'test slot',
@@ -29,20 +30,37 @@ describe('the slot registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('declares only ruled formats — 3:2 hero, 4:5 supporting, 1:1 collection grid', () => {
-    for (const s of PLATES) expect(PLATE_ASPECT[s.format]).toBeGreaterThan(0);
-    expect(platesIn('hero').every((s) => s.format === '3:2')).toBe(true);
-    expect(platesIn('cross-subject').every((s) => s.format === '4:5')).toBe(true);
-    expect(platesIn('collection').every((s) => s.format === '1:1')).toBe(true);
+  it('puts every plate in a deck run — the page has no standing image box', () => {
+    expect(PLATES.length).toBeGreaterThan(0);
+    for (const s of PLATES) expect(['deck', 'deck-coda']).toContain(s.section);
   });
 
-  it('covers all three subject classes in the row that claims the look holds across them', () => {
-    const subjects = platesIn('cross-subject').map((s) => s.subject).sort();
-    expect(subjects).toEqual(['figure', 'illustrated', 'mechanical']);
+  it('crops every deck card wide, since a card holds most of a banner', () => {
+    for (const s of PLATES) {
+      expect(DECK_FORMATS).toContain(s.format);
+      expect(PLATE_ASPECT[s.format]).toBeGreaterThanOrEqual(1.5);
+    }
   });
 
-  it('cycles the three classes through the collection grid so it reads at tile size', () => {
-    const subjects = new Set(platesIn('collection').map((s) => s.subject));
+  it('keeps one crop within a run, so the fan does not change shape as it passes', () => {
+    for (const section of ['deck', 'deck-coda'] as const) {
+      const formats = new Set(platesIn(section).map((s) => s.format));
+      expect(formats.size).toBe(1);
+    }
+  });
+
+  it('alternates subject class along each run, so the motion carries the cross-subject claim', () => {
+    for (const section of ['deck', 'deck-coda'] as const) {
+      const run = platesIn(section);
+      expect(run.length).toBeGreaterThan(1);
+      for (let i = 1; i < run.length; i++) {
+        expect(run[i].subject).not.toBe(run[i - 1].subject);
+      }
+    }
+  });
+
+  it('covers all three subject classes across the page', () => {
+    const subjects = new Set(PLATES.map((s) => s.subject));
     expect([...subjects].sort()).toEqual(['figure', 'illustrated', 'mechanical']);
   });
 
@@ -54,9 +72,9 @@ describe('the slot registry', () => {
 
 describe('plateLabel', () => {
   it('names the reserved shape, so a placeholder cannot pass for finished art', () => {
-    expect(plateLabel(slot())).toBe('hero plate — 3:2 — figure');
-    expect(plateLabel(slot({ name: 'supporting', format: '4:5', subject: 'mechanical' })))
-      .toBe('supporting plate — 4:5 — mechanical');
+    expect(plateLabel(slot())).toBe('deck plate — 3:2 — figure');
+    expect(plateLabel(slot({ name: 'coda', format: '16:9', subject: 'mechanical' })))
+      .toBe('coda plate — 16:9 — mechanical');
   });
 });
 
@@ -76,7 +94,7 @@ describe('validatePlateSource — the format contract at swap time', () => {
     ).toEqual([]);
     expect(
       validatePlateSource(
-        slot({ format: '4:5', source: { src: '/a.webp', alt: 'a', width: 1080, height: 1350 } }),
+        slot({ format: '2:1', source: { src: '/a.webp', alt: 'a', width: 2400, height: 1200 } }),
       ),
     ).toEqual([]);
   });
