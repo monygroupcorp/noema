@@ -16,8 +16,8 @@ const BEATS = [
   {
     id: 'explore',
     n: '01',
-    title: 'Explore a dataset',
-    text: 'Pull your material apart into the vocabulary it is already made of.',
+    title: 'Never face a blank prompt',
+    text: 'Pick the identities you like and a line of your own. Muse keeps making inside that world — the content varies, the taste does not. You curate instead of composing, which is the part that actually stops people.',
   },
   {
     id: 'train',
@@ -28,8 +28,8 @@ const BEATS = [
   {
     id: 'run',
     n: '03',
-    title: 'Run a finished workflow',
-    text: 'A complete pipeline, not a prompt box. Open it up when you want the controls.',
+    title: 'Build a workflow worth keeping',
+    text: 'Chain the steps once and run them forever. Publish it and other people can run it too.',
   },
 ];
 
@@ -39,6 +39,15 @@ const STEPS = [
   { n: '02', t: 'Caption it', d: 'The set is described so a model can be taught from it.' },
   { n: '03', t: 'Train', d: 'A LoRA on a base of your choosing. It lands on your shelf.' },
   { n: '04', t: 'Make with it', d: 'Your trigger works in every workflow the catalogue carries.' },
+];
+
+/** The royalty split, read from the hooks that pay it: `spellRoyalty.ts` takes 10% of a run's
+ *  impetus for the workflow's author, `modelRoyalty.ts` takes 5% for the authors of the models
+ *  that ran. Both are registered on `execution_spend` and firing in production. */
+const SPLIT = [
+  { pct: '10%', who: 'to whoever wrote the workflow', sub: 'every run, for as long as people run it' },
+  { pct: '5%', who: 'to the authors of the models it used', sub: 'split by how much each one did' },
+  { pct: '15%', who: 'to you, if both are yours', sub: 'a workflow built on your own trained identity' },
 ];
 
 /** Where the page still has nothing honest to put. Rendered as marked gaps rather than filled
@@ -201,6 +210,24 @@ export function PlateLab() {
         </section>
 
         {deck(platesIn('deck-coda'), 'A second run of work made in noema, passing', 'deck-coda')}
+
+        <section className="pay">
+          <div className="pay-in">
+            <h2>Publish it, and it pays you back.</h2>
+            <p className="pay-sub">
+              Paid in credits — the same ones everything here runs on. Not cash, deliberately:
+              a model that stays useful keeps paying for the work you make next.
+            </p>
+            <dl className="pay-split">
+              {SPLIT.map((row) => (
+                <div key={row.pct}>
+                  <dt>{row.pct}</dt>
+                  <dd><span className="who">{row.who}</span><span className="sub">{row.sub}</span></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
 
         <section className="anon">
           <div className="anon-in">

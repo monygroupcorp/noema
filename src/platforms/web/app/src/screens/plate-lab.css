@@ -71,6 +71,20 @@
 .how .how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
 .how .how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
 
+/* royalties — the sentence neither benchmark can say, bound to the rates that pay it */
+.pay{padding:var(--py-section) 0}
+.pay .pay-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.pay h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s4);max-width:18ch}
+.pay .pay-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
+.pay .pay-split{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin:var(--s10) 0 0}
+.pay .pay-split > div{border-top:1px solid var(--hair);padding-top:var(--s5)}
+.pay .pay-split dt{font-size:clamp(34px,4.6vw,60px);line-height:1;letter-spacing:-.04em;font-weight:600;
+  color:var(--accent-soft)}
+.pay .pay-split dd{margin:var(--s5) 0 0}
+.pay .pay-split .who{display:block;color:var(--text);font-size:var(--fs-md);line-height:1.45}
+.pay .pay-split .sub{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.5;margin-top:var(--s2)}
+
 /* anonymity — the block that sits where a competitor puts SOC 2 */
 .anon{padding:var(--py-section) 0}
 .anon .anon-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);max-width:720px;text-align:center}
@@ -105,6 +119,7 @@
 @media(max-width:860px){
   .cand-nav .cand-navlinks{display:none}
   .how .how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+  .pay .pay-split{grid-template-columns:1fr;gap:var(--s6)}
   .gaps .gaps-in{grid-template-columns:1fr}
   .cand-foot .cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
 }
