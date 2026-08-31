@@ -25,12 +25,13 @@ import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { Conductor } from '../../../../src/crystal/Conductor.js'
 import { MemoryModo } from '../../../../src/execution/MemoryModo.js'
 import { MemorySignorum } from '../../../../src/ledger/MemorySignorum.js'
-import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Materia, MateriaStore, MateriaStatus, PodPolicy } from '../../../../src/types/materia.js'
-import type { Hospitium, HospitiumStore } from '../../../../src/types/hospitium.js'
+import type { Hospitium, HospitiumStore, HostKey } from '../../../../src/types/hospitium.js'
 
-const ALICE: AuctorKey = { animaId: 'anima-alice' }
-const STRANGER: AuctorKey = { animaId: 'anima-stranger' }
+// Typed as `HostKey` — the host half of the AuctorKey union, which is what a Hospitium records
+// and what both scoping predicates compare. Every API call below takes it as an AuctorKey.
+const ALICE: HostKey = { animaId: 'anima-alice' }
+const STRANGER: HostKey = { animaId: 'anima-stranger' }
 /** A session id with no studio behind it — the "genuine stranger" control. */
 const NO_SUCH_STUDIO = 'modo-nothing-here'
 
