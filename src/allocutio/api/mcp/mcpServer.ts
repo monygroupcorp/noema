@@ -174,7 +174,7 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
   server.registerTool(
     'get_studio',
     {
-      description: 'Fetch one of your studios by id — poll its status (provisioning → idle) after provision_studio. Owner-scoped.',
+      description: 'Fetch one of your studios by id — poll its status (provisioning → idle) after provision_studio. Owner-scoped: a studio you host reads back in every state, terminated included, so an id me_status reports is addressable here.',
       inputSchema: { id: z.string() },
     },
     (args) => getStudioTool(api, auctor, args),
