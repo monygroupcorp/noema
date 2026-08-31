@@ -76,7 +76,12 @@ export class MongoDataset implements Datasets {
    * `Intella` stores, and the `{ kind }` single-axis Access union the schema spec settles on.
    * `Dataset` carries neither field today, so both arms match nothing — they are here so that
    * the item which gives datasets an access field is a schema change, not a re-derivation of
-   * who may read what.
+   * who may read what. Team sharing (`sodalitasId`) did NOT light those arms up: sharing with a
+   * named fellowship and publishing to everyone are different decisions.
+   *
+   * And this seam deliberately does not honour the team overlay either — it is the gate a RUN's
+   * dataset reference resolves through (`_assertOwnedAditus`), so widening it would let a member
+   * spend on someone else's data. See `Datasets.findOwned` and ADR-0014's open question.
    */
   async findOwned(id: string, owner: string): Promise<Dataset | null> {
     const doc = await this.col.findOne({
@@ -88,20 +93,39 @@ export class MongoDataset implements Datasets {
 
   private async _page(opts: DatasetListOpts): Promise<{ entries: Dataset[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
-    // Archived datasets are gone from the lists. `archivum` is UNSET on restore rather than
-    // set to null, so "no archivum field" is the whole of live — and a document written before
-    // this field existed carries none, which is correct: it is live.
-    const filter: Filter<Document> = { owner: opts.owner, archivum: { $exists: false } }
+
+    // ACCESS, in the query. The caller's own datasets UNION the datasets shared with a team the
+    // caller is a member of (`Dataset.sodalitasId` — the team overlay; `opts.sodalitasIds` is
+    // resolved at the API layer from the authenticated caller, never from a request parameter).
+    // With no team ids the clause is the bare `{ owner }` this list has always used, so a
+    // caller in no team reads exactly what they read before.
+    const teamIds = opts.sodalitasIds ?? []
+    const access: Filter<Document> =
+      teamIds.length > 0
+        ? { $or: [{ owner: opts.owner }, { sodalitasId: { $in: teamIds } }] }
+        : { owner: opts.owner }
+
+    // The access clause and the cursor clause are BOTH `$or`s, so they are composed under
+    // `$and` rather than written onto the same key — a second `filter.$or` would silently
+    // replace the first, and the one it replaced is the access predicate.
+    const clauses: Filter<Document>[] = [access]
 
     if (opts.cursor) {
       const c = decodeCursor(opts.cursor)
       if (c) {
-        filter.$or = [
-          { mutatum: { $lt: c.mutatum } },
-          { mutatum: c.mutatum, id: { $lt: c.id } },
-        ]
+        clauses.push({
+          $or: [
+            { mutatum: { $lt: c.mutatum } },
+            { mutatum: c.mutatum, id: { $lt: c.id } },
+          ],
+        })
       }
     }
+
+    // Archived datasets are gone from the lists. `archivum` is UNSET on restore rather than
+    // set to null, so "no archivum field" is the whole of live — and a document written before
+    // this field existed carries none, which is correct: it is live.
+    const filter: Filter<Document> = { archivum: { $exists: false }, $and: clauses }
 
     const docs = await this.col
       .find(filter)

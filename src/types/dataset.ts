@@ -52,6 +52,16 @@ export interface DatasetMediaItem {
   /** FK -> Actum. Present iff source === 'generation' — the run this media came from. */
   actumId?: string
   addedAt: Date
+  /** FK -> Anima. WHO put this item on the dataset — the pair of `addedAt`'s WHEN.
+   *
+   *  Load-bearing once a dataset is shared with a `Sodalitas` (see `Dataset.sodalitasId`): a
+   *  dataset several people contribute to cannot be audited, curated or credited if every item
+   *  reads as the owner's. Resolved from the authenticated caller at mint time
+   *  (`CrystalApi._mintMedia`), never from the request body.
+   *
+   *  Optional because documents written before this field existed carry none, and a guessed
+   *  backfill would assert an attribution nobody recorded — absent is the honest reading. */
+  addedBy?: string
   /** Freeform operator labels. Optional: documents written before this field existed carry none. */
   tags?: string[]
   /** Freeform operator notes on this item. Optional for the same reason as `tags`. */
@@ -141,6 +151,23 @@ export function nextDatasetVersion(versions: DatasetVersion[]): string {
 export interface Dataset {
   id: string
   owner: string
+  /**
+   * FK -> Sodalitas. Team-sharing OVERLAY: when present, every member of the named team may
+   * READ this dataset (`getDataset`, both list routes) and CONTRIBUTE to it (append media,
+   * attach/edit captionsets). Absent -> owner-only, which is every dataset written before this
+   * field existed.
+   *
+   * An overlay, NOT a second owner: `owner` stays the single scalar animaId it has always been,
+   * and the destructive lifecycle verbs (archive/restore, of the dataset and of one media item)
+   * stay with that owner. This is `Collectio.sodalitasId`'s shape reused verbatim
+   * (`src/types/collectio.ts`) — the one sanctioned team overlay in the crystal — not a second
+   * sharing vocabulary (ADR-0001: no new nouns).
+   *
+   * Distinct from the `access: 'public'` arm pre-written in `MongoDataset.findOwned`: sharing a
+   * dataset with a named fellowship and publishing it to everyone are different decisions, and
+   * this field delivers only the first.
+   */
+  sodalitasId?: string
   name: string
   modality: DatasetModality
   custody: DatasetCustody
@@ -174,6 +201,17 @@ export interface DatasetSummary {
 /** Owner-scoped, cursor-paginated read opts — mirrors the `GET /v1/me/runs` precedent. */
 export interface DatasetListOpts {
   owner: string
+  /**
+   * FK[] -> Sodalitas. The teams the CALLER is a member of, resolved at the API layer from the
+   * authenticated caller and never from a request parameter. A dataset whose `sodalitasId` is
+   * in this set is listed alongside the caller's own — the read half of the team overlay.
+   *
+   * It rides in the OPTS rather than being looked up per row so the access predicate stays IN
+   * THE QUERY (the property `findOwned` is built around): a dataset the caller may not name is
+   * never loaded, and the cursor pagination keeps working over one filtered result set instead
+   * of a post-filtered page. Absent/empty -> owner-only, the pre-existing behaviour exactly.
+   */
+  sodalitasIds?: string[]
   cursor?: string
   limit?: number
 }
@@ -209,19 +247,24 @@ export interface IngestMediaFromGeneration {
  *  a second ingestion shape would be a second place for the two to drift. */
 export type IngestMediaInput = IngestMediaFromUpload | IngestMediaFromGeneration
 
-/** Input to create a drop-media dataset. */
-export interface CreateDatasetFromUpload extends IngestMediaFromUpload {
+/** What a create body says about the dataset ITSELF, shared by both ingestion shapes so the
+ *  two cannot drift on what a dataset is named, what it holds, or who it is shared with. */
+interface CreateDatasetFields {
   name: string
   modality: DatasetModality
   custody?: DatasetCustody
+  /** FK -> Sodalitas, on the wire as `teamId` (the API's existing word for a team reference —
+   *  `POST /v1/me/projects`, `POST /v1/collections`). Shares the dataset with that team; the
+   *  caller MUST be a member of it, validated the way `createProject`/`collect` validate theirs.
+   *  Stored as `Dataset.sodalitasId`. Absent -> owner-only. */
+  teamId?: string
 }
 
+/** Input to create a drop-media dataset. */
+export interface CreateDatasetFromUpload extends IngestMediaFromUpload, CreateDatasetFields {}
+
 /** Input to create a seed-from-generation dataset. */
-export interface CreateDatasetFromGeneration extends IngestMediaFromGeneration {
-  name: string
-  modality: DatasetModality
-  custody?: DatasetCustody
-}
+export interface CreateDatasetFromGeneration extends IngestMediaFromGeneration, CreateDatasetFields {}
 
 export type CreateDatasetInput = CreateDatasetFromUpload | CreateDatasetFromGeneration
 
@@ -251,6 +294,12 @@ export interface Datasets {
    *
    * Returns null when no such dataset exists FOR THIS CALLER — the caller cannot tell a
    * dataset that is not theirs from one that does not exist, so ids stay non-enumerable.
+   *
+   * DELIBERATELY NARROWER than the read gate: this seam is what `_assertOwnedAditus` resolves a
+   * dataset REFERENCE ON A RUN through, and it does NOT honour the `sodalitasId` team overlay.
+   * A team member can read and contribute to a shared dataset but cannot yet name it as a run's
+   * input. That asymmetry is known and is the open question ADR-0014 puts to rth — widening it
+   * is a ruling about whose compute trains on whose data, not a read decision.
    *
    * OPTIONAL on the interface so a store double is not obliged to implement it. A store that
    * does not is a store that cannot affirm access, and the run entry point refuses the

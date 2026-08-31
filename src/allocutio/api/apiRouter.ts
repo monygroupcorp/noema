@@ -980,8 +980,9 @@ export function createApiRouter(deps: {
 
   // GET /v1/data/datasets — the caller's datasets as the THIN `DatasetSummary[]` projection
   // (the training-run picker's contract — matches this route's pre-existing client call in
-  // `lib/api.ts:listDatasets()`, unchanged: `{ datasets: DatasetSummary[] }`). Owner-scoped,
-  // cursor-paginated like `GET /v1/me/runs`.
+  // `lib/api.ts:listDatasets()`, unchanged: `{ datasets: DatasetSummary[] }`). Scoped to what
+  // the caller may read — their own datasets UNION those shared with a Sodalitas they belong
+  // to — and cursor-paginated like `GET /v1/me/runs`.
   router.get('/data/datasets', wrap(async (req, res) => {
     const auctor = await auth(req)
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
@@ -993,7 +994,7 @@ export function createApiRouter(deps: {
   // GET /v1/data/datasets/full — the caller's datasets as the FULL rich `Dataset[]` shape
   // (custody, modality, captionsets, versions) — `Datasets.tsx`'s live listing. Kept as a
   // separate route from the summary above so the existing `listDatasets()` client contract
-  // stays untouched; owner-scoped, cursor-paginated identically.
+  // stays untouched; same own-plus-team scoping, cursor-paginated identically.
   router.get('/data/datasets/full', wrap(async (req, res) => {
     const auctor = await auth(req)
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
@@ -1006,35 +1007,41 @@ export function createApiRouter(deps: {
   // `source: 'upload'` body (media already dropped via `POST /storage/uploads/sign`) or a
   // `source: 'generation'` body (media seeded from the caller's own completed Acta). The
   // discriminant is validated server-side (CrystalApi.createDataset); a body matching
-  // neither shape 400s.
+  // neither shape 400s. An optional `teamId` shares the dataset with a Sodalitas the caller is
+  // a member of (validated through the same `_memberTeam` seam projects and collections use);
+  // it is stored as `Dataset.sodalitasId`.
   router.post('/data/datasets', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ dataset: await api.createDataset(auctor, req.body ?? {}) })
   }))
 
-  // POST /v1/data/datasets/:id/media — append media to a dataset the caller owns. Same
-  // discriminated ingestion body as `POST /v1/data/datasets` and the same minting path, so a
-  // dataset grows the way it was seeded. Append-only: nothing here removes, replaces or
-  // reorders media, and the response carries the new `DatasetVersion` plus every captionset's
-  // recomputed coverage. The owner comes from `auth(req)` and nowhere else; a stranger's
-  // dataset id 404s.
+  // POST /v1/data/datasets/:id/media — contribute media to a dataset the caller owns OR is a
+  // member of the team it is shared with. Same discriminated ingestion body as
+  // `POST /v1/data/datasets` and the same minting path, so a dataset grows the way it was
+  // seeded — and every named Actum must still be the CALLER'S OWN and completed, so a member
+  // contributes their own generations and never someone else's. Each item records `addedBy`.
+  // Append-only: nothing here removes, replaces or reorders media, and the response carries the
+  // new `DatasetVersion` plus every captionset's recomputed coverage. The caller comes from
+  // `auth(req)` and nowhere else; a non-member's dataset id 404s.
   router.post('/data/datasets/:id/media', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ dataset: await api.addDatasetMedia(auctor, String(req.params.id), req.body ?? {}) })
   }))
 
   // POST /v1/data/datasets/:id/captionsets — attach a captionset (its caption text keyed by
-  // media id) to a dataset the caller owns. A captionset already carrying the same id is
-  // replaced, so re-running a caption pass does not accumulate duplicates. The owner comes
-  // from `auth(req)` and nowhere else; a stranger's dataset id 404s.
+  // media id) to a dataset the caller owns or is a team member of. A captionset already
+  // carrying the same id is replaced, so re-running a caption pass does not accumulate
+  // duplicates. The caller comes from `auth(req)` and nowhere else; a non-member's dataset
+  // id 404s.
   router.post('/data/datasets/:id/captionsets', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(201).json({ dataset: await api.addCaptionset(auctor, String(req.params.id), req.body ?? {}) })
   }))
 
   // PATCH /v1/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId — edit one caption
-  // of one captionset on a dataset the caller owns (captionsets are editable after generation).
-  // Coverage is recomputed server-side from the captions actually present. Owner from `auth(req)`.
+  // of one captionset on a dataset the caller owns or is a team member of (captionsets are
+  // editable after generation). Coverage is recomputed server-side from the captions actually
+  // present. The caller comes from `auth(req)`.
   router.patch('/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId', wrap(async (req, res) => {
     const auctor = await auth(req)
     const body = (req.body ?? {}) as { caption?: unknown }
@@ -1042,7 +1049,9 @@ export function createApiRouter(deps: {
     res.status(200).json({ dataset })
   }))
 
-  // POST /v1/data/datasets/:id/archive — archive a dataset the caller owns. It leaves both
+  // POST /v1/data/datasets/:id/archive — archive a dataset the caller OWNS. Owner-only, and
+  // deliberately narrower than the read/contribute gate above: the team overlay adds readers
+  // and contributors, not a second principal who may retire the owner's set. It leaves both
   // list routes and every picker built on them, and becomes unusable from them. It is NOT
   // erased: `GET` still resolves it, so a Muse session's mother dataset, a session dataset
   // behind a saved piece, and a past run's lineage all keep resolving. Reversible through
@@ -1054,14 +1063,16 @@ export function createApiRouter(deps: {
   }))
 
   // POST /v1/data/datasets/:id/restore — return an archived dataset to both list routes.
-  // Idempotent on a dataset that is already live. Owner from `auth(req)`.
+  // Owner-only, like the archive it undoes. Idempotent on a dataset that is already live.
+  // Owner from `auth(req)`.
   router.post('/data/datasets/:id/restore', wrap(async (req, res) => {
     const auctor = await auth(req)
     res.status(200).json({ dataset: await api.restoreDataset(auctor, String(req.params.id)) })
   }))
 
   // POST /v1/data/datasets/:id/media/:mediaId/archive — archive ONE media item on a dataset
-  // the caller owns. The item leaves the working set (the caption manifest, the decompose,
+  // the caller OWNS (owner-only, for the same reason the dataset archive is). The item leaves
+  // the working set (the caption manifest, the decompose,
   // the summary count, Muse's fragment pool) and every captionset's coverage is recomputed
   // against the media that is left. The item itself stays on the record — caption maps and
   // fragments are keyed on its id. Reversible through `/restore`. Owner from `auth(req)`; a
@@ -1073,7 +1084,8 @@ export function createApiRouter(deps: {
   }))
 
   // POST /v1/data/datasets/:id/media/:mediaId/restore — return one archived media item to the
-  // working set, recomputing every captionset's coverage against it. Owner from `auth(req)`.
+  // working set, recomputing every captionset's coverage against it. Owner-only, like the
+  // archive it undoes. Owner from `auth(req)`.
   router.post('/data/datasets/:id/media/:mediaId/restore', wrap(async (req, res) => {
     const auctor = await auth(req)
     const dataset = await api.restoreDatasetMedia(auctor, String(req.params.id), String(req.params.mediaId))
