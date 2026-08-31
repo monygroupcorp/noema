@@ -31,6 +31,7 @@
 .cat .cat-list{list-style:none;margin:0;padding:0;display:grid;gap:var(--s2)}
 .cat .cat-list li{color:var(--muted);font-size:var(--fs-base);border-bottom:1px solid var(--hair-soft);
   padding-bottom:var(--s2)}
+.cat .cat-list .cat-rest a{color:var(--accent-soft);font-size:var(--fs-s);text-decoration:none}
 .cat .cat-flows{grid-template-columns:repeat(3,1fr);gap:var(--s2) var(--s7);margin-bottom:var(--s7)}
 
 @media(max-width:860px){

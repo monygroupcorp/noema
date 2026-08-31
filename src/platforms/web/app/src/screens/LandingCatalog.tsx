@@ -24,8 +24,13 @@ export function LandingCatalog() {
     return <section className="cat" aria-busy="true"><div className="cat-in cat-wait" /></section>;
   }
 
+  // Both lists are samples, not inventories. The catalogue carries hundreds of trained
+  // identities; rendering them all makes a directory, not a landing page, and the count above
+  // already carries the breadth.
   const named = flows.filter((f) => f.nomen).slice(0, 12);
   const loras = models.filter((m) => m.genus === 'lora');
+  const shown = loras.slice(0, 12);
+  const rest = loras.length - shown.length;
 
   return (
     <section className="cat">
@@ -79,7 +84,12 @@ export function LandingCatalog() {
               <>
                 <h3 className="mono">trained here</h3>
                 <ul className="cat-list">
-                  {loras.map((m) => <li key={m.intellaId}>{m.nomen}</li>)}
+                  {shown.map((m) => <li key={m.intellaId}>{m.nomen}</li>)}
+                  {rest > 0 && (
+                    <li className="cat-rest">
+                      <Link to="/models">and {rest} more on the shelf</Link>
+                    </li>
+                  )}
                 </ul>
               </>
             )}
