@@ -952,7 +952,7 @@ const OkSchema: JsonSchema = {
 /** The public `Project` projection (mirrors `types.ts#Project`). */
 const ProjectSchema: JsonSchema = {
   type: 'object',
-  description: 'A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.',
+  description: 'A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.',
   properties: {
     id: { type: 'string' },
     owner: { type: 'string', description: "The owning Anima id (the project's hard ownership boundary)." },
@@ -963,7 +963,7 @@ const ProjectSchema: JsonSchema = {
     datasetIds: { type: 'array', items: { type: 'string' }, description: 'Filed dataset ids.' },
     modelIds: { type: 'array', items: { type: 'string' }, description: 'Filed model (Intella) ids.' },
     collectionIds: { type: 'array', items: { type: 'string' }, description: 'Filed collection ids.' },
-    teamId: { type: 'string', description: 'Optional referenced Team (Sodalitas) id — the shared member set.' },
+    teamId: { type: 'string', description: 'Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner.' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
   },
@@ -2648,7 +2648,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/me/projects',
-      summary: "List the caller's projects (Provincia) — account-owned workspace lenses. Identified callers only.",
+      summary: "List the projects the caller can read (Provincia) — their own, plus any shared with a Team they belong to. Identified callers only.",
       auth: true,
       response: ProjectsListSchema,
     },
@@ -2663,7 +2663,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/me/projects/:id',
-      summary: 'Fetch one owned project by id (404 if not the owner).',
+      summary: 'Fetch one project by id — the owner, or a member of the Team it is shared with (404 for anyone else).',
       auth: true,
       response: ProjectEnvelopeSchema,
     },
@@ -2684,7 +2684,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/me/projects/:id/holdings',
-      summary: 'File an asset reference (dataset|model|collection) into the project. Owner-only; idempotent.',
+      summary: 'File an asset reference (dataset|model|collection) into the project. Owner or a member of the Team it is shared with; idempotent. Filing is a reference, not a grant — it does not widen who can read the asset.',
       auth: true,
       request: FileAssetRequestSchema,
       response: ProjectEnvelopeSchema,

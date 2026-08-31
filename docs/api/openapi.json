@@ -14229,7 +14229,7 @@
     },
     "/me/projects": {
       "get": {
-        "summary": "List the caller's projects (Provincia) — account-owned workspace lenses. Identified callers only.",
+        "summary": "List the projects the caller can read (Provincia) — their own, plus any shared with a Team they belong to. Identified callers only.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14250,7 +14250,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                        "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                         "properties": {
                           "id": {
                             "type": "string"
@@ -14298,7 +14298,7 @@
                           },
                           "teamId": {
                             "type": "string",
-                            "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                            "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                           },
                           "createdAt": {
                             "type": "string",
@@ -14361,7 +14361,7 @@
                   "properties": {
                     "project": {
                       "type": "object",
-                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                       "properties": {
                         "id": {
                           "type": "string"
@@ -14409,7 +14409,7 @@
                         },
                         "teamId": {
                           "type": "string",
-                          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                         },
                         "createdAt": {
                           "type": "string",
@@ -14490,7 +14490,7 @@
     },
     "/me/projects/{id}": {
       "get": {
-        "summary": "Fetch one owned project by id (404 if not the owner).",
+        "summary": "Fetch one project by id — the owner, or a member of the Team it is shared with (404 for anyone else).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14509,7 +14509,7 @@
                   "properties": {
                     "project": {
                       "type": "object",
-                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                       "properties": {
                         "id": {
                           "type": "string"
@@ -14557,7 +14557,7 @@
                         },
                         "teamId": {
                           "type": "string",
-                          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                         },
                         "createdAt": {
                           "type": "string",
@@ -14629,7 +14629,7 @@
                   "properties": {
                     "project": {
                       "type": "object",
-                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                       "properties": {
                         "id": {
                           "type": "string"
@@ -14677,7 +14677,7 @@
                         },
                         "teamId": {
                           "type": "string",
-                          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                         },
                         "createdAt": {
                           "type": "string",
@@ -14797,7 +14797,7 @@
     },
     "/me/projects/{id}/holdings": {
       "post": {
-        "summary": "File an asset reference (dataset|model|collection) into the project. Owner-only; idempotent.",
+        "summary": "File an asset reference (dataset|model|collection) into the project. Owner or a member of the Team it is shared with; idempotent. Filing is a reference, not a grant — it does not widen who can read the asset.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14816,7 +14816,7 @@
                   "properties": {
                     "project": {
                       "type": "object",
-                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                       "properties": {
                         "id": {
                           "type": "string"
@@ -14864,7 +14864,7 @@
                         },
                         "teamId": {
                           "type": "string",
-                          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                         },
                         "createdAt": {
                           "type": "string",
@@ -14968,7 +14968,7 @@
                   "properties": {
                     "project": {
                       "type": "object",
-                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+                      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
                       "properties": {
                         "id": {
                           "type": "string"
@@ -15016,7 +15016,7 @@
                         },
                         "teamId": {
                           "type": "string",
-                          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+                          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
                         },
                         "createdAt": {
                           "type": "string",

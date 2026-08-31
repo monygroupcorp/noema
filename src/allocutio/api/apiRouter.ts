@@ -734,7 +734,8 @@ export function createApiRouter(deps: {
   }))
 
   // ── Projects (Provincia) — an account-owned workspace lens ──────────────────────
-  // GET /v1/me/projects — list the caller's projects (owner-scoped, identified only).
+  // GET /v1/me/projects — the projects the caller may read: their own UNION the ones shared
+  // with a Sodalitas they belong to (`Provincia.sodalitasId`). Identified callers only.
   router.get('/me/projects', wrap(async (req, res) => {
     res.json({ projects: await api.listProjects(await auth(req)) })
   }))
@@ -745,7 +746,8 @@ export function createApiRouter(deps: {
     res.status(201).json({ project: await api.createProject(await auth(req), { name, desc, glyph, color, teamId }) })
   }))
 
-  // GET /v1/me/projects/:id — fetch one owned project (404 if not the owner).
+  // GET /v1/me/projects/:id — fetch one project the caller may read: the owner, or a member of
+  // the team it is shared with (404 for anyone else — not_found, never forbidden).
   router.get('/me/projects/:id', wrap(async (req, res) => {
     res.json({ project: await api.getProject(await auth(req), String(req.params.id)) })
   }))
@@ -763,12 +765,15 @@ export function createApiRouter(deps: {
   }))
 
   // POST /v1/me/projects/:id/holdings — file an asset { kind: dataset|model|collection, assetId }.
+  // Owner or team member (the additive verb). A holding is a reference, not a grant: it does not
+  // change who may read the asset it names.
   router.post('/me/projects/:id/holdings', wrap(async (req, res) => {
     const { kind, assetId } = req.body ?? {}
     res.json({ project: await api.fileAsset(await auth(req), String(req.params.id), String(kind), String(assetId)) })
   }))
 
   // DELETE /v1/me/projects/:id/holdings/:kind/:assetId — unfile an asset from a project.
+  // Owner-only: the overlay widens what is added to the lens, never what is removed from it.
   router.delete('/me/projects/:id/holdings/:kind/:assetId', wrap(async (req, res) => {
     res.json({ project: await api.unfileAsset(await auth(req), String(req.params.id), String(req.params.kind), String(req.params.assetId)) })
   }))

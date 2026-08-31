@@ -1,6 +1,6 @@
-import type { Collection, Document } from 'mongodb'
+import type { Collection, Document, Filter } from 'mongodb'
 import { randomUUID } from 'node:crypto'
-import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../types/provincia.js'
+import type { Provincia, Provinciae, ProvinciaListOpts, ProvinciaPatch, Provinciarum } from '../types/provincia.js'
 
 // =============================================================================
 // MongoProvinciarum — the project store (no bigint fields → plain marshalling)
@@ -47,11 +47,32 @@ export class MongoProvinciarum implements Provinciarum {
     await this.col.deleteOne({ id })
   }
 
-  async listByOwner(animaId: string): Promise<Provinciae> {
+  /**
+   * ACCESS, in the query. The caller's own projects UNION the projects shared with a team the
+   * caller is a member of (`Provincia.sodalitasId` — the team overlay; `opts.sodalitasIds` is
+   * resolved at the API layer from the authenticated caller, never from a request parameter).
+   * With no team ids the filter is the bare `{ animaId }` this list has always used, so a caller
+   * in no team reads exactly what they read before.
+   *
+   * One `$or` and nothing else on the filter, so there is no second `$or` for it to collide
+   * with; if a further predicate is ever added here it must be composed under `$and` (the shape
+   * `MongoDataset._page` uses for its cursor clause), never written onto the same key.
+   */
+  async list(opts: ProvinciaListOpts): Promise<Provinciae> {
+    const teamIds = opts.sodalitasIds ?? []
+    const filter: Filter<Document> =
+      teamIds.length > 0
+        ? { $or: [{ animaId: opts.animaId }, { sodalitasId: { $in: teamIds } }] }
+        : { animaId: opts.animaId }
     // Oldest-first (by creation) — a stable order so the project set doesn't reshuffle
     // between loads (the client picks projects[0] as the default fallback).
-    const docs = await this.col.find({ animaId }).sort({ natum: 1 }).toArray()
+    const docs = await this.col.find(filter).sort({ natum: 1 }).toArray()
     return docs.map(fromDoc)
+  }
+
+  /** Owner-only, and no team seam: the account export reads this. */
+  async listByOwner(animaId: string): Promise<Provinciae> {
+    return this.list({ animaId })
   }
 
   /**
