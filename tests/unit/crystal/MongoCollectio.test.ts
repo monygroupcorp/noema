@@ -32,19 +32,22 @@ const base = {
   concurrentia: 2,
   status: 'nascens' as const,
   provenanceHash: `sha256:${'0'.repeat(64)}`,
-  // `MongoCollectio.create` takes `reiectae` from the caller (unlike `MongoCollectionum.create`,
-  // which omits it from its input type and seeds it to 0). Supplied here to match this store.
-  reiectae: 0,
 }
 
-test('create returns collectio with id, natum, acta=[], completae=0, fractae=0, impetusTotal=0n', async () => {
+test('create returns collectio with id, natum, acta=[], completae=0, fractae=0, reiectae=0, impetusTotal=0n', async () => {
   const c = await store.create(base)
   assert.ok(c.id)
   assert.ok(c.natum instanceof Date)
   assert.deepEqual(c.acta, [])
   assert.equal(c.completae, 0)
   assert.equal(c.fractae, 0)
+  // The counters are the store's to seed — `reiectae` included. It is half of the
+  // CollectioCursor's dispatch budget (`numerus + reiectae`), so an unseeded one makes that
+  // sum NaN and the collection never dispatches a piece (noema-373).
+  assert.equal(c.reiectae, 0)
   assert.equal(c.impetusTotal, 0n)
+  const found = await store.find(c.id)
+  assert.equal(found?.reiectae, 0)
 })
 
 test('impetusTotal round-trips as bigint', async () => {
