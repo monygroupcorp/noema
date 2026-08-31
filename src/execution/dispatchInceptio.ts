@@ -14,7 +14,7 @@
 
 import type { Actum } from '../types/actum.js'
 import type { Modorum } from '../types/modus.js'
-import type { Cursorum, ActumCompletor, Inceptio } from '../types/cursus.js'
+import type { Cursorum, ActumCompletor, CursorResult, Inceptio } from '../types/cursus.js'
 import type { ActumInceptor } from './ActumInceptor.js'
 import type { ActumIndexStore } from '../types/actumIndex.js'
 import { withTrace, getTrace, makeTraceContext } from '../lib/trace.js'
@@ -123,40 +123,49 @@ async function runDispatch(
     }
   }
 
-  // 2. Resolve modus and cursor. Reuse the modus already fetched in step 0 when it
-  // matches the locked version (the common path); only re-fetch if it somehow differs.
-  const modus = (target && target.versio === actum.modusVersiono)
-    ? target
-    : await modorum.find(actum.modusId, actum.modusVersiono)
-  if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
-
-  const cursor = cursorum.resolve(modus)
-
-  // 3. Run — propagate identity + actum id through the trace context so the cursor
-  // (and anything downstream) can read them without putting identity on any durable
-  // schema (Materia/Modo/Actum stay identity-blind). At most one of animaId/commitment
-  // is set; arcanum-proof runs set neither.
+  // 2-3. Everything from here on runs with the initiation's signa LOCKED, so every
+  // exit from this region has to settle the actum. The invariant is "any post-initiate
+  // throw releases what the initiation acquired", and it is expressed once, as a single
+  // guarded region covering modus resolution, cursor resolution and the run itself:
+  //
+  //   - `fail()` releases the locked signa and stamps the actum `fractus`, so the payer
+  //     gets the credits back immediately rather than when the expiry reaper reaches the
+  //     record.
+  //   - `fail()` is idempotent and returns early on an already-terminal actum, so the
+  //     reaper and the completion webhook keep behaving exactly as they did.
+  //   - A settle failure is never allowed to replace the original error.
+  //   - The original error is rethrown unchanged, carrying one addition: the id of the
+  //     actum that was persisted before the throw (`dispatchFailureActumId`). A caller
+  //     that tracks the runs it dispatched — a Collectio, for one — needs that id to
+  //     account for the failed piece instead of leaving it outside its own bookkeeping.
+  //
+  // Identity is read before the guarded region because the sync completion below reuses
+  // it. At most one of animaId/commitment is set; arcanum-proof runs set neither.
   const by = inceptio.by
   const animaId    = 'animaId'    in by ? by.animaId    : undefined
   const commitment = 'commitment' in by ? by.commitment : undefined
-  //
-  // A cursor that THROWS is a terminal run, so settle it here: `fail()` releases the
-  // signa the initiation locked and stamps the actum `fractus`, and the error is then
-  // rethrown unchanged for the caller to translate. Without this the actum stays
-  // `nascens` with its reservation held until the expiry reaper reaches it — the same
-  // terminal outcome, minus the credits the payer cannot use in the meantime. `fail()`
-  // is idempotent and returns early on an already-terminal actum, so the reaper and the
-  // completion webhook keep behaving exactly as they did; a settle failure is not
-  // allowed to replace the original error.
-  let cursorResult
+
+  let cursorResult: CursorResult
   try {
+    // Reuse the modus already fetched in step 0 when it matches the locked version (the
+    // common path); only re-fetch if it somehow differs.
+    const modus = (target && target.versio === actum.modusVersiono)
+      ? target
+      : await modorum.find(actum.modusId, actum.modusVersiono)
+    if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
+
+    const cursor = cursorum.resolve(modus)
+
+    // Run — propagate identity + actum id through the trace context so the cursor (and
+    // anything downstream) can read them without putting identity on any durable schema
+    // (Materia/Modo/Actum stay identity-blind).
     cursorResult = await withTrace(
       makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
       () => cursor.run(actum),
     )
   } catch (err) {
     await completor.fail(actum, (err as Error)?.message ?? String(err)).catch(() => {})
-    throw err
+    throw markDispatchFailure(err, actum.id)
   }
 
   if (cursorResult.kind === 'sync') {
@@ -172,4 +181,49 @@ async function runDispatch(
 
   // 4b. Async: leave pending — the completion webhook finishes it.
   return { actum }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch failure — carrying the persisted actum id back to the caller
+// ---------------------------------------------------------------------------
+//
+// A dispatch can throw either BEFORE an actum exists (initiation refused: unknown
+// modus, insufficient balance) or AFTER one has been persisted and its signa locked.
+// Only the second case leaves a run for the caller to account for, and the two are
+// otherwise indistinguishable at the call site.
+//
+// So a post-initiate failure stamps the persisted actum id onto the error it rethrows.
+// The error object itself is unchanged — same instance, same message, same stack — and
+// the property is non-enumerable, so it does not alter serialisation or equality checks
+// on the error. Callers read it with `dispatchFailureActumId(err)`; a caller that does
+// not care sees exactly the error it saw before.
+
+const DISPATCH_FAILURE_ACTUM_ID = '__noemaDispatchFailureActumId'
+
+/** Stamp the persisted actum id onto an error and return that same error. */
+function markDispatchFailure(err: unknown, actumId: string): unknown {
+  if (err !== null && typeof err === 'object') {
+    try {
+      Object.defineProperty(err, DISPATCH_FAILURE_ACTUM_ID, {
+        value: actumId,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      })
+    } catch {
+      // A frozen or sealed error cannot carry the id; the throw still propagates.
+    }
+  }
+  return err
+}
+
+/**
+ * The id of the actum that was persisted before a dispatch threw, or `undefined` when
+ * the failure happened before any actum existed (nothing to account for) or the error
+ * did not come from `dispatchInceptio`.
+ */
+export function dispatchFailureActumId(err: unknown): string | undefined {
+  if (err === null || typeof err !== 'object') return undefined
+  const id = (err as Record<string, unknown>)[DISPATCH_FAILURE_ACTUM_ID]
+  return typeof id === 'string' ? id : undefined
 }

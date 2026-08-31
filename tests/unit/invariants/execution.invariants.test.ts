@@ -15,6 +15,8 @@ import { Cursorum } from '../../../src/execution/Cursorum.js'
 import { ActumInceptor } from '../../../src/execution/ActumInceptor.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { Nexus } from '../../../src/ledger/Nexus.js'
+import { dispatchInceptio, dispatchFailureActumId } from '../../../src/execution/dispatchInceptio.js'
+import type { DispatchDeps } from '../../../src/execution/dispatchInceptio.js'
 
 function buildModus(overrides: Partial<Modus> = {}): Modus {
   return {
@@ -383,4 +385,76 @@ test('INVARIANT: nexus does not emit on fail', async () => {
   await completor.fail(actum, 'crash')
 
   assert.equal(emitCount, 0)
+})
+
+// ── Post-initiate dispatch failure (noema-359) ───────────────────────────────
+// RULE: once initiate() returns, an Actum is persisted and its signa are LOCKED.
+// Every path out of the dispatch after that point releases them. The reservation is
+// bounded in time by the expiry reaper, but a bound is not a release: until the
+// dispatch settles the run, the payer cannot use credits that were never spent.
+//
+// These run the real ledger, inceptor and completor through dispatchInceptio and
+// assert the BALANCE, so a release that stops happening shows up here as money left
+// locked rather than as a still-passing "it threw" assertion.
+
+test('INVARIANT: a post-initiate dispatch failure restores the balance exactly', async () => {
+  const { signorum, modorum, cursorum, acta, inceptor, completor } = buildPipeline()
+  await modorum.register(buildModus())
+  cursorum.register('test', fakeCursor(600n, 600n))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const balanceBefore = await signorum.balance({ animaId: 'anima-1' })
+
+  // The dispatch resolves its cursor from its own registry. Here that resolution
+  // fails — the initiation has already happened and its signa are locked.
+  const deps: DispatchDeps = {
+    inceptor: { initiate: (i) => inceptor.initiate(i) },
+    modorum,
+    cursorum: {
+      register: () => {},
+      resolve: () => { throw new Error('No cursor registered for ministerium') },
+    },
+    completor,
+  }
+
+  await assert.rejects(
+    () => dispatchInceptio(deps, { modusId: 'mod-1', aditus: {}, by: { animaId: 'anima-1' } }),
+    /No cursor registered/,
+  )
+
+  const balanceAfter = await signorum.balance({ animaId: 'anima-1' })
+  assert.equal(balanceAfter, balanceBefore, 'nothing was executed, so nothing may stay locked')
+
+  const all = await acta.findExpired()
+  assert.equal(all.length, 0, 'no nascens actum is left for the reaper to find')
+})
+
+test('INVARIANT: a post-initiate dispatch failure leaves the actum fractus, not nascens', async () => {
+  const { signorum, modorum, cursorum, acta, inceptor, completor } = buildPipeline()
+  await modorum.register(buildModus())
+  cursorum.register('test', fakeCursor(600n, 600n))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+
+  const deps: DispatchDeps = {
+    inceptor: { initiate: (i) => inceptor.initiate(i) },
+    modorum,
+    cursorum: {
+      register: () => {},
+      resolve: () => { throw new Error('No cursor registered for ministerium') },
+    },
+    completor,
+  }
+
+  const err = await dispatchInceptio(deps, { modusId: 'mod-1', aditus: {}, by: { animaId: 'anima-1' } })
+    .then(() => { throw new Error('expected the dispatch to throw') }, (e: unknown) => e)
+
+  // The caller is handed the id of the run that was persisted before the throw, so a
+  // collection can account for the failed piece instead of orphaning it.
+  const actumId = dispatchFailureActumId(err)
+  assert.ok(actumId, 'the persisted actum id rides the error')
+
+  const record = await acta.findById(actumId)
+  assert.ok(record)
+  assert.equal(record.status, 'fractus')
+  assert.ok(record.completum instanceof Date, 'terminal, with a completion time')
 })

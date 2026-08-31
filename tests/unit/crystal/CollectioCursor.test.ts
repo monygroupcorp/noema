@@ -6,6 +6,8 @@ import type { Actorum, Inceptio } from '../../../src/types/cursus.js'
 import type { Collectionum } from '../../../src/types/collectio.js'
 import { CollectioCursor } from '../../../src/crystal/CollectioCursor.js'
 import { selectForPiece } from '../../../src/crystal/TraitMixer.js'
+import { dispatchInceptio } from '../../../src/execution/dispatchInceptio.js'
+import type { DispatchDeps } from '../../../src/execution/dispatchInceptio.js'
 import type { Tractus } from '../../../src/types/collectio.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1298,4 +1300,188 @@ test('resume() after a restart carries the reconstructed pending-review set', as
     'completa',
     'settles once every piece — including the pre-restart one — is approved',
   )
+})
+
+// ── noema-359: a dispatch that throws is still accounted for ──────────────────
+//
+// A dispatch can throw after it has already persisted its actum and locked that
+// piece's signa. That run exists and is terminal, so the collection has to contain
+// it: the id comes back on the error and is appended to `acta`. And because no
+// completion event will ever fire for a piece that never entered `running`, the
+// collection has to settle itself — a collection whose dispatches all fail must
+// still reach a terminal state rather than sitting agens with nothing in flight.
+
+/** A dispatch stub that throws for every piece, carrying a persisted actum id. */
+function makeThrowingDispatch(actumIdPrefix = 'failed'): {
+  dispatch(inceptio: Inceptio): Promise<{ actum: Actum }>
+  calls: Inceptio[]
+  ids: string[]
+} {
+  let counter = 0
+  const calls: Inceptio[] = []
+  const ids: string[] = []
+  return {
+    calls,
+    ids,
+    async dispatch(inceptio: Inceptio): Promise<{ actum: Actum }> {
+      calls.push(inceptio)
+      const id = `${actumIdPrefix}-${counter++}`
+      ids.push(id)
+      const err = new Error('no cursor for this modus')
+      // Mirrors what dispatchInceptio stamps on a post-initiate failure.
+      Object.defineProperty(err, '__noemaDispatchFailureActumId', {
+        value: id, enumerable: false, configurable: true, writable: true,
+      })
+      throw err
+    },
+  }
+}
+
+test('a dispatch that throws appends the failed piece to acta and counts it fractus', async () => {
+  const collectio = makeCollectio({ numerus: 2, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const failing = makeThrowingDispatch()
+  const cursor = new CollectioCursor(
+    failing.dispatch,
+    collectiones,
+    makeActorum(),
+    {},
+  )
+
+  await cursor.start(collectio)
+
+  const stored = collectiones.store.get('col-1')!
+  assert.deepEqual(stored.acta, failing.ids, 'every failed piece is a member of the collection')
+  assert.equal(stored.fractae, 2, 'each failed dispatch counted once')
+  assert.equal(stored.completae, 0)
+})
+
+test('a collection whose dispatches all fail reaches a terminal state', async () => {
+  const collectio = makeCollectio({ numerus: 2, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const cursor = new CollectioCursor(
+    makeThrowingDispatch().dispatch,
+    collectiones,
+    makeActorum(),
+    {},
+  )
+
+  await cursor.start(collectio)
+
+  const stored = collectiones.store.get('col-1')!
+  assert.equal(stored.status, 'completa', 'settled, not left agens with nothing in flight')
+  assert.ok(stored.completum instanceof Date, 'terminal state carries its completion time')
+})
+
+test('a failed piece consumes its slot — no replacement is dispatched for it', async () => {
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 3 })
+  const collectiones = makeCollectionum(collectio)
+  const failing = makeThrowingDispatch()
+  const cursor = new CollectioCursor(
+    failing.dispatch,
+    collectiones,
+    makeActorum(),
+    {},
+  )
+
+  await cursor.start(collectio)
+
+  assert.equal(failing.calls.length, 3, 'exactly the target count — a failure is not retried')
+  assert.equal(collectiones.store.get('col-1')!.reiectae, 0, 'a failure is not a rejection')
+})
+
+test('a dispatch failure does not stop the pieces that follow it', async () => {
+  const collectio = makeCollectio({ numerus: 3, concurrentia: 3 })
+  const collectiones = makeCollectionum(collectio)
+  const ok = makeInceptor()
+  let calls = 0
+  const mixed = async (inceptio: Inceptio): Promise<{ actum: Actum }> => {
+    calls += 1
+    if (calls === 1) {
+      const err = new Error('no cursor for this modus')
+      Object.defineProperty(err, '__noemaDispatchFailureActumId', {
+        value: 'failed-0', enumerable: false, configurable: true, writable: true,
+      })
+      throw err
+    }
+    return ok.dispatch(inceptio)
+  }
+  const cursor = new CollectioCursor(mixed, collectiones, ok.actorum, {})
+
+  await cursor.start(collectio)
+
+  assert.equal(calls, 3, 'the remaining pieces were still dispatched')
+  const stored = collectiones.store.get('col-1')!
+  assert.equal(stored.fractae, 1)
+  assert.equal(stored.acta.length, 3, 'the failed piece and both live pieces are all members')
+  assert.ok(stored.acta.includes('failed-0'))
+  assert.equal(stored.status, 'agens', 'still running — the live pieces have not settled yet')
+})
+
+// The seam itself, unstubbed: the real dispatchInceptio settles the piece and hands
+// back the persisted actum id, and the cursor puts that id into the collection. The
+// two halves are only worth anything joined, so this test joins them.
+test('the failed piece the real dispatch settles is the one that lands in acta', async () => {
+  const collectio = makeCollectio({ numerus: 2, concurrentia: 2 })
+  const collectiones = makeCollectionum(collectio)
+  const actorum = makeActorum()
+
+  let counter = 0
+  const failed: string[] = []
+  const deps: DispatchDeps = {
+    inceptor: {
+      initiate: async (inceptio) => {
+        const actum: Actum = {
+          id: `piece-${counter++}`,
+          modusId: inceptio.modusId,
+          modusVersiono: '1.0.0',
+          aditus: inceptio.aditus,
+          status: 'nascens' as ActumStatus,
+          impetus: 100n,
+          signaConsumed: ['sig-1'],
+          inceptum: new Date(),
+          expirat: new Date(Date.now() + 60_000),
+        }
+        actorum.store.set(actum.id, actum)
+        return actum
+      },
+    },
+    modorum: {
+      find: async () => ({
+        id: 'flux-schnell', nomen: 'Test', genus: 'atomicus', versio: '1.0.0',
+        contentHash: 'abc', aditus: {}, exitus: {}, ministerium: 'runpod',
+        canonica: true, natum: new Date(), mutatum: new Date(),
+      }),
+      register: async () => {},
+      list: async () => [],
+    } as unknown as DispatchDeps['modorum'],
+    cursorum: {
+      register: () => {},
+      resolve: () => { throw new Error('No cursor registered for ministerium') },
+    },
+    completor: {
+      complete: async (actum) => actum,
+      fail: async (actum, error) => {
+        failed.push(actum.id)
+        const updated = { ...actum, status: 'fractus' as ActumStatus, error }
+        actorum.store.set(actum.id, updated)
+        return updated
+      },
+    },
+  }
+
+  const cursor = new CollectioCursor(
+    (inceptio) => dispatchInceptio(deps, inceptio),
+    collectiones,
+    actorum,
+    {},
+  )
+
+  await cursor.start(collectio)
+
+  const stored = collectiones.store.get('col-1')!
+  assert.deepEqual(failed, ['piece-0', 'piece-1'], 'both pieces were settled by the dispatch')
+  assert.deepEqual(stored.acta, failed, 'and the collection contains exactly those runs')
+  assert.equal(stored.fractae, 2)
+  assert.equal(stored.status, 'completa')
 })
