@@ -1404,6 +1404,11 @@ const DatasetMediaItemSchema: JsonSchema = {
     source: { type: 'string', enum: ['upload', 'generation'] },
     actumId: { type: 'string', description: "FK -> Actum. Present iff source === 'generation'." },
     addedAt: { type: 'string', format: 'date-time' },
+    addedBy: {
+      type: 'string',
+      description:
+        'FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded.',
+    },
   },
   required: ['id', 'url', 'source', 'addedAt'],
 }
@@ -1426,6 +1431,11 @@ const DatasetSchema: JsonSchema = {
   properties: {
     id: { type: 'string' },
     owner: { type: 'string', description: 'FK -> Anima, the owning identity.' },
+    sodalitasId: {
+      type: 'string',
+      description:
+        'FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only.',
+    },
     name: { type: 'string' },
     modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
     custody: { type: 'string', enum: ['sealed', 'local', 'remote'] },
@@ -1477,12 +1487,18 @@ const CreateDatasetRequestSchema: JsonSchema = {
   description:
     "Create a Dataset. `source: 'upload'` ingests media already dropped via " +
     "`POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the " +
-    "caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required.",
+    "caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required. " +
+    'An optional `teamId` shares the dataset with a Team (Sodalitas) the caller belongs to.',
   properties: {
     source: { type: 'string', enum: ['upload', 'generation'] },
     name: { type: 'string' },
     modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
     custody: { type: 'string', enum: ['sealed', 'local', 'remote'], description: 'Defaults to local.' },
+    teamId: {
+      type: 'string',
+      description:
+        'Share the dataset with a Team (Sodalitas) the caller is a member of — every member may then read it and contribute to it. Stored on the dataset as sodalitasId. A team the caller does not belong to is reported as not found.',
+    },
     mediaUrls: { type: 'array', items: { type: 'string' }, description: "Required when source === 'upload'." },
     actumIds: { type: 'array', items: { type: 'string' }, description: "Required when source === 'generation'." },
   },
@@ -2102,7 +2118,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/data/datasets',
-      summary: "The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, newest first.",
+      summary: "The caller's datasets as the thin summary projection (the training-run picker's contract) — the datasets they own plus the datasets shared with a Team (Sodalitas) they are a member of. Newest first.",
       auth: true,
       query: [
         {
@@ -2121,7 +2137,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/data/datasets/full',
-      summary: "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, newest first, paginated identically to the summary route.",
+      summary: "The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. The datasets they own plus the datasets shared with a Team (Sodalitas) they are a member of. Newest first, paginated identically to the summary route.",
       auth: true,
       query: [
         {
@@ -2140,7 +2156,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/data/datasets',
-      summary: "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.",
+      summary: "Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.",
       auth: true,
       request: CreateDatasetRequestSchema,
       response: DatasetEnvelopeSchema,
@@ -2149,7 +2165,7 @@ export const API_CONTRACT: ApiContract = {
       method: 'POST',
       path: '/data/datasets/:id/media',
       summary:
-        "Append media to a dataset the caller owns, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller does not own is reported as not found.",
+        "Contribute media to a dataset the caller owns OR is a team member of, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). A member contributes their own generations: every named Actum must still be the caller's own and completed, which team sharing does not change. Each item records addedBy, the contributor's Anima id. Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: AddDatasetMediaRequestSchema,
       response: DatasetEnvelopeSchema,
@@ -2157,7 +2173,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/data/datasets/:id/captionsets',
-      summary: 'Attach a caption pass (caption text keyed by media id) to a dataset the caller owns; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller does not own is reported as not found.',
+      summary: 'Attach a caption pass (caption text keyed by media id) to a dataset the caller owns or is a team member of; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller neither owns nor shares is reported as not found.',
       auth: true,
       request: AddCaptionsetRequestSchema,
       response: DatasetEnvelopeSchema,
@@ -2165,7 +2181,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'PATCH',
       path: '/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId',
-      summary: "Edit one caption within one caption pass on a dataset the caller owns — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller does not own is reported as not found.",
+      summary: "Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: SetCaptionRequestSchema,
       response: DatasetEnvelopeSchema,
@@ -2173,28 +2189,28 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'POST',
       path: '/data/datasets/:id/archive',
-      summary: 'Archive a dataset the caller owns. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.',
+      summary: 'Archive a dataset the caller owns. Owner-only: a team member reads and contributes, but retiring the set stays with its owner. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.',
       auth: true,
       response: DatasetEnvelopeSchema,
     },
     {
       method: 'POST',
       path: '/data/datasets/:id/restore',
-      summary: 'Restore an archived dataset the caller owns — it returns to both dataset list routes. Idempotent on a dataset that is already live. A dataset the caller does not own is reported as not found.',
+      summary: 'Restore an archived dataset the caller owns — it returns to both dataset list routes. Owner-only, like the archive it undoes. Idempotent on a dataset that is already live. A dataset the caller does not own is reported as not found.',
       auth: true,
       response: DatasetEnvelopeSchema,
     },
     {
       method: 'POST',
       path: '/data/datasets/:id/media/:mediaId/archive',
-      summary: "Archive one media item on a dataset the caller owns. The item leaves the dataset's working set — the media a caption pass or a decompose reads, the summary count, and the fragments a Muse session is spawned from — and every captionset's coverage is recomputed against the media that is left. The item itself stays on the record, so captions and fragments keyed on its id are preserved for a restore. Reversible via POST /v1/data/datasets/:id/media/:mediaId/restore. Idempotent. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.",
+      summary: "Archive one media item on a dataset the caller owns. Owner-only: a team member contributes to the set rather than deciding what leaves it. The item leaves the dataset's working set — the media a caption pass or a decompose reads, the summary count, and the fragments a Muse session is spawned from — and every captionset's coverage is recomputed against the media that is left. The item itself stays on the record, so captions and fragments keyed on its id are preserved for a restore. Reversible via POST /v1/data/datasets/:id/media/:mediaId/restore. Idempotent. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.",
       auth: true,
       response: DatasetEnvelopeSchema,
     },
     {
       method: 'POST',
       path: '/data/datasets/:id/media/:mediaId/restore',
-      summary: "Restore one archived media item on a dataset the caller owns — it rejoins the dataset's working set and every captionset's coverage is recomputed against it. Idempotent on an item that is already live. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.",
+      summary: "Restore one archived media item on a dataset the caller owns (owner-only, like the archive it undoes) — it rejoins the dataset's working set and every captionset's coverage is recomputed against it. Idempotent on an item that is already live. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.",
       auth: true,
       response: DatasetEnvelopeSchema,
     },

@@ -20,6 +20,7 @@ import { createApiRouter, type Identity } from '../../../../src/allocutio/api/ap
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../../src/types/dataset.js'
 import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
+import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../../src/types/sodalitas.js'
 import type { Actorum } from '../../../../src/types/cursus.js'
 import type { Actum } from '../../../../src/types/actum.js'
 import type { Fragment } from '../../../../src/crystal/muse/taxonomy.js'
@@ -38,8 +39,14 @@ class MemoryDatasets implements Datasets {
     return d
   }
   async find(id: string): Promise<Dataset | null> { return this.store.get(id) ?? null }
+  // Same access predicate MongoDataset._page puts in the query: the caller's own datasets
+  // UNION the datasets shared with a team the caller is a member of (`opts.sodalitasIds`).
+  // With no team ids this is the bare owner filter it has always been.
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
-    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner && !isArchived(d)) }
+    const teamIds = new Set(opts.sodalitasIds ?? [])
+    const mayRead = (d: Dataset): boolean =>
+      d.owner === opts.owner || (d.sodalitasId !== undefined && teamIds.has(d.sodalitasId))
+    return { entries: [...this.store.values()].filter((d) => mayRead(d) && !isArchived(d)) }
   }
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
     const { entries } = await this.list(opts)
@@ -173,8 +180,52 @@ const fakeIdentity: Identity = {
 // verify scope — Actorum's real ownsAny is exercised by the ledger's own test suite).
 const fakeSignorum = { async ownsAny() { return true } }
 
-function createServer(datasets: Datasets, actorum: Actorum): Promise<{ server: http.Server; url: string }> {
-  const deps = { datasets, actorum, signorum: fakeSignorum } as unknown as CrystalApiDeps
+// ── In-memory Sodalitatum double — the team primitive the dataset overlay reuses ──
+//
+// Flat membership, exactly as `src/types/sodalitas.ts` declares it. `find` is what
+// `_ownsDataset` consults per dataset; `listByMember` is what the two list routes resolve the
+// caller's team ids through. Nothing here is dataset-aware: the overlay is `Collectio`'s
+// unchanged, so the team store cannot be the place a dataset test passes on a special case.
+class MemorySodalitatum implements Sodalitatum {
+  private store = new Map<string, Sodalitas>()
+  private seq = 0
+
+  async find(id: string): Promise<Sodalitas | null> { return this.store.get(id) ?? null }
+  async create(input: Omit<Sodalitas, 'id' | 'natum'>): Promise<Sodalitas> {
+    const t: Sodalitas = { ...input, id: `team-${++this.seq}`, natum: new Date() }
+    this.store.set(t.id, t)
+    return t
+  }
+  async update(id: string, patch: Partial<Pick<Sodalitas, 'membra' | 'nomen'>>): Promise<Sodalitas> {
+    const t = this.store.get(id)
+    if (!t) throw new Error(`no team ${id}`)
+    const next: Sodalitas = { ...t, ...patch }
+    this.store.set(id, next)
+    return next
+  }
+  async listByMember(animaId: string): Promise<Sodalitates> {
+    return [...this.store.values()].filter((t) => t.membra.includes(animaId))
+  }
+}
+
+// An ATTRIBUTING Signorum stub: a run is owned by the anima whose id is encoded in the signum
+// it consumed. Unlike `fakeSignorum` (everyone owns everything) this can tell two callers
+// apart, which is what a "a member may only contribute their OWN generations" claim needs —
+// with the permissive stub that test would pass vacuously.
+const attributingSignorum = {
+  async ownsAny(by: { animaId: string } | { commitment: string }, signumIds: string[]) {
+    if (!('animaId' in by)) return false
+    return signumIds.includes(`sig-of-${by.animaId}`)
+  },
+}
+
+function createServer(
+  datasets: Datasets,
+  actorum: Actorum,
+  sodalitatum?: Sodalitatum,
+  signorum: unknown = fakeSignorum,
+): Promise<{ server: http.Server; url: string; api: CrystalApi }> {
+  const deps = { datasets, actorum, signorum, ...(sodalitatum ? { sodalitatum } : {}) } as unknown as CrystalApiDeps
   const api = new CrystalApi(deps)
   return new Promise((resolveP, reject) => {
     const app = express()
@@ -182,7 +233,7 @@ function createServer(datasets: Datasets, actorum: Actorum): Promise<{ server: h
     app.use('/v1', createApiRouter({ api: api as unknown as Parameters<typeof createApiRouter>[0]['api'], identity: fakeIdentity }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
-      resolveP({ server, url: `http://127.0.0.1:${addr.port}` })
+      resolveP({ server, url: `http://127.0.0.1:${addr.port}`, api })
     })
     server.on('error', reject)
   })
@@ -289,7 +340,12 @@ test('POST /v1/data/datasets rejects a body matching neither ingestion shape wit
 })
 
 test('a stranger never sees another owner\'s datasets on either list route or get', async () => {
-  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  // Extended for team sharing (noema-374): the owner holds a private dataset AND one shared
+  // with a team. A stranger is in neither, and must still see nothing — the overlay adds the
+  // named team's members as readers, it does not open the lists.
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1'] })
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]), teams)
   try {
     const owner = { 'x-api-key': 'owner-1' }
     const stranger = { 'x-api-key': 'stranger-1' }
@@ -300,14 +356,21 @@ test('a stranger never sees another owner\'s datasets on either list route or ge
     })
     const id = created.body.dataset.id
 
+    const shared = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: owner,
+      body: { source: 'upload', name: 'Ours', modality: 'image', mediaUrls: ['https://r2.example/b.png'], teamId: team.id },
+    })
+    assert.equal(shared.status, 201)
+    assert.equal(shared.body.dataset.sodalitasId, team.id)
+
     const strangerFull = await request(`${url}/v1/data/datasets/full`, { headers: stranger })
     assert.equal(strangerFull.body.datasets.length, 0)
     const strangerSummary = await request(`${url}/v1/data/datasets`, { headers: stranger })
     assert.equal(strangerSummary.body.datasets.length, 0)
 
     const ownerFull = await request(`${url}/v1/data/datasets/full`, { headers: owner })
-    assert.equal(ownerFull.body.datasets.length, 1)
-    assert.equal(ownerFull.body.datasets[0].id, id)
+    assert.deepEqual((ownerFull.body.datasets as Dataset[]).map((d) => d.id).sort(), [id, shared.body.dataset.id].sort())
   } finally {
     await closeServer(server)
   }
@@ -375,12 +438,23 @@ test('a caption stays bound to its image after new media is appended', async () 
 })
 
 test('a stranger cannot write or edit another owner\'s captionset', async () => {
+  // Extended for team sharing (noema-374): the dataset is shared with a team, and the stranger
+  // is not in it. Captioning is contribution — a MEMBER may do it — so this asserts the gate
+  // still closes for everyone else, on a dataset that is genuinely shared rather than private.
   const datasets = new MemoryDatasets()
-  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1'] })
+  const { server, url } = await createServer(datasets, makeFakeActorum([]), teams)
   try {
     const owner = { 'x-api-key': 'owner-1' }
     const stranger = { 'x-api-key': 'stranger-1' }
-    const ds = await seedDataset(url, owner, ['https://r2.example/a.png'])
+    const seeded = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: owner,
+      body: { source: 'upload', name: 'Captioned set', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: team.id },
+    })
+    assert.equal(seeded.status, 201)
+    const ds = seeded.body.dataset as Dataset
     const mediaId = ds.media[0].id
 
     const attached = await request(`${url}/v1/data/datasets/${ds.id}/captionsets`, {
@@ -849,6 +923,345 @@ test('archiving a media id that names no item on the dataset is a 400', async ()
     const res = await request(`${url}/v1/data/datasets/${ds.id}/media/not-a-media-id/archive`, { method: 'POST', headers })
     assert.equal(res.status, 400)
     assert.equal(res.body.error.code, 'input.malformed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── Team sharing (noema-374) ─────────────────────────────────────────────────
+//
+// `Dataset.sodalitasId` — `Collectio.sodalitasId`'s overlay reused, not a second sharing
+// vocabulary. One test per claim the design makes, and one per claim it deliberately does NOT
+// make: a member reads, a member contributes and is recorded as having done so, the Actum gate
+// does NOT widen with the dataset gate, the destructive verbs stay with the owner, and a
+// non-member is closed out of every route on the surface.
+
+/** Owner + one team + a dataset shared with it. `member-1` is in the team; `stranger-1` is not. */
+async function seedSharedDataset(mediaUrls: string[] = ['https://r2.example/a.png'], signorum: unknown = fakeSignorum): Promise<{
+  server: http.Server; url: string; api: CrystalApi; teamId: string; dataset: Dataset
+}> {
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1', 'member-1'] })
+  const { server, url, api } = await createServer(new MemoryDatasets(), makeFakeActorum([]), teams, signorum)
+  const created = await request(`${url}/v1/data/datasets`, {
+    method: 'POST',
+    headers: { 'x-api-key': 'owner-1' },
+    body: { source: 'upload', name: 'House look', modality: 'image', mediaUrls, teamId: team.id },
+  })
+  assert.equal(created.status, 201, 'the shared dataset was created')
+  return { server, url, api, teamId: team.id, dataset: created.body.dataset as Dataset }
+}
+
+test('creating a dataset with a teamId stores the team as an overlay, leaving owner a scalar', async () => {
+  const { server, dataset, teamId } = await seedSharedDataset()
+  try {
+    assert.equal(dataset.owner, 'owner-1', 'the owner stays the single creating anima')
+    assert.equal(dataset.sodalitasId, teamId, 'the team is recorded as an overlay beside it')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a dataset cannot be shared with a team the caller does not belong to', async () => {
+  const teams = new MemorySodalitatum()
+  const other = await teams.create({ nomen: "Someone else's", auctor: 'owner-2', membra: ['owner-2'] })
+  const datasets = new MemoryDatasets()
+  const { server, url } = await createServer(datasets, makeFakeActorum([]), teams)
+  try {
+    const attempt = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'upload', name: 'Not mine to share', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: other.id },
+    })
+    assert.equal(attempt.status, 404, 'a team the caller is not a member of reads as absent')
+
+    const bogus = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'upload', name: 'Nowhere', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: 'team-does-not-exist' },
+    })
+    assert.equal(bogus.status, 404)
+
+    // Membership is affirmed before anything is minted — neither refusal left a dataset behind.
+    assert.deepEqual((await datasets.list({ owner: 'owner-1' })).entries, [])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a team member reads a shared dataset on both list routes and through getDataset', async () => {
+  const { server, url, api, dataset } = await seedSharedDataset()
+  try {
+    const member = { 'x-api-key': 'member-1' }
+
+    const full = await request(`${url}/v1/data/datasets/full`, { headers: member })
+    assert.equal(full.status, 200)
+    assert.deepEqual((full.body.datasets as Dataset[]).map((d) => d.id), [dataset.id])
+
+    const summary = await request(`${url}/v1/data/datasets`, { headers: member })
+    assert.equal(summary.status, 200)
+    assert.deepEqual((summary.body.datasets as Array<{ id: string }>).map((d) => d.id), [dataset.id])
+
+    // The id-resolving read itself, not only the lists it feeds.
+    const resolved = await api.getDataset({ animaId: 'member-1' }, dataset.id)
+    assert.equal(resolved.id, dataset.id)
+    assert.equal(resolved.owner, 'owner-1', 'reading it does not make the member its owner')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a team member contributes media to a shared dataset, and the item records who added it', async () => {
+  const { server, url, dataset } = await seedSharedDataset()
+  try {
+    const member = { 'x-api-key': 'member-1' }
+    const appended = await request(`${url}/v1/data/datasets/${dataset.id}/media`, {
+      method: 'POST', headers: member, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] },
+    })
+    assert.equal(appended.status, 201)
+
+    const media = appended.body.dataset.media as DatasetMediaItem[]
+    assert.equal(media.length, 2)
+    assert.equal(media[1].url, 'https://r2.example/theirs.png')
+    // Attribution is the point of the field: a shared set whose items all read as the owner's
+    // cannot be audited, curated or credited.
+    assert.equal(media[1].addedBy, 'member-1', "the contributor's anima id, not the owner's")
+    assert.equal(media[0].addedBy, 'owner-1', 'and the seed media is still attributed to the owner')
+
+    // The owner sees the contribution, and the dataset is still theirs.
+    const ownerView = await request(`${url}/v1/data/datasets/full`, { headers: { 'x-api-key': 'owner-1' } })
+    assert.equal((ownerView.body.datasets[0].media as DatasetMediaItem[]).length, 2)
+    assert.equal(ownerView.body.datasets[0].owner, 'owner-1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a team member may caption a shared dataset', async () => {
+  const { server, url, dataset } = await seedSharedDataset()
+  try {
+    const member = { 'x-api-key': 'member-1' }
+    const mediaId = dataset.media[0].id
+
+    const attached = await request(`${url}/v1/data/datasets/${dataset.id}/captionsets`, {
+      method: 'POST', headers: member,
+      body: { id: 'pass-1', name: 'nl', method: 'manual', captions: { [mediaId]: 'a knight in frost' } },
+    })
+    assert.equal(attached.status, 201)
+    assert.equal(attached.body.dataset.captionsets[0].coverage, '1/1')
+
+    const edited = await request(`${url}/v1/data/datasets/${dataset.id}/captionsets/pass-1/captions/${mediaId}`, {
+      method: 'PATCH', headers: member, body: { caption: 'a knight at dusk' },
+    })
+    assert.equal(edited.status, 200)
+    assert.equal(edited.body.dataset.captionsets[0].captions[mediaId], 'a knight at dusk')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a contributing team member may seed only from their OWN completed run', async () => {
+  // THE GATE THAT DOES NOT WIDEN. Sharing a dataset gives a member a place to put work; it
+  // gives them no claim on anyone's runs. Both Acta below are completed and both are named
+  // against the same shared dataset — only the caller's own is admitted.
+  const mine: Actum = {
+    id: 'actum-member', modusId: 'flux-schnell', modusVersiono: '1.0.0', impetus: 10n,
+    signaConsumed: ['sig-of-member-1'], status: 'completus',
+    exitus: { images: ['https://cdn.example/mine.png'] },
+  } as unknown as Actum
+  const theirs: Actum = {
+    id: 'actum-owner', modusId: 'flux-schnell', modusVersiono: '1.0.0', impetus: 10n,
+    signaConsumed: ['sig-of-owner-1'], status: 'completus',
+    exitus: { images: ['https://cdn.example/theirs.png'] },
+  } as unknown as Actum
+
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1', 'member-1'] })
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([mine, theirs]), teams, attributingSignorum)
+  try {
+    const owner = { 'x-api-key': 'owner-1' }
+    const member = { 'x-api-key': 'member-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers: owner,
+      body: { source: 'upload', name: 'House look', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: team.id },
+    })
+    assert.equal(created.status, 201)
+    const id = created.body.dataset.id
+
+    const own = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers: member, body: { source: 'generation', actumIds: ['actum-member'] },
+    })
+    assert.equal(own.status, 201, "a member's own completed run is admitted")
+    assert.equal((own.body.dataset.media as DatasetMediaItem[])[1].actumId, 'actum-member')
+    assert.equal((own.body.dataset.media as DatasetMediaItem[])[1].addedBy, 'member-1')
+
+    const notTheirs = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers: member, body: { source: 'generation', actumIds: ['actum-owner'] },
+    })
+    assert.equal(notTheirs.status, 404, "the owner's run is not the member's to contribute")
+
+    // And the refusal reached nothing: the dataset still holds only the seed and the member's own.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: owner })
+    assert.equal((after.body.datasets[0].media as DatasetMediaItem[]).length, 2)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a team member may not archive or restore a shared dataset, or its media', async () => {
+  // The destructive verbs stay with the scalar owner: the overlay adds readers and
+  // contributors, not a second principal who may retire the owner's set. A member gets the
+  // same not_found a stranger gets, so the narrower refusal leaks nothing either.
+  const { server, url, dataset } = await seedSharedDataset(['https://r2.example/a.png'])
+  try {
+    const member = { 'x-api-key': 'member-1' }
+    const mediaId = dataset.media[0].id
+
+    assert.equal((await request(`${url}/v1/data/datasets/${dataset.id}/archive`, { method: 'POST', headers: member })).status, 404)
+    assert.equal((await request(`${url}/v1/data/datasets/${dataset.id}/restore`, { method: 'POST', headers: member })).status, 404)
+    assert.equal((await request(`${url}/v1/data/datasets/${dataset.id}/media/${mediaId}/archive`, { method: 'POST', headers: member })).status, 404)
+    assert.equal((await request(`${url}/v1/data/datasets/${dataset.id}/media/${mediaId}/restore`, { method: 'POST', headers: member })).status, 404)
+
+    // A 404 can be returned AFTER a write — assert nothing was stamped.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: { 'x-api-key': 'owner-1' } })
+    assert.equal(after.body.datasets.length, 1)
+    assert.equal(after.body.datasets[0].archivum, undefined)
+    assert.equal((after.body.datasets[0].media as DatasetMediaItem[])[0].archivum, undefined)
+
+    // The owner can still do it — the refusal above is about WHO, not a route that stopped working.
+    assert.equal((await request(`${url}/v1/data/datasets/${dataset.id}/archive`, { method: 'POST', headers: { 'x-api-key': 'owner-1' } })).status, 200)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a NON-member is refused on every dataset route of a team-shared dataset', async () => {
+  // The closure assertion, restated against a dataset that is genuinely shared rather than
+  // private: sharing with a named fellowship is not publishing. Every route on the surface,
+  // read and write, and always not_found rather than forbidden so ids stay non-enumerable.
+  const { server, url, api, dataset } = await seedSharedDataset(['https://r2.example/a.png'])
+  try {
+    const stranger = { 'x-api-key': 'stranger-1' }
+    const id = dataset.id
+    const mediaId = dataset.media[0].id
+
+    // Both list routes.
+    assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: stranger })).body.datasets, [])
+    assert.deepEqual((await request(`${url}/v1/data/datasets`, { headers: stranger })).body.datasets, [])
+
+    // The id-resolving read.
+    await assert.rejects(
+      () => api.getDataset({ animaId: 'stranger-1' }, id),
+      (e: unknown) => (e as { code?: string }).code === 'not_found.dataset',
+    )
+
+    // Every write.
+    const refusals: Array<[string, HttpResult]> = [
+      ['media', await request(`${url}/v1/data/datasets/${id}/media`, { method: 'POST', headers: stranger, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] } })],
+      ['captionsets', await request(`${url}/v1/data/datasets/${id}/captionsets`, { method: 'POST', headers: stranger, body: { id: 'p', name: 'n', method: 'manual' } })],
+      ['caption edit', await request(`${url}/v1/data/datasets/${id}/captionsets/p/captions/${mediaId}`, { method: 'PATCH', headers: stranger, body: { caption: 'theirs' } })],
+      ['archive', await request(`${url}/v1/data/datasets/${id}/archive`, { method: 'POST', headers: stranger })],
+      ['restore', await request(`${url}/v1/data/datasets/${id}/restore`, { method: 'POST', headers: stranger })],
+      ['media archive', await request(`${url}/v1/data/datasets/${id}/media/${mediaId}/archive`, { method: 'POST', headers: stranger })],
+      ['media restore', await request(`${url}/v1/data/datasets/${id}/media/${mediaId}/restore`, { method: 'POST', headers: stranger })],
+    ]
+    for (const [route, res] of refusals) {
+      assert.equal(res.status, 404, `${route}: a non-member reads as absent, not forbidden`)
+      assert.equal(res.body.error.code, 'not_found.dataset', `${route}: not_found, never forbidden`)
+    }
+
+    // A 404 can be returned AFTER a write — the dataset is exactly as the owner left it.
+    const after = await request(`${url}/v1/data/datasets/full`, { headers: { 'x-api-key': 'owner-1' } })
+    assert.equal(after.body.datasets.length, 1)
+    assert.equal((after.body.datasets[0].media as DatasetMediaItem[]).length, 1)
+    assert.equal(after.body.datasets[0].captionsets.length, 0)
+    assert.equal(after.body.datasets[0].archivum, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an unshared dataset stays owner-only even for a team-mate of the owner', async () => {
+  // The overlay is opt-in per dataset, not per person: being in a team with someone does not
+  // open the datasets they did NOT share with it. This is what keeps `sodalitasId: undefined`
+  // — every dataset written before this field existed — closed.
+  const teams = new MemorySodalitatum()
+  await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1', 'member-1'] })
+  const { server, url, api } = await createServer(new MemoryDatasets(), makeFakeActorum([]), teams)
+  try {
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'upload', name: 'Private', modality: 'image', mediaUrls: ['https://r2.example/a.png'] },
+    })
+    assert.equal(created.status, 201)
+    assert.equal(created.body.dataset.sodalitasId, undefined, 'no teamId means no overlay')
+
+    const member = { 'x-api-key': 'member-1' }
+    assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: member })).body.datasets, [])
+    assert.deepEqual((await request(`${url}/v1/data/datasets`, { headers: member })).body.datasets, [])
+    await assert.rejects(
+      () => api.getDataset({ animaId: 'member-1' }, created.body.dataset.id),
+      (e: unknown) => (e as { code?: string }).code === 'not_found.dataset',
+    )
+    const append = await request(`${url}/v1/data/datasets/${created.body.dataset.id}/media`, {
+      method: 'POST', headers: member, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] },
+    })
+    assert.equal(append.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('removing a member from the team closes the dataset to them again', async () => {
+  // Membership is read live off the Sodalitas, never snapshotted onto the dataset — that is
+  // what makes the team store the single source of who may read, and what makes a removal
+  // take effect without touching every dataset the team shares.
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'House look', auctor: 'owner-1', membra: ['owner-1', 'member-1'] })
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]), teams)
+  try {
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'upload', name: 'House look', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: team.id },
+    })
+    assert.equal(created.status, 201)
+    const member = { 'x-api-key': 'member-1' }
+    assert.equal((await request(`${url}/v1/data/datasets/full`, { headers: member })).body.datasets.length, 1)
+
+    await teams.update(team.id, { membra: ['owner-1'] })
+
+    assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: member })).body.datasets, [])
+    const append = await request(`${url}/v1/data/datasets/${created.body.dataset.id}/media`, {
+      method: 'POST', headers: member, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] },
+    })
+    assert.equal(append.status, 404)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a deployment with no team store wired shares nothing and refuses a teamId', async () => {
+  // FAIL CLOSED. With no `sodalitatum` dep there is nothing that can affirm membership, so the
+  // overlay grants no read at all — the convention `_ownedStudio` follows with no Conductor.
+  const datasets = new MemoryDatasets()
+  const { server, url, api } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const refused = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'upload', name: 'Shared', modality: 'image', mediaUrls: ['https://r2.example/a.png'], teamId: 'team-1' },
+    })
+    assert.equal(refused.status, 404, 'a team cannot be named when no team store can affirm it')
+
+    // A dataset already carrying an overlay is unreadable by a would-be member, not readable.
+    const stored = await datasets.create({
+      owner: 'owner-1', sodalitasId: 'team-1', name: 'Legacy shared', modality: 'image', custody: 'local',
+      media: [], captionsets: [], versions: [],
+    })
+    await assert.rejects(
+      () => api.getDataset({ animaId: 'member-1' }, stored.id),
+      (e: unknown) => (e as { code?: string }).code === 'not_found.dataset',
+    )
+    assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: { 'x-api-key': 'member-1' } })).body.datasets, [])
   } finally {
     await closeServer(server)
   }

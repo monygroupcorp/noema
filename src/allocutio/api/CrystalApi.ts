@@ -2297,25 +2297,79 @@ export class CrystalApi {
     return urls
   }
 
-  /** List the full `Dataset[]` for the caller — owner-scoped, cursor-paginated
-   *  (mirrors `GET /v1/me/runs`'s `?cursor=`/`?limit=` precedent). */
+  /**
+   * The ids of the teams this caller is a member of — the read half of the `sodalitasId`
+   * overlay, resolved ONCE per list call rather than once per row (`listCollections`'
+   * precedent). Resolved from the AUTHENTICATED caller, never from a request parameter.
+   *
+   * Empty for an anonymous caller and for a deployment with no team store wired: with no team
+   * ids, every dataset seam below reads exactly what it read before this field existed.
+   */
+  private async _datasetTeamIds(auctor: AuctorKey): Promise<string[]> {
+    if (!('animaId' in auctor) || !this.deps.sodalitatum) return []
+    return (await this.deps.sodalitatum.listByMember(auctor.animaId)).map((t) => t.id)
+  }
+
+  /** List the full `Dataset[]` for the caller — the caller's own UNION the datasets shared with
+   *  a team they are a member of, cursor-paginated (mirrors `GET /v1/me/runs`'s
+   *  `?cursor=`/`?limit=` precedent). The access predicate goes INTO the store query, so one
+   *  filtered result set is paginated rather than a page being post-filtered. */
   async listDatasets(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
     const owner = this._datasetOwner(auctor)
-    const { entries, nextCursor } = await this._datasetsStore().list({ owner, ...opts })
+    const sodalitasIds = await this._datasetTeamIds(auctor)
+    const { entries, nextCursor } = await this._datasetsStore().list({ owner, sodalitasIds, ...opts })
     return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
   /** List the thin `DatasetSummary[]` projection for the caller — the training-run
-   *  picker's consumer. Same store, same owner-scoping, projected down. */
+   *  picker's consumer. Same store, same scoping (own + team-shared), projected down. */
   async listDatasetSummaries(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: DatasetSummary[]; nextCursor?: string }> {
     const owner = this._datasetOwner(auctor)
-    const { entries, nextCursor } = await this._datasetsStore().listSummaries({ owner, ...opts })
+    const sodalitasIds = await this._datasetTeamIds(auctor)
+    const { entries, nextCursor } = await this._datasetsStore().listSummaries({ owner, sodalitasIds, ...opts })
     return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
-  /** Resolve a Dataset the caller owns, or 404 (stranger gets not_found, not forbidden —
-   *  mirrors `_ownedTabula`/`_ownedProject`). */
+  /**
+   * May this caller reach this Dataset — the owner, or a member of the team it is shared with?
+   *
+   * `Collectio`'s `_ownsCollection` verbatim in shape: the direct owner, then the `Sodalitas`
+   * overlay resolved through the team store. Absent `sodalitasId`, absent team store, or an
+   * anonymous caller all fall through to owner-only, so nothing a stranger could reach before
+   * this existed becomes reachable now.
+   */
+  private async _ownsDataset(auctor: AuctorKey, d: Dataset): Promise<boolean> {
+    if (!('animaId' in auctor)) return false
+    if (d.owner === auctor.animaId) return true
+    if (d.sodalitasId === undefined) return false
+    const team = await this.deps.sodalitatum?.find(d.sodalitasId)
+    return team?.membra.includes(auctor.animaId) ?? false
+  }
+
+  /** Resolve a Dataset the caller may reach — theirs, or shared with a team they belong to —
+   *  or 404 (a caller with no claim on it gets not_found, not forbidden, so ids stay
+   *  non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/`_ownedCollection`).
+   *
+   *  This is the READ gate and the CONTRIBUTE gate: every additive write (append media, attach
+   *  or edit a captionset) resolves through it, so a member works on the shared set. The
+   *  DESTRUCTIVE verbs do not — archive/restore of the dataset and of one media item re-check
+   *  `_ownedDatasetByOwner`, the same way `extendCollection` re-checks `_isFunder` on the one
+   *  verb a team member must not perform on the principal's behalf. */
   async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
+    this._datasetOwner(auctor)
+    const d = await this._datasetsStore().find(id)
+    if (!d || !(await this._ownsDataset(auctor, d))) {
+      throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
+    }
+    return d
+  }
+
+  /** Resolve a Dataset this caller OWNS OUTRIGHT — the narrow gate the destructive dataset
+   *  verbs keep. A team member reads and contributes; retiring the dataset (or retiring one of
+   *  its media items from the working set) stays with the single scalar `owner`, because the
+   *  team overlay adds readers and contributors, not a second principal. A member gets the same
+   *  `not_found` a stranger gets, so the refusal leaks nothing either. */
+  private async _ownedDatasetByOwner(auctor: AuctorKey, id: string): Promise<Dataset> {
     const owner = this._datasetOwner(auctor)
     const d = await this._datasetsStore().find(id)
     if (!d || d.owner !== owner) throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
@@ -2324,7 +2378,13 @@ export class CrystalApi {
 
   /** Create a Dataset from either v1 ingestion path (Q2): `upload` (already-signed R2
    *  media URLs from `POST /storage/uploads/sign`) or `generation` (media resolved from
-   *  the caller's own completed Acta). Rejects a body matching neither shape. */
+   *  the caller's own completed Acta). Rejects a body matching neither shape.
+   *
+   *  An optional `teamId` shares the new dataset with a `Sodalitas`, stored as
+   *  `Dataset.sodalitasId`. It is validated through `_memberTeam` — the SAME seam
+   *  `createProject` and `collect` validate theirs through — so a caller can only share a
+   *  dataset with a team they are themselves a member of, and a team id that does not exist or
+   *  that they do not belong to 404s before anything is written. */
   async createDataset(auctor: AuctorKey, input: CreateDatasetInput): Promise<Dataset> {
     const owner = this._datasetOwner(auctor)
     const store = this._datasetsStore()
@@ -2340,11 +2400,15 @@ export class CrystalApi {
     if (!modality || !['image', 'video', 'audio', '3d'].includes(modality)) {
       throw Errors.inputMalformed("modality must be one of 'image' | 'video' | 'audio' | '3d'")
     }
+    // Membership is affirmed BEFORE any media is minted, so a rejected share cannot leave a
+    // half-created dataset behind.
+    if (input.teamId !== undefined) await this._memberTeam(auctor, input.teamId)
 
     const media = await this._mintMedia(auctor, input, now)
 
     return store.create({
       owner,
+      ...(input.teamId !== undefined ? { sodalitasId: input.teamId } : {}),
       name: input.name,
       modality,
       custody: input.custody ?? 'local',
@@ -2358,13 +2422,28 @@ export class CrystalApi {
    *  creation and a later media append both come through here, so the two cannot diverge on
    *  what a valid body is, on how an id is assigned, or on what a `generation` source is
    *  allowed to reach. A named Actum must be the caller's own and `completus` — resolved from
-   *  the authenticated caller, never from anything else in the body. */
+   *  the authenticated caller, never from anything else in the body.
+   *
+   *  THE ACTUM CHECK DOES NOT WIDEN WITH THE DATASET GATE. A team member may contribute to a
+   *  shared dataset, and what they contribute is their OWN generations: `_owns(auctor, actum)`
+   *  is still the caller's own run, never the owner's and never another member's. Sharing a
+   *  dataset grants a place to put work, not a claim on anyone's runs.
+   *
+   *  Every item is stamped with `addedBy` — the animaId of the caller who added it, from the
+   *  authenticated caller and nowhere else. On a shared dataset this is the whole of who
+   *  contributed what; on a single-owner dataset it is redundant with `owner` and harmless. */
   private async _mintMedia(auctor: AuctorKey, input: IngestMediaInput, now: Date): Promise<DatasetMediaItem[]> {
+    // Both entry points (`createDataset`, `addDatasetMedia`) have already refused an anonymous
+    // caller through `_datasetOwner`, so this is present in practice; it stays a conditional
+    // spread rather than an assertion because the FIELD is optional and an absent attribution
+    // is a truthful record, not a defaulted one.
+    const addedBy = 'animaId' in auctor ? { addedBy: auctor.animaId } : {}
+
     if (input.source === 'upload') {
       if (!Array.isArray(input.mediaUrls) || input.mediaUrls.length === 0) {
         throw Errors.inputMalformed('mediaUrls is required and must be non-empty for an upload source')
       }
-      return input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now }))
+      return input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now, ...addedBy }))
     }
 
     if (!Array.isArray(input.actumIds) || input.actumIds.length === 0) {
@@ -2378,7 +2457,7 @@ export class CrystalApi {
       if (!actum || !(await this._owns(auctor, actum))) throw Errors.notFoundRun(actumId)
       if (actum.status !== 'completus') throw Errors.inputMalformed(`Actum '${actumId}' has not completed`)
       const urls = this._urlsFromExitus(actum.exitus)
-      for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now })
+      for (const url of urls) media.push({ id: uuidv4(), url, source: 'generation' as const, actumId, addedAt: now, ...addedBy })
     }
     if (media.length === 0) throw Errors.inputMalformed('none of the referenced Acta produced usable media')
     return media
@@ -2395,11 +2474,16 @@ export class CrystalApi {
    * consequences for caption maps, for fragments already decomposed off an item, and for the
    * provenance of a model trained from the dataset, and it is a separate decision.
    *
-   * Ownership resolves through `getDataset` — the same seam `addCaptionset` uses — so the owner
-   * comes from the authenticated caller and never from a request parameter; a dataset the caller
-   * does not own reports as not found, exactly as an id that never existed does. The body is the
-   * same discriminated ingestion shape `POST /v1/data/datasets` takes, minted through the same
-   * path; a body matching neither shape is a 400.
+   * Access resolves through `getDataset` — the same seam `addCaptionset` uses — so the caller
+   * comes from the authentication and never from a request parameter; a dataset the caller has
+   * no claim on reports as not found, exactly as an id that never existed does. THIS IS THE
+   * CONTRIBUTION SEAM: the dataset's owner, or a member of the `Sodalitas` it is shared with,
+   * may append. What a member appends is still their OWN work — `_mintMedia` keeps requiring
+   * every named Actum to be the caller's own and `completus`, which the team overlay does not
+   * touch. Each item is stamped with the contributor's animaId (`DatasetMediaItem.addedBy`).
+   *
+   * The body is the same discriminated ingestion shape `POST /v1/data/datasets` takes, minted
+   * through the same path; a body matching neither shape is a 400.
    */
   async addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
     const d = await this.getDataset(auctor, datasetId)
@@ -2415,11 +2499,13 @@ export class CrystalApi {
     return updated
   }
 
-  /** Attach (or replace) a captionset on a Dataset the caller owns. The captionset id
-   *  comes from the caller so a re-run of the same caption pass replaces its previous
-   *  result instead of accumulating duplicates.
+  /** Attach (or replace) a captionset on a Dataset the caller may reach — its owner, or a
+   *  member of the team it is shared with (captioning is additive work ON the set, which is
+   *  what contributing to a shared training set means). The captionset id comes from the caller
+   *  so a re-run of the same caption pass replaces its previous result instead of accumulating
+   *  duplicates.
    *
-   *  Ownership resolves through `getDataset` — one place decides what "the caller owns
+   *  Access resolves through `getDataset` — one place decides what "the caller may reach
    *  this" means, and a stranger gets `not_found`, never `forbidden`. Caption keys must
    *  be media ids actually on the dataset: a key bound to nothing would still count
    *  toward coverage. `coverage` is derived here, never taken from the body. */
@@ -2448,9 +2534,9 @@ export class CrystalApi {
     return updated
   }
 
-  /** Edit one caption of one captionset on a Dataset the caller owns (a captionset is
-   *  editable after generation). Same ownership resolution as `addCaptionset`; the
-   *  captionset must already exist and the media id must be on the dataset. */
+  /** Edit one caption of one captionset on a Dataset the caller may reach (a captionset is
+   *  editable after generation). Same access resolution as `addCaptionset` — owner or team
+   *  member; the captionset must already exist and the media id must be on the dataset. */
   async setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<Dataset> {
     const d = await this.getDataset(auctor, datasetId)
 
@@ -2475,22 +2561,27 @@ export class CrystalApi {
    * saved piece, and a past run's lineage all keep working. Reversible through
    * `restoreDataset`.
    *
-   * Ownership resolves through `getDataset` — from the authenticated caller, never from a
-   * request parameter — so a dataset the caller does not own reports as not found, exactly as
-   * an id that never existed does. Nothing here spends.
+   * OWNER-ONLY, and narrower than the read gate on purpose: it resolves through
+   * `_ownedDatasetByOwner`, not `getDataset`. Retiring a dataset is the destructive verb, and
+   * the team overlay adds readers and contributors, not a second principal who may retire the
+   * owner's set — the same reason `extendCollection` re-checks `_isFunder` on a Collectio every
+   * member otherwise reaches. The owner comes from the authenticated caller, never from a
+   * request parameter, so a dataset the caller does not own reports as not found, exactly as an
+   * id that never existed does. Nothing here spends.
    */
   async archiveDataset(auctor: AuctorKey, datasetId: string): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._ownedDatasetByOwner(auctor, datasetId)
     const updated = await this._datasetsStore().archiveDataset(d.id)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
     return updated
   }
 
   /** Restore an archived Dataset the caller owns — it returns to both list routes. Same
-   *  ownership resolution as `archiveDataset`; an archived dataset still resolves through
-   *  `getDataset`, which is what makes a restore reachable at all. */
+   *  owner-only resolution as `archiveDataset` (a restore is the other half of the same
+   *  lifecycle verb, so it cannot be looser than the archive it undoes); an archived dataset
+   *  still resolves through `find`, which is what makes a restore reachable at all. */
   async restoreDataset(auctor: AuctorKey, datasetId: string): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._ownedDatasetByOwner(auctor, datasetId)
     const updated = await this._datasetsStore().restoreDataset(d.id)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
     return updated
@@ -2499,8 +2590,10 @@ export class CrystalApi {
   /** Archive ONE media item on a Dataset the caller owns. The item leaves the working set —
    *  the caption manifest, the decompose, the summary count, Muse's fragment pool — and every
    *  captionset's coverage is recomputed against the media that is left. The record itself
-   *  stays, because caption maps and fragments are keyed on the media id. Same ownership
-   *  resolution as `setCaption`; a media id naming no item on the dataset is a 400. */
+   *  stays, because caption maps and fragments are keyed on the media id. OWNER-ONLY, for the
+   *  same reason `archiveDataset` is: retiring media from the working set is destructive, and a
+   *  team member contributes to the set rather than deciding what leaves it. A media id naming
+   *  no item on the dataset is a 400. */
   async archiveDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<Dataset> {
     const d = await this._ownedDatasetWithMedia(auctor, datasetId, mediaId)
     const updated = await this._datasetsStore().archiveMedia(d.id, mediaId)
@@ -2517,12 +2610,12 @@ export class CrystalApi {
     return updated
   }
 
-  /** Resolve a Dataset the caller owns and assert the media id names an item on it — the same
-   *  pair of checks `setCaption` makes, in one place so the media-scoped writes cannot drift on
-   *  what a valid target is. An ARCHIVED item is still a valid target: it is on the dataset,
-   *  and it is exactly what a restore names. */
+  /** Resolve a Dataset the caller OWNS OUTRIGHT and assert the media id names an item on it —
+   *  the media-scoped half of the destructive gate, in one place so the two media lifecycle
+   *  writes cannot drift on what a valid target is. An ARCHIVED item is still a valid target:
+   *  it is on the dataset, and it is exactly what a restore names. */
   private async _ownedDatasetWithMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._ownedDatasetByOwner(auctor, datasetId)
     if (!d.media.some((m) => m.id === mediaId)) {
       throw Errors.inputMalformed(`mediaId '${mediaId}' is not a media item on this dataset`)
     }

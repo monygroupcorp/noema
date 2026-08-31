@@ -2017,7 +2017,7 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
 
 ### GET /v1/data/datasets
 
-The caller's datasets as the thin summary projection (the training-run picker's contract). Owner-scoped, newest first.
+The caller's datasets as the thin summary projection (the training-run picker's contract) — the datasets they own plus the datasets shared with a Team (Sodalitas) they are a member of. Newest first.
 
 - **Auth:** required
 
@@ -2070,7 +2070,7 @@ The caller's datasets as the thin summary projection (the training-run picker's 
 
 ### GET /v1/data/datasets/full
 
-The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. Owner-scoped, newest first, paginated identically to the summary route.
+The caller's datasets as the full rich shape (custody, modality, captionsets, versions) — Datasets.tsx's live listing. The datasets they own plus the datasets shared with a Team (Sodalitas) they are a member of. Newest first, paginated identically to the summary route.
 
 - **Auth:** required
 
@@ -2097,6 +2097,10 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
           "owner": {
             "type": "string",
             "description": "FK -> Anima, the owning identity."
+          },
+          "sodalitasId": {
+            "type": "string",
+            "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
           },
           "name": {
             "type": "string"
@@ -2143,6 +2147,10 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
                 "addedAt": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "addedBy": {
+                  "type": "string",
+                  "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
                 }
               },
               "required": [
@@ -2247,7 +2255,7 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
 
 ### POST /v1/data/datasets
 
-Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400.
+Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.
 
 - **Auth:** required
 
@@ -2256,7 +2264,7 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
 ```json
 {
   "type": "object",
-  "description": "Create a Dataset. `source: 'upload'` ingests media already dropped via `POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required.",
+  "description": "Create a Dataset. `source: 'upload'` ingests media already dropped via `POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required. An optional `teamId` shares the dataset with a Team (Sodalitas) the caller belongs to.",
   "properties": {
     "source": {
       "type": "string",
@@ -2285,6 +2293,10 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
         "remote"
       ],
       "description": "Defaults to local."
+    },
+    "teamId": {
+      "type": "string",
+      "description": "Share the dataset with a Team (Sodalitas) the caller is a member of — every member may then read it and contribute to it. Stored on the dataset as sodalitasId. A team the caller does not belong to is reported as not found."
     },
     "mediaUrls": {
       "type": "array",
@@ -2325,6 +2337,10 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -2371,6 +2387,10 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -2470,7 +2490,7 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
 
 ### POST /v1/data/datasets/:id/media
 
-Append media to a dataset the caller owns, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller does not own is reported as not found.
+Contribute media to a dataset the caller owns OR is a team member of, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). A member contributes their own generations: every named Actum must still be the caller's own and completed, which team sharing does not change. Each item records addedBy, the contributor's Anima id. Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller neither owns nor shares is reported as not found.
 
 - **Auth:** required
 
@@ -2526,6 +2546,10 @@ Append media to a dataset the caller owns, via either ingestion path — 'upload
           "type": "string",
           "description": "FK -> Anima, the owning identity."
         },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+        },
         "name": {
           "type": "string"
         },
@@ -2571,6 +2595,10 @@ Append media to a dataset the caller owns, via either ingestion path — 'upload
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -2670,7 +2698,7 @@ Append media to a dataset the caller owns, via either ingestion path — 'upload
 
 ### POST /v1/data/datasets/:id/captionsets
 
-Attach a caption pass (caption text keyed by media id) to a dataset the caller owns; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller does not own is reported as not found.
+Attach a caption pass (caption text keyed by media id) to a dataset the caller owns or is a team member of; a captionset already carrying the same id is replaced. Coverage is derived server-side. A dataset the caller neither owns nor shares is reported as not found.
 
 - **Auth:** required
 
@@ -2725,6 +2753,10 @@ Attach a caption pass (caption text keyed by media id) to a dataset the caller o
           "type": "string",
           "description": "FK -> Anima, the owning identity."
         },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+        },
         "name": {
           "type": "string"
         },
@@ -2770,6 +2802,10 @@ Attach a caption pass (caption text keyed by media id) to a dataset the caller o
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -2869,7 +2905,7 @@ Attach a caption pass (caption text keyed by media id) to a dataset the caller o
 
 ### PATCH /v1/data/datasets/:id/captionsets/:captionsetId/captions/:mediaId
 
-Edit one caption within one caption pass on a dataset the caller owns — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller does not own is reported as not found.
+Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.
 
 - **Auth:** required
 
@@ -2907,6 +2943,10 @@ Edit one caption within one caption pass on a dataset the caller owns — captio
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -2953,6 +2993,10 @@ Edit one caption within one caption pass on a dataset the caller owns — captio
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -3052,7 +3096,7 @@ Edit one caption within one caption pass on a dataset the caller owns — captio
 
 ### POST /v1/data/datasets/:id/archive
 
-Archive a dataset the caller owns. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.
+Archive a dataset the caller owns. Owner-only: a team member reads and contributes, but retiring the set stays with its owner. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.
 
 - **Auth:** required
 
@@ -3072,6 +3116,10 @@ Archive a dataset the caller owns. It leaves both dataset list routes and every 
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -3118,6 +3166,10 @@ Archive a dataset the caller owns. It leaves both dataset list routes and every 
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -3217,7 +3269,7 @@ Archive a dataset the caller owns. It leaves both dataset list routes and every 
 
 ### POST /v1/data/datasets/:id/restore
 
-Restore an archived dataset the caller owns — it returns to both dataset list routes. Idempotent on a dataset that is already live. A dataset the caller does not own is reported as not found.
+Restore an archived dataset the caller owns — it returns to both dataset list routes. Owner-only, like the archive it undoes. Idempotent on a dataset that is already live. A dataset the caller does not own is reported as not found.
 
 - **Auth:** required
 
@@ -3237,6 +3289,10 @@ Restore an archived dataset the caller owns — it returns to both dataset list 
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -3283,6 +3339,10 @@ Restore an archived dataset the caller owns — it returns to both dataset list 
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -3382,7 +3442,7 @@ Restore an archived dataset the caller owns — it returns to both dataset list 
 
 ### POST /v1/data/datasets/:id/media/:mediaId/archive
 
-Archive one media item on a dataset the caller owns. The item leaves the dataset's working set — the media a caption pass or a decompose reads, the summary count, and the fragments a Muse session is spawned from — and every captionset's coverage is recomputed against the media that is left. The item itself stays on the record, so captions and fragments keyed on its id are preserved for a restore. Reversible via POST /v1/data/datasets/:id/media/:mediaId/restore. Idempotent. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
+Archive one media item on a dataset the caller owns. Owner-only: a team member contributes to the set rather than deciding what leaves it. The item leaves the dataset's working set — the media a caption pass or a decompose reads, the summary count, and the fragments a Muse session is spawned from — and every captionset's coverage is recomputed against the media that is left. The item itself stays on the record, so captions and fragments keyed on its id are preserved for a restore. Reversible via POST /v1/data/datasets/:id/media/:mediaId/restore. Idempotent. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
 
 - **Auth:** required
 
@@ -3402,6 +3462,10 @@ Archive one media item on a dataset the caller owns. The item leaves the dataset
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -3448,6 +3512,10 @@ Archive one media item on a dataset the caller owns. The item leaves the dataset
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
@@ -3547,7 +3615,7 @@ Archive one media item on a dataset the caller owns. The item leaves the dataset
 
 ### POST /v1/data/datasets/:id/media/:mediaId/restore
 
-Restore one archived media item on a dataset the caller owns — it rejoins the dataset's working set and every captionset's coverage is recomputed against it. Idempotent on an item that is already live. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
+Restore one archived media item on a dataset the caller owns (owner-only, like the archive it undoes) — it rejoins the dataset's working set and every captionset's coverage is recomputed against it. Idempotent on an item that is already live. A media id that names no item on the dataset is rejected with 400; a dataset the caller does not own is reported as not found.
 
 - **Auth:** required
 
@@ -3567,6 +3635,10 @@ Restore one archived media item on a dataset the caller owns — it rejoins the 
         "owner": {
           "type": "string",
           "description": "FK -> Anima, the owning identity."
+        },
+        "sodalitasId": {
+          "type": "string",
+          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
         },
         "name": {
           "type": "string"
@@ -3613,6 +3685,10 @@ Restore one archived media item on a dataset the caller owns — it rejoins the 
               "addedAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "addedBy": {
+                "type": "string",
+                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
               }
             },
             "required": [
