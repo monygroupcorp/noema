@@ -130,7 +130,9 @@ const SUBJECT_FRAGMENTS: Record<SubjectClass, string> = {
   illustrated: 'ink and gouache illustration of a figure, visible brush and line work, large flat areas of held-back colour, paper tooth visible',
 }
 
-// Spec §4 axis 2 — scenes, chosen to work across all three subject classes.
+// Spec §4 axis 2 — the ruled SIXTEEN scenes, each chosen to work across all three subject
+// classes. The first eight are the calibration batch's own axis (§4.1 fires 3 x 8 x 1 = 24), so
+// this list is ordered: slicing it never changes what a calibration run already measured.
 const ALL_SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'workbench', fragment: 'at a workbench' },
   { key: 'stairwell-landing', fragment: 'on a stairwell landing at night' },
@@ -140,6 +142,14 @@ const ALL_SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'tool-in-hand', fragment: 'holding a tool in hand' },
   { key: 'corridor', fragment: 'in a corridor' },
   { key: 'threshold', fragment: 'at a threshold' },
+  { key: 'mirror-reflection', fragment: 'beside a mirror, partly reflected' },
+  { key: 'against-weather', fragment: 'against weather at an open door' },
+  { key: 'single-lamp', fragment: 'under a single lamp' },
+  { key: 'in-transit', fragment: 'in transit' },
+  { key: 'at-table', fragment: 'at a table' },
+  { key: 'rail', fragment: 'leaning on a rail' },
+  { key: 'foreground-occluded', fragment: 'partially occluded by something in the foreground' },
+  { key: 'away-into-depth', fragment: 'turned away, into depth' },
 ]
 
 // Spec §4 axis 3 — seed variation only, no prompt change. Fixed seeds so a re-run of the
@@ -170,7 +180,7 @@ const SCENES: readonly { key: string; fragment: string }[] = ALL_SCENES.slice(
 )
 const VARIATION_SEEDS: readonly number[] = ALL_SEEDS.slice(
   0,
-  clampCount(process.env.LANDING_WALK_SEEDS, 5, ALL_SEEDS.length),
+  clampCount(process.env.LANDING_WALK_SEEDS, ALL_SEEDS.length, ALL_SEEDS.length),
 )
 
 const TOTAL_CANDIDATES = SUBJECT_CLASSES.length * SCENES.length * VARIATION_SEEDS.length
