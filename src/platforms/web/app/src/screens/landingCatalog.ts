@@ -22,6 +22,10 @@ export interface CatalogSummary {
   kinds: Tally[];
   /** Low-rank adaptations specifically — the trained identities. */
   loras: number;
+  /** What those identities were trained on, commonest base first. Aggregate rather than a list
+   *  of names: it answers what people actually build on here, and it does not put a stranger's
+   *  slug on the front page. */
+  bases: Tally[];
 }
 
 function tally(values: Array<string | null | undefined>): Tally[] {
@@ -41,6 +45,7 @@ const asText = (v: unknown): string | null => (typeof v === 'string' ? v : null)
 
 export function summariseCatalog(flows: FlowSummary[], models: ModelCard[]): CatalogSummary {
   const kinds = tally(models.map((m) => m.genus));
+  const loras = models.filter((m) => m.genus === 'lora');
   return {
     workflows: flows.length,
     verbs: tally(flows.map((f) => f.modusGenus)),
@@ -48,6 +53,7 @@ export function summariseCatalog(flows: FlowSummary[], models: ModelCard[]): Cat
     models: models.length,
     kinds,
     loras: kinds.find((k) => k.key === 'lora')?.count ?? 0,
+    bases: tally(loras.map((m) => m.basis)),
   };
 }
 

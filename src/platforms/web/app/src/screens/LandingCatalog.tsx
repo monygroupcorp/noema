@@ -17,20 +17,16 @@ const KIND_LABEL: Record<string, string> = {
  * catalogue, and a marketing surface has no business guessing.
  */
 export function LandingCatalog() {
-  const { state, summary, flows, models } = useLandingCatalog();
+  const { state, summary, flows } = useLandingCatalog();
 
   if (state === 'error') return null;
   if (state === 'loading' || !summary) {
     return <section className="cat" aria-busy="true"><div className="cat-in cat-wait" /></section>;
   }
 
-  // Both lists are samples, not inventories. The catalogue carries hundreds of trained
-  // identities; rendering them all makes a directory, not a landing page, and the count above
-  // already carries the breadth.
+  // The workflow list is a sample, not an inventory — the catalogue carries more than a landing
+  // page should print, and the counts above already carry the breadth.
   const named = flows.filter((f) => f.nomen).slice(0, 12);
-  const loras = models.filter((m) => m.genus === 'lora');
-  const shown = loras.slice(0, 12);
-  const rest = loras.length - shown.length;
 
   return (
     <section className="cat">
@@ -80,16 +76,17 @@ export function LandingCatalog() {
                 </li>
               ))}
             </ul>
-            {loras.length > 0 && (
+            {summary.bases.length > 0 && (
               <>
-                <h3 className="mono">trained here</h3>
-                <ul className="cat-list">
-                  {shown.map((m) => <li key={m.intellaId}>{m.nomen}</li>)}
-                  {rest > 0 && (
-                    <li className="cat-rest">
-                      <Link to="/models">and {rest} more on the shelf</Link>
+                <h3 className="mono">what they are trained on</h3>
+                <ul className="cat-bars">
+                  {summary.bases.map((b) => (
+                    <li key={b.key}>
+                      <span className="k">{b.key}</span>
+                      <span className="bar" style={{ '--w': `${(b.count / summary.bases[0].count) * 100}%` } as React.CSSProperties} />
+                      <span className="n mono">{b.count}</span>
                     </li>
-                  )}
+                  ))}
                 </ul>
               </>
             )}
