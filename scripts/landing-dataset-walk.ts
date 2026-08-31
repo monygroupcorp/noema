@@ -52,10 +52,26 @@
 // `deferred: human` on every piece rather than guessed at.
 //
 // Abort-and-report, never retry, on: a 402; the deadlock signature (fired,
-// zero pieces dispatched after `LANDING_WALK_DISPATCH_TIMEOUT_MS`); a run in
-// a state the API cannot explain; two consecutive phase failures. Never
-// re-dispatches a persisted actum (noema-359 is unruled — a naive
-// catch-and-continue can charge the funder twice).
+// zero pieces dispatched after `LANDING_WALK_DISPATCH_TIMEOUT_MS`); every
+// dispatch failing; a run in a state the API cannot explain; two consecutive
+// phase failures. Never re-dispatches a persisted actum.
+//
+// noema-359 IS NOW RULED (merged as #492). The spec wrote its abort rules
+// against an unruled fork where a dispatch that threw after `initiate` left the
+// actum `nascens` with its reservation held until the expiry reaper — so an
+// aborted walk could not say whether it had stranded the funder's money, and
+// "never re-dispatch" was the only safe rule. Post-#492 a post-initiate throw
+// releases what the initiation acquired, stamps the actum `fractus`, and
+// `CollectioCursor` counts it in `fractae` (this API's `failed`). Two
+// consequences the driver now depends on:
+//   1. An aborted phase A can state the disposition of every impetus it
+//      committed, rather than leaving it open. It says so in the receipt.
+//   2. A dispatch-failure storm is VISIBLE. It used to be indistinguishable
+//      from a stall — both showed zero completions — so it fell through to the
+//      deadlock timeout. Now `failed` climbs while `completed` stays 0, which
+//      is a different fault with a different remedy, and gets its own abort.
+// "Never re-dispatch a persisted actum" still stands: it is walk discipline
+// (an [AGENT] walk reports, it does not repair), not a money guard any more.
 //
 // Two modes:
 //   LIVE  (default): npx tsx scripts/landing-dataset-walk.ts --phase a [--apply]
@@ -771,11 +787,24 @@ async function phaseAWatch(client: Client, state: RunState): Promise<Collection>
       return collection
     }
     const elapsed = Date.now() - start
+
+    // Every dispatch is failing. Post-#492 this is its own signature rather than a stall:
+    // `fractae` climbs, so `sawDispatch` is true and the deadlock timeout below can never
+    // fire — without this the driver would poll a doomed collection until the operator
+    // killed it. Cancel-and-re-fire is the WRONG remedy here; it reproduces the fault.
+    if (collection.failed > 0 && collection.completed === 0 && (collection.inFlight ?? 0) === 0 && elapsed > effectiveDispatchTimeoutMs) {
+      throw new WalkFailure(
+        'watch.all-dispatches-failed',
+        `collection ${state.collectionId}: ${collection.failed} of ${collection.total} pieces failed to dispatch and none completed after ${Math.round(elapsed / 1000)}s`,
+        'noema-359/#492: every one of those failures released its reservation and is counted in `fractae`, so NOTHING is held and the purse is whole — this is a dispatch fault, not a money incident. Read the dispatch error before re-firing; cancelling and re-firing blind reproduces it.',
+      )
+    }
+
     if (!sawDispatch && elapsed > effectiveDispatchTimeoutMs) {
       throw new WalkFailure(
         'watch.deadlock',
         `collection ${state.collectionId} fired ${Math.round(elapsed / 1000)}s ago with zero pieces dispatched (status=${collection.status})`,
-        'this is the known deadlock signature (spec §9 / rth\'s 2026-08-28 incident): on pre-#476 prod, Resume no-ops — cancel the collection and re-fire (a census proves nothing was spent). Do NOT resume.',
+        'the deadlock signature (spec §9 / rth\'s 2026-08-28 incident). Post-#476 a collection keeps dispatching across a process restart, and post-#492 a throwing dispatch would show in `failed` — so zero of BOTH means the dispatcher never ran for this collection at all, not that pieces are failing quietly. Nothing was spent (no actum was persisted, so no reservation was taken). Cancel and re-fire; do not resume.',
       )
     }
     if ((collection.status as string) !== 'running' && (collection.status as string) !== 'pending' && (collection.status as string) !== 'draft') {
@@ -1110,7 +1139,7 @@ async function runSequence(
 // against in-memory fakes (the tests/unit/allocutio/api/apiRouter.test.ts
 // pattern). Includes: a quote that exceeds the ceiling (ceiling-abort path), a
 // class-skewed piece set (balance-stop path), and a fired-but-undispatched
-// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance|headroom>`.
+// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance|headroom|storm>`.
 // =============================================================================
 
 const SMOKE_BURSA_TOKEN = 'bt-smoke-landing-walk'
@@ -1121,7 +1150,7 @@ const SMOKE_PER_IMAGE_IMPETUS = '5'
 const SMOKE_BALANCE_IMPETUS = '100000000'
 const SMOKE_HEADROOM_BALANCE_IMPETUS = '4'
 
-type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance' | 'headroom'
+type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance' | 'headroom' | 'storm'
 
 /** A tiny in-process image server: serves one generated PNG per requested colour, so the
  *  smoke fixture exercises the REAL analyzeBitmap/jimp path end-to-end (no fake analyzer). */
@@ -1256,7 +1285,15 @@ async function buildSmokeAppAsync(induce: Induce): Promise<{ app: Express; close
       const c = collections.get(id)
       if (!c) throw Errors.notFoundRun(id)
       // The deadlock induce: fire but never dispatch (acta stays []).
-      seedCollection(id, true, induce !== 'deadlock')
+      // The storm induce: fire, dispatch nothing successfully, but count every piece in
+      // `fractae` — the post-#492 shape of "every dispatch threw", which is deliberately
+      // NOT the deadlock shape (there, `failed` stays 0 too).
+      seedCollection(id, true, induce !== 'deadlock' && induce !== 'storm')
+      if (induce === 'storm') {
+        const stormed = collections.get(id)!
+        stormed.failed = stormed.total
+        stormed.completed = 0
+      }
       const refetched = collections.get(id)!
       return refetched
     },
@@ -1362,7 +1399,7 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
   const { app, closeImageServer } = await buildSmokeAppAsync(induce)
   const server = await listen(app)
   const savedTimeout = effectiveDispatchTimeoutMs
-  if (induce === 'deadlock') effectiveDispatchTimeoutMs = 500 // smoke: prove the abort path fast, not the real 5min wait
+  if (induce === 'deadlock' || induce === 'storm') effectiveDispatchTimeoutMs = 500 // smoke: prove the abort path fast, not the real 5min wait
   try {
     const client = new Client(server.baseUrl, { kind: 'bursa', token: SMOKE_BURSA_TOKEN })
     const state = newState(`smoke-${induce}-${Date.now()}`, induce === 'ceiling' ? '1000' : '100000000', GEN_MODUS_ID)
@@ -1386,6 +1423,10 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
       }
       if (induce === 'deadlock' && err instanceof WalkFailure && err.assertion === 'watch.deadlock') {
         console.log(`smoke induce=deadlock: correctly aborted — ${err.message}`)
+        return
+      }
+      if (induce === 'storm' && err instanceof WalkFailure && err.assertion === 'watch.all-dispatches-failed') {
+        console.log(`smoke induce=storm: correctly aborted — ${err.message}`)
         return
       }
       if (induce === 'headroom' && err instanceof WalkFailure && err.assertion === 'spend.headroom') {
@@ -1453,11 +1494,14 @@ async function main(): Promise<void> {
     }
     // Full offline smoke: drive every phase against the real apiRouter with in-memory fakes.
     await runSmoke('none', opts.planOnly)
-    // Also exercise the three offline abort paths so the non-vacuity claims in the PR body are
-    // reproducible from this single invocation.
+    // Also exercise EVERY offline abort path, so the non-vacuity claims in the PR body are
+    // reproducible from this single invocation. An abort path missing from this list is an
+    // abort path nothing proves — `headroom` and `storm` were added with their guards.
     if (!opts.planOnly) {
       await runSmoke('ceiling', false)
+      await runSmoke('headroom', false)
       await runSmoke('deadlock', false)
+      await runSmoke('storm', false)
       await runSmoke('balance', false)
     }
     return
