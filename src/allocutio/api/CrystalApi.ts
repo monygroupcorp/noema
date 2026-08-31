@@ -147,7 +147,8 @@ export function activityDoorFor(
 import type { Collectio, Collectionum, Tractus } from '../../types/collectio.js'
 import { coverageOver, liveMedia } from '../../types/dataset.js'
 import type {
-  Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets, IngestMediaInput,
+  Captionset, CreateDatasetInput, Dataset, DatasetMediaItem, DatasetSummary, Datasets,
+  IngestMediaFromGeneration, IngestMediaFromUpload, IngestMediaInput,
 } from '../../types/dataset.js'
 import type { Corporum } from '../../types/corpus.js'
 import { parseManifest } from '../../crystal/datasetManifest.js'
@@ -2376,9 +2377,26 @@ export class CrystalApi {
     return d
   }
 
-  /** Create a Dataset from either v1 ingestion path (Q2): `upload` (already-signed R2
-   *  media URLs from `POST /storage/uploads/sign`) or `generation` (media resolved from
-   *  the caller's own completed Acta). Rejects a body matching neither shape.
+  /** Create a Dataset, either seeded through one of the two v1 ingestion paths (Q2) or EMPTY.
+   *
+   *  `source: 'upload'` takes already-signed R2 media URLs from `POST /storage/uploads/sign`;
+   *  `source: 'generation'` resolves media from the caller's own completed Acta. Omitting
+   *  `source` opens the dataset with no media, to be filled afterwards through the append route
+   *  `POST /v1/data/datasets/:id/media` — the same route a seeded dataset grows through. A
+   *  `source` present but naming neither path is still a 400.
+   *
+   *  Omission rather than a sentinel value, because an empty create is the ABSENCE of ingestion
+   *  rather than a third kind of it: `_mintMedia` keeps exactly two arms and stays the only
+   *  place media is minted, and the empty create simply does not reach it. The validation that
+   *  remains meaningful is unchanged — a caller that names a path and then supplies nothing
+   *  (`'upload'` with an empty `mediaUrls`, `'generation'` with an empty `actumIds`) is refused
+   *  by `_mintMedia` exactly as before, and media fields supplied with no `source` at all are
+   *  refused here rather than silently dropped.
+   *
+   *  The dataset's version history is the same shape whether or not it was seeded: `1.0.0` at
+   *  the media count it was created with, which for an empty dataset is `0`. The first append
+   *  then records `1.1.0` through `nextDatasetVersion`, so an empty dataset reads as a dataset
+   *  at version one holding nothing, never as a record missing its history.
    *
    *  An optional `teamId` shares the new dataset with a `Sodalitas`, stored as
    *  `Dataset.sodalitasId`. It is validated through `_memberTeam` — the SAME seam
@@ -2390,8 +2408,20 @@ export class CrystalApi {
     const store = this._datasetsStore()
     const now = new Date()
 
-    if (!input || (input.source !== 'upload' && input.source !== 'generation')) {
-      throw Errors.inputMalformed("source must be 'upload' or 'generation'")
+    if (!input || (input.source !== undefined && input.source !== 'upload' && input.source !== 'generation')) {
+      throw Errors.inputMalformed("source, when present, must be 'upload' or 'generation'")
+    }
+    if (input.source === undefined) {
+      // No source means no ingestion. Media fields carried alongside are refused rather than
+      // dropped: a body naming media the create would not mint is a body whose author expected
+      // a different outcome than an empty dataset.
+      const carried = input as {
+        mediaUrls?: IngestMediaFromUpload['mediaUrls']
+        actumIds?: IngestMediaFromGeneration['actumIds']
+      }
+      if (carried.mediaUrls !== undefined || carried.actumIds !== undefined) {
+        throw Errors.inputMalformed('source is required when mediaUrls or actumIds are supplied')
+      }
     }
     if (typeof input.name !== 'string' || !input.name.trim()) {
       throw Errors.inputMalformed('name is required')
@@ -2404,7 +2434,7 @@ export class CrystalApi {
     // half-created dataset behind.
     if (input.teamId !== undefined) await this._memberTeam(auctor, input.teamId)
 
-    const media = await this._mintMedia(auctor, input, now)
+    const media = input.source === undefined ? [] : await this._mintMedia(auctor, input, now)
 
     return store.create({
       owner,

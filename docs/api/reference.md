@@ -2255,7 +2255,7 @@ The caller's datasets as the full rich shape (custody, modality, captionsets, ve
 
 ### POST /v1/data/datasets
 
-Create a Dataset from either v1 ingestion path: 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta). Rejects a body matching neither shape with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.
+Create a Dataset from either v1 ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta) — or with no media at all by omitting source, in which case media is added afterwards through POST /v1/data/datasets/:id/media. An empty dataset is created at version 1.0.0 with a count of 0; its first append records 1.1.0. A source naming neither path, a declared source with an empty media list, and media fields supplied without a source are each rejected with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.
 
 - **Auth:** required
 
@@ -2264,14 +2264,15 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
 ```json
 {
   "type": "object",
-  "description": "Create a Dataset. `source: 'upload'` ingests media already dropped via `POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the caller's own completed Acta (actumIds). Exactly one shape; the discriminant is required. An optional `teamId` shares the dataset with a Team (Sodalitas) the caller belongs to.",
+  "description": "Create a Dataset. `source: 'upload'` ingests media already dropped via `POST /storage/uploads/sign` (mediaUrls); `source: 'generation'` seeds media from the caller's own completed Acta (actumIds). Omit `source` to create the dataset EMPTY and add media afterwards through `POST /v1/data/datasets/:id/media`; mediaUrls or actumIds supplied without a source are rejected. A source naming neither path is rejected, as is a declared source whose media list is empty. An optional `teamId` shares the dataset with a Team (Sodalitas) the caller belongs to.",
   "properties": {
     "source": {
       "type": "string",
       "enum": [
         "upload",
         "generation"
-      ]
+      ],
+      "description": "Omit to create an empty dataset."
     },
     "name": {
       "type": "string"
@@ -2303,18 +2304,17 @@ Create a Dataset from either v1 ingestion path: 'upload' (media already dropped 
       "items": {
         "type": "string"
       },
-      "description": "Required when source === 'upload'."
+      "description": "Required and non-empty when source === 'upload'."
     },
     "actumIds": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "Required when source === 'generation'."
+      "description": "Required and non-empty when source === 'generation'."
     }
   },
   "required": [
-    "source",
     "name",
     "modality"
   ]

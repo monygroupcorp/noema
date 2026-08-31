@@ -116,7 +116,13 @@ export function coverageOver(captions: Record<string, string> | undefined, media
   return captionCoverage(bound, live.length)
 }
 
-/** One snapshot of the dataset's media set — grows as media is added. */
+/** One snapshot of the dataset's media set — grows as media is added.
+ *
+ *  `count: 0` is a well-formed snapshot, not a missing one: a dataset created without media
+ *  (`POST /v1/data/datasets` with no `source`) records `1.0.0` at count 0, and its first append
+ *  records `1.1.0` at the count it then holds. An empty dataset therefore has the same version
+ *  history shape as any other — a `versions` array that is empty, rather than one holding a
+ *  zero-count entry, is what would read as a broken record. */
 export interface DatasetVersion {
   v: string
   count: number
@@ -266,7 +272,23 @@ export interface CreateDatasetFromUpload extends IngestMediaFromUpload, CreateDa
 /** Input to create a seed-from-generation dataset. */
 export interface CreateDatasetFromGeneration extends IngestMediaFromGeneration, CreateDatasetFields {}
 
-export type CreateDatasetInput = CreateDatasetFromUpload | CreateDatasetFromGeneration
+/** Input to create a dataset with no media, to be populated afterwards through
+ *  `POST /v1/data/datasets/:id/media`.
+ *
+ *  NOT a third ingestion mode — it is the ABSENCE of one. `IngestMediaInput` still has exactly
+ *  two arms, and every media item on a dataset still arrives through one of them; this shape
+ *  simply declines to ingest at creation time, so the dataset is opened first and filled by the
+ *  append route that already exists. `source` is therefore omitted rather than carrying a
+ *  sentinel value: a sentinel would be a discriminant naming a path that mints nothing.
+ *
+ *  Declining a source and declaring one are the only two options — `source: 'upload'` with an
+ *  empty `mediaUrls` (or `'generation'` with an empty `actumIds`) stays a 400, because a caller
+ *  that names an ingestion path and then supplies nothing has stated an intent it did not meet. */
+export interface CreateDatasetEmpty extends CreateDatasetFields {
+  source?: undefined
+}
+
+export type CreateDatasetInput = CreateDatasetFromUpload | CreateDatasetFromGeneration | CreateDatasetEmpty
 
 /**
  * Datasets — genitive plural "of the datasets."
