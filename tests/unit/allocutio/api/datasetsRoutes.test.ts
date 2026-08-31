@@ -18,6 +18,7 @@ import express from 'express'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
+import { isPrivateMarker, privateMarker } from '../../../../src/crystal/MediaFetcher.js'
 import { coverageOver, isArchived, liveMedia, nextDatasetVersion } from '../../../../src/types/dataset.js'
 import type { Captionset, Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../../src/types/dataset.js'
 import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../../src/types/sodalitas.js'
@@ -219,13 +220,45 @@ const attributingSignorum = {
   },
 }
 
+// ── A private-outputs store double (noema-347's `CrystalApiDeps.privateOutputs`) ──
+//
+// The real one is an R2 bucket with no public binding; presigning is a LOCAL signature over a
+// key, which is exactly what this stands in for. It records every key it was asked to sign, so
+// a test can assert that resolution happened at read time and on the key that was stored — not
+// that some plausible-looking string came back.
+function fakePrivateOutputs(opts: { refuse?: boolean } = {}): {
+  signed: string[]
+  cfg: { store: { getSignedDownloadUrl(key: string, o?: { expiresIn?: number }): Promise<string> } }
+} {
+  const signed: string[] = []
+  return {
+    signed,
+    cfg: {
+      store: {
+        async getSignedDownloadUrl(key: string): Promise<string> {
+          signed.push(key)
+          if (opts.refuse) throw new Error('private-outputs store refused')
+          return `https://private.example/${key}?X-Amz-Signature=deadbeef`
+        },
+      },
+    },
+  }
+}
+
 function createServer(
   datasets: Datasets,
   actorum: Actorum,
   sodalitatum?: Sodalitatum,
   signorum: unknown = fakeSignorum,
+  privateOutputs?: ReturnType<typeof fakePrivateOutputs>['cfg'],
 ): Promise<{ server: http.Server; url: string; api: CrystalApi }> {
-  const deps = { datasets, actorum, signorum, ...(sodalitatum ? { sodalitatum } : {}) } as unknown as CrystalApiDeps
+  const deps = {
+    datasets,
+    actorum,
+    signorum,
+    ...(sodalitatum ? { sodalitatum } : {}),
+    ...(privateOutputs ? { privateOutputs } : {}),
+  } as unknown as CrystalApiDeps
   const api = new CrystalApi(deps)
   return new Promise((resolveP, reject) => {
     const app = express()
@@ -1262,6 +1295,247 @@ test('a deployment with no team store wired shares nothing and refuses a teamId'
       (e: unknown) => (e as { code?: string }).code === 'not_found.dataset',
     )
     assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: { 'x-api-key': 'member-1' } })).body.datasets, [])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// =============================================================================
+// Private-output media
+// =============================================================================
+//
+// A run with private outputs records its media as an opaque `noema-private://<key>` marker
+// rather than a fetchable URL (`src/crystal/MediaFetcher.ts`). These cover the two halves of
+// carrying such a run into a dataset: the MINT admits the marker as a media reference, and the
+// READ resolves it into a short-lived link behind the same ownership gate the run read uses.
+//
+// What is STORED is the marker, deliberately: a presigned link lapses in minutes and a dataset
+// is durable, so persisting one would write a reference that dies while the record still lives.
+// Every assertion below therefore checks the stored record and the served record separately.
+
+/** A completed run whose exitus carries private markers. */
+function privateActum(id: string, keys: string[], signum?: string): Actum {
+  return {
+    id,
+    modusId: 'flux-schnell',
+    modusVersiono: '1.0.0',
+    impetus: 10n,
+    signaConsumed: signum ? [signum] : [],
+    status: 'completus',
+    exitus: { images: keys.map((k) => privateMarker(k)) },
+  } as unknown as Actum
+}
+
+test('a completed run whose exitus carries a private marker ingests, storing the marker and serving a link', async () => {
+  const datasets = new MemoryDatasets()
+  const priv = fakePrivateOutputs()
+  const actum = privateActum('actum-private', ['private-outputs/abc123/one.png'])
+  const { server, url } = await createServer(datasets, makeFakeActorum([actum]), undefined, fakeSignorum, priv.cfg)
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { source: 'generation', name: 'Private set', modality: 'image', actumIds: ['actum-private'] },
+    })
+    assert.equal(created.status, 201, 'a private-marker exitus is media, not an empty run')
+    const served = created.body.dataset.media as DatasetMediaItem[]
+    assert.equal(served.length, 1)
+    assert.equal(served[0].source, 'generation')
+    assert.equal(served[0].actumId, 'actum-private')
+    assert.equal(served[0].url, 'https://private.example/private-outputs/abc123/one.png?X-Amz-Signature=deadbeef')
+
+    // The RECORD keeps the durable reference — the link the caller was handed is a view of it.
+    const stored = await datasets.find(created.body.dataset.id)
+    assert.ok(stored)
+    assert.equal(stored.media[0].url, privateMarker('private-outputs/abc123/one.png'))
+    assert.deepEqual(priv.signed, ['private-outputs/abc123/one.png'])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a mixed exitus carries both its public URL and its private marker into the dataset', async () => {
+  const datasets = new MemoryDatasets()
+  const priv = fakePrivateOutputs()
+  const actum: Actum = {
+    id: 'actum-mixed',
+    modusId: 'flux-schnell',
+    modusVersiono: '1.0.0',
+    impetus: 10n,
+    signaConsumed: [],
+    status: 'completus',
+    exitus: { images: ['https://cdn.example/public.png', privateMarker('private-outputs/abc123/two.png')] },
+  } as unknown as Actum
+  const { server, url } = await createServer(datasets, makeFakeActorum([actum]), undefined, fakeSignorum, priv.cfg)
+  try {
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'generation', name: 'Mixed set', modality: 'image', actumIds: ['actum-mixed'] },
+    })
+    assert.equal(created.status, 201)
+    const served = created.body.dataset.media as DatasetMediaItem[]
+    assert.equal(served.length, 2, 'both references are media')
+    assert.equal(served[0].url, 'https://cdn.example/public.png', 'a public URL passes through untouched')
+    assert.equal(served[1].url, 'https://private.example/private-outputs/abc123/two.png?X-Amz-Signature=deadbeef')
+
+    const stored = await datasets.find(created.body.dataset.id)
+    assert.ok(stored)
+    assert.deepEqual(stored.media.map((m) => m.url), [
+      'https://cdn.example/public.png',
+      privateMarker('private-outputs/abc123/two.png'),
+    ])
+    assert.deepEqual(priv.signed, ['private-outputs/abc123/two.png'], 'only the marker is presigned')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/data/datasets/:id/media appends a private-marker run to an existing dataset', async () => {
+  const datasets = new MemoryDatasets()
+  const priv = fakePrivateOutputs()
+  const actum = privateActum('actum-private', ['private-outputs/abc123/three.png'])
+  const { server, url } = await createServer(datasets, makeFakeActorum([actum]), undefined, fakeSignorum, priv.cfg)
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { source: 'upload', name: 'Growing set', modality: 'image', mediaUrls: ['https://r2.example/a.png'] },
+    })
+    assert.equal(created.status, 201)
+    const id = created.body.dataset.id
+
+    const appended = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers, body: { source: 'generation', actumIds: ['actum-private'] },
+    })
+    assert.equal(appended.status, 201)
+    const served = appended.body.dataset.media as DatasetMediaItem[]
+    assert.equal(served.length, 2)
+    assert.equal(served[1].url, 'https://private.example/private-outputs/abc123/three.png?X-Amz-Signature=deadbeef')
+
+    const stored = await datasets.find(id)
+    assert.ok(stored)
+    assert.equal(stored.media[1].url, privateMarker('private-outputs/abc123/three.png'))
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a stored private marker is resolved on every owner-scoped dataset read', async () => {
+  const datasets = new MemoryDatasets()
+  const priv = fakePrivateOutputs()
+  const actum = privateActum('actum-private', ['private-outputs/abc123/four.png'])
+  const { server, url, api } = await createServer(datasets, makeFakeActorum([actum]), undefined, fakeSignorum, priv.cfg)
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { source: 'generation', name: 'Private set', modality: 'image', actumIds: ['actum-private'] },
+    })
+    assert.equal(created.status, 201)
+    const expected = 'https://private.example/private-outputs/abc123/four.png?X-Amz-Signature=deadbeef'
+
+    // The full listing — what a person's own dataset screen renders.
+    const full = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.equal(full.status, 200)
+    assert.equal((full.body.datasets[0].media as DatasetMediaItem[])[0].url, expected)
+
+    // And the single-dataset read every contribute verb and the MCP dataset tool resolve through.
+    const one = await api.getDataset({ animaId: 'owner-1' }, created.body.dataset.id)
+    assert.equal(one.media[0].url, expected)
+
+    // Resolution is a projection, never a write-back: the record still holds the marker.
+    const stored = await datasets.find(created.body.dataset.id)
+    assert.ok(stored)
+    assert.ok(isPrivateMarker(stored.media[0].url))
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an unresolvable private marker is served as the opaque marker, never as a public URL', async () => {
+  // Two deployments that cannot presign: one with no private-outputs store wired at all, one
+  // whose store refuses. Both leave the marker exactly as stored. Degrading to a marker is
+  // correct — the object sits in a bucket with no public binding, so a URL built from the key
+  // would be a broken link that also reads as public.
+  for (const priv of [undefined, fakePrivateOutputs({ refuse: true }).cfg]) {
+    const datasets = new MemoryDatasets()
+    const actum = privateActum('actum-private', ['private-outputs/abc123/five.png'])
+    const { server, url } = await createServer(datasets, makeFakeActorum([actum]), undefined, fakeSignorum, priv)
+    try {
+      const headers = { 'x-api-key': 'owner-1' }
+      const created = await request(`${url}/v1/data/datasets`, {
+        method: 'POST',
+        headers,
+        body: { source: 'generation', name: 'Private set', modality: 'image', actumIds: ['actum-private'] },
+      })
+      assert.equal(created.status, 201, 'ingestion does not depend on being able to presign')
+      const served = (created.body.dataset.media as DatasetMediaItem[])[0]
+      assert.equal(served.url, privateMarker('private-outputs/abc123/five.png'))
+      assert.ok(!/^https?:\/\//.test(served.url), 'never degraded to a public URL')
+    } finally {
+      await closeServer(server)
+    }
+  }
+})
+
+test('a private marker does not widen the ownership gate — a stranger\'s run is still not found', async () => {
+  // The scheme check widened; the authorization check did not. Both runs below are completed
+  // and both carry a private marker — only the caller's own is reachable.
+  const mine = privateActum('actum-mine', ['private-outputs/aaa/mine.png'], 'sig-of-owner-1')
+  const theirs = privateActum('actum-theirs', ['private-outputs/bbb/theirs.png'], 'sig-of-stranger-1')
+  const priv = fakePrivateOutputs()
+  const { server, url } = await createServer(
+    new MemoryDatasets(), makeFakeActorum([mine, theirs]), undefined, attributingSignorum, priv.cfg,
+  )
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const refused = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { source: 'generation', name: 'Not mine', modality: 'image', actumIds: ['actum-theirs'] },
+    })
+    assert.equal(refused.status, 404)
+    assert.equal(refused.body.error.code, 'not_found.run')
+    assert.deepEqual(priv.signed, [], 'a refused run is never presigned')
+
+    const own = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { source: 'generation', name: 'Mine', modality: 'image', actumIds: ['actum-mine'] },
+    })
+    assert.equal(own.status, 201)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('the empty-media refusal names the condition that fired it', async () => {
+  // A completed run whose exitus holds neither an http(s) URL nor a private marker is what
+  // actually produces no media, so the sentence says exactly that.
+  const actum: Actum = {
+    id: 'actum-nothing',
+    modusId: 'llm-chat',
+    modusVersiono: '1.0.0',
+    impetus: 10n,
+    signaConsumed: [],
+    status: 'completus',
+    exitus: { text: 'a paragraph, not an image' },
+  } as unknown as Actum
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([actum]))
+  try {
+    const res = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'owner-1' },
+      body: { source: 'generation', name: 'Empty', modality: 'image', actumIds: ['actum-nothing'] },
+    })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.error.code, 'input.malformed')
+    assert.match(res.body.error.message, /media reference/)
+    assert.match(res.body.error.message, /private-output marker/)
   } finally {
     await closeServer(server)
   }

@@ -47,6 +47,15 @@ export function captionCoverage(captions: Record<string, string> | undefined, me
  *  signed-PUT upload) or seeded from an existing generation's output. */
 export interface DatasetMediaItem {
   id: string
+  /** Where the media is. STORED as a DURABLE reference — an `http(s)` URL, or the
+   *  `noema-private://<key>` marker a run with private outputs records
+   *  (`src/crystal/MediaFetcher.ts`). A presigned link is deliberately never stored: it lapses
+   *  in minutes, and a dataset outlives it by design.
+   *
+   *  READ back resolved: `CrystalApi._resolveDatasetMedia` turns a marker into a short-lived
+   *  presigned GET on every owner-scoped read, so a reader of a `Dataset` always has a fetchable
+   *  url and never has to presign anything itself. Host-side readers that take a `MediaFetcher`
+   *  resolve a marker to bytes through the same registered private-output store. */
   url: string
   source: 'upload' | 'generation'
   /** FK -> Actum. Present iff source === 'generation' — the run this media came from. */

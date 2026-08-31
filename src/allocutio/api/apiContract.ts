@@ -1400,7 +1400,11 @@ const DatasetMediaItemSchema: JsonSchema = {
   type: 'object',
   properties: {
     id: { type: 'string' },
-    url: { type: 'string' },
+    url: {
+      type: 'string',
+      description:
+        'Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link.',
+    },
     source: { type: 'string', enum: ['upload', 'generation'] },
     actumId: { type: 'string', description: "FK -> Actum. Present iff source === 'generation'." },
     addedAt: { type: 'string', format: 'date-time' },
