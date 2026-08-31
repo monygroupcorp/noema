@@ -32,6 +32,32 @@ export interface CollectioCursorConfig {
   reviewEnabled?: boolean
 }
 
+/**
+ * Settle ONE in-flight piece as cancelled, returning the run as it stands afterwards.
+ *
+ * The cursor does not own settlement — releasing a reservation and stamping a run terminal
+ * belongs to the completor, which the crystal core does not reach. The caller supplies the
+ * one settlement it already uses for "cancel a run" and the cursor books the outcome, so a
+ * collection cancel and a single-run cancel are the same act, invoked from two places.
+ *
+ * The RETURNED status is what the piece is booked as, not what the caller asked for: a
+ * completion already in transit can win the race, in which case the settlement is a no-op
+ * and the run comes back `completus` — a piece that generated, and is counted as one.
+ * `null` when the run record cannot be read; the piece is then booked as not generated.
+ */
+export type SettleCancelledPiece = (actumId: string) => Promise<Actum | null>
+
+/** What one cancellation sweep did. Every piece that was in flight is in exactly one list. */
+export interface CollectioCancelReport {
+  /** Pieces the sweep settled — in flight when it began, terminal when it ended. */
+  cancelled: string[]
+  /** Pieces a completion already in transit settled first; counted as the work they did. */
+  completed: string[]
+  /** Pieces whose settlement threw. Still in flight, and named rather than swallowed —
+   *  the sweep carries on past one so the rest are still cancelled. */
+  unsettled: Array<{ actumId: string; error: string }>
+}
+
 interface CollectioState {
   /** Next pieceIndex to dispatch */
   nextIndex: number
@@ -351,6 +377,78 @@ export class CollectioCursor {
   }
 
   /**
+   * Settle every piece this collection has in flight — the cancel sweep.
+   *
+   * Call AFTER the collection has been marked `cancellata`: the sweep books each piece
+   * through `onActumCompleta`, and `_checkDone` reads the persisted status to decide that a
+   * collection already terminal is not re-settled as `completa` when its last piece leaves
+   * flight. Dispatching is held first, so no slot freed by a settled piece refills.
+   *
+   * Three things race with this sweep, and each is handled by booking the OUTCOME rather
+   * than the intent:
+   *
+   *  - A piece that completes between the sweep's decision and its own settlement. There is
+   *    no pre-check on the piece's status here — one would be read before the settlement and
+   *    acted on after it. `settle` re-reads the record and returns it untouched when it is
+   *    already terminal, so such a piece comes back `completus` and is booked as generated.
+   *  - A completion whose booking has already landed. `onActumCompleta` counts a piece only
+   *    while it is still in `running`, so a piece already booked is not booked twice, and the
+   *    sweep skips it.
+   *  - A settlement that throws. That piece stays in flight, is named in the report, and the
+   *    sweep continues to the next one. The collection still reaches its terminal state, and
+   *    the piece is still counted where it actually is — in flight.
+   *
+   * A settled piece is booked as one that did NOT generate: it lands in `fractae`, never in
+   * `completae`. Every dispatched piece therefore stays in exactly one counter, so the
+   * collection's counters reconcile against its target across a cancel.
+   *
+   * Idempotent: a collection with nothing in flight (already cancelled, or never fired)
+   * sweeps nothing and reports nothing.
+   */
+  async cancelInFlight(
+    collectioId: string,
+    settle: SettleCancelledPiece,
+  ): Promise<CollectioCancelReport> {
+    const report: CollectioCancelReport = { cancelled: [], completed: [], unsettled: [] }
+
+    const state = await this._loadState(collectioId)
+    if (!state) return report
+
+    // Nothing new may be fanned out while pieces are being settled: a slot freed by a
+    // settlement must not be refilled by the collection that is being cancelled.
+    state.paused = true
+
+    // Snapshot the set — booking a piece mutates `running`, and a completion in transit may
+    // remove one from it while this loop is awaiting.
+    for (const actumId of [...state.running]) {
+      let settled: Actum | null
+      try {
+        settled = await settle(actumId)
+      } catch (err) {
+        report.unsettled.push({
+          actumId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        continue
+      }
+
+      // A completion that got its booking in first already moved this piece out of flight
+      // and into its own counter. Re-booking it would count one piece twice.
+      if (!state.running.has(actumId)) {
+        report.completed.push(actumId)
+        continue
+      }
+
+      const generated = settled?.status === 'completus'
+      await this.onActumCompleta(collectioId, actumId, generated)
+      if (generated) report.completed.push(actumId)
+      else report.cancelled.push(actumId)
+    }
+
+    return report
+  }
+
+  /**
    * Resume dispatching after a pause. Clears the persisted `pausatum` and
    * re-enters the fan-out, reconstructing in-memory state from the persisted
    * record when this process has none — the case after a restart.
@@ -479,10 +577,24 @@ export class CollectioCursor {
     const state = this.states.get(collectioId)
     if (!state) return
 
+    const collectio = await this.collectiones.find(collectioId)
+    if (!collectio) return
+
+    // A cancelled collection is ALREADY terminal, and `cancellata` is the terminal state it
+    // reached — a piece leaving flight afterwards does not re-settle it as `completa`. The
+    // pieces it never dispatched stay undispatched; that is what a cancel means. Once nothing
+    // is left in flight the scheduling state is dropped, so no later event can re-enter the
+    // fan-out through it.
+    if (collectio.status === 'cancellata') {
+      if (state.running.size === 0) this.states.delete(collectioId)
+      return
+    }
+
+    // The number of pieces to dispatch: the target plus one replacement per rejection.
     if (
       state.running.size === 0 &&
       state.pendingReview.size === 0 &&
-      state.nextIndex >= (await this._totalPieces(collectioId, state))
+      state.nextIndex >= collectio.numerus + collectio.reiectae
     ) {
       await this.collectiones.update(collectioId, {
         status: 'completa',
@@ -491,12 +603,5 @@ export class CollectioCursor {
       // Clean up in-memory state
       this.states.delete(collectioId)
     }
-  }
-
-  /** The number of pieces to dispatch: the target plus one replacement per rejection. */
-  private async _totalPieces(collectioId: string, state: CollectioState): Promise<number> {
-    const collectio = await this.collectiones.find(collectioId)
-    if (!collectio) return state.nextIndex
-    return collectio.numerus + collectio.reiectae
   }
 }

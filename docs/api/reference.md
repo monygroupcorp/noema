@@ -10355,7 +10355,7 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
 
 ### POST /v1/collectiones/:id/cancel
 
-Cancel a Collection — stop dispatching and mark it cancelled. Owner-scoped.
+Cancel a Collection (owner-scoped, idempotent): stop dispatching, mark it cancelled, and settle the pieces it still has in flight through the same cancellation POST /v1/runs/:id/cancel uses — each of those pods is terminated and its locked credits released rather than charged. A settled piece is counted in `failed`; a piece that finished before the cancellation reached it keeps the work it did and is counted as generated. Pieces not yet dispatched are never dispatched. Cancelling a collection that has nothing in flight returns it unchanged, 200.
 
 - **Auth:** required
 
