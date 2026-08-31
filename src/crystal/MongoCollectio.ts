@@ -9,16 +9,24 @@ function toDoc(c: Partial<Collectio>): Record<string, unknown> {
 
 function fromDoc(doc: Record<string, unknown>): Collectio {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id, impetusTotal, ...rest } = doc as Record<string, unknown> & { _id: unknown; impetusTotal: string }
-  return { ...rest, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
+  const { _id, impetusTotal, reiectae, ...rest } = doc as Record<string, unknown> & { _id: unknown; impetusTotal: string; reiectae?: number }
+  // `reiectae` is part of the dispatch budget (`numerus + reiectae`), so an absent one is not a
+  // cosmetic gap: it makes that sum NaN and the fan-out's `nextIndex < totalPieces` guard false
+  // forever — the collection goes agens and never dispatches a piece. Docs written before this
+  // store seeded the field (and any written by an older build) must read back as 0, not undefined.
+  return { ...rest, reiectae: reiectae ?? 0, impetusTotal: BigInt(impetusTotal ?? '0') } as Collectio
 }
 
 export class MongoCollectio implements Collectionum {
   constructor(private col: Collection) {}
 
-  async create(input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'impetusTotal'>): Promise<Collectio> {
+  // The counters are the STORE's to seed — every one of them. `reiectae` belongs with
+  // `completae`/`fractae` in the omitted set (as the `Collectionum` contract declares): callers
+  // never pass it, so a store that does not seed it persists a collection with no `reiectae` at
+  // all, and `numerus + reiectae` — the CollectioCursor's dispatch budget — becomes NaN.
+  async create(input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>): Promise<Collectio> {
     const now = new Date()
-    const c: Collectio = { ...input, id: uuidv4(), acta: [], completae: 0, fractae: 0, impetusTotal: 0n, natum: now }
+    const c: Collectio = { ...input, id: uuidv4(), acta: [], completae: 0, fractae: 0, reiectae: 0, impetusTotal: 0n, natum: now }
     await this.col.insertOne(toDoc(c))
     return c
   }
