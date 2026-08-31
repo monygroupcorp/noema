@@ -339,6 +339,216 @@ test('POST /v1/data/datasets rejects a body matching neither ingestion shape wit
   }
 })
 
+// ── Empty create (noema-380) ───────────────────────────────────────────────
+// A dataset can be opened with no media and filled afterwards through the append route that
+// already exists. `source` is OMITTED for that — the absence of an ingestion path, not a third
+// one — so `_mintMedia` keeps exactly two arms and stays the only place media is minted.
+
+test('POST /v1/data/datasets with no source creates an empty dataset that reads and lists correctly', async () => {
+  const { server, url, api } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers,
+      body: { name: 'To be filled', modality: 'image' },
+    })
+    assert.equal(created.status, 201)
+    const ds = created.body.dataset
+    assert.deepEqual(ds.media, [])
+    assert.deepEqual(ds.captionsets, [])
+    assert.equal(ds.custody, 'local')
+    // The version history has the same shape a seeded dataset gets: one entry at 1.0.0,
+    // counting the media it was created with. An empty `versions` is what would read as broken.
+    assert.equal(ds.versions.length, 1)
+    assert.equal(ds.versions[0].v, '1.0.0')
+    assert.equal(ds.versions[0].count, 0)
+
+    const resolved = await api.getDataset({ animaId: 'owner-1' }, ds.id)
+    assert.deepEqual(resolved.media, [])
+    assert.equal(resolved.versions.length, 1)
+
+    const full = await request(`${url}/v1/data/datasets/full`, { headers })
+    assert.equal(full.status, 200)
+    assert.equal(full.body.datasets.length, 1)
+    assert.equal(full.body.datasets[0].id, ds.id)
+
+    const summary = await request(`${url}/v1/data/datasets`, { headers })
+    assert.equal(summary.status, 200)
+    assert.equal(summary.body.datasets.length, 1)
+    // An empty dataset counts zero images — it is listed, not hidden and not undefined.
+    assert.equal(summary.body.datasets[0].images, 0)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a dataset created empty is populated through the existing append route, and its versions stay in sequence', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Filled later', modality: 'image' },
+    })
+    assert.equal(created.status, 201)
+    const id = created.body.dataset.id
+
+    const appended = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST',
+      headers,
+      body: { source: 'upload', mediaUrls: ['https://r2.example/a.png', 'https://r2.example/b.png'] },
+    })
+    assert.equal(appended.status, 201)
+    assert.equal(appended.body.dataset.media.length, 2)
+    // 1.0.0 (count 0, at creation) -> 1.1.0 (count 2, the first append). The append reads its
+    // next version off the history the empty create left, so nothing is skipped.
+    assert.deepEqual(appended.body.dataset.versions.map((v: { v: string }) => v.v), ['1.0.0', '1.1.0'])
+    assert.deepEqual(appended.body.dataset.versions.map((v: { count: number }) => v.count), [0, 2])
+
+    const second = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: ['https://r2.example/c.png'] },
+    })
+    assert.equal(second.status, 201)
+    assert.deepEqual(second.body.dataset.versions.map((v: { v: string }) => v.v), ['1.0.0', '1.1.0', '1.2.0'])
+
+    const summary = await request(`${url}/v1/data/datasets`, { headers })
+    assert.equal(summary.body.datasets[0].images, 3)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a captionset on a dataset created empty covers 0/0 and recounts once media lands', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Empty then captioned', modality: 'image' },
+    })
+    const id = created.body.dataset.id
+
+    // Coverage over an empty media set is a truthful 0/0, not a division that reads as broken.
+    const attached = await request(`${url}/v1/data/datasets/${id}/captionsets`, {
+      method: 'POST', headers, body: { id: 'cs-1', name: 'First pass', method: 'manual' },
+    })
+    assert.equal(attached.status, 201)
+    assert.equal(attached.body.dataset.captionsets[0].coverage, '0/0')
+
+    const appended = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers, body: { source: 'upload', mediaUrls: ['https://r2.example/a.png'] },
+    })
+    assert.equal(appended.body.dataset.captionsets[0].coverage, '0/1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test("POST /v1/data/datasets still rejects a declared source that supplies no media", async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    // Declining to name a source is now allowed; naming one and then supplying nothing is not.
+    const emptyUpload = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { source: 'upload', name: 'Nothing to upload', modality: 'image', mediaUrls: [] },
+    })
+    assert.equal(emptyUpload.status, 400)
+    assert.equal(emptyUpload.body.error.code, 'input.malformed')
+
+    const emptyGeneration = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { source: 'generation', name: 'Nothing to seed', modality: 'image', actumIds: [] },
+    })
+    assert.equal(emptyGeneration.status, 400)
+    assert.equal(emptyGeneration.body.error.code, 'input.malformed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/data/datasets rejects media fields supplied with no source rather than dropping them', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const withUrls = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Media, no source', modality: 'image', mediaUrls: ['https://r2.example/a.png'] },
+    })
+    assert.equal(withUrls.status, 400)
+    assert.equal(withUrls.body.error.code, 'input.malformed')
+
+    const withActa = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Acta, no source', modality: 'image', actumIds: ['actum-1'] },
+    })
+    assert.equal(withActa.status, 400)
+    assert.equal(withActa.body.error.code, 'input.malformed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an empty create still requires a name and a valid modality', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const noName = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { modality: 'image' },
+    })
+    assert.equal(noName.status, 400)
+    assert.equal(noName.body.error.code, 'input.malformed')
+
+    const badModality = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Unnameable modality', modality: 'telepathy' },
+    })
+    assert.equal(badModality.status, 400)
+    assert.equal(badModality.body.error.code, 'input.malformed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/data/datasets/:id/media still requires a source — an append always ingests', async () => {
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]))
+  try {
+    const headers = { 'x-api-key': 'owner-1' }
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST', headers, body: { name: 'Append needs a source', modality: 'image' },
+    })
+    const id = created.body.dataset.id
+    const res = await request(`${url}/v1/data/datasets/${id}/media`, {
+      method: 'POST', headers, body: { mediaUrls: ['https://r2.example/a.png'] },
+    })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.error.code, 'input.malformed')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a dataset created empty and shared with a team is contributable by a member', async () => {
+  const teams = new MemorySodalitatum()
+  const team = await teams.create({ nomen: 'Atelier', auctor: 'owner-1', membra: ['owner-1', 'member-2'] })
+  const { server, url } = await createServer(new MemoryDatasets(), makeFakeActorum([]), teams)
+  try {
+    const created = await request(`${url}/v1/data/datasets`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'owner-1' },
+      body: { name: 'Shared and empty', modality: 'image', teamId: team.id },
+    })
+    assert.equal(created.status, 201)
+    assert.equal(created.body.dataset.sodalitasId, team.id)
+    assert.deepEqual(created.body.dataset.media, [])
+
+    const contributed = await request(`${url}/v1/data/datasets/${created.body.dataset.id}/media`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'member-2' },
+      body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] },
+    })
+    assert.equal(contributed.status, 201)
+    assert.equal(contributed.body.dataset.media.length, 1)
+    assert.equal(contributed.body.dataset.media[0].addedBy, 'member-2')
+  } finally {
+    await closeServer(server)
+  }
+})
+
 test('a stranger never sees another owner\'s datasets on either list route or get', async () => {
   // Extended for team sharing (noema-374): the owner holds a private dataset AND one shared
   // with a team. A stranger is in neither, and must still see nothing — the overlay adds the

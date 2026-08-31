@@ -1022,9 +1022,11 @@ export function createApiRouter(deps: {
 
   // POST /v1/data/datasets — create a Dataset via either v1 ingestion path (Q2): a
   // `source: 'upload'` body (media already dropped via `POST /storage/uploads/sign`) or a
-  // `source: 'generation'` body (media seeded from the caller's own completed Acta). The
-  // discriminant is validated server-side (CrystalApi.createDataset); a body matching
-  // neither shape 400s. An optional `teamId` shares the dataset with a Sodalitas the caller is
+  // `source: 'generation'` body (media seeded from the caller's own completed Acta) — or with
+  // NO media at all, by omitting `source`, leaving the dataset to be filled through the append
+  // route below. The discriminant is validated server-side (CrystalApi.createDataset); a
+  // `source` naming neither path 400s, as does one naming a path with nothing supplied for it.
+  // An optional `teamId` shares the dataset with a Sodalitas the caller is
   // a member of (validated through the same `_memberTeam` seam projects and collections use);
   // it is stored as `Dataset.sodalitasId`.
   router.post('/data/datasets', wrap(async (req, res) => {
