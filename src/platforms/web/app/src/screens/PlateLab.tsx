@@ -16,18 +16,21 @@ const BEATS = [
   {
     id: 'explore',
     n: '01',
+    align: 'left',
     title: 'Never face a blank prompt',
     text: 'Pick the identities you like and a line of your own. Muse keeps making inside that world — the content varies, the taste does not. You curate instead of composing, which is the part that actually stops people.',
   },
   {
     id: 'train',
     n: '02',
+    align: 'right',
     title: 'Train a visual identity',
     text: 'Teach a model the hand your work is in, and keep the model.',
   },
   {
     id: 'run',
     n: '03',
+    align: 'left',
     title: 'Build a workflow worth keeping',
     text: 'Chain the steps once and run them forever. Publish it and other people can run it too.',
   },
@@ -117,12 +120,16 @@ export function PlateLab() {
     return mode === 'lock' ? <ScrollStage hold={deckHold(slots.length)}>{el}</ScrollStage> : el;
   };
 
-  const beat = (node: ReactNode, key: string) =>
-    mode === 'lock' ? (
-      <ScrollStage key={key} hold={0.8}><div className="beat">{node}</div></ScrollStage>
+  // No two consecutive blocks sit the same way. Three centred beats in a row read as a template
+  // however good the sentences are; the page's rhythm is carried by where things sit.
+  const beat = (node: ReactNode, key: string, align: 'left' | 'right' | 'centre' = 'centre') => {
+    const inner = <div className={`beat beat-${align}`}>{node}</div>;
+    return mode === 'lock' ? (
+      <ScrollStage key={key} hold={0.8}>{inner}</ScrollStage>
     ) : (
-      <div key={key} className="cand-flow"><div className="beat">{node}</div></div>
+      <div key={key} className="cand-flow">{inner}</div>
     );
+  };
 
   return (
     <div className="lab">
@@ -198,6 +205,7 @@ export function PlateLab() {
               <p>{b.text}</p>
             </>,
             b.id,
+            b.align as 'left' | 'right',
           ),
         )}
 
@@ -301,6 +309,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
             </span>
           </>,
           'end',
+          'centre',
         )}
 
         <footer className="cand-foot">

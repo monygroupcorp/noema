@@ -37,13 +37,17 @@ export function LandingCatalog() {
           They move when we ship.
         </p>
 
-        <dl className="cat-stats">
-          <div><dt>{summary.workflows}</dt><dd>workflows</dd></div>
-          <div><dt>{summary.verbs.length}</dt><dd>things they do</dd></div>
-          <div><dt>{summary.modalities.length}</dt><dd>modalities</dd></div>
-          <div><dt>{summary.models}</dt><dd>models on the shelf</dd></div>
-          <div><dt>{summary.loras}</dt><dd>trained identities</dd></div>
-        </dl>
+      </div>
+
+      {/* The one moment on the page that raises its voice. These are the numbers the platform
+          actually earned, and whispering them at body scale was the page's own fault. */}
+      <dl className="cat-brag">
+        <div><dt>{summary.loras}</dt><dd>identities trained here</dd></div>
+        <div><dt>{summary.workflows}</dt><dd>workflows, doing {summary.verbs.length} different things</dd></div>
+        <div><dt>{summary.models}</dt><dd>on the shelf, across {summary.modalities.length} modalities</dd></div>
+      </dl>
+
+      <div className="cat-in">
 
         <div className="cat-cols">
           <div className="cat-col">
