@@ -5,8 +5,13 @@ import {
   impetusPerSecondFromHourly, impetusForPodMs, computeBootCostImpetus, bootShare,
   tierOf, impetusFor, modoHostFor,
   REFERENCE_COST_PER_HR, RESERVE_SAFETY_FACTOR, GENERIC_RESERVE_IMPETUS, reservationImpetus,
+  reserveHeadroomImpetus,
 } from '../../../src/ledger/rates.js'
 import type { Hospitium } from '../../../src/types/hospitium.js'
+import type { Essentia } from '../../../src/types/essendi.js'
+import {
+  ESSENTIA_RUNMAKE_SD15, ESSENTIA_RUNMAKE_KREA_TURBO, ESSENTIA_RUNMAKE_ZIMAGE_TURBO,
+} from '../../../src/crystal/seeds/essentiae.js'
 
 test('IMPETUS_USD_RATE matches the documented unit (1pt = $0.000337)', () => {
   assert.equal(IMPETUS_USD_RATE, 0.000337)
@@ -183,4 +188,89 @@ test('GENERIC_RESERVE_IMPETUS sits above the observed cold-start maximum and und
   assert.equal(GENERIC_RESERVE_IMPETUS, 900n)
   assert.ok(GENERIC_RESERVE_IMPETUS > 511n)    // highest cold wall-clock observed, in seconds
   assert.ok(GENERIC_RESERVE_IMPETUS < 1800n)   // the default maxJobSeconds ceiling
+})
+
+// ── Per-flow calibration vs the generic bound ────────────────────────────────
+//
+// Two things are pinned here. First, that a flow carrying its own `pretium` reserves the
+// number its curve was fitted to produce, so a later edit to the seed has to restate the
+// intent rather than drift the money quietly. Second, the arithmetic that decides how wide
+// a fan-out over that flow can run: a reservation is HELD for the whole run and released at
+// settlement, so `reserve × concurrentia` — not the collection's eventual cost — is what
+// must fit in the purse.
+
+/**
+ * `RunPodCursor.reserve()`'s precedence, minus the `impetusFixum` branch (no seeded pod
+ * flow declares one): the flow's own curve when it has one and its terms resolve, the
+ * generic bound otherwise. Restated here so a seed can be asserted end-to-end.
+ */
+function reserveFor(essentia: Essentia, aditus: Record<string, unknown> = {}): bigint {
+  if (!essentia.pretium) return GENERIC_RESERVE_IMPETUS
+  return reservationImpetus({ pretium: essentia.pretium, forma: essentia.aditus, aditus })
+    ?? GENERIC_RESERVE_IMPETUS
+}
+
+test('a calibrated flow reserves from its own curve, not the generic bound', () => {
+  // krea-turbo at its declared defaults (8 steps, 1024²):
+  //   2 × (208 + 1.75×8 + 13.35×1.048576) = 471.997 → 472.
+  assert.equal(reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO), 472n)
+  assert.ok(reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO) < GENERIC_RESERVE_IMPETUS)
+
+  // sd1-5, the other calibrated flow: 2 × (66 + 1.0×20) = 172.
+  assert.equal(reserveFor(ESSENTIA_RUNMAKE_SD15), 172n)
+})
+
+test("krea-turbo's reserve keeps ~2x margin over the cold cost it was fitted to", () => {
+  // The measured shape: a run that has to pull the weights bills ~222 billed seconds
+  // (≡ impetus on the pod path), a run landing on a pod that already holds them ~14.
+  const observedCold = 222n
+  assert.ok(reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO) >= observedCold * BigInt(RESERVE_SAFETY_FACTOR))
+
+  // An under-reservation is the failure that costs real GPU time (`Cursor overcharge` fires
+  // at settlement, after the run has executed), so the margin has to survive raising either
+  // variable input — not just hold at the defaults.
+  const wide = reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO, { width: 2048, height: 2048 })
+  assert.equal(wide, 556n)
+  assert.ok(wide >= (208n + 14n * 4n) * 2n, '4× the pixels: execution term scales, base does not')
+
+  const deep = reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO, { steps: 40 })
+  assert.equal(deep, 584n)
+  assert.ok(deep >= (208n + 14n * 5n) * 2n, '5× the steps: execution term scales, base does not')
+
+  // Still far under the job-timeout ceiling that clamps `reserve()`, so the clamp never binds.
+  assert.ok(deep < 1800n)
+})
+
+test('an uncalibrated flow falls back to the generic bound', () => {
+  // z-image-turbo is krea-turbo's nearest sibling — same substrate class, same 8-step
+  // distilled shape — and still reserves generically: a curve is fitted from a flow's OWN
+  // runs, never inherited from a similar one.
+  assert.equal(ESSENTIA_RUNMAKE_ZIMAGE_TURBO.pretium, undefined)
+  assert.equal(reserveFor(ESSENTIA_RUNMAKE_ZIMAGE_TURBO), GENERIC_RESERVE_IMPETUS)
+})
+
+test('reserveHeadroomImpetus: a fan-out needs reserve × concurrentia in the purse', () => {
+  const perRun = reserveFor(ESSENTIA_RUNMAKE_KREA_TURBO)
+  assert.equal(reserveHeadroomImpetus(perRun, 1), 472n)
+  assert.equal(reserveHeadroomImpetus(perRun, 2), 944n)
+  assert.equal(reserveHeadroomImpetus(perRun, 8), 3776n)
+
+  // The headroom is set by the reserve, not by what the pieces cost. A collection whose
+  // pieces mostly land warm (~14 each) still has to fund the full cold hold per slot,
+  // because every dispatch reserves before it knows where it will land.
+  assert.ok(reserveHeadroomImpetus(perRun, 8) > 8n * 14n)
+
+  // Calibration is what buys width: the same purse that funds N slots on the generic bound
+  // funds nearly 2N on the fitted curve.
+  const generic = reserveHeadroomImpetus(GENERIC_RESERVE_IMPETUS, 8)
+  assert.ok(reserveHeadroomImpetus(perRun, 15) < generic)
+})
+
+test('reserveHeadroomImpetus: degenerate widths and holds are 0, never negative', () => {
+  assert.equal(reserveHeadroomImpetus(472n, 0), 0n)
+  assert.equal(reserveHeadroomImpetus(472n, -1), 0n)
+  assert.equal(reserveHeadroomImpetus(472n, Number.NaN), 0n)
+  assert.equal(reserveHeadroomImpetus(0n, 4), 0n)
+  // Fractional concurrency floors — a half slot is not a slot.
+  assert.equal(reserveHeadroomImpetus(472n, 2.9), 944n)
 })

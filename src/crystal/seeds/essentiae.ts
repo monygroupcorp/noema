@@ -105,8 +105,8 @@ export const ESSENTIA_RUNMAKE_SD15: Essentia = {
   // perMegapixelSeconds is deliberately absent: every run in the sample is 512², so there
   // is no resolution variance to fit and a coefficient would be invented rather than
   // measured. At the declared defaults this reserves 172 impetus (≈$0.058).
-  // The only flow with a large enough sample to fit — every other flow reserves the
-  // generic bound until its own runs accumulate.
+  // A flow reserves `GENERIC_RESERVE_IMPETUS` until it has enough of its own runs to fit a
+  // curve like this one; `krea-turbo` is the other flow that has reached that point.
   pretium: {
     baseSeconds: 66,
     perStepSeconds: 1.0,
@@ -290,6 +290,44 @@ export const ESSENTIA_RUNMAKE_KREA_TURBO: Essentia = {
     seedPlaceholder: 88888888,
     privateMode: false,
     vramGb: 24,
+  },
+
+  // Cost curve, fitted from this flow's own settled runs at the declared defaults
+  // (8 steps, 1024²). The observed shape is two-tier: a run whose pod has no weights yet
+  // settles around 222, a run landing on a pod that already holds them around 14. Settlement
+  // on the pod path is one impetus per billed second, so those are seconds directly — the
+  // curve's own units, no conversion.
+  //
+  // The ~208 difference is this flow's cold overhead. It is NOT pod provisioning: the billed
+  // window is the runner's job clock, which opens once the runner accepts the job, so RunPod
+  // boot and SSH bootstrap sit outside it. What is inside is node install, ComfyUI restart,
+  // and the pull of a 12.9B unet plus text encoder and VAE onto a fresh disk — download, not
+  // compute. That is `baseSeconds`; the ~14 is graph execution.
+  //
+  // Splitting the execution term: an additive curve cannot express the steps × megapixels
+  // product a sampler actually costs, and one operating point cannot separate the two
+  // coefficients. So each variable term is set to reproduce the WHOLE measured execution on
+  // its own — 14/8 per step, 14/1.048576 per megapixel — which keeps the curve an upper
+  // bound when either input is raised above the defaults. The price is that execution is
+  // counted twice at the defaults (28 against a measured 14); since execution is ~6% of the
+  // cold total, that costs ~6% of the reserve. Omitting the resolution term as `sd1-5` does
+  // is only safe where the sample has no resolution range to speak of — this flow's 24GB pod
+  // puts 2048² within reach, so the term stays.
+  //
+  // At the declared defaults this reserves 472 impetus (≈$0.16) against a ~222 measured cold
+  // run — 2.1× the worst case observed, and roughly half the generic bound, so a given purse
+  // sustains about twice the `concurrentia` (see `reserveHeadroomImpetus`). It holds its
+  // ~2× margin as either input is raised: ~2.1× at 2048², ~2.1× at 40 steps. Far enough out
+  // (40 steps AND 4096²) the product term outruns an additive curve, but so does the generic
+  // bound — that corner is held by the `maxJobSeconds` ceiling, not by any reservation model.
+  //
+  // `baseSeconds` is deliberately the FULL cold overhead and is not amortised across a
+  // collection: concurrent dispatches all miss `Praefectus.findWarm` together and each pay
+  // their own download.
+  pretium: {
+    baseSeconds: 208,
+    perStepSeconds: 1.75,
+    perMegapixelSeconds: 13.35,
   },
 
   natum: new Date('2026-06-26'),
