@@ -6,23 +6,38 @@
   margin:0 0 var(--s4);max-width:16ch}
 .modes .modes-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
 
-.modes .modes-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s6);margin-top:var(--s10)}
-.modes .mode{display:block;text-decoration:none;color:inherit}
-.modes .mode-shot{display:block;width:100%;aspect-ratio:16/10;border-radius:var(--r-lg);
-  overflow:hidden;object-fit:cover;object-position:top left;border:1px solid var(--hair);
-  background:var(--panel)}
-.modes .mode-empty{display:grid;place-items:center;border-style:dashed;border-color:var(--faint);
-  padding:var(--s5);text-align:center}
-.modes .mode-empty .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.05em;line-height:1.6}
-.modes .mode-meta{display:block;margin-top:var(--s4)}
-.modes .mode-meta h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s2)}
-.modes .mode-meta p{color:var(--muted);font-size:var(--fs-s);line-height:1.55;margin:0}
-.modes a.mode:hover .mode-shot{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+/* the rooms ride the same deck the plates do — one card at a time, the top sliding off to
+   uncover the next. The screen fills the card; its name sits on a plate over the bottom, the
+   way a caption sits on a photograph rather than under it. */
+.deck-modes{margin-top:var(--s10)}
+.deck-modes .deck-card{background:var(--panel)}
+.modes .mode-shot{position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;object-position:top left}
+.modes .mode-empty{display:grid;place-items:center;padding:var(--s7);text-align:center;
+  background:var(--raised)}
+.modes .mode-empty .mono{color:var(--muted);font-size:var(--fs-s);letter-spacing:.05em;line-height:1.7}
+
+.modes .mode-plate{position:absolute;left:0;right:0;bottom:0;z-index:2;display:block;
+  padding:var(--s9) var(--s7) var(--s6);
+  background:linear-gradient(to top,var(--bg) 12%,transparent)}
+.modes .mode-name{display:block;font-size:clamp(20px,2.4vw,32px);letter-spacing:-.03em;
+  font-weight:600;color:var(--text)}
+.modes .mode-line{display:block;color:var(--muted);font-size:clamp(13px,1.3vw,16px);
+  line-height:1.5;margin-top:var(--s2);max-width:46ch}
+/* the rooms, reachable. Always fully visible, unlike the cards they name. */
+.modes .modes-links{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s6);margin-top:var(--s7)}
+.modes .modes-links a{color:var(--muted);font-size:var(--fs-base);text-decoration:none;
+  padding:var(--s2) 0;border-bottom:1px solid transparent}
+.modes .modes-links a:hover{color:var(--text);border-bottom-color:var(--accent)}
 
 /* the run demonstration — the product's own states, walked. Labelled, and carrying none of the
    numbers a real run reports, so it cannot be mistaken for one. */
-.modes .mode-run{position:relative;display:grid;grid-template-rows:auto auto auto 1fr auto;
-  gap:var(--s4);padding:var(--s6);background:var(--panel);border-style:solid}
+/* the run sits as a panel inside the frame rather than stretching to fill it — a card the size
+   of a banner with four rows of interface in it reads as a broken layout, not a demonstration. */
+.modes .mode-run{position:absolute;inset:0;display:grid;place-items:center;
+  padding:var(--s7) var(--s7) calc(var(--s10) + var(--s7));background:var(--raised)}
+.modes .run-panel{width:min(100%,520px);display:grid;gap:var(--s4);
+  border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);padding:var(--s6)}
 .modes .run-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
 .modes .run-flow{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
 .modes .run-chip{font-size:var(--fs-xs);letter-spacing:.08em;border-radius:var(--r-pill);
@@ -34,7 +49,7 @@
 .modes .run-bar > span{display:block;height:100%;background:var(--accent);
   transition:width var(--dur-slow) var(--ease)}
 .modes .run-out{border:1px solid var(--hair);border-radius:var(--r-sm);background:var(--raised);
-  min-height:0;display:grid;place-items:center;transition:border-color var(--dur) var(--ease)}
+  aspect-ratio:2;display:grid;place-items:center;transition:border-color var(--dur) var(--ease)}
 .modes .run-out[data-done="true"]{border-color:color-mix(in srgb,var(--good) 40%,var(--hair))}
 /* --faint on --raised is 4.24:1 at this size, under AA. --muted clears it. */
 .modes .run-out .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em}
@@ -42,5 +57,8 @@
    worse than no label, and this one has to stay readable. */
 .modes .run-mark{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.05em}
 
-@media(max-width:960px){.modes .modes-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:640px){.modes .modes-grid{grid-template-columns:1fr}}
+@media(max-width:640px){
+  .modes .mode-plate{padding:var(--s8) var(--s5) var(--s4)}
+  .modes .mode-run{padding:var(--s5) var(--s5) var(--s10)}
+  .modes .run-panel{padding:var(--s5)}
+}

@@ -228,7 +228,7 @@ export function PlateLab() {
           </div>
         </section>
 
-        <LandingModes />
+        <LandingModes stagger={stagger} progress={mode} />
 
         <LandingOpen />
 
