@@ -600,20 +600,37 @@ function buildHardChecks(state: RunState, candidatesCompleted: number): HardChec
   return rows
 }
 
-function printHardChecks(rows: HardCheckRow[]): void {
+/** A dry pass never fires, so nothing downstream of the quote is EXERCISED. Reporting those
+ *  checks as FAIL says the run was driven and came up short, which is not what happened — and
+ *  the walk-board row built from that count would carry the same untruth onto the board. A check
+ *  that was never reached reports SKIP, and the verdict says DRY. (DOCTRINE §24: a receipt that
+ *  reads as a result it did not produce is a false receipt.) */
+function printHardChecks(rows: HardCheckRow[], apply: boolean): void {
   console.log('\n--- HARD CHECKS (spec §10) ---')
   for (const r of rows) {
-    console.log(`${r.pass ? 'PASS' : 'FAIL'}  #${r.n}  ${r.name}  — ${r.observed}`)
+    const mark = r.pass ? 'PASS' : apply ? 'FAIL' : 'SKIP'
+    const observed = r.pass || apply ? r.observed : 'not exercised — dry pass fired nothing'
+    console.log(`${mark}  #${r.n}  ${r.name}  — ${observed}`)
   }
   const allPass = rows.every((r) => r.pass)
+  if (!apply) {
+    console.log('\nRUN: DRY — planned and quoted, fired nothing. No hard check below #9 can be earned without --apply.')
+    return
+  }
   console.log(allPass ? '\nRUN: PASS (all 9 hard checks)' : '\nRUN: PARTIAL — not all hard checks passed')
 }
 
-function walkBoardRow(state: RunState, rows: HardCheckRow[]): string {
+function walkBoardRow(state: RunState, rows: HardCheckRow[], apply: boolean): string {
   const date = state.startedAt.slice(0, 10)
   const passCount = rows.filter((r) => r.pass).length
   const defects = state.defects.length
-  return `- [AGENT] ${date} · landing-dataset-walk drove the full generate→curate→dataset→caption→train→plates sequence over /v1 · run ${state.runId}, ${TOTAL_CANDIDATES}-candidate collection, klein-4b/${TRAIN_STEPS}-step training · ${passCount}/9 hard checks passed, spend ${totalSpent(state)}/${state.ceilingImpetus} impetus · ${defects} defect(s) filed`
+  const spent = totalSpent(state)
+  // The row is written to be pasted onto the walk board verbatim, so it states what this
+  // invocation actually did. A dry pass drove the quote path and nothing else.
+  const did = apply
+    ? `drove the full generate→curate→dataset→caption→train→plates sequence over /v1 · ${passCount}/9 hard checks passed`
+    : `DRY PASS — resolved the contract and quoted phase A over /v1, fired nothing · hard checks not exercised`
+  return `- [AGENT] ${date} · landing-dataset-walk ${did} · run ${state.runId}, ${TOTAL_CANDIDATES}-candidate collection, klein-4b/${TRAIN_STEPS}-step training · spend ${spent}/${state.ceilingImpetus} impetus · ${defects} defect(s) filed`
 }
 
 // =============================================================================
@@ -1445,8 +1462,10 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
     }
 
     const rows = buildHardChecks(state, state.pieces?.length ?? 0)
-    printHardChecks(rows)
-    console.log('\n' + walkBoardRow(state, rows))
+    // The smoke fixture drives every phase for real (against fakes) — `--plan-only` returned
+    // above — so this receipt is an applied one.
+    printHardChecks(rows, true)
+    console.log('\n' + walkBoardRow(state, rows, true))
     console.log(`\nDEFECTS FILED: ${state.defects.length}`)
     for (const d of state.defects) console.log(`  - ${d.route}: ${d.observation}`)
   } finally {
@@ -1547,8 +1566,8 @@ async function main(): Promise<void> {
   })
 
   const rows = buildHardChecks(state, state.pieces?.length ?? 0)
-  printHardChecks(rows)
-  console.log('\n' + walkBoardRow(state, rows))
+  printHardChecks(rows, opts.apply)
+  console.log('\n' + walkBoardRow(state, rows, opts.apply))
   console.log(`\nDEFECTS FILED: ${state.defects.length}`)
   for (const d of state.defects) console.log(`  - ${d.route}: ${d.observation}\n    why: ${d.whyDefect}`)
   await writeFile(new URL(`landing-${runId}-final.json`, stateDir()), JSON.stringify({ state, hardChecks: rows }, null, 2))
