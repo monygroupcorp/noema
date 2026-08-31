@@ -149,11 +149,11 @@ class MemCollectionum implements Collectionum {
   async listByStatus(status: CollectioStatus): Promise<Collectiones> {
     return [...this.store.values()].filter((c) => c.status === status)
   }
-  async create(input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>) {
+  async create(input: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal'>) {
     const full: Collectio = {
       ...input,
       id: randomUUID(),
-      acta: [], completae: 0, fractae: 0, reiectae: 0, impetusTotal: 0n,
+      acta: [], completae: 0, fractae: 0, pendentes: 0, reiectae: 0, impetusTotal: 0n,
       natum: new Date(),
     }
     this.store.set(full.id, full)

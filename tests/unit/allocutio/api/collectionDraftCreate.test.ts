@@ -59,7 +59,7 @@ function makeCollectionum(): Collectionum & { store: Map<string, Collectio> } {
       return [...store.values()].filter((c) => c.status === status)
     },
     async create(input) {
-      const c = { ...input, id: randomUUID(), natum: new Date(), acta: [], completae: 0, fractae: 0, reiectae: 0, impetusTotal: 0n } as Collectio
+      const c = { ...input, id: randomUUID(), natum: new Date(), acta: [], completae: 0, fractae: 0, pendentes: 0, reiectae: 0, impetusTotal: 0n } as Collectio
       store.set(c.id, c)
       return c
     },

@@ -255,14 +255,33 @@ export interface Collection {
    *  Derived on read from the acta list, not stored. Only populated by `getCollection`
    *  (the run screen's poll target); absent elsewhere (e.g. `listCollections`). */
   inFlight?: number
-  /** Completed acta held for reviewer approval (`reviewOutcome: 'pending'`) — not yet
-   *  counted in `completed`. Derived on read; only populated by `getCollection`. */
-  pendingReview?: number
-  /** Pieces completed so far (approved, when review is on). */
+
+  // The piece counters below are the collection's own bookkeeping, and they answer one
+  // question each so a poller does not have to infer anything from behaviour:
+  //
+  //   completed      generated AND accepted — counts toward `total`
+  //   pendingReview  generated, awaiting a reviewer's decision — does not yet count
+  //   failed         did not generate
+  //   rejected       generated, then declined by a reviewer — re-rolled, not counted
+  //
+  // `rejected` raises the dispatch budget by exactly the piece it removed from the
+  // target, so it cancels out and every dispatched piece is in exactly one bucket:
+  //
+  //   completed + pendingReview + failed + inFlight + <not yet dispatched> === total
+  //
+  // A caller therefore computes what is outstanding as
+  // `total - completed - pendingReview - failed - inFlight`, and the five sum to `total`.
+
+  /** Pieces generated and held for a reviewer's decision (`reviewOutcome: 'pending'`) —
+   *  real, paid-for work, not yet counted in `completed`. Always 0 while review is off. */
+  pendingReview: number
+  /** Pieces generated AND accepted — approved by a reviewer when review is on, every
+   *  successful generation when it is off. This is what counts toward `total`. */
   completed: number
   /** Pieces that failed to generate so far. */
   failed: number
-  /** Pieces a reviewer rejected so far (distinct from failed). */
+  /** Pieces a reviewer rejected so far (distinct from failed — the piece generated,
+   *  and a replacement is dispatched for it). */
   rejected: number
   /** Total impetus across completed pieces, serialised as a string. */
   cost?: string

@@ -153,7 +153,15 @@ const COLLECTION_STATUS_MAP: Record<CollectioStatus, CollectionStatus> = {
   cancellata: 'cancelled',
 }
 
-/** Project a Collectio onto its public, JSON-safe Collection shape. Pure. */
+/**
+ * Project a Collectio onto its public, JSON-safe Collection shape. Pure.
+ *
+ * The piece counters are projected straight off the record — `completae` is
+ * "generated and accepted", `pendentes` is "generated, awaiting a reviewer",
+ * `fractae` is "did not generate", `reiectae` is "generated, then declined".
+ * They are read from the ONE place that maintains them (the Collectio itself),
+ * so what a caller polls and what the collection records cannot disagree.
+ */
 export function toCollection(c: Collectio): Collection {
   const out: Collection = {
     id: c.id,
@@ -162,6 +170,7 @@ export function toCollection(c: Collectio): Collection {
     total: c.numerus,
     provenanceHash: c.provenanceHash,
     completed: c.completae,
+    pendingReview: c.pendentes ?? 0,
     failed: c.fractae,
     rejected: c.reiectae ?? 0,
   }

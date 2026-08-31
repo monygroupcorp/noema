@@ -162,8 +162,12 @@ Shipped this build-out (#1–#4, 2026-06-19):
 - ✅ **Imagined vs realized rarity** (#2) — `rarityReport()`: per-axis target (`TraitValor.rarity`,
   normalized) vs realized (counted from the stamped `attributes[]` of completed, non-rejected pieces).
   `GET /v1/collectiones/:id/rarity`. Drift is expected at low N.
-- ✅ progress (`completae`/`fractae`/`reiectae`/`numerus`), cost (`impetusTotal`) — surfaced via the
-  public `Collection` (`completed`/`failed`/`rejected`/`total`/`cost`) + observe.
+- ✅ progress (`completae`/`pendentes`/`fractae`/`reiectae`/`numerus`), cost (`impetusTotal`) — surfaced
+  via the public `Collection` (`completed`/`pendingReview`/`failed`/`rejected`/`total`/`cost`) + observe.
+  `completae` is *generated and accepted*; a piece held by `reviewEnabled` is *generated and awaiting a
+  decision* and counts in `pendentes` until a reviewer approves it (→ `completae`) or rejects it
+  (→ `reiectae`, which extends the dispatch budget by one). Every dispatched piece is in exactly one
+  counter, so `completed + pendingReview + failed + inFlight + outstanding = total`.
 
 ### 4e. Export + mint (agnostic metadata, projected on export)
 - **→ Now owned by the Publishing module** (`docs/spec/publishing.md`, finalized 2026-06-21): publishing owns

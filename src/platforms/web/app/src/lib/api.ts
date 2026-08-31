@@ -1534,11 +1534,15 @@ export interface Collection {
   // Acta dispatched but not yet settled (provisioning/executing). Only populated on the
   // single-collection GET (the run screen's poll target), not on the list endpoint.
   inFlight?: number;
-  // Completed acta parked for reviewer approval — not yet in `completed`. Only populated
-  // on the single-collection GET.
+  // Pieces generated and parked for a reviewer's decision — real work, not yet in
+  // `completed`. Approving one moves it to `completed`, rejecting one to `rejected`.
+  // Optional here only because an older server payload may omit it.
   pendingReview?: number;
+  // Pieces generated AND accepted — approved when review is on, every success when it is
+  // off. `completed + pendingReview + failed + inFlight + outstanding === total`.
   completed: number;
   failed: number;
+  // Generated, then declined by a reviewer — a replacement is dispatched for it.
   rejected: number;
   cost?: string;
   createdAt?: string;

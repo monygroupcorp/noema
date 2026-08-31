@@ -48,8 +48,8 @@ class MemCollectionum implements Collectionum {
     return filter?.status ? all.filter(c => c.status === filter.status) : all
   }
   async listByStatus(status: CollectioStatus) { return [...this.store.values()].filter(c => c.status === status) }
-  async create(c: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'reiectae' | 'impetusTotal'>) {
-    const full: Collectio = { ...c, id: randomUUID(), natum: new Date(), acta: [], completae: 0, fractae: 0, reiectae: 0, impetusTotal: 0n }
+  async create(c: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal'>) {
+    const full: Collectio = { ...c, id: randomUUID(), natum: new Date(), acta: [], completae: 0, fractae: 0, pendentes: 0, reiectae: 0, impetusTotal: 0n }
     this.store.set(full.id, full)
     return full
   }

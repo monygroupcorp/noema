@@ -845,14 +845,16 @@ const CollectionSchema: JsonSchema = {
         required: ['animaId', 'weight'],
       },
     },
-    completed: { type: 'number', description: 'Pieces completed so far (approved, when review is on).' },
+    inFlight: { type: 'number', description: 'Pieces dispatched but not yet settled — provisioning or executing. Returned by the single-collection GET only (the run screen’s poll target), not by the list endpoint.' },
+    pendingReview: { type: 'number', description: 'Pieces GENERATED and awaiting a reviewer’s decision. Real work that does not yet count toward `total`: approving one moves it to `completed`, rejecting one moves it to `rejected`. Always 0 when `reviewEnabled` is off.' },
+    completed: { type: 'number', description: 'Pieces GENERATED AND ACCEPTED — approved by a reviewer when `reviewEnabled` is on, every successful generation when it is off. This is what counts toward `total`.' },
     failed: { type: 'number', description: 'Pieces that failed to generate so far.' },
-    rejected: { type: 'number', description: 'Pieces a reviewer rejected so far (distinct from failed).' },
+    rejected: { type: 'number', description: 'Pieces a reviewer rejected so far — the piece generated, and a replacement is dispatched for it (distinct from failed).' },
     cost: { type: 'string', description: 'Total impetus across completed pieces, serialised as a string.' },
     createdAt: { type: 'string', format: 'date-time', description: 'When the collection started.' },
     completedAt: { type: 'string', format: 'date-time', description: 'When it finished (or was cancelled).' },
   },
-  required: ['id', 'status', 'modusId', 'total', 'provenanceHash', 'completed', 'failed', 'rejected'],
+  required: ['id', 'status', 'modusId', 'total', 'provenanceHash', 'completed', 'pendingReview', 'failed', 'rejected'],
 }
 
 /** The `{ collection }` envelope returned by the collection operations. */
@@ -2465,7 +2467,7 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/collectiones/:id',
-      summary: 'Fetch one Collection by id — progress (completed/failed/total), status, cost. Owner-scoped (404 if not yours).',
+      summary: 'Fetch one Collection by id — status, cost, and the piece counters. Every dispatched piece is in exactly one of `completed`, `pendingReview`, `failed`, `rejected` or `inFlight`, and `rejected` raises the dispatch budget by the piece it removed from the target, so `completed + pendingReview + failed + inFlight + outstanding = total`. Owner-scoped (404 if not yours).',
       auth: true,
       response: CollectionEnvelopeSchema,
     },
