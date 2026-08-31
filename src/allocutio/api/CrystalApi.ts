@@ -2140,7 +2140,11 @@ export class CrystalApi {
   /**
    * Create a project the caller owns. Projects require an identified (animaId)
    * caller — the account IS the ownership boundary (there is no anon project).
-   * If `teamId` is given the caller must be a member of that team.
+   * If `teamId` is given the caller must be a member of that team, validated through the same
+   * `_memberTeam` seam `collect` and `createDataset` validate theirs through — so a caller can
+   * only share with a team they themselves belong to, and it is stored as
+   * `Provincia.sodalitasId`: every member of it may then read the project and file assets into
+   * it (ADR-0015). Absent → owner-only.
    */
   async createProject(
     auctor: AuctorKey,
@@ -2160,18 +2164,32 @@ export class CrystalApi {
     return toProject(created)
   }
 
-  /** List the projects the caller owns. */
+  /** List the projects the caller may read — their own UNION the projects shared with a team
+   *  they are a member of (`Provincia.sodalitasId`). The access predicate goes INTO the store
+   *  query, so one filtered result set is ordered rather than a page being post-filtered, and
+   *  the caller's team ids are resolved ONCE here rather than once per row. */
   async listProjects(auctor: AuctorKey): Promise<Project[]> {
     const animaId = this._projectAnimaId(auctor)
-    return (await this._projectStore().listByOwner(animaId)).map(toProject)
+    const sodalitasIds = await this._callerTeamIds(auctor)
+    return (await this._projectStore().list({ animaId, sodalitasIds })).map(toProject)
   }
 
-  /** Fetch one owned project, or 404. */
+  /** Fetch one project the caller may read — theirs, or shared with a team they belong to — or
+   *  404. */
   async getProject(auctor: AuctorKey, id: string): Promise<Project> {
-    return toProject(await this._ownedProject(auctor, id))
+    return toProject(await this._readableProject(auctor, id))
   }
 
-  /** Patch a project's metadata (name/desc/glyph/color/teamId). Owner-only. */
+  /**
+   * Patch a project's metadata (name/desc/glyph/color/teamId). OWNER-ONLY, and narrower than the
+   * read gate on purpose.
+   *
+   * A metadata patch neither adds to the project nor is confined to it: `teamId` IS the sharing
+   * decision, so a member reaching this verb could re-point the project at a team of their own or
+   * clear the reference and lock every other member out. The overlay adds readers and
+   * contributors, not a principal who may re-draw the boundary that admitted them. A member gets
+   * the same `not_found` a stranger gets, so the narrower refusal leaks nothing either.
+   */
   async updateProject(
     auctor: AuctorKey,
     id: string,
@@ -2190,22 +2208,35 @@ export class CrystalApi {
     return toProject(next)
   }
 
-  /** Delete a project. Owner-only. Filed assets are untouched (holdings are references). */
+  /** Delete a project. OWNER-ONLY — the destructive verb, on the owner's side of the same line
+   *  `archiveDataset` sits on. Filed assets are untouched (holdings are references). */
   async deleteProject(auctor: AuctorKey, id: string): Promise<void> {
     await this._ownedProject(auctor, id)
     await this._projectStore().remove(id)
   }
 
-  /** File an asset reference into a project's holdings (idempotent). Owner-only. */
+  /**
+   * File an asset reference into a project's holdings (idempotent). Owner OR a member of the
+   * team the project is shared with — this is the CONTRIBUTION verb, the additive half of the
+   * line `addDatasetMedia` draws: a member adds to the shared workspace lens.
+   *
+   * FILING IS A REFERENCE, NOT A GRANT, in both directions. It does not widen what the filed id
+   * resolves to for anyone — each asset store keeps its own gate, so a dataset shared with
+   * nobody stays unreadable to every member who can see the project that names it — and for the
+   * same reason it is not a place to leak one: an id filed here is a name, and a name the caller
+   * may not resolve is still a name they may not resolve.
+   */
   async fileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
     if (!assetId) throw Errors.inputMalformed('assetId is required')
     const field = HOLDING_FIELD[resKind(kind)]
-    const project = await this._ownedProject(auctor, id)
+    const project = await this._readableProject(auctor, id)
     if (project[field].includes(assetId)) return toProject(project)
     return toProject(await this._projectStore().update(id, { [field]: [...project[field], assetId] }))
   }
 
-  /** Remove an asset reference from a project's holdings (idempotent). Owner-only. */
+  /** Remove an asset reference from a project's holdings (idempotent). OWNER-ONLY: the line is
+   *  adds-to vs. removes-from, and unfiling is the removal. A member files work into the shared
+   *  lens; deciding what leaves it stays with the owner. */
   async unfileAsset(auctor: AuctorKey, id: string, kind: string, assetId: string): Promise<Project> {
     const field = HOLDING_FIELD[resKind(kind)]
     const project = await this._ownedProject(auctor, id)
@@ -2355,9 +2386,13 @@ export class CrystalApi {
    * precedent). Resolved from the AUTHENTICATED caller, never from a request parameter.
    *
    * Empty for an anonymous caller and for a deployment with no team store wired: with no team
-   * ids, every dataset seam below reads exactly what it read before this field existed.
+   * ids, every seam that consults it reads exactly what it read before the overlay existed.
+   *
+   * ONE helper for every overlay that needs it (datasets and projects both), because "the teams
+   * this caller belongs to" is one question with one answer — a second per-noun copy would be a
+   * second place for the two to disagree about what membership means.
    */
-  private async _datasetTeamIds(auctor: AuctorKey): Promise<string[]> {
+  private async _callerTeamIds(auctor: AuctorKey): Promise<string[]> {
     if (!('animaId' in auctor) || !this.deps.sodalitatum) return []
     return (await this.deps.sodalitatum.listByMember(auctor.animaId)).map((t) => t.id)
   }
@@ -2368,7 +2403,7 @@ export class CrystalApi {
    *  filtered result set is paginated rather than a page being post-filtered. */
   async listDatasets(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
     const owner = this._datasetOwner(auctor)
-    const sodalitasIds = await this._datasetTeamIds(auctor)
+    const sodalitasIds = await this._callerTeamIds(auctor)
     const { entries, nextCursor } = await this._datasetsStore().list({ owner, sodalitasIds, ...opts })
     const datasets = await Promise.all(entries.map((d) => this._resolveDatasetMedia(d)))
     return { datasets, ...(nextCursor ? { nextCursor } : {}) }
@@ -2378,7 +2413,7 @@ export class CrystalApi {
    *  picker's consumer. Same store, same scoping (own + team-shared), projected down. */
   async listDatasetSummaries(auctor: AuctorKey, opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: DatasetSummary[]; nextCursor?: string }> {
     const owner = this._datasetOwner(auctor)
-    const sodalitasIds = await this._datasetTeamIds(auctor)
+    const sodalitasIds = await this._callerTeamIds(auctor)
     const { entries, nextCursor } = await this._datasetsStore().listSummaries({ owner, sodalitasIds, ...opts })
     return { datasets: entries, ...(nextCursor ? { nextCursor } : {}) }
   }
@@ -3494,11 +3529,41 @@ export class CrystalApi {
     throw Errors.authForbidden('projects require an identified account')
   }
 
-  /** Resolve a project the caller owns, or 404. */
+  /** Resolve a project the caller OWNS OUTRIGHT, or 404 — the narrow gate the destructive
+   *  project verbs keep (`updateProject`, `deleteProject`, `unfileAsset`). */
   private async _ownedProject(auctor: AuctorKey, id: string): Promise<Provincia> {
     const animaId = this._projectAnimaId(auctor)
     const project = await this._projectStore().find(id)
     if (!project || project.animaId !== animaId) throw Errors.notFoundProject(id)
+    return project
+  }
+
+  /**
+   * May this caller reach this project — the owner, or a member of the team it is shared with?
+   *
+   * `_ownsCollection`/`_ownsDataset` verbatim in shape: the direct owner, then the `Sodalitas`
+   * overlay resolved through the team store. Absent `sodalitasId`, absent team store, or an
+   * anonymous caller all fall through to owner-only, so nothing a stranger could reach before
+   * this field was consulted becomes reachable now.
+   */
+  private async _ownsProject(auctor: AuctorKey, p: Provincia): Promise<boolean> {
+    if (!('animaId' in auctor)) return false
+    if (p.animaId === auctor.animaId) return true
+    if (p.sodalitasId === undefined) return false
+    const team = await this.deps.sodalitatum?.find(p.sodalitasId)
+    return team?.membra.includes(auctor.animaId) ?? false
+  }
+
+  /** Resolve a project the caller may reach — theirs, or shared with a team they belong to — or
+   *  404 (a caller with no claim on it gets not_found, not forbidden, so ids stay
+   *  non-enumerable). This is the READ gate and the CONTRIBUTE gate; `_ownedProject` above stays
+   *  the gate for the verbs that remove. */
+  private async _readableProject(auctor: AuctorKey, id: string): Promise<Provincia> {
+    // Anonymous (commitment/bursa) callers are refused here exactly as they always were —
+    // projects are animaId-keyed and the overlay does not change that.
+    this._projectAnimaId(auctor)
+    const project = await this._projectStore().find(id)
+    if (!project || !(await this._ownsProject(auctor, project))) throw Errors.notFoundProject(id)
     return project
   }
 

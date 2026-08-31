@@ -43,7 +43,7 @@ import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { mintOwnedPurse, reclaimOwnedPurse, redeemOwnedPurse } from '../../../src/crystal/ownedPurse.js'
 import { MemoryBursarium } from './_purseKit.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
-import type { Provincia, Provinciae, ProvinciaPatch, Provinciarum } from '../../../src/types/provincia.js'
+import type { Provincia, Provinciae, ProvinciaListOpts, ProvinciaPatch, Provinciarum } from '../../../src/types/provincia.js'
 import type { Sodalitas, Sodalitates, Sodalitatum } from '../../../src/types/sodalitas.js'
 import type { Tabula, Tabulae, Tabularum } from '../../../src/types/tabula.js'
 import type { Collectio, Collectiones, Collectionum, CollectioStatus } from '../../../src/types/collectio.js'
@@ -89,8 +89,17 @@ class MemProvinciarum implements Provinciarum {
     return p
   }
   async remove(id: string) { this.store.delete(id) }
+  // The access predicate MongoProvinciarum.list puts in the query: own UNION team-shared. The
+  // identities in this suite share no team, so it collapses to the owner filter — which is the
+  // point: the invariants below hold on the widened seam, not only on the narrow one.
+  async list(opts: ProvinciaListOpts): Promise<Provinciae> {
+    const teamIds = new Set(opts.sodalitasIds ?? [])
+    return [...this.store.values()].filter(
+      (p) => p.animaId === opts.animaId || (p.sodalitasId !== undefined && teamIds.has(p.sodalitasId)),
+    )
+  }
   async listByOwner(animaId: string): Promise<Provinciae> {
-    return [...this.store.values()].filter((p) => p.animaId === animaId)
+    return this.list({ animaId })
   }
 }
 
@@ -914,7 +923,7 @@ const COVERED_RESOURCES: Record<string, string[]> = {
   'not_found.dataset': ['_datasetOwner', 'getDataset'],
   'not_found.muse_piece': ['updateMusePiece', '_mutateMuseSession'],
   'not_found.muse_session': ['_museSessionOwner', '_museSession'],
-  'not_found.project': ['_ownedProject'],
+  'not_found.project': ['_ownedProject', '_ownsProject', '_readableProject'],
   'not_found.run': ['_owns'],
   'not_found.tabula': ['_ownedTabula'],
   'not_found.team': ['_memberTeam'],

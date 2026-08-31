@@ -11888,7 +11888,7 @@ Remove a member from a team (the founder cannot be removed). Member-scoped.
 
 ### GET /v1/me/projects
 
-List the caller's projects (Provincia) — account-owned workspace lenses. Identified callers only.
+List the projects the caller can read (Provincia) — their own, plus any shared with a Team they belong to. Identified callers only.
 
 - **Auth:** required
 
@@ -11902,7 +11902,7 @@ List the caller's projects (Provincia) — account-owned workspace lenses. Ident
       "type": "array",
       "items": {
         "type": "object",
-        "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+        "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
         "properties": {
           "id": {
             "type": "string"
@@ -11950,7 +11950,7 @@ List the caller's projects (Provincia) — account-owned workspace lenses. Ident
           },
           "teamId": {
             "type": "string",
-            "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+            "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
           },
           "createdAt": {
             "type": "string",
@@ -12028,7 +12028,7 @@ Create a project owned by the caller. Holdings start empty; assets are filed in 
   "properties": {
     "project": {
       "type": "object",
-      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
       "properties": {
         "id": {
           "type": "string"
@@ -12076,7 +12076,7 @@ Create a project owned by the caller. Holdings start empty; assets are filed in 
         },
         "teamId": {
           "type": "string",
-          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
         },
         "createdAt": {
           "type": "string",
@@ -12107,7 +12107,7 @@ Create a project owned by the caller. Holdings start empty; assets are filed in 
 
 ### GET /v1/me/projects/:id
 
-Fetch one owned project by id (404 if not the owner).
+Fetch one project by id — the owner, or a member of the Team it is shared with (404 for anyone else).
 
 - **Auth:** required
 
@@ -12119,7 +12119,7 @@ Fetch one owned project by id (404 if not the owner).
   "properties": {
     "project": {
       "type": "object",
-      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
       "properties": {
         "id": {
           "type": "string"
@@ -12167,7 +12167,7 @@ Fetch one owned project by id (404 if not the owner).
         },
         "teamId": {
           "type": "string",
-          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
         },
         "createdAt": {
           "type": "string",
@@ -12237,7 +12237,7 @@ Patch project metadata (name/desc/glyph/color/teamId). Owner-only.
   "properties": {
     "project": {
       "type": "object",
-      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
       "properties": {
         "id": {
           "type": "string"
@@ -12285,7 +12285,7 @@ Patch project metadata (name/desc/glyph/color/teamId). Owner-only.
         },
         "teamId": {
           "type": "string",
-          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
         },
         "createdAt": {
           "type": "string",
@@ -12322,7 +12322,7 @@ Delete a project. Owner-only. Filed assets are untouched (holdings are reference
 
 ### POST /v1/me/projects/:id/holdings
 
-File an asset reference (dataset|model|collection) into the project. Owner-only; idempotent.
+File an asset reference (dataset|model|collection) into the project. Owner or a member of the Team it is shared with; idempotent. Filing is a reference, not a grant — it does not widen who can read the asset.
 
 - **Auth:** required
 
@@ -12362,7 +12362,7 @@ File an asset reference (dataset|model|collection) into the project. Owner-only;
   "properties": {
     "project": {
       "type": "object",
-      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
       "properties": {
         "id": {
           "type": "string"
@@ -12410,7 +12410,7 @@ File an asset reference (dataset|model|collection) into the project. Owner-only;
         },
         "teamId": {
           "type": "string",
-          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
         },
         "createdAt": {
           "type": "string",
@@ -12453,7 +12453,7 @@ Unfile an asset reference from the project. Owner-only; idempotent.
   "properties": {
     "project": {
       "type": "object",
-      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies.",
+      "description": "A project (Provincia) — an account-owned workspace lens. Holdings are id references, never copies: filing an asset here does not change who may read that asset.",
       "properties": {
         "id": {
           "type": "string"
@@ -12501,7 +12501,7 @@ Unfile an asset reference from the project. Owner-only; idempotent.
         },
         "teamId": {
           "type": "string",
-          "description": "Optional referenced Team (Sodalitas) id — the shared member set."
+          "description": "Optional referenced Team (Sodalitas) id — every member of it may read the project and file assets into it. An overlay on the owner, not a second owner."
         },
         "createdAt": {
           "type": "string",
