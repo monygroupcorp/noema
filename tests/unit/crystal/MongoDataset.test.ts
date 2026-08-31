@@ -55,6 +55,22 @@ test('findOwned returns null to anyone else — the predicate is in the query', 
   assert.equal(await store.findOwned('nope', base.owner), null, 'and null for an id that names nothing')
 })
 
+test('findOwned admits a dataset shared with one of the caller\'s teams (noema-384)', async () => {
+  const d = await store.create({ ...base, sodalitasId: 'team-1' })
+  assert.equal((await store.findOwned(d.id, 'anima-other', ['team-1']))?.id, d.id)
+  assert.equal((await store.findOwned(d.id, 'anima-other', ['team-9', 'team-1']))?.id, d.id)
+})
+
+test('findOwned: the team arm is the CALLER\'s teams, and absent it the read is owner-only', async () => {
+  const shared = await store.create({ ...base, sodalitasId: 'team-1' })
+  const unshared = await store.create({ ...base, name: 'unshared' })
+  assert.equal(await store.findOwned(shared.id, 'anima-other', ['team-9']), null, 'a team the caller is not in')
+  assert.equal(await store.findOwned(shared.id, 'anima-other', []), null, 'no teams at all')
+  assert.equal(await store.findOwned(shared.id, 'anima-other'), null, 'the argument omitted entirely')
+  assert.equal(await store.findOwned(unshared.id, 'anima-other', ['team-1']), null, 'a dataset shared with nobody')
+  assert.equal((await store.findOwned(unshared.id, base.owner, ['team-1']))?.id, unshared.id, 'the owner still reads their own')
+})
+
 test('findOwned admits a dataset whose access kind is public, in either shape', async () => {
   const flat = await store.create(base)
   const union = await store.create({ ...base, name: 'union' })

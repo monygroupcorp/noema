@@ -1,8 +1,10 @@
 # ADR-0014: Dataset ownership and team sharing
 
-- **Status:** **proposed — for rth's ruling.** Nothing here is settled. The code on
-  `noema-374-dataset-team-sharing` implements the decision below because a ticket asked for the
-  capability, not because this ADR has been accepted. If rth rules differently, the code moves.
+- **Status:** **proposed — for rth's ruling**, EXCEPT open question 2 (training on a shared
+  dataset), which rth **accepted on 2026-08-31**; it is recorded as ruled below and implemented.
+  The rest is not settled. The code on `noema-374-dataset-team-sharing` implements the decision
+  below because a ticket asked for the capability, not because this ADR has been accepted. If rth
+  rules differently, the code moves.
 - **Date:** 2026-08-31
 
 ## Context
@@ -43,10 +45,13 @@ on the owner, not a second owner.**
 1. **`Dataset.sodalitasId?: string`** — `Collectio.sodalitasId` reused verbatim in shape and in
    meaning. Absent means owner-only, which is every dataset that exists today. No new noun.
 
-2. **The overlay grants READ and CONTRIBUTE.** A member of the named team may:
+2. **The overlay grants READ and CONTRIBUTE** — and, since the ruling on open question 2 (rth,
+   2026-08-31), NAMING IT AS A RUN'S INPUT. A member of the named team may:
    - resolve the dataset (`getDataset`) and see it on both list routes;
    - append media to it (`POST /v1/data/datasets/:id/media`);
-   - attach and edit captionsets.
+   - attach and edit captionsets;
+   - name it in a run's `aditus` on a port declared `owned: { genus: 'dataset' }`, which resolves
+     through `Datasets.findOwned` at dispatch.
 
    `getDataset` is the single seam all of those resolve through, so widening it once widens them
    together — which is the point: one place decides what "this caller may reach this dataset"
@@ -95,8 +100,10 @@ on the owner, not a second owner.**
   an `access` field; both anticipate a public flag. **This ticket does not light them up.** Sharing
   a dataset with a named fellowship and publishing it to everyone are different decisions with
   different blast radii, and they should be ruled on separately. The dead arms are still dead.
-- **No widening of `findOwned` itself.** That seam is what `_assertOwnedAditus` resolves a
-  *dataset reference on a run* through. It still honours `owner` only. See the open question below.
+- ~~**No widening of `findOwned` itself.**~~ **Superseded by the ruling on open question 2 (rth,
+  2026-08-31.)** As proposed, that seam — what `_assertOwnedAditus` resolves a *dataset reference
+  on a run* through — honoured `owner` only. It now honours the team overlay as well; see the
+  question below for what did and did not move with it.
 - **No ownership transfer.** Out of scope, and a separate decision from sharing.
 - **Nothing changes for `Provincia`.** `Provincia.sodalitasId` still grants nothing. Making it
   grant something is real, adjacent, and its own ticket — but note that after this change the tree
@@ -116,13 +123,36 @@ rather than a retraction.
    option is "a member may archive what they added" — now expressible, because `addedBy` records
    it. **Chosen for now: owner-only, because it is the reversible choice.**
 
-2. **Should a team member be able to TRAIN on a shared dataset?** Today they cannot: a run that
-   names a dataset in its `aditus` resolves through `Datasets.findOwned`, which is still
-   owner-only, so a member can read the house-look set but cannot point a training run at it. That
-   asymmetry is odd and probably wants closing. It is left open because it is a ruling about whose
-   compute runs on whose data, which the read decision does not imply. **This is the question most
-   likely to bite in practice** — it is the difference between "rth can see and add to the fleet's
-   dataset" and "rth can actually use it".
+2. **Should a team member be able to TRAIN on a shared dataset?** **RULED — ACCEPTED (rth,
+   2026-08-31.)** Yes: a member may name a dataset shared with their team as a run's input.
+
+   As posed, a run that named a dataset in its `aditus` resolved through `Datasets.findOwned`,
+   which was owner-only, so a member could read the house-look set but could not point a run at
+   it. The question was held open because it is a ruling about whose compute runs on whose data,
+   which the read decision does not imply. That ruling has been made in the affirmative, and
+   `findOwned` now honours the `sodalitasId` overlay the read gate honours.
+
+   **Consequence.** `Datasets.findOwned` takes the caller's team ids alongside the owner and
+   admits a dataset shared with one of them; the arms are `_page`'s, composed under `$and` for
+   `_page`'s reason. `_assertOwnedAditus` resolves those ids through the same `_callerTeamIds`
+   the read path uses and closes them over the lookup. Three properties are deliberately
+   unchanged:
+
+   - **The gate is still at dispatch, closed over the dispatching caller.** No team identity is
+     attached to the `Actum` or threaded through execution — an `Actum` stays identity-blind
+     (ADR-0002), which is why the scope has to be resolved at the entry point and only there.
+   - **Membership is still read live** (decision 7): a member removed from the team cannot start
+     a new run against the dataset. A run already dispatched is unaffected — the gate was passed
+     when it was passed — and that is asserted, not left implicit.
+   - **Fail closed** (decision above): no team store wired, an anonymous caller, or a dataset with
+     no `sodalitasId` all fall through to owner-only.
+
+   The widening is DATASETS only. The `owned: { genus: 'corpus' }` reference did not move —
+   `Corpus` carries no team overlay to honour — nor did the `access: 'public'` arms, which remain
+   a separate ruling. Note that `modus.aitoolkit-training` declares its `dataset` port as a
+   **corpus** reference, so today the ports this reaches are the dataset-genus ones
+   (`modus.dataset-caption`, `modus.dataset-decompose`) and any future modus declaring
+   `owned: { genus: 'dataset' }`; closing the gap between the two nouns is its own item.
 
 3. **Should captioning have been on the member side of the line at all?** It is additive, and a
    training set is media *plus* captions, so it went with contribution. But a caption edit
@@ -149,6 +179,17 @@ rather than a retraction.
   through to owner-only. Nothing a stranger could not reach before becomes reachable now.
 - **The API contract moved in step** (`apiContract.ts` → regenerated `docs/api/`), which the
   hermetic drift check enforces.
-- **Follow-ups if this is accepted:** the training-reference question (open question 2) is the
-  first real one; a UI for choosing a team at dataset creation is not built; nothing backfills
-  `addedBy` onto existing items.
+- **The run gate is enforced by `tests/unit/allocutio/api/ownedResourceValidation.test.ts`** —
+  where the declaration machinery is already pinned, because what widened is that lookup and not
+  a dataset route. It asserts a member dispatching against a shared dataset; a non-member refused
+  with the refusal an id that names nothing already gives; a team-mate's unshared dataset staying
+  owner-only; a dataset shared with a team the caller is not in refused; fail-closed with no team
+  store wired and for an anonymous caller; that no team identity reaches the dispatched
+  `Inceptio`; that losing membership closes the next dispatch while the run already dispatched is
+  byte-for-byte unchanged and is never re-resolved; and that the corpus reference did not widen.
+  `tests/unit/crystal/MongoDataset.test.ts` pins the same predicate at the store (the `crystal-db`
+  job — it needs a live Mongo).
+- **Follow-ups if this is accepted:** open questions 1, 3 and 4 remain open; a UI for choosing a
+  team at dataset creation is not built; nothing backfills `addedBy` onto existing items; and
+  `modus.aitoolkit-training` still takes a `Corpus`, not a `Dataset`, so the ruled capability
+  reaches the dataset-genus ports rather than that modus.

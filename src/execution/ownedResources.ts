@@ -50,7 +50,12 @@ export interface OwnedDatasetShape {
  * `_ownedStudio` follows when no Conductor is wired).
  */
 export interface OwnedResourceLookups {
-  /** Resolve a dataset this caller may name, or null. */
+  /**
+   * Resolve a dataset this caller may name, or null. "May name" is the API layer's question,
+   * answered entirely on that side of this seam: the caller's identity AND the teams they
+   * belong to are closed over when the lookup is built, at dispatch time, so nothing about who
+   * is calling crosses into the check or onto the Actum.
+   */
   dataset?: (id: string) => Promise<OwnedDatasetShape | null>
   /** Resolve a corpus this caller may name, or null. */
   corpus?: (id: string) => Promise<unknown | null>
