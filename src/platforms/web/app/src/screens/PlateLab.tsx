@@ -1,16 +1,17 @@
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { Wordmark } from '../ui/Wordmark';
 import { PlateDeck } from './PlateDeck';
 import { ScrollStage } from './ScrollStage';
+import { LandingCatalog } from './LandingCatalog';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
 const STAGGERS = [0, 18, 36];
 const LEADINGS = [1.02, 1.12, 1.22];
 
-/** The information beats, each one locked to the viewport for as long as the reader stays. */
+/** The pathway beats, each locked to the viewport for as long as the reader stays. */
 const BEATS = [
   {
     id: 'explore',
@@ -32,13 +33,45 @@ const BEATS = [
   },
 ];
 
+/** The sequence, in the order it was actually driven. Draft — the truth pass rewrites these. */
+const STEPS = [
+  { n: '01', t: 'Bring material', d: 'Upload what you have, or make the source set here first.' },
+  { n: '02', t: 'Caption it', d: 'The set is described so a model can be taught from it.' },
+  { n: '03', t: 'Train', d: 'A LoRA on a base of your choosing. It lands on your shelf.' },
+  { n: '04', t: 'Make with it', d: 'Your trigger works in every workflow the catalogue carries.' },
+];
+
+/** Where the page still has nothing honest to put. Rendered as marked gaps rather than filled
+ *  with invented evidence — a fabricated testimonial is the one thing that cannot be walked
+ *  back once it ships. */
+const GAPS = [
+  {
+    id: 'proof',
+    label: 'proof slot — customers, ratings, named artists',
+    note: 'Competitors run logo bars, star ratings and artist stories here. We have none that are real. Stays empty until there are users to quote.',
+  },
+  {
+    id: 'pricing',
+    label: 'pricing slot — plans and numbers',
+    note: 'Blocked: no purchase has ever settled on production, so no number here is claimable yet.',
+  },
+];
+
+const FOOTER = [
+  { h: 'Make', links: [['Catalogue', '/catalog'], ['Run a workflow', '/run'], ['Collections', '/collections'], ['Canvas', '/canvas']] },
+  { h: 'Train', links: [['Datasets', '/datasets'], ['Model shelf', '/models'], ['Teams', '/teams'], ['Projects', '/projects']] },
+  { h: 'Account', links: [['Funding', '/funding'], ['Keyring', '/keyring'], ['Preferences', '/preferences'], ['Status', '/status']] },
+  { h: 'Read', links: [['About', '/about'], ['Ceremony', '/ceremony'], ['Privacy', '/legal/privacy'], ['Terms', '/legal/terms']] },
+];
+
 /**
  * The coded design laboratory for the landing page.
  *
  * Not a public surface: the route is registered only in dev builds, so unfilled slots and draft
  * copy cannot reach a visitor. It exists so the page can be judged the only way a scroll page
  * can be — by scrolling it, in the real application, at the widths the capability proof is
- * argued at.
+ * argued at. The catalogue block reads live data through the dev proxy, so its numbers here are
+ * the real ones.
  *
  * Every control in the bar is an open decision that is cheaper to settle by looking than by
  * specifying.
@@ -51,12 +84,9 @@ export function PlateLab() {
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
 
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
-  const run = platesIn('deck');
-  const coda = platesIn('deck-coda');
-  // How far the reader scrolls, in viewport heights, while a block is locked.
   const deckHold = (n: number) => (n - 1) * 0.55;
 
-  const deck = (slots: typeof run, label: string, className?: string) => {
+  const deck = (slots: typeof PLATES, label: string, className?: string) => {
     const el = (
       <PlateDeck
         slots={slots}
@@ -67,20 +97,14 @@ export function PlateLab() {
         className={className}
       />
     );
-    return mode === 'lock' ? (
-      <ScrollStage hold={deckHold(slots.length)}>{el}</ScrollStage>
-    ) : (
-      el
-    );
+    return mode === 'lock' ? <ScrollStage hold={deckHold(slots.length)}>{el}</ScrollStage> : el;
   };
 
-  const beat = (node: React.ReactNode, key: string) =>
+  const beat = (node: ReactNode, key: string) =>
     mode === 'lock' ? (
-      <ScrollStage key={key} hold={0.8}>
-        <div className="beat">{node}</div>
-      </ScrollStage>
+      <ScrollStage key={key} hold={0.8}><div className="beat">{node}</div></ScrollStage>
     ) : (
-      <div key={key} className="cand-flow">{node}</div>
+      <div key={key} className="cand-flow"><div className="beat">{node}</div></div>
     );
 
   return (
@@ -118,14 +142,16 @@ export function PlateLab() {
         </span>
       </div>
 
-      <div
-        className={`cand cand-type-${font}`}
-        style={{ '--hero-leading': String(leading) } as CSSProperties}
-      >
+      <div className={`cand cand-type-${font}`} style={{ '--hero-leading': String(leading) } as CSSProperties}>
         <nav className="cand-nav">
           <span className="brand"><Wordmark height={22} /></span>
+          <span className="cand-navlinks">
+            <Link to="/catalog">Catalogue</Link>
+            <Link to="/models">Models</Link>
+            <Link to="/datasets">Training</Link>
+            <Link to="/pricing">Pricing</Link>
+          </span>
           <span className="right">
-            <Link className="btn-ghost" to="/pricing">Pricing</Link>
             <Link className="btn" to="/onboard">Open app</Link>
           </span>
         </nav>
@@ -139,10 +165,13 @@ export function PlateLab() {
           </p>
           <span className="cand-cta">
             <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
+            <Link className="btn-ghost" to="/catalog">Browse the catalogue</Link>
           </span>
         </header>
 
-        {deck(run, 'A run of work made in noema, passing')}
+        {deck(platesIn('deck'), 'A run of work made in noema, passing')}
+
+        <LandingCatalog />
 
         {BEATS.map((b) =>
           beat(
@@ -155,7 +184,50 @@ export function PlateLab() {
           ),
         )}
 
-        {deck(coda, 'A second run of work made in noema, passing', 'deck-coda')}
+        <section className="how">
+          <div className="how-in">
+            <h2>How a visual identity gets made.</h2>
+            <p className="how-sub">The sequence, in the order it is actually driven.</p>
+            <ol className="how-steps">
+              {STEPS.map((s) => (
+                <li key={s.n}>
+                  <span className="mono">{s.n}</span>
+                  <h3>{s.t}</h3>
+                  <p>{s.d}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {deck(platesIn('deck-coda'), 'A second run of work made in noema, passing', 'deck-coda')}
+
+        <section className="anon">
+          <div className="anon-in">
+            <span className="anon-tag mono"><Ic name="eye-off" /> anonymous by construction</span>
+            <h2>Fund it and make it without leaving a name.</h2>
+            <p>
+              Deposit, join the anonymity set, and spend with a zero-knowledge proof — we never
+              learn your wallet. Generation runs on external providers today; hardware-sealed
+              compute is on the roadmap, not in the product.
+            </p>
+            <span className="anon-links">
+              <Link className="btn-ghost" to="/about"><Ic name="file-text" /> Read the architecture</Link>
+              <Link className="btn-ghost" to="/legal/privacy"><Ic name="eye-off" /> Privacy policy</Link>
+            </span>
+          </div>
+        </section>
+
+        <section className="gaps">
+          <div className="gaps-in">
+            {GAPS.map((g) => (
+              <div key={g.id} className="gap">
+                <span className="gap-label mono">{g.label}</span>
+                <p>{g.note}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {beat(
           <>
@@ -166,6 +238,22 @@ export function PlateLab() {
           </>,
           'end',
         )}
+
+        <footer className="cand-foot">
+          <div className="cand-foot-in">
+            <div className="cand-foot-brand"><Wordmark height={20} /></div>
+            {FOOTER.map((col) => (
+              <div key={col.h} className="cand-foot-col">
+                <h3 className="mono">{col.h}</h3>
+                <ul>
+                  {col.links.map(([label, to]) => (
+                    <li key={to}><Link to={to}>{label}</Link></li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </footer>
       </div>
     </div>
   );

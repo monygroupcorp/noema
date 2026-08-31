@@ -1,0 +1,40 @@
+/* the breadth block — the live catalogue, counted rather than claimed */
+.cat{padding:var(--py-section) 0}
+.cat .cat-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.cat .cat-wait{min-height:320px}
+.cat h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
+.cat .cat-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:44ch;margin:0}
+
+.cat .cat-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s5);margin:var(--s10) 0 0;
+  border-top:1px solid var(--hair);padding-top:var(--s6)}
+.cat .cat-stats div{margin:0}
+.cat .cat-stats dt{font-size:clamp(30px,4vw,54px);line-height:1;letter-spacing:-.04em;font-weight:600;color:var(--text)}
+.cat .cat-stats dd{margin:var(--s2) 0 0;color:var(--faint);font-family:var(--font-mono);font-size:var(--fs-xs);letter-spacing:.06em}
+
+.cat .cat-cols{display:grid;grid-template-columns:1fr 1fr;gap:var(--s10);margin-top:var(--s10)}
+.cat h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;
+  font-weight:400;margin:0 0 var(--s5)}
+.cat .cat-col h3:not(:first-child){margin-top:var(--s9)}
+.cat .cat-h{margin-top:var(--s10)}
+
+.cat .cat-bars{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
+.cat .cat-bars li{display:grid;grid-template-columns:9ch 1fr 3ch;align-items:center;gap:var(--s4)}
+.cat .cat-bars .k{font-size:var(--fs-base);color:var(--text)}
+.cat .cat-bars .bar{height:2px;background:var(--accent);opacity:.65;width:var(--w,0)}
+.cat .cat-bars .n{color:var(--faint);font-size:var(--fs-xs);text-align:right}
+
+.cat .cat-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--s2)}
+.cat .cat-chips li{border:1px solid var(--hair);border-radius:var(--r-pill);padding:var(--s1) var(--s4);
+  font-size:var(--fs-s);color:var(--muted)}
+.cat .cat-chips li .mono{color:var(--faint);font-size:var(--fs-xs)}
+
+.cat .cat-list{list-style:none;margin:0;padding:0;display:grid;gap:var(--s2)}
+.cat .cat-list li{color:var(--muted);font-size:var(--fs-base);border-bottom:1px solid var(--hair-soft);
+  padding-bottom:var(--s2)}
+.cat .cat-flows{grid-template-columns:repeat(3,1fr);gap:var(--s2) var(--s7);margin-bottom:var(--s7)}
+
+@media(max-width:860px){
+  .cat .cat-stats{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+  .cat .cat-cols{grid-template-columns:1fr;gap:var(--s9)}
+  .cat .cat-flows{grid-template-columns:1fr}
+}

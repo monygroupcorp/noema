@@ -52,3 +52,59 @@
 
 /* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
 .cand-flow{padding:var(--py-section) 0}
+
+/* nav as a capability map — the competitors' nav names jobs; ours named two settings pages */
+.cand-nav .cand-navlinks{display:flex;align-items:center;gap:var(--s6)}
+.cand-nav .cand-navlinks a{color:var(--muted);font-size:var(--fs-base);text-decoration:none}
+.cand-nav .cand-navlinks a:hover{color:var(--text)}
+.cand-hero .cand-cta{display:flex;align-items:center;justify-content:center;gap:var(--s3);flex-wrap:wrap}
+
+/* how it works — the sequence as a designed object, not three narrated boxes */
+.how{padding:var(--py-section) 0}
+.how .how-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.how h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
+.how .how-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);margin:0}
+.how .how-steps{list-style:none;margin:var(--s10) 0 0;padding:0;display:grid;
+  grid-template-columns:repeat(4,1fr);gap:var(--s7)}
+.how .how-steps li{border-top:1px solid var(--hair);padding-top:var(--s5)}
+.how .how-steps .mono{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.16em}
+.how .how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
+.how .how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
+
+/* anonymity — the block that sits where a competitor puts SOC 2 */
+.anon{padding:var(--py-section) 0}
+.anon .anon-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);max-width:720px;text-align:center}
+.anon .anon-tag{display:inline-flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);
+  letter-spacing:.14em;text-transform:uppercase;color:var(--accent-soft);
+  border:1px solid var(--hair);border-radius:var(--r-pill);padding:var(--s1) var(--s4)}
+.anon .anon-tag svg.lucide{width:13px;height:13px}
+.anon h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:var(--s6) 0 var(--s5)}
+.anon p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0 auto;max-width:52ch}
+.anon .anon-links{display:flex;gap:var(--s3);justify-content:center;flex-wrap:wrap;margin-top:var(--s7)}
+
+/* the marked gaps — where the page has nothing honest to put yet */
+.gaps{padding:var(--py-section) 0}
+.gaps .gaps-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+  grid-template-columns:1fr 1fr;gap:var(--s6)}
+.gaps .gap{border:1px dashed var(--faint);border-radius:var(--r-lg);padding:var(--s7);min-height:180px}
+.gaps .gap-label{display:block;color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em;
+  margin-bottom:var(--s4)}
+.gaps .gap p{color:var(--faint);font-size:var(--fs-s);line-height:1.6;margin:0}
+
+/* footer as a capability index — the cheapest information density on the page */
+.cand-foot{border-top:1px solid var(--hair);padding:var(--s10) 0 var(--s9)}
+.cand-foot .cand-foot-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+  grid-template-columns:1.4fr repeat(4,1fr);gap:var(--s7)}
+.cand-foot h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;
+  font-weight:400;margin:0 0 var(--s4)}
+.cand-foot ul{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
+.cand-foot a{color:var(--muted);font-size:var(--fs-s);text-decoration:none}
+.cand-foot a:hover{color:var(--text)}
+
+@media(max-width:860px){
+  .cand-nav .cand-navlinks{display:none}
+  .how .how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+  .gaps .gaps-in{grid-template-columns:1fr}
+  .cand-foot .cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
+}
