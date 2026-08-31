@@ -234,6 +234,11 @@ const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 6
  *  original; short enough that a copied link is not a durable handle to private media. */
 const PRIVATE_PRESIGN_TTL_SECONDS = 15 * 60
 
+/** The cause recorded on a run the owner stops themselves (`POST /v1/runs/:id/cancel`). It is
+ *  only ever the cause when nothing more specific was recorded first — `completor.fail` keeps a
+ *  cause already on the record and drops the caller's. */
+const CANCELLED_BY_OWNER = 'cancelled by the run owner'
+
 /** The ring slices CrystalApi composes. */
 export interface CrystalApiDeps {
   inceptor: { initiate: ActumInceptor['initiate'] }
@@ -989,6 +994,33 @@ export class CrystalApi {
     const mandatum = await this.deps.mandata?.findByActum(id).catch(() => null)
     if (mandatum) run.order = toRunOrder(mandatum)
     return run
+  }
+
+  /**
+   * Stop one of the caller's in-flight runs and settle it — the agent twin of the cancel a
+   * chat user already reaches from `/status`. Same single settlement path (`completor.fail`):
+   * the pod is killed before the signa are released, the run lands `fractus`, and nothing is
+   * charged. No second cancel mechanism exists here — this is the surface, not the machinery.
+   *
+   * OWNER-SCOPED through `_owns`, exactly as `getRun` is: a stranger's run id is
+   * `not_found.run`, never `forbidden`, so run ids stay non-enumerable — the same convention
+   * `getStudio`/`releaseStudio` state for studios.
+   *
+   * IDEMPOTENT, like `DELETE /v1/studios/:id`: cancelling a run that has already settled is
+   * not an error. The terminal view comes back, 200, and no second settlement is invoked —
+   * `completor.fail` re-reads the record and returns it untouched when it is already terminal,
+   * so a double-cancel can neither double-release signa nor overwrite a recorded cause.
+   *
+   * Returns the run through `getRun`, so a cancel answers with the same projection a poll of
+   * `GET /v1/runs/:id` would return.
+   */
+  async cancelRun(auctor: AuctorKey, id: string): Promise<Run> {
+    const a = await this.deps.actorum.findById(id)
+    if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
+    if (a.status !== 'completus' && a.status !== 'fractus') {
+      await this.deps.completor.fail(a, CANCELLED_BY_OWNER)
+    }
+    return this.getRun(auctor, id)
   }
 
   /**

@@ -487,6 +487,104 @@ test('getRun: a cost-free compositus parent is owned via its child steps (ADR-00
   )
 })
 
+// ── cancelRun (POST /v1/runs/:id/cancel) ────────────────────────────────────
+
+/**
+ * A run store + completor pair that actually settle, so a cancel is observable. The completor
+ * double mirrors the real one's terminal guard (terminal in → the record back, untouched, no
+ * second release), so idempotency is asserted against the same shape production has.
+ */
+function makeCancellableRun(status: Actum['status'] = 'agens') {
+  const act: Actum = {
+    ...nascens({ modusId: 'flux-schnell', aditus: {}, by: auctor }),
+    id: 'act-live',
+    status,
+    ...(status === 'completus' ? { exitus: { image: 'x' }, impetus: 5n } : {}),
+  }
+  const failedWith: string[] = []
+  const actorum = ({
+    findById: async (id: string) => (id === act.id ? act : null),
+    findByCompositum: async () => [],
+    create: async () => { throw new Error('unused') },
+    update: async () => { throw new Error('unused') },
+    findByExternusJobId: async () => null,
+    findByCallbackNonce: async () => null,
+    findByNullifier: async () => null,
+    findExpired: async () => [],
+    findInFlight: async () => [],
+  } as unknown) as CrystalApiDeps['actorum']
+  const completor: CrystalApiDeps['completor'] = {
+    complete: async (a: Actum) => a,
+    fail: async (a: Actum, error: string) => {
+      failedWith.push(error)
+      if (act.status === 'completus' || act.status === 'fractus') return act
+      act.status = 'fractus'
+      act.error = error
+      act.completum = new Date('2026-06-10T00:02:00Z')
+      return act
+    },
+  }
+  return { act, failedWith, actorum, completor }
+}
+
+test('cancelRun settles an in-flight run the caller owns through completor.fail', async () => {
+  const { act, failedWith, actorum, completor } = makeCancellableRun('agens')
+  const { deps } = makeDeps({ actorum, completor })
+  const api = new CrystalApi(deps)
+
+  const run = await api.cancelRun(auctor, 'act-live')
+
+  assert.equal(failedWith.length, 1, 'settlement runs through the completor, not a second cancel path')
+  assert.equal(act.status, 'fractus')
+  assert.equal(run.id, 'act-live')
+  assert.equal(run.status, 'failed', 'the terminal view comes back, the same projection GET /v1/runs/:id returns')
+})
+
+test('cancelRun refuses a stranger — not_found.run, never forbidden, and nothing is settled', async () => {
+  const { act, failedWith, actorum, completor } = makeCancellableRun('agens')
+  const { deps } = makeDeps({ actorum, completor })
+  const api = new CrystalApi(deps)
+
+  await assert.rejects(
+    () => api.cancelRun({ animaId: 'someone-else' }, 'act-live'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+  assert.equal(failedWith.length, 0, "a stranger's cancel must not reach settlement")
+  assert.equal(act.status, 'agens', 'the run keeps running')
+
+  // An unknown id is indistinguishable from an unowned one — run ids stay non-enumerable.
+  await assert.rejects(
+    () => api.cancelRun(auctor, 'ghost'),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+})
+
+test('cancelRun is idempotent — a second cancel returns the same terminal view, no second settle', async () => {
+  const { failedWith, actorum, completor } = makeCancellableRun('agens')
+  const { deps } = makeDeps({ actorum, completor })
+  const api = new CrystalApi(deps)
+
+  const first = await api.cancelRun(auctor, 'act-live')
+  const second = await api.cancelRun(auctor, 'act-live')
+
+  assert.equal(first.status, 'failed')
+  assert.deepEqual(second, first, 'the same terminal view, 200')
+  assert.equal(failedWith.length, 1, 'the already-terminal run is not settled a second time')
+})
+
+test('cancelRun leaves a completed run untouched and returns it as it stands', async () => {
+  const { act, failedWith, actorum, completor } = makeCancellableRun('completus')
+  const { deps } = makeDeps({ actorum, completor })
+  const api = new CrystalApi(deps)
+
+  const run = await api.cancelRun(auctor, 'act-live')
+
+  assert.equal(failedWith.length, 0, 'a settled run is never re-settled — nothing to refund')
+  assert.equal(act.status, 'completus')
+  assert.equal(run.status, 'complete')
+  assert.deepEqual(run.exitus, { image: 'x' }, 'the outputs of a finished run survive a late cancel')
+})
+
 test('describeFlow returns a schema with an input', async () => {
   const { deps } = makeDeps()
   const api = new CrystalApi(deps)
