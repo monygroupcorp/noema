@@ -1094,13 +1094,18 @@ async function runSequence(
 // against in-memory fakes (the tests/unit/allocutio/api/apiRouter.test.ts
 // pattern). Includes: a quote that exceeds the ceiling (ceiling-abort path), a
 // class-skewed piece set (balance-stop path), and a fired-but-undispatched
-// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance>`.
+// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance|headroom>`.
 // =============================================================================
 
 const SMOKE_BURSA_TOKEN = 'bt-smoke-landing-walk'
 const SMOKE_PER_IMAGE_IMPETUS = '5'
+// The balance `GET /v1/me` reports. Ample by default; under the headroom induce it is set BELOW
+// `perRunReserve x concurrentia` (5 x 2 = 10) so the pre-flight gate is the thing that stops the
+// run — the only way that abort can be reached is the guard doing its job.
+const SMOKE_BALANCE_IMPETUS = '100000000'
+const SMOKE_HEADROOM_BALANCE_IMPETUS = '4'
 
-type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance'
+type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance' | 'headroom'
 
 /** A tiny in-process image server: serves one generated PNG per requested colour, so the
  *  smoke fixture exercises the REAL analyzeBitmap/jimp path end-to-end (no fake analyzer). */
@@ -1196,6 +1201,19 @@ async function buildSmokeAppAsync(induce: Induce): Promise<{ app: Express; close
       if (target.modusId === TRAINING_MODUS_ID) return { impetus: '500' }
       const per = induce === 'ceiling' ? '999999' : SMOKE_PER_IMAGE_IMPETUS
       return { impetus: per }
+    },
+    async getMe() {
+      // Without this the router's `/v1/me` 500s, `assertReserveHeadroom` takes its
+      // balance-unknown branch, and the headroom gate is never actually exercised offline.
+      return {
+        bindings: [],
+        secrets: { civitai: 'absent' as const, huggingface: 'absent' as const },
+        secretsAvailable: false,
+        admin: false,
+        balanceImpetus:
+          induce === 'headroom' ? SMOKE_HEADROOM_BALANCE_IMPETUS : SMOKE_BALANCE_IMPETUS,
+        balanceUsd: 0,
+      }
     },
     async listFlows() {
       return [
@@ -1352,6 +1370,10 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
       }
       if (induce === 'deadlock' && err instanceof WalkFailure && err.assertion === 'watch.deadlock') {
         console.log(`smoke induce=deadlock: correctly aborted — ${err.message}`)
+        return
+      }
+      if (induce === 'headroom' && err instanceof WalkFailure && err.assertion === 'spend.headroom') {
+        console.log(`smoke induce=headroom: correctly aborted — ${err.message}`)
         return
       }
       if (induce === 'balance' && err instanceof WalkFailure && err.assertion === 'curate.balance') {
