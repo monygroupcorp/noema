@@ -130,8 +130,8 @@ const SUBJECT_FRAGMENTS: Record<SubjectClass, string> = {
   illustrated: 'ink and gouache illustration of a figure, visible brush and line work, large flat areas of held-back colour, paper tooth visible',
 }
 
-// Spec §4 axis 2 — eight scenes, chosen to work across all three subject classes.
-const SCENES: readonly { key: string; fragment: string }[] = [
+// Spec §4 axis 2 — scenes, chosen to work across all three subject classes.
+const ALL_SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'workbench', fragment: 'at a workbench' },
   { key: 'stairwell-landing', fragment: 'on a stairwell landing at night' },
   { key: 'window-night', fragment: 'at a window at night' },
@@ -142,14 +142,56 @@ const SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'threshold', fragment: 'at a threshold' },
 ]
 
-// Spec §4 axis 3 — seed variation only, no prompt change. Five fixed seeds so a re-run of the
+// Spec §4 axis 3 — seed variation only, no prompt change. Fixed seeds so a re-run of the
 // SAME grid is reproducible.
-const VARIATION_SEEDS: readonly number[] = [10001, 10002, 10003, 10004, 10005]
+const ALL_SEEDS: readonly number[] = [
+  10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008,
+]
 
-const TOTAL_CANDIDATES = SUBJECT_CLASSES.length * SCENES.length * VARIATION_SEEDS.length // 3*8*5=120
-const SELECT_TARGET_PER_CLASS = 20
-const SELECT_FLOOR_PER_CLASS = 15 // spec §10.3 / §5: below 15 -> stop, do not backfill
-const SELECT_TARGET_TOTAL = SELECT_TARGET_PER_CLASS * SUBJECT_CLASSES.length // 60
+// The GRID IS RUNTIME CONFIG, not a constant. rth ruled the sizes on 2026-08-28 (384-candidate
+// full grid: 3 classes x 16 scenes x 8 seeds; a 24-image calibration batch first: 3 x 8 x 1), and
+// the sizes will change again between runs — a hardcoded grid is a defect, not a default. The
+// values below are the ruled DEFAULTS; env overrides pick the actual run.
+//   LANDING_WALK_SCENES  — how many scenes of ALL_SCENES to use
+//   LANDING_WALK_SEEDS   — how many seeds of ALL_SEEDS to use
+const clampCount = (raw: string | undefined, fallback: number, max: number): number => {
+  const n = raw === undefined ? fallback : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > max) {
+    throw new Error(
+      `landing-dataset-walk: bad grid size ${JSON.stringify(raw)} — expected an integer 1..${max}`,
+    )
+  }
+  return n
+}
+
+const SCENES: readonly { key: string; fragment: string }[] = ALL_SCENES.slice(
+  0,
+  clampCount(process.env.LANDING_WALK_SCENES, ALL_SCENES.length, ALL_SCENES.length),
+)
+const VARIATION_SEEDS: readonly number[] = ALL_SEEDS.slice(
+  0,
+  clampCount(process.env.LANDING_WALK_SEEDS, 5, ALL_SEEDS.length),
+)
+
+const TOTAL_CANDIDATES = SUBJECT_CLASSES.length * SCENES.length * VARIATION_SEEDS.length
+// Select targets scale with the grid: the spec's ruled full grid (384) curates to 120 at 40/class
+// with a floor of 30, i.e. a ~31% keep rate and a floor at 75% of target. Deriving them keeps a
+// calibration batch from tripping a floor sized for the full run.
+const SELECT_TARGET_PER_CLASS = Math.max(
+  1,
+  Math.round((TOTAL_CANDIDATES / SUBJECT_CLASSES.length) * 0.3125),
+)
+const SELECT_FLOOR_PER_CLASS = Math.max(1, Math.round(SELECT_TARGET_PER_CLASS * 0.75))
+const SELECT_TARGET_TOTAL = SELECT_TARGET_PER_CLASS * SUBJECT_CLASSES.length
+// Spec §10.1: the grid dispatches and >=92% completes. Derived, never a literal — a hard check
+// whose PRINTED threshold differs from the one it tests is a false receipt (DOCTRINE §24).
+const MIN_COMPLETED = Math.ceil(TOTAL_CANDIDATES * 0.92)
+
+// Settlement model (impetus == seconds of pod time). Overridable so a measured run replaces the
+// estimate rather than arguing with it.
+const COLD_START_SECONDS = Number(process.env.LANDING_WALK_COLD_START_SECONDS ?? 400)
+const WARM_SECONDS_PER_IMAGE = Number(process.env.LANDING_WALK_WARM_SECONDS ?? 40)
+const COLLECTION_CONCURRENTIA = Number(process.env.LANDING_WALK_CONCURRENTIA ?? 2)
 
 // Ground / key colours the mechanical curation gate checks against (art bible §2).
 const GROUND_HEX = '#08090A'
@@ -198,14 +240,28 @@ async function fetchJson(url: string, init: RequestInit): Promise<FetchResult> {
   return { status: res.status, body }
 }
 
+/**
+ * How the driver authenticates. TWO rails, because the funded account decides which one:
+ *   • `bursa`  — anonymous rail, `x-bursa-token` (the noema-356 concierge-walk pattern)
+ *   • `bearer` — an owned anima account, `Authorization: Bearer` (helm-fleet-01's rail)
+ * The spec originally assumed the bursa rail by inheritance from 356 and was wrong: the helm
+ * fleet account is an anima with a bearer, and its purse is the funded one.
+ */
+type AuthRail = { kind: 'bursa'; token: string } | { kind: 'bearer'; token: string }
+
 class Client {
   constructor(
     private readonly baseUrl: string,
-    private readonly bursaToken: string,
+    private readonly auth: AuthRail,
   ) {}
 
   private headers(): Record<string, string> {
-    return { 'content-type': 'application/json', 'x-bursa-token': this.bursaToken }
+    return {
+      'content-type': 'application/json',
+      ...(this.auth.kind === 'bursa'
+        ? { 'x-bursa-token': this.auth.token }
+        : { authorization: `Bearer ${this.auth.token}` }),
+    }
   }
 
   private async req(method: string, path: string, body?: unknown): Promise<FetchResult> {
@@ -336,6 +392,29 @@ function assertUnderCeiling(state: RunState, incomingQuote: string, label: strin
       'the driver stops at the ceiling and never tops up — raise LANDING_WALK_CEILING_IMPETUS and resume with --from, or accept a partial run',
     )
   }
+}
+
+/**
+ * Reserves are held per in-flight run and released on settlement, so what must fit in the purse
+ * is `perRunReserve x concurrentia`, never the whole grid. Checked against the live balance.
+ */
+async function assertReserveHeadroom(client: Client, headroom: bigint): Promise<void> {
+  const me = await client.get('/v1/me')
+  if (me.status !== 200) {
+    console.log(`[cost] /v1/me returned ${me.status} — balance unknown, headroom NOT asserted; a 402 will speak instead`)
+    return
+  }
+  const balanceRaw = (me.body as { balanceImpetus?: string }).balanceImpetus
+  if (!balanceRaw) return // no balance surfaced — do not invent one, let a 402 speak instead
+  const balance = BigInt(balanceRaw)
+  if (headroom > balance) {
+    throw new WalkFailure(
+      'spend.headroom',
+      `reserve headroom ${headroom} impetus (concurrentia ${COLLECTION_CONCURRENTIA} x ${headroom / BigInt(COLLECTION_CONCURRENTIA)}) exceeds the purse balance ${balance}`,
+      'reserves are held per in-flight run and released on settlement — lower LANDING_WALK_CONCURRENTIA or fund the purse; the run itself costs far less than the reserve',
+    )
+  }
+  console.log(`[cost] reserve headroom ${headroom} fits balance ${balance}`)
 }
 
 // =============================================================================
@@ -476,9 +555,9 @@ function buildHardChecks(state: RunState, candidatesCompleted: number): HardChec
   const minClass = SUBJECT_CLASSES.length > 0 ? Math.min(...SUBJECT_CLASSES.map(perClass)) : 0
   const spend = totalSpent(state)
   const rows: HardCheckRow[] = [
-    { n: 1, name: '120 candidates dispatched, >=110 completed', pass: candidatesCompleted >= 110, observed: `${candidatesCompleted}/${TOTAL_CANDIDATES}` },
+    { n: 1, name: `${TOTAL_CANDIDATES} candidates dispatched, >=${MIN_COMPLETED} completed`, pass: candidatesCompleted >= MIN_COMPLETED, observed: `${candidatesCompleted}/${TOTAL_CANDIDATES}` },
     { n: 2, name: 'every completed piece fetched + classified', pass: pieces.length === candidatesCompleted && candidatesCompleted > 0, observed: `${pieces.length} classified` },
-    { n: 3, name: '>=60 selects, no class below 15', pass: approved.length >= SELECT_TARGET_TOTAL && minClass >= SELECT_FLOOR_PER_CLASS, observed: `${approved.length} selects, min class ${minClass}` },
+    { n: 3, name: `>=${SELECT_TARGET_TOTAL} selects, no class below ${SELECT_FLOOR_PER_CLASS}`, pass: approved.length >= SELECT_TARGET_TOTAL && minClass >= SELECT_FLOOR_PER_CLASS, observed: `${approved.length} selects, min class ${minClass}` },
     { n: 4, name: 'dataset created from approved acta only', pass: state.datasetId !== undefined, observed: state.datasetId ? `dataset ${state.datasetId}` : 'not created' },
     { n: 5, name: 'captionset coverage 100%, trigger in every caption', pass: state.captionsetId !== undefined, observed: state.captionsetId ? `captionset ${state.captionsetId}` : 'not created' },
     { n: 6, name: 'training run reaches terminal success, registers lora Intella', pass: state.loraIntellaId !== undefined, observed: state.loraIntellaId ?? 'not trained' },
@@ -563,23 +642,44 @@ async function quotePhaseA(client: Client, state: RunState): Promise<string> {
   expectStatus(q, [200], 'quote.phaseA', 'POST /v1/runs/quote (phase A sample)')
   const perImage = (q.body as { impetus?: string }).impetus
   if (!perImage) throw new WalkFailure('quote.phaseA', `quote response carried no impetus: ${JSON.stringify(q.body)}`)
-  const total = (BigInt(perImage) * BigInt(TOTAL_CANDIDATES)).toString()
-  state.quotes.phaseA = { impetus: total, at: new Date().toISOString() }
-  return total
+  // WHAT THE QUOTE ACTUALLY IS (src/ledger/rates.ts, src/crystal/RunPodCursor.ts): a per-run
+  // RESERVATION, not a price. `reservationImpetus()` resolves impetusFixum -> the flow's own
+  // `pretium` curve -> GENERIC_RESERVE_IMPETUS (900), and krea-turbo carries no curve, so every
+  // quote is the generic fallback: "2 x the observed cold-start p95 of 402 s, rounded up.
+  // PLACEHOLDER pending per-flow calibration." One impetus is ONE SECOND of pod time at
+  // REFERENCE_COST_PER_HR ($1.2132/hr). The reserve is HELD at dispatch and settled against
+  // actual pod-seconds, so multiplying it by the grid size models nothing real — it prices every
+  // image as its own cold start with a full weight download. Real shape: one cold start, then
+  // ~40 s per image on the warm pod.
+  state.quotes.phaseA = { impetus: perImage, at: new Date().toISOString() }
+  return perImage
 }
 
 async function phaseAGenerate(client: Client, state: RunState, apply: boolean): Promise<void> {
-  const quoted = await quotePhaseA(client, state)
-  assertUnderCeiling(state, quoted, 'phase A generate (120 candidates)')
+  const perRunReserve = await quotePhaseA(client, state)
+  // The pre-flight gate is on RESERVE HEADROOM — what is held at once — because reserves are
+  // taken per run at dispatch and released on settlement. `concurrentia` bounds it.
+  const headroom = BigInt(perRunReserve) * BigInt(COLLECTION_CONCURRENTIA)
+  const settlementEstimate =
+    BigInt(COLD_START_SECONDS) + BigInt(WARM_SECONDS_PER_IMAGE) * BigInt(TOTAL_CANDIDATES)
+  console.log(
+    `[cost] per-run reserve ${perRunReserve} impetus (a HOLD, generic fallback — not a price)\n` +
+      `[cost] reserve headroom at concurrentia=${COLLECTION_CONCURRENTIA}: ${headroom} impetus\n` +
+      `[cost] estimated SETTLEMENT for ${TOTAL_CANDIDATES} images: ~${settlementEstimate} impetus ` +
+      `(~$${(Number(settlementEstimate) * 0.000337).toFixed(2)}) = one ${COLD_START_SECONDS}s cold start + ` +
+      `${TOTAL_CANDIDATES}x${WARM_SECONDS_PER_IMAGE}s warm`,
+  )
+  assertUnderCeiling(state, settlementEstimate.toString(), `phase A generate (${TOTAL_CANDIDATES} candidates, estimated settlement)`)
+  await assertReserveHeadroom(client, headroom)
   if (!apply) {
-    console.log(`[dry] phase A would fire ${TOTAL_CANDIDATES} candidates, quoted ${quoted} impetus total`)
+    console.log(`[dry] phase A would fire ${TOTAL_CANDIDATES} candidates`)
     return
   }
 
   const created = await client.post('/v1/collectiones', {
     nomen: COLLECTION_NAME,
     descriptio: 'Wave 3 landing house-look dataset candidates',
-    concurrentia: 2, // spec §4: "deliberately conservative first contact"
+    concurrentia: COLLECTION_CONCURRENTIA, // spec §4: "deliberately conservative first contact"
     reviewEnabled: true,
     draft: true,
   })
@@ -613,7 +713,7 @@ async function phaseAGenerate(client: Client, state: RunState, apply: boolean): 
   const recreated = await client.post('/v1/collectiones', {
     nomen: COLLECTION_NAME,
     descriptio: 'Wave 3 landing house-look dataset candidates',
-    concurrentia: 2,
+    concurrentia: COLLECTION_CONCURRENTIA,
     reviewEnabled: true,
     draft: true,
     aditusBase: { _basePrompt: '{{subject}}, {{scene}}, ' + HOUSE_CLAUSE, width: 1024, height: 1024 },
@@ -633,7 +733,8 @@ async function phaseAGenerate(client: Client, state: RunState, apply: boolean): 
 
   const fired = await client.post(`/v1/collectiones/${finalId}/fire`)
   expectStatus(fired, [200], 'generate.fire', `POST /v1/collectiones/${finalId}/fire`)
-  state.spend.phaseA = { quoted, at: new Date().toISOString() }
+  // Recorded as the ESTIMATED settlement; the real figure is read back from the completed acta.
+  state.spend.phaseA = { quoted: settlementEstimate.toString(), at: new Date().toISOString() }
   await saveState(state)
 }
 
@@ -1229,7 +1330,7 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
   const savedTimeout = effectiveDispatchTimeoutMs
   if (induce === 'deadlock') effectiveDispatchTimeoutMs = 500 // smoke: prove the abort path fast, not the real 5min wait
   try {
-    const client = new Client(server.baseUrl, SMOKE_BURSA_TOKEN)
+    const client = new Client(server.baseUrl, { kind: 'bursa', token: SMOKE_BURSA_TOKEN })
     const state = newState(`smoke-${induce}-${Date.now()}`, induce === 'ceiling' ? '1000' : '100000000', GEN_MODUS_ID)
 
     if (planOnly) {
@@ -1326,12 +1427,15 @@ async function main(): Promise<void> {
 
   const baseUrl = process.env.LANDING_WALK_BASE_URL
   const bursaToken = process.env.LANDING_WALK_BURSA_TOKEN
-  if (!baseUrl || !bursaToken) {
+  const bearer = process.env.LANDING_WALK_BEARER
+  if (!baseUrl || (!bursaToken && !bearer)) {
     throw new WalkFailure(
       'config.missing',
-      'LANDING_WALK_BASE_URL and LANDING_WALK_BURSA_TOKEN are both required for a live walk (see .env-example); use --smoke for the offline fixture',
+      'LANDING_WALK_BASE_URL plus ONE of LANDING_WALK_BEARER (an owned anima account, e.g. the helm fleet account) or LANDING_WALK_BURSA_TOKEN (the anonymous rail) are required for a live walk (see .env-example); use --smoke for the offline fixture',
     )
   }
+  // Bearer wins when both are present: an owned account's purse is the one that gets funded.
+  const authRail: AuthRail = bearer ? { kind: 'bearer', token: bearer } : { kind: 'bursa', token: bursaToken! }
   const ceiling = process.env.LANDING_WALK_CEILING_IMPETUS
   if (opts.apply && !ceiling) {
     throw new WalkFailure(
@@ -1340,7 +1444,7 @@ async function main(): Promise<void> {
     )
   }
 
-  const client = new Client(baseUrl.replace(/\/$/, ''), bursaToken)
+  const client = new Client(baseUrl.replace(/\/$/, ''), authRail)
   const runId = opts.runId ?? (opts.from || opts.phase ? undefined : `landing-${Date.now()}`)
   if (!runId) {
     throw new WalkFailure('config.missing', '--run-id is required when resuming with --from/--phase; a fresh run generates one and prints it')
