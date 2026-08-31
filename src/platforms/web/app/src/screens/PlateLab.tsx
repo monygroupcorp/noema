@@ -236,7 +236,9 @@ export function PlateLab() {
             </div>
             <div className="mint-code" aria-label="How a hosted collection resolves">
               <div className="mint-code-h mono">your contract</div>
-              <pre className="mono"><code>{`baseURI   <your collection>/
+              {/* the code panel scrolls sideways on a narrow screen, so it has to be reachable
+                  by keyboard — an unfocusable scroll region is an axe failure and a real one. */}
+              <pre className="mono" tabIndex={0}><code>{`baseURI   <your collection>/
 tokenURI  <your collection>/<tokenId>.json`}</code></pre>
               <div className="mint-code-f mono">
                 hosting is a bridge, not permanent storage — migrate to Arweave or IPFS before you
