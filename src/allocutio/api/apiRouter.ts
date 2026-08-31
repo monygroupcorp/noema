@@ -97,6 +97,8 @@ export interface ApiFacade {
     opts?: InvokeOpts,
   ): Promise<Run>
   getRun(auctor: AuctorKey, id: string): Promise<Run>
+  /** Stop an in-flight run and settle it. Owner-scoped, idempotent; returns the terminal run. */
+  cancelRun(auctor: AuctorKey, id: string): Promise<Run>
   /** The standing order behind a run, or null when it has none. */
   getRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null>
   /** Cancel that order. Idempotent; null when the run has no order. */
@@ -521,6 +523,21 @@ export function createApiRouter(deps: {
     wrap(async (req, res) => {
       const auctor = await auth(req)
       res.json({ run: await api.getRun(auctor, String(req.params.id)) })
+    }),
+  )
+
+  // POST /v1/runs/:id/cancel — stop a run the caller owns and settle it (nothing is charged).
+  // A POST verb-suffix, not DELETE: the run record is not removed, it reaches its terminal
+  // state and stays readable — the same shape `POST /v1/collectiones/:id/cancel` uses for the
+  // same act. Owner-scoped from the resolved caller (a run id is an address, not a capability):
+  // a stranger gets not_found.run, never forbidden, so ids stay non-enumerable. Idempotent —
+  // cancelling an already-terminal run returns the same terminal view, 200, exactly as a
+  // double-DELETE of a studio does.
+  router.post(
+    '/runs/:id/cancel',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      res.json({ run: await api.cancelRun(auctor, String(req.params.id)) })
     }),
   )
 

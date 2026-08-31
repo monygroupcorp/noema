@@ -23,6 +23,11 @@ const fakeApi = {
     if (id === 'r1') return { id: 'r1', status: 'complete', modusId: 'flux-schnell' }
     throw Errors.notFoundRun(id)
   },
+  async cancelRun(auctor: AuctorKey, id: string): Promise<Run> {
+    if (id !== 'r1') throw Errors.notFoundRun(id)
+    lastCancelAuctor = auctor
+    return { id: 'r1', status: 'failed', modusId: 'flux-schnell', failure: { code: 'run.execution_error', message: 'stopped' } }
+  },
   async listFlows(): Promise<unknown[]> {
     return [{ id: 'flux-schnell', nomen: 'FLUX' }]
   },
@@ -97,6 +102,9 @@ const fakeApi = {
 
 // Records the opts the router forwarded to provisionStudio.
 let lastProvisionOpts: ProvisionStudioOpts | undefined
+
+// Records the auctor the router forwarded to cancelRun — it must be the RESOLVED caller.
+let lastCancelAuctor: AuctorKey | undefined
 
 const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
@@ -210,6 +218,50 @@ test('GET /v1/runs/:id for an unknown run returns 404 not_found.run', async () =
     const res = await request(`${url}/v1/runs/ghost`, { headers: { 'x-api-key': 'k' } })
     assert.equal(res.status, 404)
     assert.equal(res.body.error.code, 'not_found.run')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/:id/cancel with auth returns 200 { run } in its terminal view', async () => {
+  const { server, url } = await createServer()
+  try {
+    lastCancelAuctor = undefined
+    const res = await request(`${url}/v1/runs/r1/cancel`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      // A body is neither read nor needed — the owner comes from the credential.
+      body: { animaId: 'someone-else' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.run.id, 'r1')
+    assert.equal(res.body.run.status, 'failed')
+    assert.deepEqual(lastCancelAuctor, { animaId: 'a1' }, 'the owner is the resolved caller, never the body')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/:id/cancel for a run that is not the caller\'s returns 404 not_found.run', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/runs/ghost/cancel`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+    })
+    assert.equal(res.status, 404)
+    assert.equal(res.body.error.code, 'not_found.run')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/:id/cancel with no auth returns 401 auth.missing', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/runs/r1/cancel`, { method: 'POST' })
+    assert.equal(res.status, 401)
+    assert.equal(res.body.error.code, 'auth.missing')
   } finally {
     await closeServer(server)
   }

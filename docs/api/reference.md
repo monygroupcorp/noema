@@ -292,6 +292,106 @@ Fetch a run by id (poll for completion).
 }
 ```
 
+### POST /v1/runs/:id/cancel
+
+Stop an in-flight run and settle it (owner-scoped, idempotent): the pod is terminated and the locked credits are released — the run is not charged. Returns the terminal run view, the same projection GET /v1/runs/:id returns; a cancelled run reads status "failed". Cancelling a run that has already settled returns that run unchanged, 200; a stranger gets not_found.run.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run": {
+      "type": "object",
+      "description": "The public projection of a run (Actum). JSON-safe and stable.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The run identifier."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "failed"
+          ],
+          "description": "The run lifecycle status."
+        },
+        "modusId": {
+          "type": "string",
+          "description": "The flow (modus) this run executes."
+        },
+        "exitus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The outputs produced by the run — present only when available."
+        },
+        "failure": {
+          "type": "object",
+          "description": "Populated only when the run failed.",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ]
+        },
+        "cost": {
+          "type": "string",
+          "description": "Impetus cost, serialised as a string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the run started, as an ISO-8601 string."
+        },
+        "aditus": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OWNER-SCOPED: the stored effective input the run was cast with, echoed verbatim (including an unresolved \"shuffle\" seed sentinel if that's what was stored). Present only when populated."
+        },
+        "pinnedModels": {
+          "type": "array",
+          "description": "OWNER-SCOPED: the models pinned at cast time. Present only when populated.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "modusVersion": {
+          "type": "string",
+          "description": "OWNER-SCOPED: the cast-time modus version. Present only when populated."
+        },
+        "order": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "modusId"
+      ]
+    }
+  },
+  "required": [
+    "run"
+  ]
+}
+```
+
 ### GET /v1/runs/:id/order
 
 The standing order behind a run — the request, not the attempt. A training run that fails on infrastructure stays scheduled: the order attempts again hourly until it lands or its window closes. Returns { order: null } for a run that has none.

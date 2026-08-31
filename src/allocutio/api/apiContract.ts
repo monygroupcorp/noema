@@ -1893,6 +1893,17 @@ export const API_CONTRACT: ApiContract = {
       response: RunEnvelopeSchema,
     },
     {
+      method: 'POST',
+      path: '/runs/:id/cancel',
+      summary:
+        'Stop an in-flight run and settle it (owner-scoped, idempotent): the pod is terminated and the ' +
+        'locked credits are released — the run is not charged. Returns the terminal run view, the same ' +
+        'projection GET /v1/runs/:id returns; a cancelled run reads status "failed". Cancelling a run that ' +
+        'has already settled returns that run unchanged, 200; a stranger gets not_found.run.',
+      auth: true,
+      response: RunEnvelopeSchema,
+    },
+    {
       method: 'GET',
       path: '/runs/:id/order',
       summary:

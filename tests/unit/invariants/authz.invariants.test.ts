@@ -537,6 +537,9 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
     // and reading one exposes what they asked for.
     { name: 'getRunOrder', call: (id) => api.getRunOrder(B, id) },
     { name: 'revokeRunOrder', call: (id) => api.revokeRunOrder(B, id) },
+    // Stopping a run settles it and releases its signa, so the id must be an address and
+    // never a capability: B holding A's run id buys nothing.
+    { name: 'cancelRun', call: (id) => api.cancelRun(B, id) },
   ], () => snapshot(actorum['store'] as Map<string, unknown>))
 
   const own = await api.getRun(A, run.id)
@@ -559,6 +562,21 @@ test('INVARIANT: identity B cannot read identity A\'s Actum by id', async () => 
   )
   assert.equal((await mandata.list())[0].status, 'active', 'B\'s refused cancel left A\'s order running')
   assert.equal((await api.getRunOrder(A, run.id))?.state, 'scheduled', 'A still reads their own order')
+
+  // The sweep above ran against a run that had already settled, where a leak could not have
+  // stopped anything. Repeat the cancel refusal against an IN-FLIGHT run of A's, which is the
+  // state where a leak would actually cost A a running job.
+  const liveSignum = await signorum.issue({ animaId: A.animaId, forma: 'minted', valor: 1000n, auctor: 'test' })
+  const live = await actorum.create({
+    id: 'actum-of-a-live', modusId: 'modus-1', modusVersiono: '1.0.0', impetus: 100n,
+    signaConsumed: [liveSignum.id], aditus: { prompt: 'a private prompt' },
+    status: 'agens', expirat: new Date(Date.now() + 60_000),
+  })
+  await assert.rejects(
+    () => api.cancelRun(B, live.id),
+    (e: unknown) => e instanceof ApiError && e.code === 'not_found.run',
+  )
+  assert.equal((await actorum.findById(live.id))?.status, 'agens', 'B\'s refused cancel left A\'s run running')
 })
 
 // ── BY ID: Dataset (owner resolved in getDataset) ────────────────────────────
