@@ -334,6 +334,12 @@ function recordingCursor() {
     cursor: {
       start: rec('start'), extend: rec('extend'), approveActum: rec('approveActum'),
       rejectAndRevive: rec('rejectAndRevive'), pause: rec('pause'), resume: rec('resume'),
+      // The cancel sweep is recorded by its collection id alone — its other argument is the
+      // settlement closure, which has no useful rendering in a call log.
+      cancelInFlight: async (collectioId: unknown) => {
+        calls.push(`cancelInFlight(${collectioId})`)
+        return { cancelled: [], completed: [], unsettled: [] }
+      },
     },
   }
 }

@@ -235,9 +235,9 @@ const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 6
  *  original; short enough that a copied link is not a durable handle to private media. */
 const PRIVATE_PRESIGN_TTL_SECONDS = 15 * 60
 
-/** The cause recorded on a run the owner stops themselves (`POST /v1/runs/:id/cancel`). It is
- *  only ever the cause when nothing more specific was recorded first — `completor.fail` keeps a
- *  cause already on the record and drops the caller's. */
+/** The cause recorded on a run the owner stops themselves (`POST /v1/runs/:id/cancel`, and each
+ *  piece a collection cancel settles). It is only ever the cause when nothing more specific was
+ *  recorded first — `completor.fail` keeps a cause already on the record and drops the caller's. */
 const CANCELLED_BY_OWNER = 'cancelled by the run owner'
 
 /** The ring slices CrystalApi composes. */
@@ -290,7 +290,7 @@ export interface CrystalApiDeps {
   /** Collection store + fan-out cursor — back `collect`/`getCollection`/review.
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
-  collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume'>
+  collectioCursor?: Pick<CollectioCursor, 'start' | 'extend' | 'approveActum' | 'rejectAndRevive' | 'pause' | 'resume' | 'cancelInFlight'>
   /** Dataset store — backs `listDatasets`/`listDatasetSummaries`/`getDataset`/`createDataset`,
    *  and resolves a run's declared dataset references for the calling anima.
    *  Absent → dataset ops unavailable, and a declared dataset reference is refused. */
@@ -1019,9 +1019,31 @@ export class CrystalApi {
     const a = await this.deps.actorum.findById(id)
     if (!a || !(await this._owns(auctor, a))) throw Errors.notFoundRun(id)
     if (a.status !== 'completus' && a.status !== 'fractus') {
-      await this.deps.completor.fail(a, CANCELLED_BY_OWNER)
+      await this._settleCancelled(a)
     }
     return this.getRun(auctor, id)
+  }
+
+  /**
+   * THE cancellation of one run: `completor.fail` with the owner-cancel cause — the pod is
+   * killed, the reservation is released rather than charged, and the run lands `fractus`.
+   *
+   * Every cancel surface comes through here, so "cancel a run" has one expression and one
+   * recorded cause whether the caller stopped a single run or the collection that owns it.
+   * There is no status pre-check inside: `fail` re-reads the record and returns it untouched
+   * when it is already terminal, so a run that settled in the meantime comes back as it
+   * stands and is neither re-released nor re-caused.
+   */
+  private async _settleCancelled(a: Actum): Promise<Actum> {
+    return this.deps.completor.fail(a, CANCELLED_BY_OWNER)
+  }
+
+  /** Read a run by id and cancel it, returning it as it stands once settled — the settlement
+   *  the collection cancel sweep hands to the cursor, per piece. Null when the record is gone. */
+  private async _settleCancelledById(actumId: string): Promise<Actum | null> {
+    const a = await this.deps.actorum.findById(actumId)
+    if (!a) return null
+    return this._settleCancelled(a)
   }
 
   /**
@@ -1498,11 +1520,47 @@ export class CrystalApi {
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
 
-  /** Cancel a Collection — stop dispatching + mark cancellata. Owner-scoped. */
+  /**
+   * Cancel a Collection — stop dispatching, mark it `cancellata`, and settle the pieces it
+   * still has in flight. Owner-scoped.
+   *
+   * A cancel settles the work the collection has in flight: each in-flight piece is cancelled
+   * through the SAME settlement `cancelRun` uses (`_settleCancelled` → `completor.fail`), so a
+   * cancelled piece's reservation is released rather than charged, and there is one expression
+   * of "cancel a run" rather than a collection-shaped second one.
+   *
+   * ORDER matters. Dispatching is held first, so no slot freed by a settled piece refills.
+   * The record is marked terminal SECOND, before any piece is settled, because the cursor
+   * reads that status when a piece leaves flight: a collection already `cancellata` is not
+   * re-settled as `completa` by its own last piece.
+   *
+   * IDEMPOTENT: a collection with nothing in flight — already cancelled, still a draft, or
+   * finished — settles nothing and is not an error. The sweep works off what is actually in
+   * flight, and the settlement is itself a no-op on an already-terminal run.
+   *
+   * A piece whose settlement throws is left in flight and named in the log rather than
+   * aborting the sweep: the remaining pieces are still cancelled, and the collection still
+   * reaches its terminal state.
+   */
   async cancelCollection(auctor: AuctorKey, id: string): Promise<Collection> {
     await this._ownedCollection(auctor, id)
-    await this.deps.collectioCursor?.pause(id)
-    return toCollection(await this.deps.collectiones!.update(id, { status: 'cancellata' }))
+    const collectiones = this.deps.collectiones!
+    const cursor = this.deps.collectioCursor
+    await cursor?.pause(id)
+    const cancelled = await collectiones.update(id, { status: 'cancellata' })
+    if (!cursor) return toCollection(cancelled)
+
+    const report = await cursor.cancelInFlight(id, (actumId) => this._settleCancelledById(actumId))
+    if (report.unsettled.length) {
+      log.warn('collection cancel: some pieces could not be settled', {
+        collectioId: id,
+        unsettled: report.unsettled.length,
+        errors: report.unsettled.map((u) => u.error),
+      })
+    }
+    // Re-read: the sweep moves the piece counters through the cursor, so the record the
+    // caller gets back is the one the cancel left behind, not the one it started from.
+    return toCollection((await collectiones.find(id)) ?? cancelled)
   }
 
   /** Review: approve a pending piece (it counts toward the collection). Owner-scoped. */
