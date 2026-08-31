@@ -5,6 +5,7 @@ import type { Nexus } from '../types/nexus.js'
 import type { Vestigiorum } from '../types/vestigium.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Intellarum } from '../types/intelligendi.js'
+import type { ModoStore } from '../types/modo.js'
 import { impetusFor } from '../ledger/rates.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace, makeTraceContext } from '../lib/trace.js'
@@ -37,6 +38,11 @@ interface Deps {
   /** Optional: model registry — resolves each model id to its human-readable `nomen`
    *  for `intellaDescription`. Absent (or id unresolved) → falls back to the raw id. */
   intellarum?: Pick<Intellarum, 'find'>
+  /** Optional: session store — a run bound to a `Modo` accrues its SETTLED impetus
+   *  onto that session here (the sole accrual site; see `Modo.impetusAccrued`).
+   *  Absent → no session accrual, which is the correct behaviour for a slim
+   *  deployment that has no sessions at all. */
+  modos?: Pick<ModoStore, 'findById' | 'update'>
 }
 
 let warnedMissingVestigiorum = false
@@ -81,7 +87,7 @@ export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
   async complete(actum: Actum, result: Exitus, auctor?: Auctor): Promise<Actum> {
-    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum } = this.deps
+    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum, modos } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -142,6 +148,31 @@ export class ActumCompletor {
       executio,
       ...(materiamId ? { materiamId } : {}),
     })
+
+    // Session spend accrual — the ONE site, for the same reason vestigium indexing
+    // is: every rail funnels through complete(), and this is the only point at which
+    // the SETTLED figure exists. `impetus` here is exactly what `signorum.settle`
+    // spent above and exactly what was written to `Actum.impetus` — so the session
+    // counter and the ledger cannot report different numbers for the same run.
+    //
+    // It is deliberately not `reportedImpetus`: `Modo.impetusAccrued` feeds the
+    // session budget guard in `Census`, and a budget is an authorization to SPEND,
+    // drawn down by what the ledger charges rather than by what the pod consumed.
+    // The two agree until a surcharge or the reservation cap applies; where they
+    // differ, the charged one is the one the guard has to enforce against. See the
+    // field's doc comment for the full statement of the rule — it must not be
+    // restated at any dispatch- or webhook-side call site, because neither of those
+    // can see this number, and a second derivation of it is a second answer.
+    //
+    // Read the modo fresh: a caller may have written `acta` between dispatch and
+    // here, and the accrual must not clobber it with a stale copy.
+    const modoId = current?.modoId ?? actum.modoId
+    if (modos && modoId) {
+      const modo = await modos.findById(modoId)
+      if (modo) {
+        await modos.update(modoId, { impetusAccrued: modo.impetusAccrued + impetus })
+      }
+    }
 
     // Vestigium indexing (single choke point — every rail funnels through complete()).
     // Fire-and-forget: indexing must never fail or delay a completion. Identity resolution

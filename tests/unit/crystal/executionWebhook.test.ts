@@ -732,51 +732,30 @@ test('missing nexus dep is a no-op — request still succeeds', async () => {
 })
 
 // ── Modo session spend ────────────────────────────────────────────────────────
+//
+// The webhook does NOT write session spend. `Modo.impetusAccrued` holds the amount
+// the LEDGER SETTLED, which only exists once `completor.complete` has settled the
+// run — so the accrual lives there, on both rails, and this webhook's own
+// pre-settlement figure never reaches the session counter. The parity itself is
+// covered end-to-end (ordinary / surcharged / capped, async rail and sync rail) in
+// tests/unit/execution/sessionSpendParity.test.ts.
 
-// 23. COMPLETED webhook updates impetusAccrued on the modo for async jobs
-test('COMPLETED updates modo impetusAccrued when actum has modoId', async () => {
+// 23. A completion carries no session write of its own — the completor owns it.
+test('COMPLETED writes no session spend from the webhook\'s own figure', async () => {
   const modos = new MemoryModo()
   const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
   const actum = makeActum({ modoId: modo.id })
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor: makeCompletor(),
-    modos,
-  }
+  const completor = makeCompletor()
+  const deps: ExecutionWebhookDeps = { actorum: makeActorum(actum), completor }
 
-  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 60_000 }), deps)
+  const result = await handleExecutionWebhook(
+    makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 60_000 }), deps)
 
-  const updated = await modos.findById(modo.id)
-  // executionTime 60_000ms → impetus = ceil(60_000 / 1000) = 60; 100 + 60 = 160
-  assert.equal(updated?.impetusAccrued, 160n)
-})
-
-// 24. COMPLETED without modos dep is a no-op — does not throw
-test('COMPLETED without modos dep succeeds when actum has modoId', async () => {
-  const actum = makeActum({ modoId: 'modo-xyz' })
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor: makeCompletor(),
-  }
-  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 5000 }), deps)
   assert.equal(result.status, 200)
-})
-
-// 25. COMPLETED for actum without modoId leaves modos untouched
-test('COMPLETED for actum without modoId does not update any modo', async () => {
-  const modos = new MemoryModo()
-  const modo = await modos.create({ status: 'active', impetusAccrued: 50n, acta: [], idleWarmthSec: 300 })
-  const actum = makeActum()  // no modoId
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor: makeCompletor(),
-    modos,
-  }
-
-  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 10_000 }), deps)
-
-  const unchanged = await modos.findById(modo.id)
-  assert.equal(unchanged?.impetusAccrued, 50n)
+  assert.equal(completor.completed.length, 1, 'the run was handed to the completor')
+  // This completor double settles nothing, so a session counter the webhook does
+  // not touch stays exactly where it was.
+  assert.equal((await modos.findById(modo.id))?.impetusAccrued, 100n)
 })
 
 // ── ActumIndex identity fallback (noema-044) ──────────────────────────────────
@@ -904,7 +883,7 @@ test('nonce-less callback for a run that carries a nonce writes nothing', async 
   await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A', modoId: modo.id }))
 
   const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum, modos }
+  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
 
   const result = await handleExecutionWebhook(
     makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }),
@@ -928,7 +907,7 @@ test('a nonce from a different run writes nothing', async () => {
   await seedActum(actorum, makeActum({ id: 'actum-test-2', externusJobId: 'job-other', callbackNonce: 'nonce-B' }))
 
   const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum, modos }
+  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
 
   const result = await handleExecutionWebhook(
     makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }, { nonce: 'nonce-B' }),

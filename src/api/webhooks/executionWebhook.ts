@@ -6,7 +6,6 @@ import type { Nexus } from '../../types/nexus.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
-import type { ModoStore } from '../../types/modo.js'
 import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
@@ -48,8 +47,6 @@ export interface ExecutionWebhookDeps {
     modus: import('../../types/modus.js').Modus | null,
     outputItems: Array<{ url?: string; path?: string; kind?: string } | string>,
   ): Promise<Record<string, unknown> | null>
-  /** Optional: session store — updates impetusAccrued when async jobs complete. */
-  modos?: ModoStore
   /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
   hospitia?: HospitiumStore
   /** Optional: compiled-bundle store — reads the resolved `spec.models` (the models the
@@ -249,16 +246,10 @@ export async function handleExecutionWebhook(
 
       const completed = await deps.completor.complete(actum, exitus, auctor)
 
-      // Update session spend — async jobs can't update impetusAccrued at dispatch
-      // time since the actual cost is unknown until the webhook fires.
-      if (deps.modos && actum.modoId) {
-        const modo = await deps.modos.findById(actum.modoId)
-        if (modo) {
-          await deps.modos.update(actum.modoId, {
-            impetusAccrued: modo.impetusAccrued + exitus.impetus,
-          })
-        }
-      }
+      // Session spend is not accrued here: `completor.complete` above accrues it
+      // from the amount it settled (see `Modo.impetusAccrued`). `exitus.impetus`
+      // is this webhook's pre-settlement figure and must not reach the session
+      // counter, which the budget guard weighs against the ledger.
 
       // Spell-author royalty routing — reuse the `modus` resolved above.
       // `Modus.auctor` is the `{ animaId } | { commitment }` owner union. Royalty
