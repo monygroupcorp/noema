@@ -1,0 +1,25 @@
+/* the plate — the landing page's unit of imagery.
+   The box is reserved from the slot's declared format before any art exists, so filling a
+   slot changes what is inside the frame and never the layout around it (no shift on load). */
+.plate{--plate-aspect:1;  /* the slot's declared format, set per-instance by the component */
+  position:relative;display:block;width:100%;aspect-ratio:var(--plate-aspect);
+  border-radius:var(--r-lg);overflow:hidden;background:var(--panel)}
+.plate .plate-img{display:block;width:100%;height:100%;object-fit:cover}
+
+/* an unfilled slot. Flat ground, one hairline, one mono label naming the reserved shape —
+   readable as scaffolding at a glance and at any size. */
+.plate-empty{display:grid;place-items:center;background:var(--panel);
+  border:1px dashed var(--faint)}
+.plate-empty .plate-label{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em;
+  text-align:center;padding:0 var(--s4)}
+
+/* the settle — the page's one authored motion, ruled to explain the product rather than
+   announce a website effect: the plate resolves into focus once, on arrival.
+   The still is the source of truth; this only plays where motion is welcome. */
+@media (prefers-reduced-motion: no-preference){
+  .plate-resolve{animation:plate-settle var(--dur-slow) var(--ease) both}
+}
+@keyframes plate-settle{
+  from{opacity:0;filter:blur(6px) saturate(.6);transform:scale(1.012)}
+  to{opacity:1;filter:none;transform:none}
+}

@@ -1,0 +1,22 @@
+/* the plate lab — a dev-only surface for looking at the landing page's reserved geometry.
+   Plain by intent: it is an instrument, not a candidate design. */
+.plate-lab{max-width:1180px;margin:0 auto;padding:var(--s10) var(--px-section)}
+.plate-lab .lab-head h1{font-size:var(--fs-2xl);letter-spacing:-.03em;font-weight:600;margin:0 0 var(--s3)}
+.plate-lab .lab-head p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;max-width:620px;margin:0 0 var(--s3)}
+.plate-lab .lab-count{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.06em}
+
+.plate-lab .lab-sec{margin-top:var(--s10);padding-top:var(--s7);border-top:1px solid var(--hair)}
+.plate-lab .lab-sec h2{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s2)}
+.plate-lab .lab-note{color:var(--muted);font-size:var(--fs-s);line-height:1.6;max-width:620px;margin:0 0 var(--s6)}
+.plate-lab .lab-note code{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text)}
+
+.plate-lab .lab-hero{max-width:960px}
+.plate-lab .lab-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s4)}
+.plate-lab .lab-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3)}
+.plate-lab .lab-grid.narrow{grid-template-columns:repeat(2,1fr)}
+.plate-lab .lab-narrow{width:390px;max-width:100%;display:grid;gap:var(--s4)}
+
+@media(max-width:640px){
+  .plate-lab .lab-row{grid-template-columns:1fr}
+  .plate-lab .lab-grid{grid-template-columns:repeat(2,1fr)}
+}
