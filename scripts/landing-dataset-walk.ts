@@ -52,10 +52,26 @@
 // `deferred: human` on every piece rather than guessed at.
 //
 // Abort-and-report, never retry, on: a 402; the deadlock signature (fired,
-// zero pieces dispatched after `LANDING_WALK_DISPATCH_TIMEOUT_MS`); a run in
-// a state the API cannot explain; two consecutive phase failures. Never
-// re-dispatches a persisted actum (noema-359 is unruled — a naive
-// catch-and-continue can charge the funder twice).
+// zero pieces dispatched after `LANDING_WALK_DISPATCH_TIMEOUT_MS`); every
+// dispatch failing; a run in a state the API cannot explain; two consecutive
+// phase failures. Never re-dispatches a persisted actum.
+//
+// noema-359 IS NOW RULED (merged as #492). The spec wrote its abort rules
+// against an unruled fork where a dispatch that threw after `initiate` left the
+// actum `nascens` with its reservation held until the expiry reaper — so an
+// aborted walk could not say whether it had stranded the funder's money, and
+// "never re-dispatch" was the only safe rule. Post-#492 a post-initiate throw
+// releases what the initiation acquired, stamps the actum `fractus`, and
+// `CollectioCursor` counts it in `fractae` (this API's `failed`). Two
+// consequences the driver now depends on:
+//   1. An aborted phase A can state the disposition of every impetus it
+//      committed, rather than leaving it open. It says so in the receipt.
+//   2. A dispatch-failure storm is VISIBLE. It used to be indistinguishable
+//      from a stall — both showed zero completions — so it fell through to the
+//      deadlock timeout. Now `failed` climbs while `completed` stays 0, which
+//      is a different fault with a different remedy, and gets its own abort.
+// "Never re-dispatch a persisted actum" still stands: it is walk discipline
+// (an [AGENT] walk reports, it does not repair), not a money guard any more.
 //
 // Two modes:
 //   LIVE  (default): npx tsx scripts/landing-dataset-walk.ts --phase a [--apply]
@@ -93,7 +109,13 @@ import { Errors } from '../src/allocutio/api/errors.js'
 // Constants (spec §3 "Identity constants" + §4 "Phase A" + art bible §9)
 // =============================================================================
 
-const TRIGGER_WORD = process.env.LANDING_WALK_TRIGGER_WORD ?? 'nmahaus'
+// Spec §3 RULES the trigger as `noema` (rth, 2026-08-28; art bible §9 says the same). `nmahaus`
+// was the pre-ruling draft value and stayed as the default on the grounds that the ruling could
+// be applied as env config — but the trigger is written into every caption and is what the
+// trained Intella is addressed by, and the spec fixes it "before captioning; changing it later
+// invalidates the captionset". A default that silently trains the wrong trigger is the failure
+// this constant exists to prevent, so the default IS the ruling.
+const TRIGGER_WORD = process.env.LANDING_WALK_TRIGGER_WORD ?? 'noema'
 const DATASET_NAME = 'landing-house-look-v1'
 const COLLECTION_NAME = 'landing house look — candidates v1'
 // klein-4b is the spec's ruling (canon-training-modus.md preset alias, verified against
@@ -130,8 +152,10 @@ const SUBJECT_FRAGMENTS: Record<SubjectClass, string> = {
   illustrated: 'ink and gouache illustration of a figure, visible brush and line work, large flat areas of held-back colour, paper tooth visible',
 }
 
-// Spec §4 axis 2 — eight scenes, chosen to work across all three subject classes.
-const SCENES: readonly { key: string; fragment: string }[] = [
+// Spec §4 axis 2 — the ruled SIXTEEN scenes, each chosen to work across all three subject
+// classes. The first eight are the calibration batch's own axis (§4.1 fires 3 x 8 x 1 = 24), so
+// this list is ordered: slicing it never changes what a calibration run already measured.
+const ALL_SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'workbench', fragment: 'at a workbench' },
   { key: 'stairwell-landing', fragment: 'on a stairwell landing at night' },
   { key: 'window-night', fragment: 'at a window at night' },
@@ -140,16 +164,66 @@ const SCENES: readonly { key: string; fragment: string }[] = [
   { key: 'tool-in-hand', fragment: 'holding a tool in hand' },
   { key: 'corridor', fragment: 'in a corridor' },
   { key: 'threshold', fragment: 'at a threshold' },
+  { key: 'mirror-reflection', fragment: 'beside a mirror, partly reflected' },
+  { key: 'against-weather', fragment: 'against weather at an open door' },
+  { key: 'single-lamp', fragment: 'under a single lamp' },
+  { key: 'in-transit', fragment: 'in transit' },
+  { key: 'at-table', fragment: 'at a table' },
+  { key: 'rail', fragment: 'leaning on a rail' },
+  { key: 'foreground-occluded', fragment: 'partially occluded by something in the foreground' },
+  { key: 'away-into-depth', fragment: 'turned away, into depth' },
 ]
 
-// Spec §4 axis 3 — seed variation only, no prompt change. Five fixed seeds so a re-run of the
+// Spec §4 axis 3 — seed variation only, no prompt change. Fixed seeds so a re-run of the
 // SAME grid is reproducible.
-const VARIATION_SEEDS: readonly number[] = [10001, 10002, 10003, 10004, 10005]
+const ALL_SEEDS: readonly number[] = [
+  10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008,
+]
 
-const TOTAL_CANDIDATES = SUBJECT_CLASSES.length * SCENES.length * VARIATION_SEEDS.length // 3*8*5=120
-const SELECT_TARGET_PER_CLASS = 20
-const SELECT_FLOOR_PER_CLASS = 15 // spec §10.3 / §5: below 15 -> stop, do not backfill
-const SELECT_TARGET_TOTAL = SELECT_TARGET_PER_CLASS * SUBJECT_CLASSES.length // 60
+// The GRID IS RUNTIME CONFIG, not a constant. rth ruled the sizes on 2026-08-28 (384-candidate
+// full grid: 3 classes x 16 scenes x 8 seeds; a 24-image calibration batch first: 3 x 8 x 1), and
+// the sizes will change again between runs — a hardcoded grid is a defect, not a default. The
+// values below are the ruled DEFAULTS; env overrides pick the actual run.
+//   LANDING_WALK_SCENES  — how many scenes of ALL_SCENES to use
+//   LANDING_WALK_SEEDS   — how many seeds of ALL_SEEDS to use
+const clampCount = (raw: string | undefined, fallback: number, max: number): number => {
+  const n = raw === undefined ? fallback : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > max) {
+    throw new Error(
+      `landing-dataset-walk: bad grid size ${JSON.stringify(raw)} — expected an integer 1..${max}`,
+    )
+  }
+  return n
+}
+
+const SCENES: readonly { key: string; fragment: string }[] = ALL_SCENES.slice(
+  0,
+  clampCount(process.env.LANDING_WALK_SCENES, ALL_SCENES.length, ALL_SCENES.length),
+)
+const VARIATION_SEEDS: readonly number[] = ALL_SEEDS.slice(
+  0,
+  clampCount(process.env.LANDING_WALK_SEEDS, ALL_SEEDS.length, ALL_SEEDS.length),
+)
+
+const TOTAL_CANDIDATES = SUBJECT_CLASSES.length * SCENES.length * VARIATION_SEEDS.length
+// Select targets scale with the grid: the spec's ruled full grid (384) curates to 120 at 40/class
+// with a floor of 30, i.e. a ~31% keep rate and a floor at 75% of target. Deriving them keeps a
+// calibration batch from tripping a floor sized for the full run.
+const SELECT_TARGET_PER_CLASS = Math.max(
+  1,
+  Math.round((TOTAL_CANDIDATES / SUBJECT_CLASSES.length) * 0.3125),
+)
+const SELECT_FLOOR_PER_CLASS = Math.max(1, Math.round(SELECT_TARGET_PER_CLASS * 0.75))
+const SELECT_TARGET_TOTAL = SELECT_TARGET_PER_CLASS * SUBJECT_CLASSES.length
+// Spec §10.1: the grid dispatches and >=92% completes. Derived, never a literal — a hard check
+// whose PRINTED threshold differs from the one it tests is a false receipt (DOCTRINE §24).
+const MIN_COMPLETED = Math.ceil(TOTAL_CANDIDATES * 0.92)
+
+// Settlement model (impetus == seconds of pod time). Overridable so a measured run replaces the
+// estimate rather than arguing with it.
+const COLD_START_SECONDS = Number(process.env.LANDING_WALK_COLD_START_SECONDS ?? 400)
+const WARM_SECONDS_PER_IMAGE = Number(process.env.LANDING_WALK_WARM_SECONDS ?? 40)
+const COLLECTION_CONCURRENTIA = Number(process.env.LANDING_WALK_CONCURRENTIA ?? 2)
 
 // Ground / key colours the mechanical curation gate checks against (art bible §2).
 const GROUND_HEX = '#08090A'
@@ -198,14 +272,28 @@ async function fetchJson(url: string, init: RequestInit): Promise<FetchResult> {
   return { status: res.status, body }
 }
 
+/**
+ * How the driver authenticates. TWO rails, because the funded account decides which one:
+ *   • `bursa`  — anonymous rail, `x-bursa-token` (the noema-356 concierge-walk pattern)
+ *   • `bearer` — an owned anima account, `Authorization: Bearer` (helm-fleet-01's rail)
+ * The spec originally assumed the bursa rail by inheritance from 356 and was wrong: the helm
+ * fleet account is an anima with a bearer, and its purse is the funded one.
+ */
+type AuthRail = { kind: 'bursa'; token: string } | { kind: 'bearer'; token: string }
+
 class Client {
   constructor(
     private readonly baseUrl: string,
-    private readonly bursaToken: string,
+    private readonly auth: AuthRail,
   ) {}
 
   private headers(): Record<string, string> {
-    return { 'content-type': 'application/json', 'x-bursa-token': this.bursaToken }
+    return {
+      'content-type': 'application/json',
+      ...(this.auth.kind === 'bursa'
+        ? { 'x-bursa-token': this.auth.token }
+        : { authorization: `Bearer ${this.auth.token}` }),
+    }
   }
 
   private async req(method: string, path: string, body?: unknown): Promise<FetchResult> {
@@ -338,6 +426,29 @@ function assertUnderCeiling(state: RunState, incomingQuote: string, label: strin
   }
 }
 
+/**
+ * Reserves are held per in-flight run and released on settlement, so what must fit in the purse
+ * is `perRunReserve x concurrentia`, never the whole grid. Checked against the live balance.
+ */
+async function assertReserveHeadroom(client: Client, headroom: bigint): Promise<void> {
+  const me = await client.get('/v1/me')
+  if (me.status !== 200) {
+    console.log(`[cost] /v1/me returned ${me.status} — balance unknown, headroom NOT asserted; a 402 will speak instead`)
+    return
+  }
+  const balanceRaw = (me.body as { balanceImpetus?: string }).balanceImpetus
+  if (!balanceRaw) return // no balance surfaced — do not invent one, let a 402 speak instead
+  const balance = BigInt(balanceRaw)
+  if (headroom > balance) {
+    throw new WalkFailure(
+      'spend.headroom',
+      `reserve headroom ${headroom} impetus (concurrentia ${COLLECTION_CONCURRENTIA} x ${headroom / BigInt(COLLECTION_CONCURRENTIA)}) exceeds the purse balance ${balance}`,
+      'reserves are held per in-flight run and released on settlement — lower LANDING_WALK_CONCURRENTIA or fund the purse; the run itself costs far less than the reserve',
+    )
+  }
+  console.log(`[cost] reserve headroom ${headroom} fits balance ${balance}`)
+}
+
 // =============================================================================
 // Mechanical curation gate (spec §5, art bible §2/§9/§10) — ONLY the honestly
 // mechanical checks. Everything else is marked `deferred: human`.
@@ -449,13 +560,37 @@ function analyzeBitmap(width: number, height: number, getPixel: (x: number, y: n
   return { checks, pass: checks.every((c) => c.pass) }
 }
 
-async function analyzeImageUrl(url: string): Promise<{ checks: MechanicalCheck[]; pass: boolean }> {
+/** Where a run's candidate images are kept on disk.
+ *
+ *  The images ARE the paid artifact of this walk — the rejects as much as the selects, because a
+ *  reject is the curation gate's evidence and the only way to argue with a verdict later. The API
+ *  keeps the acta, but the driver should not depend on a signed output URL still resolving days
+ *  after the run, so every candidate is written down as it is fetched, before it is judged. */
+function imagesDir(runId: string): URL {
+  return new URL(`${runId}-images/`, stateDir())
+}
+
+/** Fetches a piece image, optionally writes it to disk, and runs the mechanical gate over it.
+ *  One fetch serves both: the bytes that were judged are the bytes that were saved. */
+async function analyzeImageUrl(url: string, saveAs?: URL): Promise<{ checks: MechanicalCheck[]; pass: boolean }> {
   const res = await fetch(url)
   if (!res.ok) throw new WalkFailure('curate.fetch', `could not fetch piece image ${url}: ${res.status}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
+  if (saveAs) {
+    await mkdir(new URL('.', saveAs), { recursive: true })
+    await writeFile(saveAs, bytes)
+  }
   const { Jimp } = await import('jimp')
   const img = await Jimp.read(Buffer.from(bytes))
   return analyzeBitmap(img.bitmap.width, img.bitmap.height, (x, y) => img.getPixelColor(x, y))
+}
+
+/** A browsable, sortable filename: the axes first so a directory listing groups by class and
+ *  scene, the actum id last so the file is still traceable to its run. */
+function imageFileName(subjectClass: string, scene: string, seed: number, actumId: string, url: string): string {
+  const ext = /\.(png|jpe?g|webp)(\?|$)/i.exec(url)?.[1]?.toLowerCase() ?? 'png'
+  const safe = (v: string): string => v.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()
+  return `${safe(subjectClass)}__${safe(scene)}__seed-${seed}__${actumId}.${ext === 'jpeg' ? 'jpg' : ext}`
 }
 
 // =============================================================================
@@ -476,9 +611,9 @@ function buildHardChecks(state: RunState, candidatesCompleted: number): HardChec
   const minClass = SUBJECT_CLASSES.length > 0 ? Math.min(...SUBJECT_CLASSES.map(perClass)) : 0
   const spend = totalSpent(state)
   const rows: HardCheckRow[] = [
-    { n: 1, name: '120 candidates dispatched, >=110 completed', pass: candidatesCompleted >= 110, observed: `${candidatesCompleted}/${TOTAL_CANDIDATES}` },
+    { n: 1, name: `${TOTAL_CANDIDATES} candidates dispatched, >=${MIN_COMPLETED} completed`, pass: candidatesCompleted >= MIN_COMPLETED, observed: `${candidatesCompleted}/${TOTAL_CANDIDATES}` },
     { n: 2, name: 'every completed piece fetched + classified', pass: pieces.length === candidatesCompleted && candidatesCompleted > 0, observed: `${pieces.length} classified` },
-    { n: 3, name: '>=60 selects, no class below 15', pass: approved.length >= SELECT_TARGET_TOTAL && minClass >= SELECT_FLOOR_PER_CLASS, observed: `${approved.length} selects, min class ${minClass}` },
+    { n: 3, name: `>=${SELECT_TARGET_TOTAL} selects, no class below ${SELECT_FLOOR_PER_CLASS}`, pass: approved.length >= SELECT_TARGET_TOTAL && minClass >= SELECT_FLOOR_PER_CLASS, observed: `${approved.length} selects, min class ${minClass}` },
     { n: 4, name: 'dataset created from approved acta only', pass: state.datasetId !== undefined, observed: state.datasetId ? `dataset ${state.datasetId}` : 'not created' },
     { n: 5, name: 'captionset coverage 100%, trigger in every caption', pass: state.captionsetId !== undefined, observed: state.captionsetId ? `captionset ${state.captionsetId}` : 'not created' },
     { n: 6, name: 'training run reaches terminal success, registers lora Intella', pass: state.loraIntellaId !== undefined, observed: state.loraIntellaId ?? 'not trained' },
@@ -489,20 +624,37 @@ function buildHardChecks(state: RunState, candidatesCompleted: number): HardChec
   return rows
 }
 
-function printHardChecks(rows: HardCheckRow[]): void {
+/** A dry pass never fires, so nothing downstream of the quote is EXERCISED. Reporting those
+ *  checks as FAIL says the run was driven and came up short, which is not what happened — and
+ *  the walk-board row built from that count would carry the same untruth onto the board. A check
+ *  that was never reached reports SKIP, and the verdict says DRY. (DOCTRINE §24: a receipt that
+ *  reads as a result it did not produce is a false receipt.) */
+function printHardChecks(rows: HardCheckRow[], apply: boolean): void {
   console.log('\n--- HARD CHECKS (spec §10) ---')
   for (const r of rows) {
-    console.log(`${r.pass ? 'PASS' : 'FAIL'}  #${r.n}  ${r.name}  — ${r.observed}`)
+    const mark = r.pass ? 'PASS' : apply ? 'FAIL' : 'SKIP'
+    const observed = r.pass || apply ? r.observed : 'not exercised — dry pass fired nothing'
+    console.log(`${mark}  #${r.n}  ${r.name}  — ${observed}`)
   }
   const allPass = rows.every((r) => r.pass)
+  if (!apply) {
+    console.log('\nRUN: DRY — planned and quoted, fired nothing. No hard check below #9 can be earned without --apply.')
+    return
+  }
   console.log(allPass ? '\nRUN: PASS (all 9 hard checks)' : '\nRUN: PARTIAL — not all hard checks passed')
 }
 
-function walkBoardRow(state: RunState, rows: HardCheckRow[]): string {
+function walkBoardRow(state: RunState, rows: HardCheckRow[], apply: boolean): string {
   const date = state.startedAt.slice(0, 10)
   const passCount = rows.filter((r) => r.pass).length
   const defects = state.defects.length
-  return `- [AGENT] ${date} · landing-dataset-walk drove the full generate→curate→dataset→caption→train→plates sequence over /v1 · run ${state.runId}, ${TOTAL_CANDIDATES}-candidate collection, klein-4b/${TRAIN_STEPS}-step training · ${passCount}/9 hard checks passed, spend ${totalSpent(state)}/${state.ceilingImpetus} impetus · ${defects} defect(s) filed`
+  const spent = totalSpent(state)
+  // The row is written to be pasted onto the walk board verbatim, so it states what this
+  // invocation actually did. A dry pass drove the quote path and nothing else.
+  const did = apply
+    ? `drove the full generate→curate→dataset→caption→train→plates sequence over /v1 · ${passCount}/9 hard checks passed`
+    : `DRY PASS — resolved the contract and quoted phase A over /v1, fired nothing · hard checks not exercised`
+  return `- [AGENT] ${date} · landing-dataset-walk ${did} · run ${state.runId}, ${TOTAL_CANDIDATES}-candidate collection, klein-4b/${TRAIN_STEPS}-step training · spend ${spent}/${state.ceilingImpetus} impetus · ${defects} defect(s) filed`
 }
 
 // =============================================================================
@@ -563,23 +715,44 @@ async function quotePhaseA(client: Client, state: RunState): Promise<string> {
   expectStatus(q, [200], 'quote.phaseA', 'POST /v1/runs/quote (phase A sample)')
   const perImage = (q.body as { impetus?: string }).impetus
   if (!perImage) throw new WalkFailure('quote.phaseA', `quote response carried no impetus: ${JSON.stringify(q.body)}`)
-  const total = (BigInt(perImage) * BigInt(TOTAL_CANDIDATES)).toString()
-  state.quotes.phaseA = { impetus: total, at: new Date().toISOString() }
-  return total
+  // WHAT THE QUOTE ACTUALLY IS (src/ledger/rates.ts, src/crystal/RunPodCursor.ts): a per-run
+  // RESERVATION, not a price. `reservationImpetus()` resolves impetusFixum -> the flow's own
+  // `pretium` curve -> GENERIC_RESERVE_IMPETUS (900), and krea-turbo carries no curve, so every
+  // quote is the generic fallback: "2 x the observed cold-start p95 of 402 s, rounded up.
+  // PLACEHOLDER pending per-flow calibration." One impetus is ONE SECOND of pod time at
+  // REFERENCE_COST_PER_HR ($1.2132/hr). The reserve is HELD at dispatch and settled against
+  // actual pod-seconds, so multiplying it by the grid size models nothing real — it prices every
+  // image as its own cold start with a full weight download. Real shape: one cold start, then
+  // ~40 s per image on the warm pod.
+  state.quotes.phaseA = { impetus: perImage, at: new Date().toISOString() }
+  return perImage
 }
 
 async function phaseAGenerate(client: Client, state: RunState, apply: boolean): Promise<void> {
-  const quoted = await quotePhaseA(client, state)
-  assertUnderCeiling(state, quoted, 'phase A generate (120 candidates)')
+  const perRunReserve = await quotePhaseA(client, state)
+  // The pre-flight gate is on RESERVE HEADROOM — what is held at once — because reserves are
+  // taken per run at dispatch and released on settlement. `concurrentia` bounds it.
+  const headroom = BigInt(perRunReserve) * BigInt(COLLECTION_CONCURRENTIA)
+  const settlementEstimate =
+    BigInt(COLD_START_SECONDS) + BigInt(WARM_SECONDS_PER_IMAGE) * BigInt(TOTAL_CANDIDATES)
+  console.log(
+    `[cost] per-run reserve ${perRunReserve} impetus (a HOLD, generic fallback — not a price)\n` +
+      `[cost] reserve headroom at concurrentia=${COLLECTION_CONCURRENTIA}: ${headroom} impetus\n` +
+      `[cost] estimated SETTLEMENT for ${TOTAL_CANDIDATES} images: ~${settlementEstimate} impetus ` +
+      `(~$${(Number(settlementEstimate) * 0.000337).toFixed(2)}) = one ${COLD_START_SECONDS}s cold start + ` +
+      `${TOTAL_CANDIDATES}x${WARM_SECONDS_PER_IMAGE}s warm`,
+  )
+  assertUnderCeiling(state, settlementEstimate.toString(), `phase A generate (${TOTAL_CANDIDATES} candidates, estimated settlement)`)
+  await assertReserveHeadroom(client, headroom)
   if (!apply) {
-    console.log(`[dry] phase A would fire ${TOTAL_CANDIDATES} candidates, quoted ${quoted} impetus total`)
+    console.log(`[dry] phase A would fire ${TOTAL_CANDIDATES} candidates`)
     return
   }
 
   const created = await client.post('/v1/collectiones', {
     nomen: COLLECTION_NAME,
     descriptio: 'Wave 3 landing house-look dataset candidates',
-    concurrentia: 2, // spec §4: "deliberately conservative first contact"
+    concurrentia: COLLECTION_CONCURRENTIA, // spec §4: "deliberately conservative first contact"
     reviewEnabled: true,
     draft: true,
   })
@@ -613,7 +786,7 @@ async function phaseAGenerate(client: Client, state: RunState, apply: boolean): 
   const recreated = await client.post('/v1/collectiones', {
     nomen: COLLECTION_NAME,
     descriptio: 'Wave 3 landing house-look dataset candidates',
-    concurrentia: 2,
+    concurrentia: COLLECTION_CONCURRENTIA,
     reviewEnabled: true,
     draft: true,
     aditusBase: { _basePrompt: '{{subject}}, {{scene}}, ' + HOUSE_CLAUSE, width: 1024, height: 1024 },
@@ -633,7 +806,8 @@ async function phaseAGenerate(client: Client, state: RunState, apply: boolean): 
 
   const fired = await client.post(`/v1/collectiones/${finalId}/fire`)
   expectStatus(fired, [200], 'generate.fire', `POST /v1/collectiones/${finalId}/fire`)
-  state.spend.phaseA = { quoted, at: new Date().toISOString() }
+  // Recorded as the ESTIMATED settlement; the real figure is read back from the completed acta.
+  state.spend.phaseA = { quoted: settlementEstimate.toString(), at: new Date().toISOString() }
   await saveState(state)
 }
 
@@ -654,11 +828,24 @@ async function phaseAWatch(client: Client, state: RunState): Promise<Collection>
       return collection
     }
     const elapsed = Date.now() - start
+
+    // Every dispatch is failing. Post-#492 this is its own signature rather than a stall:
+    // `fractae` climbs, so `sawDispatch` is true and the deadlock timeout below can never
+    // fire — without this the driver would poll a doomed collection until the operator
+    // killed it. Cancel-and-re-fire is the WRONG remedy here; it reproduces the fault.
+    if (collection.failed > 0 && collection.completed === 0 && (collection.inFlight ?? 0) === 0 && elapsed > effectiveDispatchTimeoutMs) {
+      throw new WalkFailure(
+        'watch.all-dispatches-failed',
+        `collection ${state.collectionId}: ${collection.failed} of ${collection.total} pieces failed to dispatch and none completed after ${Math.round(elapsed / 1000)}s`,
+        'noema-359/#492: every one of those failures released its reservation and is counted in `fractae`, so NOTHING is held and the purse is whole — this is a dispatch fault, not a money incident. Read the dispatch error before re-firing; cancelling and re-firing blind reproduces it.',
+      )
+    }
+
     if (!sawDispatch && elapsed > effectiveDispatchTimeoutMs) {
       throw new WalkFailure(
         'watch.deadlock',
         `collection ${state.collectionId} fired ${Math.round(elapsed / 1000)}s ago with zero pieces dispatched (status=${collection.status})`,
-        'this is the known deadlock signature (spec §9 / rth\'s 2026-08-28 incident): on pre-#476 prod, Resume no-ops — cancel the collection and re-fire (a census proves nothing was spent). Do NOT resume.',
+        'the deadlock signature (spec §9 / rth\'s 2026-08-28 incident). Post-#476 a collection keeps dispatching across a process restart, and post-#492 a throwing dispatch would show in `failed` — so zero of BOTH means the dispatcher never ran for this collection at all, not that pieces are failing quietly. Nothing was spent (no actum was persisted, so no reservation was taken). Cancel and re-fire; do not resume.',
       )
     }
     if ((collection.status as string) !== 'running' && (collection.status as string) !== 'pending' && (collection.status as string) !== 'draft') {
@@ -690,7 +877,10 @@ async function phaseBCurate(client: Client, state: RunState): Promise<void> {
     let mechanical: { checks: MechanicalCheck[]; pass: boolean }
     try {
       if (!imageUrl) throw new WalkFailure('curate.no-image', `piece ${piece.actumId} has no output.image`)
-      mechanical = await analyzeImageUrl(imageUrl)
+      mechanical = await analyzeImageUrl(
+        imageUrl,
+        new URL(imageFileName(subjectClass, scene, seed, piece.actumId, imageUrl), imagesDir(state.runId)),
+      )
       consecutiveFailures = 0
     } catch (err) {
       consecutiveFailures++
@@ -993,13 +1183,18 @@ async function runSequence(
 // against in-memory fakes (the tests/unit/allocutio/api/apiRouter.test.ts
 // pattern). Includes: a quote that exceeds the ceiling (ceiling-abort path), a
 // class-skewed piece set (balance-stop path), and a fired-but-undispatched
-// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance>`.
+// collection (deadlock path) — see `--smoke --induce <ceiling|deadlock|balance|headroom|storm>`.
 // =============================================================================
 
 const SMOKE_BURSA_TOKEN = 'bt-smoke-landing-walk'
 const SMOKE_PER_IMAGE_IMPETUS = '5'
+// The balance `GET /v1/me` reports. Ample by default; under the headroom induce it is set BELOW
+// `perRunReserve x concurrentia` (5 x 2 = 10) so the pre-flight gate is the thing that stops the
+// run — the only way that abort can be reached is the guard doing its job.
+const SMOKE_BALANCE_IMPETUS = '100000000'
+const SMOKE_HEADROOM_BALANCE_IMPETUS = '4'
 
-type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance'
+type Induce = 'none' | 'ceiling' | 'deadlock' | 'balance' | 'headroom' | 'storm'
 
 /** A tiny in-process image server: serves one generated PNG per requested colour, so the
  *  smoke fixture exercises the REAL analyzeBitmap/jimp path end-to-end (no fake analyzer). */
@@ -1096,6 +1291,19 @@ async function buildSmokeAppAsync(induce: Induce): Promise<{ app: Express; close
       const per = induce === 'ceiling' ? '999999' : SMOKE_PER_IMAGE_IMPETUS
       return { impetus: per }
     },
+    async getMe() {
+      // Without this the router's `/v1/me` 500s, `assertReserveHeadroom` takes its
+      // balance-unknown branch, and the headroom gate is never actually exercised offline.
+      return {
+        bindings: [],
+        secrets: { civitai: 'absent' as const, huggingface: 'absent' as const },
+        secretsAvailable: false,
+        admin: false,
+        balanceImpetus:
+          induce === 'headroom' ? SMOKE_HEADROOM_BALANCE_IMPETUS : SMOKE_BALANCE_IMPETUS,
+        balanceUsd: 0,
+      }
+    },
     async listFlows() {
       return [
         { id: GEN_MODUS_ID, nomen: 'Krea 2 Turbo', versio: '1.0.0', modusGenus: 'generate' as never },
@@ -1121,7 +1329,15 @@ async function buildSmokeAppAsync(induce: Induce): Promise<{ app: Express; close
       const c = collections.get(id)
       if (!c) throw Errors.notFoundRun(id)
       // The deadlock induce: fire but never dispatch (acta stays []).
-      seedCollection(id, true, induce !== 'deadlock')
+      // The storm induce: fire, dispatch nothing successfully, but count every piece in
+      // `fractae` — the post-#492 shape of "every dispatch threw", which is deliberately
+      // NOT the deadlock shape (there, `failed` stays 0 too).
+      seedCollection(id, true, induce !== 'deadlock' && induce !== 'storm')
+      if (induce === 'storm') {
+        const stormed = collections.get(id)!
+        stormed.failed = stormed.total
+        stormed.completed = 0
+      }
       const refetched = collections.get(id)!
       return refetched
     },
@@ -1227,9 +1443,9 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
   const { app, closeImageServer } = await buildSmokeAppAsync(induce)
   const server = await listen(app)
   const savedTimeout = effectiveDispatchTimeoutMs
-  if (induce === 'deadlock') effectiveDispatchTimeoutMs = 500 // smoke: prove the abort path fast, not the real 5min wait
+  if (induce === 'deadlock' || induce === 'storm') effectiveDispatchTimeoutMs = 500 // smoke: prove the abort path fast, not the real 5min wait
   try {
-    const client = new Client(server.baseUrl, SMOKE_BURSA_TOKEN)
+    const client = new Client(server.baseUrl, { kind: 'bursa', token: SMOKE_BURSA_TOKEN })
     const state = newState(`smoke-${induce}-${Date.now()}`, induce === 'ceiling' ? '1000' : '100000000', GEN_MODUS_ID)
 
     if (planOnly) {
@@ -1253,6 +1469,14 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
         console.log(`smoke induce=deadlock: correctly aborted — ${err.message}`)
         return
       }
+      if (induce === 'storm' && err instanceof WalkFailure && err.assertion === 'watch.all-dispatches-failed') {
+        console.log(`smoke induce=storm: correctly aborted — ${err.message}`)
+        return
+      }
+      if (induce === 'headroom' && err instanceof WalkFailure && err.assertion === 'spend.headroom') {
+        console.log(`smoke induce=headroom: correctly aborted — ${err.message}`)
+        return
+      }
       if (induce === 'balance' && err instanceof WalkFailure && err.assertion === 'curate.balance') {
         console.log(`smoke induce=balance: correctly aborted — ${err.message}`)
         return
@@ -1265,8 +1489,10 @@ async function runSmoke(induce: Induce, planOnly: boolean): Promise<void> {
     }
 
     const rows = buildHardChecks(state, state.pieces?.length ?? 0)
-    printHardChecks(rows)
-    console.log('\n' + walkBoardRow(state, rows))
+    // The smoke fixture drives every phase for real (against fakes) — `--plan-only` returned
+    // above — so this receipt is an applied one.
+    printHardChecks(rows, true)
+    console.log('\n' + walkBoardRow(state, rows, true))
     console.log(`\nDEFECTS FILED: ${state.defects.length}`)
     for (const d of state.defects) console.log(`  - ${d.route}: ${d.observation}`)
   } finally {
@@ -1314,11 +1540,14 @@ async function main(): Promise<void> {
     }
     // Full offline smoke: drive every phase against the real apiRouter with in-memory fakes.
     await runSmoke('none', opts.planOnly)
-    // Also exercise the three offline abort paths so the non-vacuity claims in the PR body are
-    // reproducible from this single invocation.
+    // Also exercise EVERY offline abort path, so the non-vacuity claims in the PR body are
+    // reproducible from this single invocation. An abort path missing from this list is an
+    // abort path nothing proves — `headroom` and `storm` were added with their guards.
     if (!opts.planOnly) {
       await runSmoke('ceiling', false)
+      await runSmoke('headroom', false)
       await runSmoke('deadlock', false)
+      await runSmoke('storm', false)
       await runSmoke('balance', false)
     }
     return
@@ -1326,12 +1555,15 @@ async function main(): Promise<void> {
 
   const baseUrl = process.env.LANDING_WALK_BASE_URL
   const bursaToken = process.env.LANDING_WALK_BURSA_TOKEN
-  if (!baseUrl || !bursaToken) {
+  const bearer = process.env.LANDING_WALK_BEARER
+  if (!baseUrl || (!bursaToken && !bearer)) {
     throw new WalkFailure(
       'config.missing',
-      'LANDING_WALK_BASE_URL and LANDING_WALK_BURSA_TOKEN are both required for a live walk (see .env-example); use --smoke for the offline fixture',
+      'LANDING_WALK_BASE_URL plus ONE of LANDING_WALK_BEARER (an owned anima account, e.g. the helm fleet account) or LANDING_WALK_BURSA_TOKEN (the anonymous rail) are required for a live walk (see .env-example); use --smoke for the offline fixture',
     )
   }
+  // Bearer wins when both are present: an owned account's purse is the one that gets funded.
+  const authRail: AuthRail = bearer ? { kind: 'bearer', token: bearer } : { kind: 'bursa', token: bursaToken! }
   const ceiling = process.env.LANDING_WALK_CEILING_IMPETUS
   if (opts.apply && !ceiling) {
     throw new WalkFailure(
@@ -1340,7 +1572,7 @@ async function main(): Promise<void> {
     )
   }
 
-  const client = new Client(baseUrl.replace(/\/$/, ''), bursaToken)
+  const client = new Client(baseUrl.replace(/\/$/, ''), authRail)
   const runId = opts.runId ?? (opts.from || opts.phase ? undefined : `landing-${Date.now()}`)
   if (!runId) {
     throw new WalkFailure('config.missing', '--run-id is required when resuming with --from/--phase; a fresh run generates one and prints it')
@@ -1361,8 +1593,8 @@ async function main(): Promise<void> {
   })
 
   const rows = buildHardChecks(state, state.pieces?.length ?? 0)
-  printHardChecks(rows)
-  console.log('\n' + walkBoardRow(state, rows))
+  printHardChecks(rows, opts.apply)
+  console.log('\n' + walkBoardRow(state, rows, opts.apply))
   console.log(`\nDEFECTS FILED: ${state.defects.length}`)
   for (const d of state.defects) console.log(`  - ${d.route}: ${d.observation}\n    why: ${d.whyDefect}`)
   await writeFile(new URL(`landing-${runId}-final.json`, stateDir()), JSON.stringify({ state, hardChecks: rows }, null, 2))

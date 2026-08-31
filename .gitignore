@@ -162,3 +162,8 @@ tee/wg-server/tee-wg-server
 # concierge-gym transcript corpus (raw adversarial session runs; regenerable, never committed —
 # only the sanitized entries in scripts/gym-decks/regression.json are)
 /gym-runs/
+
+# landing-dataset-walk run receipts (per-run state, regenerable, and the smoke
+# inductions write one per run — the rescued WIP commit carried 39k lines of them
+# in by accident). The driver's own header always claimed these were ignored.
+/walk-runs/
