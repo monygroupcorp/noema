@@ -1,56 +1,127 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { Wordmark } from '../ui/Wordmark';
 import { PlateDeck } from './PlateDeck';
+import { ScrollStage } from './ScrollStage';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
-const LEADS = [0.7, 0.78, 0.86];
+const LEADS = [0.78, 0.86, 0.92];
+const LEADINGS = [1.02, 1.12, 1.22];
+
+/** The information beats, each one locked to the viewport for as long as the reader stays. */
+const BEATS = [
+  {
+    id: 'explore',
+    n: '01',
+    title: 'Explore a dataset',
+    text: 'Pull your material apart into the vocabulary it is already made of.',
+  },
+  {
+    id: 'train',
+    n: '02',
+    title: 'Train a visual identity',
+    text: 'Teach a model the hand your work is in, and keep the model.',
+  },
+  {
+    id: 'run',
+    n: '03',
+    title: 'Run a finished workflow',
+    text: 'A complete pipeline, not a prompt box. Open it up when you want the controls.',
+  },
+];
 
 /**
- * The coded design laboratory for the landing page's image mechanism.
+ * The coded design laboratory for the landing page.
  *
  * Not a public surface: the route is registered only in dev builds, so unfilled slots and draft
- * copy cannot reach a visitor. It exists so the deck can be judged the only way a scroll device
- * can be judged — by scrolling past it, in the real application, with real fonts and tokens, at
- * the widths the capability proof is argued at.
+ * copy cannot reach a visitor. It exists so the page can be judged the only way a scroll page
+ * can be — by scrolling it, in the real application, at the widths the capability proof is
+ * argued at.
  *
- * The two controls are the open decisions. Card crop changes what the art has to be shot for,
- * and lead fraction changes how much of the next card is showing when the reader arrives. Both
- * are cheaper to settle by looking than by specifying.
+ * Every control in the bar is an open decision that is cheaper to settle by looking than by
+ * specifying.
  */
 export function PlateLab() {
-  const [format, setFormat] = useState<PlateFormat>('2:1');
-  const [lead, setLead] = useState(0.78);
+  const [font, setFont] = useState<'geist' | 'marquee'>('geist');
+  const [leading, setLeading] = useState(1.12);
+  const [crop, setCrop] = useState<PlateFormat>('2:1');
+  const [lead, setLead] = useState(0.86);
+  const [mode, setMode] = useState<'lock' | 'pass'>('lock');
+
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
+  const run = platesIn('deck');
+  const coda = platesIn('deck-coda');
+  // How far the reader scrolls, in viewport heights, while a block is locked.
+  const deckHold = (n: number) => (n - 1) * 0.55;
+
+  const deck = (slots: typeof run, label: string, className?: string) => {
+    const el = (
+      <PlateDeck
+        slots={slots}
+        format={className ? undefined : crop}
+        lead={lead}
+        progress={mode}
+        label={label}
+        className={className}
+      />
+    );
+    return mode === 'lock' ? (
+      <ScrollStage hold={deckHold(slots.length)}>{el}</ScrollStage>
+    ) : (
+      el
+    );
+  };
+
+  const beat = (node: React.ReactNode, key: string) =>
+    mode === 'lock' ? (
+      <ScrollStage key={key} hold={0.8}>
+        <div className="beat">{node}</div>
+      </ScrollStage>
+    ) : (
+      <div key={key} className="cand-flow">{node}</div>
+    );
 
   return (
     <div className="lab">
       <div className="lab-bar">
         <span className="lab-tag mono">design lab · not public</span>
-        <span className="lab-meta mono">
-          {filled}/{PLATES.length} plates · copy is draft
+        <span className="lab-meta mono">{filled}/{PLATES.length} plates · copy is draft</span>
+        <span className="lab-ctl">
+          <span className="mono">type</span>
+          <button className={font === 'geist' ? 'on' : ''} onClick={() => setFont('geist')}>geist</button>
+          <button className={font === 'marquee' ? 'on' : ''} onClick={() => setFont('marquee')}>marquee</button>
         </span>
         <span className="lab-ctl">
-          <span className="mono">card</span>
+          <span className="mono">leading</span>
+          {LEADINGS.map((l) => (
+            <button key={l} className={l === leading ? 'on' : ''} onClick={() => setLeading(l)}>{l}</button>
+          ))}
+        </span>
+        <span className="lab-ctl">
+          <span className="mono">crop</span>
           {DECK_FORMATS.map((f) => (
-            <button key={f} className={f === format ? 'on' : ''} onClick={() => setFormat(f)}>
-              {f}
-            </button>
+            <button key={f} className={f === crop ? 'on' : ''} onClick={() => setCrop(f)}>{f}</button>
           ))}
         </span>
         <span className="lab-ctl">
           <span className="mono">lead</span>
           {LEADS.map((l) => (
-            <button key={l} className={l === lead ? 'on' : ''} onClick={() => setLead(l)}>
-              {Math.round(l * 100)}%
-            </button>
+            <button key={l} className={l === lead ? 'on' : ''} onClick={() => setLead(l)}>{Math.round(l * 100)}%</button>
           ))}
+        </span>
+        <span className="lab-ctl">
+          <span className="mono">scroll</span>
+          <button className={mode === 'lock' ? 'on' : ''} onClick={() => setMode('lock')}>lock</button>
+          <button className={mode === 'pass' ? 'on' : ''} onClick={() => setMode('pass')}>pass</button>
         </span>
       </div>
 
-      <div className="cand">
+      <div
+        className={`cand cand-type-${font}`}
+        style={{ '--hero-leading': String(leading) } as CSSProperties}
+      >
         <nav className="cand-nav">
           <span className="brand"><Wordmark height={22} /></span>
           <span className="right">
@@ -60,10 +131,7 @@ export function PlateLab() {
         </nav>
 
         <header className="cand-hero">
-          <h1>
-            Your own material,<br />
-            <span className="dim">a system you can use again.</span>
-          </h1>
+          <h1>Your own material,<br /><span className="dim">a system you can use again.</span></h1>
           <hr className="noema-rule" />
           <p>
             Bring what you already have. Explore it, train on it, and make new work that carries
@@ -74,46 +142,30 @@ export function PlateLab() {
           </span>
         </header>
 
-        <PlateDeck
-          slots={platesIn('deck')}
-          format={format}
-          lead={lead}
-          label="A run of work made in noema, passing"
-        />
+        {deck(run, 'A run of work made in noema, passing')}
 
-        <section className="cand-sec">
-          <h2>Three ways in.</h2>
-          <p className="cand-sub">
-            Each one is a complete piece of work, not a step in a form. Start anywhere; they meet
-            in the same place.
-          </p>
-          <div className="cand-paths">
-            <article>
-              <h3>Explore a dataset</h3>
-              <p>Pull your material apart into the vocabulary it is already made of.</p>
-            </article>
-            <article>
-              <h3>Train a visual identity</h3>
-              <p>Teach a model the hand your work is in, and keep the model.</p>
-            </article>
-            <article>
-              <h3>Run a finished workflow</h3>
-              <p>A complete pipeline, not a prompt box. Open it up when you want the controls.</p>
-            </article>
-          </div>
-        </section>
+        {BEATS.map((b) =>
+          beat(
+            <>
+              <span className="beat-n mono">{b.n}</span>
+              <h2>{b.title}</h2>
+              <p>{b.text}</p>
+            </>,
+            b.id,
+          ),
+        )}
 
-        <PlateDeck
-          slots={platesIn('deck-coda')}
-          lead={lead}
-          className="deck-coda"
-          label="A second run of work made in noema, passing"
-        />
+        {deck(coda, 'A second run of work made in noema, passing', 'deck-coda')}
 
-        <section className="cand-end">
-          <h2>Make something worth keeping.</h2>
-          <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
-        </section>
+        {beat(
+          <>
+            <h2>Make something worth keeping.</h2>
+            <span className="beat-cta">
+              <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
+            </span>
+          </>,
+          'end',
+        )}
       </div>
     </div>
   );

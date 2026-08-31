@@ -1,0 +1,20 @@
+/* a stage — locks to the viewport for `--hold` viewport-heights of scrolling, then releases.
+   The lock is sticky positioning: the page's scroll distance is untouched, nothing snaps, and
+   the reader's speed is their own. `--p` runs 0→1 across the hold and is inherited by
+   everything inside, so a stage's contents animate without knowing about the page. */
+.stage{--hold:1;position:relative;height:calc(100vh + var(--hold) * 100vh)}
+.stage-pin{--p:0;position:sticky;top:0;height:100vh;display:grid;align-content:center;
+  overflow:hidden}
+
+/* A held beat carries no entrance of its own. It scrolls in, stops, and stays for the length
+   of the hold — the stop IS the effect. An earlier version faded it against `--p`, which put a
+   blank screen at both ends of every lock, because `--p` is pinned at 0 for the whole time the
+   stage is still travelling up into place. */
+
+@media (prefers-reduced-motion: reduce){
+  /* no lock at all — a pinned stage with nothing moving in it is just a long empty scroll.
+     Every stage is a finished composition at --p:0, which is what makes this safe. */
+  .stage{height:auto}
+  .stage-pin{position:static;height:auto;padding:var(--py-section) 0}
+  .beat{opacity:1;transform:none}
+}

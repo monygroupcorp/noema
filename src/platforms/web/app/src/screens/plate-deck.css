@@ -3,7 +3,6 @@
    covers it, so the card behind always shows an edge. The whole fan is one transform, so the
    motion is a compositor job and the page's own scrolling is never touched. */
 .deck{
-  --p:0;                                        /* pass progress, written by the component */
   --deck-n:1; --deck-aspect:2; --deck-lead:.78;
   --deck-step:calc(100% * var(--deck-lead));    /* origin-to-origin spacing of the cards */
   --deck-card-w:calc(var(--deck-step) * 1.06);  /* wider than the step — hence the overlap */
@@ -11,6 +10,9 @@
   overflow:hidden;
   width:100%;
 }
+/* self-driven: the component writes its own progress onto the banner. In lock mode nothing is
+   declared here, so `--p` is inherited from the enclosing stage. */
+.deck-pass{--p:0}
 .deck-track{
   position:relative;
   height:0;
@@ -18,7 +20,7 @@
   /* travel ends with the last card's right edge on the banner's right edge — the run empties
      into the frame rather than off it. */
   --deck-travel:calc((var(--deck-n) - 1) * var(--deck-step) + var(--deck-card-w) - 100%);
-  transform:translate3d(calc(-1 * var(--p) * var(--deck-travel)),0,0);
+  transform:translate3d(calc(-1 * var(--p,0) * var(--deck-travel)),0,0);
   will-change:transform;
 }
 .deck-card{

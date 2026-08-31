@@ -1,12 +1,11 @@
 /* the design lab — a dev-only surface for judging the landing page's image mechanism.
    The bar is an instrument; everything under .cand is the candidate page being judged. */
-.lab-bar{position:sticky;top:0;z-index:var(--z-nav);display:flex;align-items:center;gap:var(--s5);
-  flex-wrap:wrap;padding:var(--s3) var(--s6);border-bottom:1px solid var(--hair);
+.lab-bar{position:sticky;top:0;z-index:var(--z-nav);display:flex;align-items:center;gap:var(--s4);
+  flex-wrap:wrap;padding:var(--s2) var(--s4);border-bottom:1px solid var(--hair);
   background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px)}
 .lab-bar .lab-tag{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase}
 .lab-bar .lab-meta{color:var(--faint);font-size:var(--fs-xs)}
-.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s2);margin-left:auto}
-.lab-bar .lab-ctl:not(:last-child){margin-left:0}
+.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1)}
 .lab-bar .lab-ctl > .mono{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
 .lab-bar button{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);
   background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-sm);
@@ -14,14 +13,18 @@
 .lab-bar button.on{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
 
 /* ── the candidate ─────────────────────────────────────────────────────────────────────── */
-.cand{display:flex;flex-direction:column;gap:var(--py-section);padding-bottom:var(--s10)}
+.cand{padding-bottom:var(--s10)}
 .cand-nav{display:flex;align-items:center;justify-content:space-between;
-  padding:var(--s4) var(--px-section);margin-bottom:calc(-1 * var(--py-section) + var(--s6))}
+  padding:var(--s4) var(--px-section)}
 .cand-nav .right{display:flex;align-items:center;gap:var(--s3)}
 
 .cand-hero{max-width:1080px;margin:0 auto;padding:clamp(40px,9vh,110px) var(--px-section) 0;text-align:center}
-.cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:1.02;letter-spacing:-.04em;font-weight:600;
-  margin:0;color:var(--text)}
+.cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:var(--hero-leading,1.12);
+  letter-spacing:-.04em;font-weight:600;margin:0;color:var(--text)}
+/* the shipped ad register — Martian Mono 800, uppercase. Kept switchable because retiring it
+   is a taste call, not a finding. */
+.cand-type-marquee .cand-hero h1{font-family:var(--font-marquee);font-weight:800;
+  text-transform:uppercase;font-size:clamp(26px,4.4vw,52px);letter-spacing:-.01em}
 .cand-hero h1 .dim{color:var(--muted)}
 .cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
 .cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
@@ -34,17 +37,18 @@
 /* the coda run is the quieter second pass — inset and shorter, so it returns without repeating */
 .deck-coda{max-width:1180px;margin:0 auto;border-radius:var(--r-lg)}
 
-.cand-sec{max-width:1080px;margin:0 auto;padding:0 var(--px-section);text-align:center}
-.cand-sec h2{font-size:clamp(26px,3.4vw,42px);letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4)}
-.cand-sub{color:var(--muted);font-size:clamp(14px,1.4vw,16px);line-height:1.6;max-width:520px;margin:0 auto}
-.cand-paths{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin-top:var(--s10);text-align:left}
-.cand-paths article{border-top:1px solid var(--hair);padding-top:var(--s5)}
-.cand-paths h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:0 0 var(--s3)}
-.cand-paths p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
+/* a held beat — one statement, alone on the screen, for as long as the reader stays with it.
+   Three small cards in a row say the same words and none of them land. */
+.beat{max-width:760px;margin:0 auto;padding:0 var(--px-section);text-align:center}
+.beat .beat-n{display:block;color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.18em;
+  margin-bottom:var(--s6)}
+.beat h2{font-size:clamp(30px,4.6vw,58px);line-height:1.06;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s5)}
+.beat p{color:var(--muted);font-size:clamp(15px,1.6vw,19px);line-height:1.55;max-width:520px;
+  margin:0 auto}
+.beat .beat-cta{display:block;margin-top:var(--s8)}
+.cand-type-marquee .beat h2{font-family:var(--font-marquee);font-weight:800;text-transform:uppercase;
+  font-size:clamp(22px,3.2vw,38px);letter-spacing:-.01em}
 
-.cand-end{text-align:center;padding:0 var(--px-section)}
-.cand-end h2{font-size:clamp(26px,3.4vw,40px);letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s7)}
-
-@media(max-width:760px){
-  .cand-paths{grid-template-columns:1fr;gap:var(--s6)}
-}
+/* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
+.cand-flow{padding:var(--py-section) 0}

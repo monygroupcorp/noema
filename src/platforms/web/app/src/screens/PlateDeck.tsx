@@ -14,6 +14,14 @@ interface PlateDeckProps {
   /** Fraction of the banner width the leading card holds before the next one covers it.
    *  Lower leaves a wider peek of the card behind. */
   lead?: number;
+  /** Where the run's progress comes from.
+   *
+   *  `lock` — inherit `--p` from an enclosing ScrollStage. The page holds still while the run
+   *  passes, so the whole run is seen and the reader chooses the pace. This is the page's mode.
+   *
+   *  `pass` — drive the run from the banner's own trip through the viewport, with nothing
+   *  locked. Cheaper and never holds the reader, but a long run goes by too fast to read. */
+  progress?: 'lock' | 'pass';
   className?: string;
 }
 
@@ -33,12 +41,13 @@ interface PlateDeckProps {
  * finished composition on its own: the lead card is fully visible and the run is legible behind
  * it, which is what the still has to be anyway.
  */
-export function PlateDeck({ slots, label, format, lead = 0.78, className }: PlateDeckProps) {
+export function PlateDeck({ slots, label, format, lead = 0.86, progress = 'lock', className }: PlateDeckProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    // In `lock` mode the enclosing stage owns the progress and the deck simply inherits it.
+    if (!el || progress === 'lock') return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
     let raf = 0;
@@ -78,7 +87,7 @@ export function PlateDeck({ slots, label, format, lead = 0.78, className }: Plat
       window.removeEventListener('resize', onScroll);
       reduce.removeEventListener('change', apply);
     };
-  }, [slots.length, format, lead]);
+  }, [slots.length, format, lead, progress]);
 
   if (!slots.length) return null;
 
@@ -92,7 +101,9 @@ export function PlateDeck({ slots, label, format, lead = 0.78, className }: Plat
   return (
     <div
       ref={ref}
-      className={['deck', className ?? ''].filter(Boolean).join(' ')}
+      className={['deck', progress === 'pass' ? 'deck-pass' : '', className ?? '']
+        .filter(Boolean)
+        .join(' ')}
       style={style}
       role="group"
       aria-label={label}
