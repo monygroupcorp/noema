@@ -11,11 +11,17 @@ import { LandingModes } from './LandingModes';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
-/** Display faces the marketing surface can wear, from what is already self-hosted. The point of
- *  the control is not to pick one of these — Geist is the default typeface of this whole product
- *  category and none of these is bespoke — but to prove the seam, so dropping in a licensed face
- *  later is one `@font-face` and one token. */
-const DISPLAY_FACES = ['geist', 'grotesk', 'plex', 'martian'] as const;
+/** Display faces the marketing surface can wear.
+ *
+ *  Geist is the baseline to judge against — and the default typeface of this entire product
+ *  category, which is the problem. The three serifs are SIL Open Font License and span the
+ *  contrast range deliberately, because the real question is whether a display serif survives a
+ *  near-black ground or goes spindly on it. Venice.ai answers the same question on cream paper
+ *  with Canela at weight 400; the ground is what makes it an open question here.
+ *
+ *  None of these is the final answer. Proving the seam is the point: a licensed face later is
+ *  one `@font-face` and one token. */
+const DISPLAY_FACES = ['geist', 'instrument', 'newsreader', 'fraunces', 'martian'] as const;
 type DisplayFace = (typeof DISPLAY_FACES)[number];
 
 const STAGGERS = [0, 18, 36];
