@@ -6,11 +6,12 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 [data-brand="noema"], .brand-noema {
-  /* Typeface. Two registers: calm in-app (Geist), fierce in ads (Martian Mono).
-     The wordmark and marquee share Martian Mono so the brand reads as one
-     engineered system; Geist keeps running copy easy to read. */
+  /* Typeface. Three roles, the way a publication is set: a serif that carries the
+     voice, a grotesque that carries the reading, and a mono that carries the
+     instruments — every number, label, eyebrow and readout. The marquee register
+     stays Martian Mono for the ad/wordmark lockup. */
   --brand-font-marquee: "Martian Mono", ui-monospace, monospace; /* ad headlines */
-  --brand-font-display: "Geist", -apple-system, system-ui, sans-serif; /* in-app headings */
+  --brand-font-display: "Fraunces", Georgia, serif; /* headings — the voice */
   --brand-font-body:    "Geist", -apple-system, system-ui, sans-serif;
   --brand-font-mono:    "Geist Mono", ui-monospace, monospace;
 
