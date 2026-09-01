@@ -12,21 +12,47 @@ regression (future baselines) and an LLM-critique pass (Phase 2); axe findings a
   server or network needed.
 - `walk.config.ts` — the one hand-maintained file: fixture ids for `:param` segments.
 - `walk.ts` — the walker. Signs in (best-effort, see below), then per route: desktop (1280x800)
-  + mobile (390x844) screenshots into `shots/<route>/`, and an axe WCAG 2.1/2.2 A+AA scan
-  appended to `report/axe.json`. `npm run walk -- --list` enumerates the planned shots without
-  touching a target. `npm run walk` runs the real walk against `WALK_BASE_URL`.
+  + mobile (390x844) screenshots into `shots/<run>/<route>/`, and an axe WCAG 2.1/2.2 A+AA scan
+  written to `report/<run>/axe.json` beside a `manifest.json`. `npm run walk -- --list`
+  enumerates the planned shots without touching a target.
+- `review.ts` — how a person looks at the result. One run builds a contact sheet of every shot;
+  two runs build a diff, every shot compared pixel for pixel and sorted by how much moved.
 
-`shots/` and `report/` are gitignored — regenerated output, not committed baselines. No
-`toHaveScreenshot` baselines are committed by this item: prod is several PRs behind the next
-deploy cut, so a baseline cut now would bake a stale build.
+## Runs
+
+Captures are named, because the point of photographing every route is comparing two sets of
+photographs. A run writes a manifest recording the commit, the target, whether it was signed in,
+every shot's size, and any route it could not reach — so a set of pictures stays attributable to
+the build that produced it. A baseline nobody can trace to a revision is a folder of screenshots,
+not evidence.
+
+```
+npm run walk -- --run baseline           # capture, named
+npm run walk:review -- baseline          # contact sheet → report/baseline/index.html
+npm run walk:review -- baseline redesign # what changed → report/redesign/diff-from-baseline.html
+```
+
+The diff renders a mask per shot (changed pixels lit) and reports the ratio, plus any change in
+page height. Images of unlike size are compared on the union canvas, so a page that got taller
+counts the new region as changed — which it is.
+
+The comparison runs in the browser Playwright already provides rather than pulling in an image
+library; this codebase avoids new npm dependencies where a platform primitive will do.
+
+`shots/` and `report/` are gitignored — regenerated output, never committed. Baselines live on
+the machine that cut them and are re-cut from a named revision when needed, so nothing here goes
+stale in the repository.
 
 ## Running it
 
 ```
 WALK_BASE_URL=http://localhost:5173 \
 WALK_EMAIL=<username> WALK_PASSWORD=<password> \
-npm run walk
+npm run walk -- --run baseline
 ```
+
+Point the dev server at production data with `API_ORIGIN=https://noema.art npm run dev` if the
+capture should show a populated app rather than staging's near-empty one.
 
 `WALK_BASE_URL` can point at a local dev server, staging, or prod — the harness doesn't care.
 `WALK_EMAIL`/`WALK_PASSWORD` are optional: without them the walk still runs, as an anonymous
