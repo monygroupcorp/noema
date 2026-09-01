@@ -519,14 +519,21 @@ export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
   imageId: 'pytorch/pytorch',
   imageVersion: '2.13.0-cuda13.0-cudnn9-runtime',
   runtime: 'ComfyUI',
-  // TODO(noema-372): pin to the ref recovered from the rig image
-  // (`docker run --rm minimax-comfy:local git -C /opt/ComfyUI rev-parse HEAD`). The tag below is
-  // the floor H3 needs, not the ref the measurements were taken on.
-  comfyRef: 'v0.30.0',
+  // Recovered from the rig image that produced the measurements above:
+  // `comfyui_version.py` reports 0.33.0 at commit dcbcf8c (2026-09-01). Pinned to the TAG
+  // because the bootstrap clones with `--branch`, which takes tags and branches but not a
+  // SHA — so if dcbcf8c sits between tags this is the nearest reproducible ref, a
+  // deliberate hair's-breadth away from the exact bytes benchmarked.
+  comfyRef: 'v0.33.0',
   install: [
     // Each bootstrap command runs in its OWN shell, so `export` would not survive to the
     // bootstrap's `pip install -r requirements.txt`. Write pip's real config instead.
     'pip config set global.break-system-packages true',
+    // The rig image carries comfy-kitchen 0.2.31. Whether that arrived via ComfyUI's own
+    // requirements.txt or via the rig Dockerfile's explicit install is not distinguishable
+    // from the built image, so this stays: it is idempotent if requirements.txt already
+    // pulls it, and load-bearing if it does not — the int8 convrot kernels the pruned
+    // checkpoints are built on come from this package.
     'pip install --no-cache-dir comfy-kitchen',
   ],
   intellae: [
