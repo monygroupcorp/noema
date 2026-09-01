@@ -117,16 +117,16 @@ export function Deck({
   return (
     <div
       ref={ref}
-      className={['deck', progress === 'pass' ? 'deck-pass' : '', className ?? '']
+      className={['lp-deck', progress === 'pass' ? 'lp-deck-pass' : '', className ?? '']
         .filter(Boolean)
         .join(' ')}
       style={style}
       role="group"
       aria-label={label}
     >
-      <div className="deck-track">
+      <div className="lp-deck-track">
         {items.map((item, i) => (
-          <div key={i} className="deck-card" style={{ '--i': String(i) } as CSSProperties}>
+          <div key={i} className="lp-deck-card" style={{ '--i': String(i) } as CSSProperties}>
             {item}
           </div>
         ))}

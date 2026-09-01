@@ -28,8 +28,8 @@ export function LandingOpen() {
   if (ticker.length === 0) return null;
 
   return (
-    <section className="open">
-      <div className="open-in">
+    <section className="lp-open">
+      <div className="lp-open-in">
         <h2>If it exists, it can run here.</h2>
         <p>
           The models are open weights and the code that runs them is public. Bring one in by URL —
@@ -37,7 +37,7 @@ export function LandingOpen() {
           every workflow the catalogue carries. Package something nobody has packaged yet, publish
           it, and it earns.
         </p>
-        <div className="open-facts">
+        <div className="lp-open-facts">
           {api && (
             <div>
               <span className="n">{api.endpoints}</span>
@@ -58,15 +58,15 @@ export function LandingOpen() {
             <span className="l">Viral Public License · the whole platform, in the open</span>
           </div>
         </div>
-        <div className="open-links">
+        <div className="lp-open-links">
           <a className="btn-ghost" href={REPO} target="_blank" rel="noreferrer">Read the source</a>
           <Link className="btn-ghost" to="/models">Import a model</Link>
         </div>
       </div>
 
       {/* the ticker — live names, moving slowly. Duplicated once so the loop has no seam. */}
-      <div className="open-ticker" aria-hidden="true">
-        <div className="open-rail">
+      <div className="lp-open-ticker" aria-hidden="true">
+        <div className="lp-open-rail">
           {[0, 1].map((pass) => (
             <ul key={pass}>
               {ticker.map((name, i) => (
@@ -76,7 +76,7 @@ export function LandingOpen() {
           ))}
         </div>
       </div>
-      <p className="open-ticker-alt">
+      <p className="lp-open-ticker-alt">
         Everything above is a model or workflow currently installed, read from the catalogue.
       </p>
     </section>

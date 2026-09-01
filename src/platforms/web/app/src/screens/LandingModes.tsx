@@ -138,13 +138,16 @@ function ModeCard({ mode }: { mode: WorkMode }) {
 export function LandingModes({
   stagger = 18,
   progress = 'lock',
+  showPlaceholders = false,
 }: {
   stagger?: number;
   progress?: 'lock' | 'pass';
+  /** Render rooms whose capture has not been taken yet as labelled frames. Dev-only. */
+  showPlaceholders?: boolean;
 }) {
-  const run = <ModesRun stagger={stagger} progress={progress} />;
+  const run = <ModesRun stagger={stagger} progress={progress} showPlaceholders={showPlaceholders} />;
   return (
-    <section className="modes">
+    <section className="lp-modes">
       {progress === 'lock' ? (
         <ScrollStage hold={(WORK_MODES.length) * 0.5 + MODES_TRAIL * 0.7}>{run}</ScrollStage>
       ) : (
@@ -162,12 +165,15 @@ export function LandingModes({
  * the reader wondering which screen they are looking at — the thing a caption on a moving card
  * cannot do, because the caption moves with it.
  */
-function ModesRun({ stagger, progress }: { stagger: number; progress: 'lock' | 'pass' }) {
+function ModesRun({ stagger, progress, showPlaceholders }: { stagger: number; progress: 'lock' | 'pass'; showPlaceholders: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const p = useStageProgress(ref, progress === 'lock');
 
+  // A room with no capture yet is not shown to a visitor — the run carries the rooms that can
+  // actually be seen, and grows as captures land. The demonstration always closes it.
+  const rooms = showPlaceholders ? WORK_MODES : WORK_MODES.filter((m) => m.shot !== null);
   const items = [
-    ...WORK_MODES.map((m) => <ModeCard key={m.id} mode={m} />),
+    ...rooms.map((m) => <ModeCard key={m.id} mode={m} />),
     null,
   ];
   items[items.length - 1] = (
@@ -179,8 +185,8 @@ function ModesRun({ stagger, progress }: { stagger: number; progress: 'lock' | '
   const top = Math.min(items.length - 1, Math.max(0, Math.floor(advance)));
 
   return (
-    <div className="modes-run" ref={ref}>
-      <div className="modes-head">
+    <div className="lp-modes-run" ref={ref}>
+      <div className="lp-modes-head">
         <h2>Every room of the studio.</h2>
         <p>
           Each one is a whole way of working, not a tab. You can live in one of them or move
@@ -189,7 +195,7 @@ function ModesRun({ stagger, progress }: { stagger: number; progress: 'lock' | '
       </div>
 
       <Deck
-        className="deck-modes"
+        className="lp-deck-modes"
         label="The rooms of the studio, one at a time"
         aspect={16 / 9}
         aspectNarrow={3 / 4}
@@ -199,13 +205,13 @@ function ModesRun({ stagger, progress }: { stagger: number; progress: 'lock' | '
         items={items}
       />
 
-      <nav className="modes-index" aria-label="The rooms">
-        {WORK_MODES.map((m, i) => (
+      <nav className="lp-modes-index" aria-label="The rooms">
+        {rooms.map((m, i) => (
           <Link key={m.id} to={m.route} data-on={i === top || undefined}>
             {m.name}
           </Link>
         ))}
-        <span data-on={top === WORK_MODES.length || undefined}>Running</span>
+        <span data-on={top === rooms.length || undefined}>Running</span>
       </nav>
     </div>
   );
