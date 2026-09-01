@@ -31,10 +31,11 @@ export function LandingCatalog() {
   return (
     <section className="cat">
       <div className="cat-in">
-        <h2>Everything the studio carries — counted, not claimed.</h2>
+        <h2>Under the hood</h2>
         <p className="cat-sub">
-          These numbers are read from the catalogue when the page loads, not written into it.
-          They move when we ship.
+          Check back and watch the platform grow, as we keep adding cutting-edge advances in
+          open generative AI and training our own models. Counted from the catalogue when this
+          page loads, never written into it.
         </p>
 
       </div>

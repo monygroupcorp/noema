@@ -21,21 +21,21 @@ const BEATS: Beat[] = [
     n: '01',
     align: 'left',
     title: 'Never face a blank prompt',
-    text: 'Pick the identities you like and a line of your own. Muse keeps making inside that world — the content varies, the taste does not. You curate instead of composing, which is the part that actually stops people.',
+    text: 'Bring a mood board and focus on style configuration while you generate the content you enjoy — endless variations, no writer\u2019s block.',
   },
   {
     id: 'train',
     n: '02',
     align: 'right',
-    title: 'Train a visual identity',
-    text: 'Teach a model the hand your work is in, and keep the model.',
+    title: 'Train your own models',
+    text: 'Only you know what looks good. Get your style right and share it with the world. Earn royalties on the platform when others work with it.',
   },
   {
     id: 'run',
     n: '03',
     align: 'left',
-    title: 'Build a workflow worth keeping',
-    text: 'Chain the steps once and run them forever. Publish it and other people can run it too.',
+    title: 'Make the perfect workflow',
+    text: 'Combine multiple workflows into one to get perfect results every time. Earn royalties on the platform when others use it.',
   },
 ];
 
@@ -173,11 +173,11 @@ export function PlateLab() {
         </nav>
 
         <header className="cand-hero">
-          <h1>Your own material,<br /><span className="dim">a system you can use again.</span></h1>
+          <h1>Generative AI for sovereign creators</h1>
+          <span className="cand-kicker mono">contribute and earn compute</span>
           <hr className="noema-rule" />
           <p>
-            Bring what you already have. Explore it, train on it, and make new work that carries
-            the same hand.
+            Bring your taste, steer the culture of generative art on the new internet.
           </p>
           <span className="cand-cta">
             <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
@@ -189,6 +189,8 @@ export function PlateLab() {
         {deck(platesIn('deck'), 'A run of work made in noema, passing')}
 
         <LandingCatalog />
+
+        <LandingOpen />
 
         {mode === 'lock' ? (
           <ScrollStage hold={BEATS.length * 0.6}><BeatRun beats={BEATS} /></ScrollStage>
@@ -216,7 +218,6 @@ export function PlateLab() {
           </div>
         </section>
 
-        <LandingOpen />
 
         <section className="how">
           <div className="how-in">

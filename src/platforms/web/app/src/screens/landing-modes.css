@@ -3,21 +3,23 @@
 /* no bottom padding: the locked run already ends on a whole screen of its own, and a section
    pad on top of that is the awkward gap before whatever comes next. */
 .modes{padding:var(--py-section) 0 0}
-.modes .modes-in{max-width:1180px;margin:0 auto;padding:0 var(--px-section)}
-.modes h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
-  margin:0 0 var(--s4);max-width:16ch}
-.modes .modes-in{padding-bottom:var(--s8)}
-.modes .modes-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
 
 /* the rooms ride the same deck the plates do — one card at a time, the top sliding off to
    uncover the next. The screen fills the card; its name sits on a plate over the bottom, the
    way a caption sits on a photograph rather than under it. */
 /* the heading travels with the run rather than scrolling away above it */
-/* the rooms run is inset rather than full-bleed: at full width a 16:9 card is 857px tall and
-   there is no room left in the pin for the heading that has to travel with it. */
-.modes .modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);
-  max-width:1240px;margin:0 auto;width:100%}
-.modes .modes-run h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px)}
+/* Everything about the rooms lives inside the lock: the heading, the run, and the index under
+   it. Inset rather than full-bleed, and width-capped against the viewport height, so heading +
+   cards + index always fit the pinned screen instead of overrunning it on a short display. */
+.modes .modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);width:100%;
+  max-width:min(1240px, calc((100svh - 300px) * 1.8));
+  max-width:min(1240px, calc((100vh - 300px) * 1.8));
+  margin:0 auto}
+.modes .modes-head{display:flex;align-items:baseline;justify-content:space-between;
+  gap:var(--s7);flex-wrap:wrap}
+.modes .modes-head h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px);
+  line-height:1.1;letter-spacing:-.03em;font-weight:600}
+.modes .modes-head p{color:var(--muted);font-size:var(--fs-s);line-height:1.5;max-width:42ch;margin:0}
 .deck-modes{margin-top:0}
 .deck-modes .deck-card{background:var(--panel)}
 .modes .mode-shot{position:absolute;inset:0;width:100%;height:100%;
@@ -33,11 +35,13 @@
   font-weight:600;color:var(--text)}
 .modes .mode-line{display:block;color:var(--muted);font-size:clamp(13px,1.3vw,16px);
   line-height:1.5;margin-top:var(--s2);max-width:46ch}
-/* the rooms, reachable. Always fully visible, unlike the cards they name. */
-.modes .modes-links{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s6);margin-top:var(--s7)}
-.modes .modes-links a{color:var(--muted);font-size:var(--fs-base);text-decoration:none;
-  padding:var(--s2) 0;border-bottom:1px solid transparent}
-.modes .modes-links a:hover{color:var(--text);border-bottom-color:var(--accent)}
+/* the index — the rooms as names you can click, and as a readout of where the run has got to */
+.modes .modes-index{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s6)}
+.modes .modes-index a,.modes .modes-index span{color:var(--faint);font-size:var(--fs-s);
+  text-decoration:none;padding-bottom:var(--s2);border-bottom:1px solid transparent;
+  transition:color var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.modes .modes-index a:hover{color:var(--muted)}
+.modes .modes-index [data-on]{color:var(--text);border-bottom-color:var(--accent)}
 
 /* the run demonstration — the product's own states, walked. Labelled, and carrying none of the
    numbers a real run reports, so it cannot be mistaken for one. */

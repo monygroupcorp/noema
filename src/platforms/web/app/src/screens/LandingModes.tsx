@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Deck } from './Deck';
-import { ScrollStage } from './ScrollStage';
+import { ScrollStage, useStageProgress } from './ScrollStage';
 import { WORK_MODES, type WorkMode } from './workModes';
 import './landing-modes.css';
 
@@ -142,54 +142,71 @@ export function LandingModes({
   stagger?: number;
   progress?: 'lock' | 'pass';
 }) {
+  const run = <ModesRun stagger={stagger} progress={progress} />;
+  return (
+    <section className="modes">
+      {progress === 'lock' ? (
+        <ScrollStage hold={(WORK_MODES.length) * 0.5 + MODES_TRAIL * 0.7}>{run}</ScrollStage>
+      ) : (
+        run
+      )}
+    </section>
+  );
+}
+
+/**
+ * The run itself, and the index under it.
+ *
+ * The index is the same list of rooms twice over: names a reader can click, and a readout of
+ * where the run has got to. It lights the room whose card is on top, so the deck never leaves
+ * the reader wondering which screen they are looking at — the thing a caption on a moving card
+ * cannot do, because the caption moves with it.
+ */
+function ModesRun({ stagger, progress }: { stagger: number; progress: 'lock' | 'pass' }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const p = useStageProgress(ref, progress === 'lock');
+
   const items = [
     ...WORK_MODES.map((m) => <ModeCard key={m.id} mode={m} />),
-    null, // placeholder so the count is known before the demo is built
+    null,
   ];
   items[items.length - 1] = (
     <RunDemo key="run" count={items.length} trail={MODES_TRAIL} locked={progress === 'lock'} />
   );
-  const deck = (
-    <div className="modes-run">
-      <h2>Every room of the studio.</h2>
-      <Deck
-      trail={MODES_TRAIL}
-      className="deck-modes"
-      label="The rooms of the studio, one at a time"
-      aspect={16 / 9}
-      aspectNarrow={3 / 4}
-      stagger={stagger}
-      progress={progress}
-      items={items}
-      />
-    </div>
-  );
+
+  // which card is on top: cards depart one per unit of advance, and the last one never does.
+  const advance = Math.min(p * (items.length - 1 + MODES_TRAIL), items.length - 1);
+  const top = Math.min(items.length - 1, Math.max(0, Math.floor(advance)));
 
   return (
-    <section className="modes">
-      <div className="modes-in">
-        <p className="modes-sub">
+    <div className="modes-run" ref={ref}>
+      <div className="modes-head">
+        <h2>Every room of the studio.</h2>
+        <p>
           Each one is a whole way of working, not a tab. You can live in one of them or move
           between all of them.
         </p>
-        <nav className="modes-links" aria-label="The rooms">
-          {WORK_MODES.map((m) => (
-            <Link key={m.id} to={m.route}>{m.name}</Link>
-          ))}
-        </nav>
-
       </div>
 
-      {/* The heading rides with the cards. Left behind in normal flow it scrolled away before
-          the first card arrived, so the run played with nothing on screen saying what it was. */}
-      {/* a longer hold than the plate runs get: the last card is a run that has to execute
-          across its own slice of the travel, and a slice of a short hold is not enough scroll
-          to execute across. */}
-      {progress === 'lock' ? (
-        <ScrollStage hold={(items.length - 1) * 0.5 + MODES_TRAIL * 0.7}>{deck}</ScrollStage>
-      ) : (
-        deck
-      )}
-    </section>
+      <Deck
+        className="deck-modes"
+        label="The rooms of the studio, one at a time"
+        aspect={16 / 9}
+        aspectNarrow={3 / 4}
+        trail={MODES_TRAIL}
+        stagger={stagger}
+        progress={progress}
+        items={items}
+      />
+
+      <nav className="modes-index" aria-label="The rooms">
+        {WORK_MODES.map((m, i) => (
+          <Link key={m.id} to={m.route} data-on={i === top || undefined}>
+            {m.name}
+          </Link>
+        ))}
+        <span data-on={top === WORK_MODES.length || undefined}>Running</span>
+      </nav>
+    </div>
   );
 }
