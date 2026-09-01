@@ -120,3 +120,17 @@
   font-display: swap;
   src: url('./martian-mono/martian-mono-800.woff2') format('woff2');
 }
+
+/* ─── Fraunces — the display face ───────────────────────────────────────────────
+   SIL Open Font License (Undercase Type), verified under `ofl/` in google/fonts.
+   One variable file carrying a live optical-size axis: 6.9% of rendered pixels
+   change between opsz 9 and opsz 144, so `font-optical-sizing: auto` gives the
+   display sizes the high-contrast cut and small text the sturdy one.
+   ──────────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fraunces/fraunces-var.woff2') format('woff2-variations');
+}
