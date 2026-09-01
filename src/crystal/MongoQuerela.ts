@@ -44,4 +44,12 @@ export class MongoQuerela implements QuerelaStore {
     const doc = await this.col.findOne({ ownerKey, contentHash })
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
+
+  async list(filter?: { kind?: Querela['kind']; status?: Querela['status'] }): Promise<Querela[]> {
+    const f: Record<string, unknown> = {}
+    if (filter?.kind !== undefined) f.kind = filter.kind
+    if (filter?.status !== undefined) f.status = filter.status
+    const docs = await this.col.find(f).sort({ natum: -1 }).toArray()
+    return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
 }

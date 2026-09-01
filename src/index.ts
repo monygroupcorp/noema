@@ -21,6 +21,7 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { createQuerelaAdminRouter } from './api/querela/querelaAdminRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -1101,6 +1102,10 @@ async function main(): Promise<void> {
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
   app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+  // Admin read + triage of those reports (list across all owners, close). Platform-admin
+  // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
+  // than shared via the CrystalApi facade.
+  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({ querelae: ring.querelae, identity: apiResolver }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.

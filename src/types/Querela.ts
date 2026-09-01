@@ -76,4 +76,8 @@ export interface QuerelaStore {
   update(id: string, patch: Partial<Pick<Querela, 'status'>>): Promise<Querela>
   /** Dedup lookup — an identical (ownerKey, contentHash) pair means "already reported". */
   findByOwnerAndHash(ownerKey: string, contentHash: string): Promise<Querela | null>
+  /** ADMIN: every report across ALL owners, optionally narrowed by kind and/or status.
+   *  Newest first. The read half of the admin triage surface — `findByOwner` stays
+   *  scoped to one owner and does not serve this. */
+  list(filter?: { kind?: Querela['kind']; status?: Querela['status'] }): Promise<Querela[]>
 }

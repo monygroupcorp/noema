@@ -205,6 +205,7 @@ const KNOWN_UNDECLARED = [
   '/api/v1/auth',
   '/api/v1/storage',
   '/api/v1/x402',
+  '/v1/admin/reports',
   '/v1/auth',
   '/v1/colloquia',
   '/v1/purses',

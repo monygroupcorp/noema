@@ -2799,6 +2799,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
+    { code: 'not_found.querela', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },

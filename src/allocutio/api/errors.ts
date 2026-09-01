@@ -99,6 +99,7 @@ export const Errors = {
   secretRequired: (provider: string, message?: string) =>
     new ApiError('secret.required', message ?? `Connect a ${provider} token to import this gated model`, 422, { details: { provider } }),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
+  notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>
