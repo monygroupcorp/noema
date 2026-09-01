@@ -183,7 +183,7 @@ export function LandingModes({
           across its own slice of the travel, and a slice of a short hold is not enough scroll
           to execute across. */}
       {progress === 'lock' ? (
-        <ScrollStage hold={(items.length - 1 + MODES_TRAIL) * 0.7}>{deck}</ScrollStage>
+        <ScrollStage hold={(items.length - 1) * 0.5 + MODES_TRAIL * 0.7}>{deck}</ScrollStage>
       ) : (
         deck
       )}

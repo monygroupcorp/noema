@@ -66,6 +66,9 @@
 .cand-type-marquee .beat h2{font-family:var(--font-marquee);font-weight:800;text-transform:uppercase;
   font-size:clamp(22px,3.2vw,38px);letter-spacing:-.01em}
 
+/* the closing door — a CTA in normal flow, not a held argument */
+.cand-end{padding:var(--py-section) 0}
+
 /* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
 .cand-flow{padding:var(--py-section) 0}
 

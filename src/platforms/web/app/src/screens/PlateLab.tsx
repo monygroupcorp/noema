@@ -1,9 +1,10 @@
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { Wordmark } from '../ui/Wordmark';
 import { PlateDeck } from './PlateDeck';
 import { ScrollStage } from './ScrollStage';
+import { BeatRun, type Beat } from './BeatRun';
 import { LandingCatalog } from './LandingCatalog';
 import { LandingOpen } from './LandingOpen';
 import { LandingModes } from './LandingModes';
@@ -13,8 +14,8 @@ import './plate-lab.css';
 const STAGGERS = [0, 18, 36];
 const LEADINGS = [1.02, 1.12, 1.22];
 
-/** The pathway beats, each locked to the viewport for as long as the reader stays. */
-const BEATS = [
+/** The pathway beats. They share one lock and take turns, rather than costing a screen each. */
+const BEATS: Beat[] = [
   {
     id: 'explore',
     n: '01',
@@ -106,7 +107,7 @@ export function PlateLab() {
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
 
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
-  const deckHold = (n: number) => (n - 1) * 0.55;
+  const deckHold = (n: number) => (n - 1) * 0.45;
 
   const deck = (slots: typeof PLATES, label: string, className?: string) => {
     const el = (
@@ -120,17 +121,6 @@ export function PlateLab() {
       />
     );
     return mode === 'lock' ? <ScrollStage hold={deckHold(slots.length)}>{el}</ScrollStage> : el;
-  };
-
-  // No two consecutive blocks sit the same way. Three centred beats in a row read as a template
-  // however good the sentences are; the page's rhythm is carried by where things sit.
-  const beat = (node: ReactNode, key: string, align: 'left' | 'right' | 'centre' = 'centre') => {
-    const inner = <div className={`beat beat-${align}`}>{node}</div>;
-    return mode === 'lock' ? (
-      <ScrollStage key={key} hold={0.8}>{inner}</ScrollStage>
-    ) : (
-      <div key={key} className="cand-flow">{inner}</div>
-    );
   };
 
   return (
@@ -200,16 +190,10 @@ export function PlateLab() {
 
         <LandingCatalog />
 
-        {BEATS.map((b) =>
-          beat(
-            <>
-              <span className="beat-n mono">{b.n}</span>
-              <h2>{b.title}</h2>
-              <p>{b.text}</p>
-            </>,
-            b.id,
-            b.align as 'left' | 'right',
-          ),
+        {mode === 'lock' ? (
+          <ScrollStage hold={BEATS.length * 0.6}><BeatRun beats={BEATS} /></ScrollStage>
+        ) : (
+          <div className="cand-flow"><BeatRun beats={BEATS} /></div>
         )}
 
         <section className="how">
@@ -306,16 +290,15 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
           </div>
         </section>
 
-        {beat(
-          <>
+        {/* a closing CTA is not an argument that needs holding — it is a door. */}
+        <section className="cand-end">
+          <div className="beat">
             <h2>Make something worth keeping.</h2>
             <span className="beat-cta">
               <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
             </span>
-          </>,
-          'end',
-          'centre',
-        )}
+          </div>
+        </section>
 
         <footer className="cand-foot">
           <div className="cand-foot-in">
