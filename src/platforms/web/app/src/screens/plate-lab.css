@@ -39,7 +39,17 @@
    without touching the app's. Every heading that carries the argument reads from it.
    Fraunces is the default: a display serif, set light and large, on a ground where the whole
    category ships a neutral geometric sans. */
-.cand{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em}
+/* Three roles, three faces, the way a publication is set: a serif that carries the voice, a
+   grotesque that carries the reading, and a mono that carries the instruments — every number,
+   label, eyebrow and readout on the page. Venice runs the identical structure (Canela / Aeonik /
+   Aeonik Fono); the mono half is the one most pages forget. */
+.cand{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em;
+  --font-label:var(--font-mono)}
+.cand .mono,.cand .cat-brag dd,.cand .modes-index,.cand .cat-chips li .mono{
+  font-family:var(--font-label)}
+/* body text under a display serif wants a touch more room than UI copy does */
+.cand .beat p,.cand .cand-hero p,.cand .cat-sub,.cand .modes-head p,
+.cand .pay-sub,.cand .how-sub{line-height:1.65}
 .cand-face-geist{--font-display:var(--font-sans);--display-weight:600;--display-track:-.04em}
 .cand-face-instrument{--font-display:"Instrument Serif",Georgia,serif;--display-weight:400;--display-track:-.015em}
 .cand-face-newsreader{--font-display:"Newsreader",Georgia,serif;--display-weight:500;--display-track:-.02em}
@@ -98,6 +108,43 @@
 .beat .beat-cta{display:block;margin-top:var(--s8)}
 .cand-face-martian .beat h2{font-weight:800;text-transform:uppercase;
   font-size:clamp(19px,2.6vw,32px);letter-spacing:-.01em}
+
+/* ── theming ────────────────────────────────────────────────────────────────────────────────
+   Everything here is scoped to `.cand`, never to the design system, because these tokens are
+   shared with the running app. The marketing surface gets to develop its own register first; if
+   the direction proves out it propagates inward, not the other way round.
+
+   `editorial` is the register the serif asks for: ink rather than screen-white, hairlines rather
+   than boxes, corners that read as print rather than as software, and an accent spent rarely.
+   ──────────────────────────────────────────────────────────────────────────────────────────── */
+.cand-theme-editorial{
+  /* Ink, not UI white. #e7eaef is a cool screen grey tuned for small sans; a display serif at
+     weight 400 wants a warmer, slightly softer note or it reads clinical. */
+  --ink:#f2efe9;
+  --ink-quiet:#a09a92;
+  /* Print corners. The app rounds generously because it is full of controls; a page of type and
+     photographs is not, and 14px radii on an editorial layout read as software. */
+  --r-lg:3px; --r:2px; --r-sm:2px; --r-pill:999px;
+  --hair:#1e1d1b;
+  --text:var(--ink);
+  --muted:var(--ink-quiet);
+}
+.cand-theme-editorial .cand-hero h1,
+.cand-theme-editorial .beat h2,
+.cand-theme-editorial .cat-brag dt,
+.cand-theme-editorial .modes-head h2,
+.cand-theme-editorial .cat h2,
+.cand-theme-editorial .pay h2,
+.cand-theme-editorial .open h2,
+.cand-theme-editorial .mint h2,
+.cand-theme-editorial .how h2,
+.cand-theme-editorial .anon h2,
+.cand-theme-editorial .cand-end h2{color:var(--ink)}
+/* the primary action stops being a rounded software button and becomes a printed one */
+.cand-theme-editorial .btn{border-radius:2px}
+.cand-theme-editorial .btn-ghost{border-radius:2px}
+.cand-theme-editorial .deck-card{border-radius:3px}
+.cand-theme-editorial .mode-shot{border-radius:0}
 
 /* the closing door — a CTA in normal flow, not a held argument */
 .cand-end{padding:var(--py-section) 0}

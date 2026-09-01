@@ -119,6 +119,7 @@ export function PlateLab() {
   const [crop, setCrop] = useState<PlateFormat>('21:9');
   const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
+  const [theme, setTheme] = useState<'current' | 'editorial'>('editorial');
 
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
   const deckHold = (n: number) => (n - 1) * 0.45;
@@ -167,13 +168,21 @@ export function PlateLab() {
           ))}
         </span>
         <span className="lab-ctl">
+          <span className="mono">theme</span>
+          <button className={theme === 'current' ? 'on' : ''} onClick={() => setTheme('current')}>current</button>
+          <button className={theme === 'editorial' ? 'on' : ''} onClick={() => setTheme('editorial')}>editorial</button>
+        </span>
+        <span className="lab-ctl">
           <span className="mono">scroll</span>
           <button className={mode === 'lock' ? 'on' : ''} onClick={() => setMode('lock')}>lock</button>
           <button className={mode === 'pass' ? 'on' : ''} onClick={() => setMode('pass')}>pass</button>
         </span>
       </div>
 
-      <div className={`cand cand-face-${display}`} style={{ '--hero-leading': String(leading) } as CSSProperties}>
+      <div
+        className={`cand cand-face-${display} cand-theme-${theme}`}
+        style={{ '--hero-leading': String(leading) } as CSSProperties}
+      >
         <nav className="cand-nav">
           <span className="brand"><Wordmark height={22} /></span>
           <span className="cand-navlinks">
