@@ -13,11 +13,18 @@
 # used (the fetch just falls through to HF and gets slow, not broken, which is
 # the failure mode worth naming).
 #
-# Usage:
-#   export R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=…
+# Credentials come from the repo's .env — no exports needed:
 #   ./scripts/mirror-minimax-h3-weights.sh              # upload, then verify
 #   ./scripts/mirror-minimax-h3-weights.sh --verify     # verify only, no upload
 #   ./scripts/mirror-minimax-h3-weights.sh --dry-run
+#
+# It looks for .env at $ENV_FILE, then the repo root, then the MAIN worktree's root
+# (a linked worktree has no .env of its own — it is gitignored and never copied over).
+# Anything already exported wins over the file, so a one-off override still works:
+#   R2_MODELS_BUCKET=other-bucket ./scripts/mirror-minimax-h3-weights.sh
+#
+# Values are read, never echoed. The script prints which file it used and which keys
+# it found by NAME only.
 #
 # Resumable: rclone skips a file already present at the same size, so a killed
 # run is restarted by running it again. ~56 GB total.
@@ -49,16 +56,76 @@ for arg in "$@"; do
   esac
 done
 
+# ── .env loading ───────────────────────────────────────────────────────────
+# Parsed, never sourced: sourcing an env file EXECUTES it, and a stray backtick or
+# $(…) in a secret would run as code. This reads one key at a time and does no
+# expansion at all.
+env_file() {
+  local -a candidates=()
+  [[ -n "${ENV_FILE:-}" ]] && candidates+=("$ENV_FILE")
+  local root common
+  root=$(git rev-parse --show-toplevel 2>/dev/null) && candidates+=("$root/.env")
+  # In a linked worktree --git-common-dir points at the MAIN checkout's .git, whose
+  # parent is the main worktree — where the gitignored .env actually lives.
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+    && candidates+=("$(dirname "$common")/.env")
+  local f
+  for f in "${candidates[@]}"; do
+    [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+  done
+  return 1
+}
+
+read_env_key() {  # <file> <KEY> — value to stdout, never logged
+  local file="$1" key="$2" line val
+  line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" 2>/dev/null | tail -n 1) || true
+  [[ -n "$line" ]] || return 1
+  val=${line#*=}
+  val=${val#"${val%%[![:space:]]*}"}          # ltrim
+  case "$val" in
+    \"*) val=${val#\"}; val=${val%%\"*} ;;    # double-quoted
+    \'*) val=${val#\'}; val=${val%%\'*} ;;    # single-quoted
+    *)   val=${val%% \#*}                      # unquoted inline comment
+         val=${val%"${val##*[![:space:]]}"}   # rtrim
+         ;;
+  esac
+  val=${val%$'\r'}                             # CRLF-safe
+  [[ -n "$val" ]] || return 1
+  printf '%s' "$val"
+}
+
 need_env() {
+  local wanted=(R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_MODELS_BUCKET R2_MODELS_PUBLIC_URL)
+  local file found=() v val
+  if file=$(env_file); then
+    echo "== credentials from $file"
+    for v in "${wanted[@]}"; do
+      # An exported value always wins, so a one-off override is not silently ignored.
+      [[ -n "${!v:-}" ]] && continue
+      if val=$(read_env_key "$file" "$v"); then
+        export "$v=$val"
+        found+=("$v")
+      fi
+    done
+    (( ${#found[@]} )) && echo "   loaded: ${found[*]}" || echo "   loaded: (nothing new — all already exported)"
+  else
+    echo "== no .env found; relying on the environment" >&2
+  fi
+
+  # Re-read the two that carry defaults, now that .env has had its say.
+  BUCKET="${R2_MODELS_BUCKET:-$BUCKET}"
+  PUBLIC_URL="${R2_MODELS_PUBLIC_URL:-$PUBLIC_URL}"
+
   local missing=()
   for v in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
     [[ -n "${!v:-}" ]] || missing+=("$v")
   done
   if (( ${#missing[@]} )); then
-    echo "missing env: ${missing[*]}" >&2
-    echo "these are the MODELS-bucket credentials, not the app's R2_BUCKET_NAME creds" >&2
+    echo "missing: ${missing[*]}" >&2
+    echo "not in the environment and not in the .env this script found" >&2
     exit 1
   fi
+  echo "   bucket: $BUCKET   public: $PUBLIC_URL"
 }
 
 # rclone, configured entirely from the environment so nothing is written to disk.
@@ -101,6 +168,9 @@ if (( ! VERIFY_ONLY )); then
       --stats-one-line
   done
 fi
+
+# Verify mode still needs the .env, for the bucket + public URL it may carry.
+(( VERIFY_ONLY )) && need_env || true
 
 # ── Verify against the PUBLIC url the seeds actually use ────────────────────
 # Uploading to the right bucket is not the same as being reachable at the URL a
