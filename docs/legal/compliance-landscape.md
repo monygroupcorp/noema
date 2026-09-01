@@ -150,6 +150,7 @@ commercial license.
 | Pony Diffusion | (SDXL) | Fair AI Public License 1.0-SD | ✅ | Flow-down restrictions |
 | Llama | 3.x | Meta Community License | ✅ (with conditions) | 700M MAU cap, attribution/naming, flow-down AUP |
 | Qwen | 3 / 3-VL / Image | Apache 2.0 | ✅ | Verify per checkpoint; Qwen3 generation is Apache |
+| MiniMax | H3 (fl2va / ref2va) | MiniMax H3 | ✅ licence held | Restrictive in the US; Mony Group LLC requested and received a US operating licence (2026-09-01). Third-party H3 derivatives are NOT covered — `minimax-h3` stays `no` in `modelLicense.ts` so imports fail closed. Turbo LoRAs (larryvrh) verified under the same grant. |
 
 > Action: extend this table for **every** model in the catalog before it can be billed.
 > Tie it to the `Fundamentum` / `Essentia` registry so license metadata is single-sourced

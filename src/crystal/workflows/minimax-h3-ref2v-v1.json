@@ -1,0 +1,240 @@
+{
+  "templateId": "minimax-h3-ref2v",
+  "version": "1",
+  "displayName": "MiniMax H3 \u2014 reference to video with voice (960x768, 209f @24fps, 4-step turbo)",
+  "seedInputKey": "input_seed",
+  "customNodes": [],
+  "inputTemplate": {
+    "1": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "2": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "type": "minimax",
+        "device": "default"
+      }
+    },
+    "3": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      }
+    },
+    "4": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      }
+    },
+    "5": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "strength_model": 1.0
+      }
+    },
+    "img0": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "PLACEHOLDER"
+      }
+    },
+    "aud0": {
+      "class_type": "LoadAudio",
+      "inputs": {
+        "audio": "PLACEHOLDER"
+      }
+    },
+    "8": {
+      "class_type": "MiniMaxH3ReferenceToVideo",
+      "inputs": {
+        "clip": [
+          "2",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "audio_vae": [
+          "4",
+          0
+        ],
+        "prompt": "PLACEHOLDER",
+        "width": 960,
+        "height": 768,
+        "length": 209,
+        "ref_image_size": "match",
+        "ref_images.ref_image_0": [
+          "img0",
+          0
+        ],
+        "ref_audios.ref_audio_0": [
+          "aud0",
+          0
+        ]
+      }
+    },
+    "9": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 42
+      }
+    },
+    "10": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "res_multistep"
+      }
+    },
+    "11": {
+      "class_type": "BasicScheduler",
+      "inputs": {
+        "model": [
+          "5",
+          0
+        ],
+        "scheduler": "simple",
+        "steps": 4,
+        "denoise": 1.0
+      }
+    },
+    "12": {
+      "class_type": "BasicGuider",
+      "inputs": {
+        "model": [
+          "5",
+          0
+        ],
+        "conditioning": [
+          "8",
+          0
+        ]
+      }
+    },
+    "13": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "9",
+          0
+        ],
+        "guider": [
+          "12",
+          0
+        ],
+        "sampler": [
+          "10",
+          0
+        ],
+        "sigmas": [
+          "11",
+          0
+        ],
+        "latent_image": [
+          "8",
+          1
+        ]
+      }
+    },
+    "14": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "13",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      }
+    },
+    "15": {
+      "class_type": "VAEDecodeAudio",
+      "inputs": {
+        "samples": [
+          "13",
+          0
+        ],
+        "vae": [
+          "4",
+          0
+        ]
+      }
+    },
+    "16": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          "14",
+          0
+        ],
+        "fps": 24.0,
+        "audio": [
+          "15",
+          0
+        ]
+      }
+    },
+    "17": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          "16",
+          0
+        ],
+        "filename_prefix": "minimax-h3/ref2v",
+        "format": "auto",
+        "codec": "auto"
+      }
+    }
+  },
+  "slotMap": {
+    "/8/inputs/prompt": "prompt",
+    "/8/inputs/length": "frames",
+    "/img0/inputs/image": "ref_image",
+    "/aud0/inputs/audio": "ref_audio",
+    "/9/inputs/noise_seed": "input_seed"
+  },
+  "requiredModels": [
+    {
+      "role": "unet",
+      "id": "intella.minimax-h3-ref2va-int8",
+      "dest": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    },
+    {
+      "role": "lora",
+      "id": "intella.minimax-h3-ref2v-turbo-4step",
+      "dest": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+    },
+    {
+      "role": "clip",
+      "id": "intella.qwen3vl-32b-minimax-h3-int8",
+      "dest": "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    {
+      "role": "vae",
+      "id": "intella.minimax-h3-video-vae",
+      "dest": "vae/minimax_h3_video_vae_fp16.safetensors"
+    },
+    {
+      "role": "audio_vae",
+      "id": "intella.minimax-h3-audio-vae",
+      "dest": "vae/minimax_h3_audio_vae_fp32.safetensors"
+    }
+  ],
+  "platformHints": {
+    "vramGb": 48
+  }
+}

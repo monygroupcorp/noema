@@ -97,6 +97,23 @@ export interface CompiledSpecBase {
 
 /** ComfyUI graph spec — the original shape (key-set unchanged: hash-stable). */
 export interface ComfyUICompiledSpec extends CompiledSpecBase {
+  /**
+   * Pinned upstream ComfyUI ref, forwarded from `Fundamentum.comfyRef` (noema-372).
+   *
+   * Until now the Fundamentum could DECLARE a ref and nothing carried it to the pod, so
+   * `_bootstrapComfyUI` always fell back to `DEFAULT_COMFYUI_REF`. Harmless while every
+   * substrate wanted that same v0.26.0; fatal for one that does not — a MiniMax H3 pod would
+   * boot healthy with no H3 nodes in it. Emitted only when the fundament declares it, so a
+   * substrate that does not stays byte-identical (the `customNodes`/`mediaInputs` grain).
+   */
+  comfyRef?: string
+  /**
+   * Substrate bootstrap commands, forwarded from `Fundamentum.install` (noema-372). Run on the
+   * pod BEFORE the ComfyUI clone, so they can prepare the interpreter the bootstrap's own
+   * `pip install` then uses. Distinct from `ScriptCompiledSpec.script.install`, which installs a
+   * modelcard repo's deps.
+   */
+  install?: string[]
   workflow: {
     templateId: string
     templateVersion: string
@@ -407,6 +424,10 @@ export class Compiler {
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime: fundamentum.runtime ?? 'ComfyUI',
+      ...(fundamentum.comfyRef ? { comfyRef: fundamentum.comfyRef } : {}),
+      ...(fundamentum.install && fundamentum.install.length > 0
+        ? { install: fundamentum.install }
+        : {}),
       ...(template.customNodes && template.customNodes.length > 0
         ? { customNodes: template.customNodes }
         : {}),

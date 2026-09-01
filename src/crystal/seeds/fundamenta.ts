@@ -487,6 +487,59 @@ export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
   mutatum: new Date('2026-07-10'),
 }
 
+/**
+ * MiniMax H3 · ComfyUI — the video+audio substrate shared by t2v, fl2v and ref2v (noema-372).
+ *
+ * WHY A DIFFERENT BASE IMAGE than every other ComfyUI fundament. H3 needs ComfyUI >= 0.30.0
+ * (native support merged 2026-08-03) and is acutely torch-sensitive: the rig measured a ~2x
+ * throughput swing traced purely to the bundled PyTorch build. `runpod/pytorch:2.4.0-cu124`,
+ * which the flux/sd/wan fundamenta ride, is far too old. This pins the exact base the
+ * head-to-head was measured on (57.5 s/shot warm, 24.0 GB peak VRAM, 77 GB peak host RAM).
+ *
+ * `comfyRef` IS LOAD-BEARING. `SecurePodClient`'s DEFAULT_COMFYUI_REF is v0.26.0 — under
+ * 0.30.0. If this field is ever dropped, the pod boots healthy with no H3 nodes in it and the
+ * failure looks like a bad graph rather than a bad substrate.
+ *
+ * `install` covers what that base needs and the stock bootstrap does not do on its own:
+ * PEP 668 makes the 2.13 image's Python externally-managed, so a bare `pip install` refuses;
+ * and comfy-kitchen supplies the int8 convrot kernels the pruned checkpoints are built on.
+ *
+ * WEIGHT SPLIT. Only the SHARED weights live here — text encoder + both VAEs, ~32 GB. Each
+ * flow adds its own DiT + baked turbo LoRA via `Essentia.intellae`. Co-host key is fundament-id
+ * equality, so all three flows land on one pod and pull the 26 GB encoder ONCE.
+ *
+ * vramGb is 48, not the 24.0 GB measured: that measurement is the peak on a 24 GB card, i.e.
+ * the ceiling with nothing to spare, so it is a bad capacity floor for pod selection.
+ */
+export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
+  id: 'minimax-h3-comfyui',
+  nomen: 'MiniMax H3 · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'pytorch/pytorch',
+  imageVersion: '2.13.0-cuda13.0-cudnn9-runtime',
+  runtime: 'ComfyUI',
+  // TODO(noema-372): pin to the ref recovered from the rig image
+  // (`docker run --rm minimax-comfy:local git -C /opt/ComfyUI rev-parse HEAD`). The tag below is
+  // the floor H3 needs, not the ref the measurements were taken on.
+  comfyRef: 'v0.30.0',
+  install: [
+    // Each bootstrap command runs in its OWN shell, so `export` would not survive to the
+    // bootstrap's `pip install -r requirements.txt`. Write pip's real config instead.
+    'pip config set global.break-system-packages true',
+    'pip install --no-cache-dir comfy-kitchen',
+  ],
+  intellae: [
+    { id: 'intella.qwen3vl-32b-minimax-h3-int8', role: 'clip' },
+    { id: 'intella.minimax-h3-video-vae',        role: 'vae' },
+    { id: 'intella.minimax-h3-audio-vae',        role: 'audio_vae' },
+  ],
+  vramGb: 48,
+  canonica: true,
+  natum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-01'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -508,4 +561,5 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_LTX_COMFYUI,
   FUNDAMENTUM_WAN22_T2V_COMFYUI,
   FUNDAMENTUM_WAN22_I2V_COMFYUI,
+  FUNDAMENTUM_MINIMAX_H3_COMFYUI,
 ]

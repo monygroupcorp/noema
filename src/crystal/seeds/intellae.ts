@@ -1026,6 +1026,261 @@ export const INTELLA_WAN21_VAE: Intella = {
   natum: new Date('2026-07-07'),
 }
 
+
+// =============================================================================
+// MiniMax H3 — video+audio generation (noema-372)
+//
+// LICENSING. The H3 weights are NOT openly licensed and are restrictive in the
+// United States. Mony Group LLC — the company that owns noema — requested and
+// received a licence to operate them in the US (rth, 2026-09-01). That grant is
+// why these canonical seeds carry `commercialUse: 'yes'` while the shared
+// register in `modelLicense.ts` maps the bare `minimax-h3` licence id to 'no'.
+// The register is right and this is not an exception to it: `licenseCommercial()`
+// classifies THIRD-PARTY IMPORTS, which are not covered by our grant and must stay
+// fail-closed. A canonical seed carries an explicit verdict instead — the same seam
+// `Intellarum.setLicense` exists for ("one cleared after taking out a commercial
+// licence"). Do not copy 'yes' onto a user-imported H3 derivative.
+//
+// "va" = video + audio: there is a separate audio VAE and the model emits a voice
+// track, so a single mp4 carries both (CreateVideo muxes before SaveVideo).
+//
+// The pruned int8 "convrot" checkpoints are the whole reason this fits: ~56 GB
+// total against 135 GiB at full precision. The nvfp4 text-encoder variant is
+// deliberately NOT seeded — it is Blackwell-only and useless on Ada.
+// =============================================================================
+
+/** MiniMax H3 first/last-frame-to-video DiT (pruned int8 convrot). Serves t2v + fl2v. */
+export const INTELLA_MINIMAX_H3_FL2VA: Intella = {
+  id: 'intella.minimax-h3-fl2va-int8',
+  nomen: 'MiniMax H3 — first/last-frame to video (pruned int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'minimax-h3',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/split_files/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'split_files/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+  sizeGb: 20,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** MiniMax H3 reference-to-video DiT (pruned int8 convrot). Serves ref2v. */
+export const INTELLA_MINIMAX_H3_REF2VA: Intella = {
+  id: 'intella.minimax-h3-ref2va-int8',
+  nomen: 'MiniMax H3 — reference to video (pruned int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'minimax-h3',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/split_files/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'split_files/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+  sizeGb: 20,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 text encoder — Qwen3-VL-32B, int8 convrot.
+ *
+ * The single largest weight in the stack at 26 GB, and the reason the three flows
+ * share one Fundamentum: co-hosted, it is pulled once instead of three times.
+ */
+export const INTELLA_MINIMAX_H3_TEXT_ENCODER: Intella = {
+  id: 'intella.qwen3vl-32b-minimax-h3-int8',
+  nomen: 'Qwen3-VL-32B for MiniMax H3 (int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 32_000_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/split_files/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'split_files/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+  sizeGb: 26,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** MiniMax H3 video VAE (fp16) — the image half of the decode. */
+export const INTELLA_MINIMAX_H3_VIDEO_VAE: Intella = {
+  id: 'intella.minimax-h3-video-vae',
+  nomen: 'MiniMax H3 — video VAE (fp16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/vae/minimax_h3_video_vae_fp16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/split_files/vae/minimax_h3_video_vae_fp16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'split_files/vae/minimax_h3_video_vae_fp16.safetensors' },
+    },
+  ],
+  dest: 'vae/minimax_h3_video_vae_fp16.safetensors',
+  sizeGb: 5,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 audio VAE (fp32) — the voice half of the decode.
+ *
+ * `VAEDecodeAudio` reads this; `CreateVideo` muxes its output into the mp4. Without
+ * it the flows produce silent video, so it is a base weight, not an optional extra.
+ */
+export const INTELLA_MINIMAX_H3_AUDIO_VAE: Intella = {
+  id: 'intella.minimax-h3-audio-vae',
+  nomen: 'MiniMax H3 — audio VAE (fp32)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/vae/minimax_h3_audio_vae_fp32.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/split_files/vae/minimax_h3_audio_vae_fp32.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'split_files/vae/minimax_h3_audio_vae_fp32.safetensors' },
+    },
+  ],
+  dest: 'vae/minimax_h3_audio_vae_fp32.safetensors',
+  sizeGb: 1,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * fl2v 4-step turbo LoRA (768p) — BAKED into the t2v/fl2v graphs.
+ *
+ * This is a flow weight, not a user-selectable LoRA: the graph names it in
+ * `LoraLoaderModelOnly` at strength 1.0 and the 4-step schedule depends on it.
+ * It rides `Essentia.intellae` (the weight manifest) and must never reach the
+ * prompt-driven LoRA rail — hence no `familia`, so `triggerMap` cannot surface it.
+ *
+ * Third-party weights (larryvrh), a DIFFERENT licence from the base H3 checkpoints;
+ * verified separately for the same US grant.
+ */
+export const INTELLA_MINIMAX_H3_FL2V_TURBO: Intella = {
+  id: 'intella.minimax-h3-fl2v-turbo-4step',
+  nomen: 'MiniMax H3 fl2v — 4-step turbo LoRA (768p, bf16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'lora',
+  architectura: 'dit',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/main/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'larryvrh/MiniMax-H3-Turbo-Lora', branch: 'main', filename: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors' },
+    },
+  ],
+  dest: 'loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+  sizeGb: 2,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** ref2v 4-step turbo LoRA — BAKED into the ref2v graph. See the fl2v turbo note. */
+export const INTELLA_MINIMAX_H3_REF2V_TURBO: Intella = {
+  id: 'intella.minimax-h3-ref2v-turbo-4step',
+  nomen: 'MiniMax H3 ref2v — 4-step turbo LoRA (bf16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'lora',
+  architectura: 'dit',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'larryvrh/MiniMax-H3-Turbo-Lora', branch: 'main', filename: 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors' },
+    },
+  ],
+  dest: 'loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+  sizeGb: 2,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
 export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_FLUX_SCHNELL,
   INTELLA_FLUX_VAE,
@@ -1063,4 +1318,11 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_WAN22_I2V_LOW,
   INTELLA_UMT5_XXL,
   INTELLA_WAN21_VAE,
+  INTELLA_MINIMAX_H3_FL2VA,
+  INTELLA_MINIMAX_H3_REF2VA,
+  INTELLA_MINIMAX_H3_TEXT_ENCODER,
+  INTELLA_MINIMAX_H3_VIDEO_VAE,
+  INTELLA_MINIMAX_H3_AUDIO_VAE,
+  INTELLA_MINIMAX_H3_FL2V_TURBO,
+  INTELLA_MINIMAX_H3_REF2V_TURBO,
 ]

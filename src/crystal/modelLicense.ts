@@ -43,6 +43,11 @@ const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
   'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] + [klein] 9B Non-Commercial (only klein 4B is Apache)
   'closed': 'no',                 // FLUX.1 pro / API-only — not self-hostable
   'cc-by-nc': 'no',               // any non-commercial Creative Commons variant
+  'minimax-h3': 'no',             // MiniMax H3 — restrictive in the US; ❌ unless separately
+                                  // licensed. Mony Group LLC holds a US operating licence
+                                  // (rth 2026-09-01), so the CANONICAL H3 seeds carry an
+                                  // explicit commercialUse:'yes'. This entry governs THIRD-PARTY
+                                  // imports, which our grant does not cover — keep it 'no'.
   'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
   'krea-community': 'conditional',       // Krea 2 Community — commercial only for entities <$1M revenue
   'unknown': 'unknown',
