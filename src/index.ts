@@ -1333,8 +1333,10 @@ async function main(): Promise<void> {
 
   // /widget — the Noema embed surface (ADR-0011 §7): the SDK + chrome-less,
   // themed per-agent & gallery views, composed from the public feed + owner appearance.
-  // Framing is a per-partner CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-sep)
-  // replacing the legacy `frame-ancestors *`; default 'self' (same-origin only).
+  // Framing resolves PER AGENT: a `Legatus.frameAncestors` (once a partner has one set)
+  // wins; otherwise the platform-wide CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-
+  // sep) applies unchanged; with neither set, the router's own default ('self') applies —
+  // replacing the legacy `frame-ancestors *`.
   const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
     .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
   app.use('/widget', createWidgetRouter({
@@ -1345,7 +1347,7 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
-    frameAncestors: widgetFrameAncestors,
+    frameAncestors: (legatus) => (legatus?.frameAncestors?.length ? legatus.frameAncestors : widgetFrameAncestors),
   }))
 
   // Owned purses (§7) — the crystal-core "delegation": an identified account mints a

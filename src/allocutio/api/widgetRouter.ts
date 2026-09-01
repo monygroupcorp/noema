@@ -15,12 +15,14 @@
 // interactive path is the §5 x402 capability endpoints, which the SDK already speaks.
 //
 // FRAMING is hardened vs the legacy `frame-ancestors *`: every HTML view carries a
-// real per-partner `frame-ancestors` allowlist (deps.frameAncestors), and the iframe
-// posts only non-secret messages (WIDGET_READY / GALLERY_LIGHTBOX). We deliberately do
-// NOT set X-Frame-Options — it cannot express an allowlist and would shadow the CSP.
+// real per-partner `frame-ancestors` allowlist, resolved PER AGENT/COLLECTION via
+// `deps.frameAncestors(legatus)` — a resolved `Legatus.frameAncestors` wins, else the
+// platform-wide list, else `'self'` (see `frame()` below) — and the iframe posts only
+// non-secret messages (WIDGET_READY / GALLERY_LIGHTBOX). We deliberately do NOT set
+// X-Frame-Options — it cannot express an allowlist and would shadow the CSP.
 
 import express, { type Router, type Request, type Response } from 'express'
-import type { LegatusStore } from '../../types/legatus.js'
+import type { Legatus, LegatusStore } from '../../types/legatus.js'
 import type { Appearance } from '../../types/consuetudo.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
@@ -41,8 +43,15 @@ export interface WidgetRouterDeps {
   quoteImpetus?: (modusId: string) => Promise<bigint>
   /** x402 rail config (currency label / markup) for the price display. */
   x402Config?: X402Config
-  /** CSP `frame-ancestors` allowlist — the origins allowed to embed the widgets. */
-  frameAncestors: string[]
+  /**
+   * Resolve the CSP `frame-ancestors` allowlist — the origins allowed to embed a given
+   * agent's (or collection's) widget. Called per-request with the `Legatus` the route
+   * resolved (`undefined` when none applies, e.g. an unknown agent or empty collection).
+   * Implementations should fall back to the platform-wide list when the `Legatus` has no
+   * `frameAncestors` of its own; the router's own `'self'` default applies if the
+   * returned array is empty.
+   */
+  frameAncestors: (legatus: Legatus | undefined) => string[]
   /** Show the identity SIGN-IN affordance (challenge→session). Requires the host to serve
    *  the `/widget/:agentId/auth/wallet/*` endpoints. Default OFF: prod serves none, so the
    *  widget shows only real connect-wallet (no session) — no way to ship a spoofable login. */
@@ -332,10 +341,13 @@ const ENTRANCE_JS = `(function(){
 export function createWidgetRouter(deps: WidgetRouterDeps): Router {
   const router = express.Router({ mergeParams: true })
   const limit = deps.limit ?? 24
-  const frameAncestors = deps.frameAncestors.length ? deps.frameAncestors.join(' ') : "'self'"
 
-  /** Apply the per-partner framing allowlist to an embeddable HTML view. */
-  function frame(res: Response): void {
+  /** Apply the per-partner framing allowlist to an embeddable HTML view. `legatus` is
+   *  whatever the route resolved for this request (or `undefined`) — passed through to
+   *  `deps.frameAncestors` so a per-agent list can win over the platform-wide default. */
+  function frame(res: Response, legatus: Legatus | undefined): void {
+    const ancestors = deps.frameAncestors(legatus)
+    const frameAncestors = ancestors.length ? ancestors.join(' ') : "'self'"
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`)
     res.setHeader('Cache-Control', 'no-store')
@@ -354,13 +366,18 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
   router.get('/gallery/:collectionAddress', async (req: Request, res: Response): Promise<void> => {
     const addr = String(req.params.collectionAddress)
     const agents = await deps.legati.listByCollection(addr)
-    const animaIds = agents.filter((a) => a.status !== 'revoked').map((a) => a.animaId)
+    const activeAgents = agents.filter((a) => a.status !== 'revoked')
+    const animaIds = activeAgents.map((a) => a.animaId)
     const items = animaIds.length ? await deps.feed({ visibility: 'feed', authorAnimaIds: animaIds, limit }) : []
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
     const body = tiles.length
       ? `<div class="grid">${tiles.map(tileHtml).join('')}</div>`
       : `<div class="empty">No creations in this collection yet.</div>`
-    frame(res)
+    // A collection has no single `Legatus` — every agent in it belongs to the same
+    // partner, so the first one carrying a per-partner `frameAncestors` speaks for the
+    // whole gallery. None set (the common case) → `frame()` falls back to the global list.
+    const perPartner = activeAgents.find((a) => a.frameAncestors && a.frameAncestors.length)
+    frame(res, perPartner)
     res.status(200).send(page({ title: 'Gallery', body, script: IFRAME_BRIDGE }))
   })
 
@@ -370,7 +387,7 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     const agentId = String(req.params.agentId)
     const legatus = await deps.legati.findByAgentId(agentId)
     if (!legatus || legatus.status === 'revoked') {
-      frame(res)
+      frame(res, legatus ?? undefined)
       res.status(404).send(page({ title: 'Not found', body: `<div class="empty">Agent not found.</div>`, script: IFRAME_BRIDGE }))
       return
     }
@@ -434,7 +451,7 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     const gallery = tiles.length
       ? `<div class="sect">Recent creations</div><div class="grid">${tiles.map(tileHtml).join('')}</div>`
       : (panel ? '' : `<div class="empty">This agent hasn't published anything yet.</div>`)
-    frame(res)
+    frame(res, legatus)
     res.status(200).send(page({
       title: agentId, ...(appearance ? { appearance } : {}),
       header: agentHeader(agentId, appearance, legatus.ownerAddress, deps.sessionAuth ?? false),
