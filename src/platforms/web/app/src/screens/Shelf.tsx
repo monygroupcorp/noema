@@ -110,6 +110,13 @@ export function Shelf() {
   const [admin, setAdmin] = useState(false);
   const [licBusy, setLicBusy] = useState<string | null>(null);
 
+  // Publish (POST /v1/editiones) — makes a private model listed + royalty-eligible. Per-model
+  // state since several cards can be mid-publish at once. A publish settles asynchronously
+  // (PublicationWorker; HF weight upload can take a while), so 'pending' is a real, honest
+  // terminal state here, not a placeholder for 'done' — we poll briefly and stop rather than
+  // claim success before the edition actually lands.
+  const [pubState, setPubState] = useState<Record<string, 'busy' | 'pending' | 'err'>>({});
+
   // The global catalog surface (GET /v1/models) — collapsed until asked for.
   const [catOpen, setCatOpen] = useState(false);
   const [catalog, setCatalog] = useState<ModelCard[] | null>(null);
@@ -146,6 +153,47 @@ export function Shelf() {
       setModels((cur) => (cur ?? []).map((m) => (m.intellaId === id ? model : m)));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setLicBusy(null); }
+  }
+
+  // Publish a private model — HuggingFace is the only registry with a real uploader wired
+  // (civitai has no public write API; ModelPublishAdapter projects a handle only there).
+  // 'unlisted' (not 'private') is what actually flips the model to listed: the access
+  // reconciler (CrystalApi._reconcile) only sets access:'public' when visibility !== 'private'.
+  async function publishModel(id: string) {
+    setPubState((s) => ({ ...s, [id]: 'busy' }));
+    try {
+      const { edition } = await api.publish({
+        artifact: { kind: 'intella', id },
+        destination: 'huggingface',
+        visibility: 'unlisted',
+        custody: 'ours',
+      });
+      if (edition.status === 'published') {
+        setModels((cur) => (cur ?? []).map((m) => (m.intellaId === id ? { ...m, access: 'public' } : m)));
+        setPubState((s) => { const n = { ...s }; delete n[id]; return n; });
+        return;
+      }
+      setPubState((s) => ({ ...s, [id]: 'pending' }));
+      // Brief bounded poll — the worker settles this async (HF weight upload can take a
+      // while). Stop and leave it as an honest 'pending' rather than hang indefinitely;
+      // the badge catches up on the model's next natural load either way.
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const { edition: polled } = await api.getEdition(edition.id);
+        if (polled.status === 'published') {
+          setModels((cur) => (cur ?? []).map((m) => (m.intellaId === id ? { ...m, access: 'public' } : m)));
+          setPubState((s) => { const n = { ...s }; delete n[id]; return n; });
+          return;
+        }
+        if (polled.status === 'failed' || polled.status === 'rejected') {
+          setPubState((s) => ({ ...s, [id]: 'err' }));
+          return;
+        }
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setPubState((s) => ({ ...s, [id]: 'err' }));
+    }
   }
 
   async function doImport() {
@@ -265,6 +313,19 @@ export function Shelf() {
                       <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
+                      {!listed && pubState[m.intellaId] !== 'pending' && (
+                        <button
+                          className="btn ghost"
+                          onClick={() => publishModel(m.intellaId)}
+                          disabled={pubState[m.intellaId] === 'busy'}
+                          title="List this model publicly and make it eligible for royalty when others use it"
+                        >
+                          {pubState[m.intellaId] === 'busy' ? 'publishing…' : pubState[m.intellaId] === 'err' ? 'publish failed — retry' : 'Publish'}
+                        </button>
+                      )}
+                      {!listed && pubState[m.intellaId] === 'pending' && (
+                        <span className="mc-meta mono" title="Still settling — this can take a few minutes for weight upload">publishing…</span>
+                      )}
                       {admin && (
                         <button className="btn ghost" onClick={() => reclassify(m.intellaId)} disabled={licBusy === m.intellaId} title="Admin: re-derive license from the base model">
                           {licBusy === m.intellaId ? 'reclassifying…' : 'reclassify license'}
