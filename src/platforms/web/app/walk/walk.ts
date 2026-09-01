@@ -74,10 +74,10 @@ function listOnly(rows: RouteRow[]): void {
 // Skips gracefully with no credentials: the walk still runs, just as an anonymous session, which
 // is a legitimate state to capture (many screens work anon; auth-gated ones will show whatever
 // the anon/redirect state renders — a real observation, not a failure).
-async function login(browser: Browser): Promise<void> {
+async function login(browser: Browser): Promise<boolean> {
   if (!EMAIL || !PASSWORD) {
     console.log('WALK_EMAIL/WALK_PASSWORD not set — walking without a session (anonymous).');
-    return;
+    return false;
   }
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -90,7 +90,24 @@ async function login(browser: Browser): Promise<void> {
     await page.waitForURL(/\/app/, { timeout: 15_000 }).catch(() => {
       console.log('Sign-in did not reach /app within 15s — continuing with whatever session resulted.');
     });
-    await context.storageState({ path: STATE_FILE });
+    // Verify rather than assume. `storageState` writes a file whether or not a session was
+    // minted, and a stale file from a previous run would make an anonymous walk claim to be
+    // authenticated — which is the one thing a manifest must never do.
+    const signedIn = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('noema-sessions');
+        if (!raw) return false;
+        const store = JSON.parse(raw) as { accounts?: Record<string, unknown> };
+        return Object.keys(store.accounts ?? {}).length > 0;
+      } catch { return false; }
+    });
+    if (signedIn) await context.storageState({ path: STATE_FILE });
+    console.log(signedIn ? 'signed in — walking with a session.' : 'sign-in produced no session — walking anonymously.');
+    return signedIn;
+  } catch (err) {
+    // A changed affordance on the sign-in door must not take the whole walk down with it.
+    console.log(`sign-in failed (${(err as Error).message.split('\n')[0]}) — walking anonymously.`);
+    return false;
   } finally {
     await context.close();
   }
@@ -101,7 +118,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
   mkdirSync(REPORT_DIR, { recursive: true });
 
   const browser: Browser = await chromium.launch();
-  await login(browser);
+  const authenticated = await login(browser);
 
   const report: { route: string; viewport: string; violations: unknown[] }[] = [];
   const counts: Record<string, number> = {};
@@ -109,7 +126,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
   const failed: { route: string; error: string }[] = [];
 
   for (const row of rows) {
-    const ctx = existsSync(STATE_FILE)
+    const ctx = authenticated && existsSync(STATE_FILE)
       ? await browser.newContext({ storageState: STATE_FILE })
       : await browser.newContext();
     const page = await ctx.newPage();
@@ -160,7 +177,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         capturedAt: new Date().toISOString(),
         revision: revision(),
         baseUrl: BASE_URL,
-        authenticated: existsSync(STATE_FILE),
+        authenticated,
         viewports: VIEWPORTS,
         routes: rows.length,
         failed,
