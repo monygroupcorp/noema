@@ -3,7 +3,12 @@
   "version": "1",
   "displayName": "MiniMax H3 \u2014 text to video with audio (960x768, 209f @24fps, 4-step turbo)",
   "seedInputKey": "input_seed",
-  "customNodes": [],
+  "customNodes": [
+    {
+      "url": "https://github.com/skfoo/ComfyUI-Coziness",
+      "name": "ComfyUI-Coziness"
+    }
+  ],
   "inputTemplate": {
     "1": {
       "class_type": "UNETLoader",
@@ -47,14 +52,17 @@
       "class_type": "MiniMaxH3ImageToVideo",
       "inputs": {
         "clip": [
-          "2",
-          0
+          "21",
+          1
         ],
         "vae": [
           "3",
           0
         ],
-        "prompt": "PLACEHOLDER",
+        "prompt": [
+          "20",
+          0
+        ],
         "width": 960,
         "height": 768,
         "length": 209
@@ -76,7 +84,7 @@
       "class_type": "BasicScheduler",
       "inputs": {
         "model": [
-          "5",
+          "21",
           0
         ],
         "scheduler": "simple",
@@ -88,7 +96,7 @@
       "class_type": "BasicGuider",
       "inputs": {
         "model": [
-          "5",
+          "21",
           0
         ],
         "conditioning": [
@@ -173,10 +181,33 @@
         "format": "auto",
         "codec": "auto"
       }
+    },
+    "20": {
+      "class_type": "LoraTextExtractor-b1f83aa2",
+      "inputs": {
+        "text": "PLACEHOLDER"
+      }
+    },
+    "21": {
+      "class_type": "MultiLoraLoader-70bf3d77",
+      "inputs": {
+        "model": [
+          "5",
+          0
+        ],
+        "clip": [
+          "2",
+          0
+        ],
+        "text": [
+          "20",
+          1
+        ]
+      }
     }
   },
   "slotMap": {
-    "/8/inputs/prompt": "prompt",
+    "/20/inputs/text": "prompt",
     "/8/inputs/length": "frames",
     "/9/inputs/noise_seed": "input_seed"
   },
@@ -209,5 +240,6 @@
   ],
   "platformHints": {
     "vramGb": 48
-  }
+  },
+  "loraCapable": true
 }

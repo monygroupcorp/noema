@@ -1028,6 +1028,14 @@ export const ESSENTIA_LTX_I2V: Essentia = {
 // the weight manifest and carries no `familia`, so the prompt-driven LoRA rail cannot
 // surface or stack it.
 //
+// USER LORAS. All three templates are `loraCapable`, on the `minimax-h3` familia the two
+// DiTs carry. The rail stacks ON TOP of the turbo LoRA — `MultiLoraLoader` takes the
+// turbo loader's OUTPUT as its model — so a user LoRA never displaces the 4-step schedule
+// the graph's `steps: 4` depends on. Nothing carries this familia yet, so the rail is a
+// no-op until an H3 LoRA exists: `triggerMap` returns empty, the extractor emits an empty
+// spec, and `MultiLoraLoader` passes the model through untouched. That the turbo LoRA
+// patches the int8-convrot quantized DiT at all is the evidence the rail can work on it.
+//
 // AUDIO. H3 is video+audio ("va"): `VAEDecodeAudio` feeds `CreateVideo`, which muxes the
 // voice track into the mp4 before `SaveVideo`. The exitus is therefore ONE `video`, same
 // as Wan — there is no separate audio artifact.

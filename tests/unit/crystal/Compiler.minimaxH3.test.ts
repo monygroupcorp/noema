@@ -60,7 +60,10 @@ test('t2v slots the prompt into the H3 node and wires NEITHER frame port', async
 
   const h3 = node(spec, '8')
   assert.equal(h3.class_type, 'MiniMaxH3ImageToVideo')
-  assert.equal(h3.inputs.prompt, 'a newsreader at a plain desk')
+  // The prompt enters at the LoRA text extractor and reaches the H3 node with any
+  // `<lora:…>` tags stripped — so the model never sees the tag syntax as scene text.
+  assert.equal(node(spec, '20').inputs.text, 'a newsreader at a plain desk')
+  assert.deepEqual(h3.inputs.prompt, ['20', 0])
   // The whole basis for t2v existing without a t2v checkpoint: both frame ports stay unwired.
   assert.ok(!('first_frame' in h3.inputs), 't2v must not wire first_frame')
   assert.ok(!('last_frame' in h3.inputs), 't2v must not wire last_frame')
@@ -100,6 +103,7 @@ test('ref2v stages BOTH image and audio, and keeps the dotted autogrow links int
 
   const h3 = node(spec, '8')
   assert.equal(h3.class_type, 'MiniMaxH3ReferenceToVideo')
+  assert.deepEqual(h3.inputs.prompt, ['20', 0])
   // Autogrow inputs are addressed by DOTTED PATH. A flat `ref_image_0` passes validation and
   // dies at execution, so this assertion is the one that protects the whole flow.
   assert.deepEqual(h3.inputs['ref_images.ref_image_0'], ['img0', 0])
@@ -149,4 +153,42 @@ test('a substrate that declares neither field stays byte-identical (hash stabili
   )
   assert.ok(!('comfyRef' in (spec as object)), 'no comfyRef key when the fundament declares none')
   assert.ok(!('install' in (spec as object)), 'no install key when the fundament declares none')
+})
+
+test('user LoRAs stack ON TOP of the baked turbo LoRA, never instead of it', async () => {
+  for (const essentia of [ESSENTIA_MINIMAX_H3_T2V, ESSENTIA_MINIMAX_H3_FL2V, ESSENTIA_MINIMAX_H3_REF2V]) {
+    const { spec } = await makeCompiler().compile(essentia, {
+      prompt: 'a talking head <lora:something:0.8>',
+      first_frame: 'https://r2.example/a.png',
+      ref_image: 'https://r2.example/a.png', ref_audio: 'https://r2.example/a.wav',
+    })
+
+    // node 5 is the 4-step turbo LoRA the graph's `steps: 4` depends on. The user rail
+    // (21) takes node 5's OUTPUT as its model, so the turbo LoRA is never displaced.
+    const turbo = node(spec, '5')
+    assert.equal(turbo.class_type, 'LoraLoaderModelOnly', `${essentia.id}: turbo lora still loaded`)
+    const multi = node(spec, '21')
+    assert.equal(multi.class_type, 'MultiLoraLoader-70bf3d77')
+    assert.deepEqual(multi.inputs.model, ['5', 0], `${essentia.id}: user loras stack on the turbo lora`)
+    assert.deepEqual(multi.inputs.text, ['20', 1], 'lora spec comes from extractor output 1')
+
+    // and everything downstream consumes the PATCHED model/clip, not the raw ones
+    assert.deepEqual(node(spec, '11').inputs.model, ['21', 0], `${essentia.id}: scheduler on patched model`)
+    assert.deepEqual(node(spec, '12').inputs.model, ['21', 0], `${essentia.id}: guider on patched model`)
+    assert.deepEqual(node(spec, '8').inputs.clip, ['21', 1], `${essentia.id}: conditioning on patched clip`)
+  }
+})
+
+test('the LoRA rail is declared, and carries the node pack it needs', async () => {
+  for (const essentia of [ESSENTIA_MINIMAX_H3_T2V, ESSENTIA_MINIMAX_H3_FL2V, ESSENTIA_MINIMAX_H3_REF2V]) {
+    const { spec } = await makeCompiler().compile(essentia, {
+      prompt: 'x', first_frame: 'https://r2.example/a.png',
+      ref_image: 'https://r2.example/a.png', ref_audio: 'https://r2.example/a.wav',
+    })
+    // Without the pack the two rail nodes do not exist on the pod and the whole graph
+    // fails to queue — not just the LoRA part.
+    const packs = asComfyUI(spec).customNodes ?? []
+    assert.ok(packs.some(p => p.url.includes('ComfyUI-Coziness')),
+      `${essentia.id} must ship the Coziness pack that provides the rail nodes`)
+  }
 })
