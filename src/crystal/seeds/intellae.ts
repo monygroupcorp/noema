@@ -301,9 +301,9 @@ export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/flux1-kontext-dev_ComfyUI', branch: 'main', filename: 'split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/flux1-kontext-dev_ComfyUI', branch: 'main', filename: 'diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/flux1-kontext-dev.safetensors',
@@ -360,9 +360,9 @@ export const INTELLA_QWEN3_8B_FLUX2: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/text_encoders/qwen_3_8b_fp8mixed.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/flux2-klein-9B', branch: 'main', filename: 'split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors' },
+      meta: { repo: 'Comfy-Org/flux2-klein-9B', branch: 'main', filename: 'text_encoders/qwen_3_8b_fp8mixed.safetensors' },
     },
   ],
   dest: 'text_encoders/qwen_3_8b_fp8mixed.safetensors',
@@ -388,9 +388,9 @@ export const INTELLA_QWEN3_4B_FLUX2: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/text_encoders/qwen_3_4b.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/vae-text-encorder-for-flux-klein-4b', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
+      meta: { repo: 'Comfy-Org/vae-text-encorder-for-flux-klein-4b', branch: 'main', filename: 'text_encoders/qwen_3_4b.safetensors' },
     },
   ],
   dest: 'text_encoders/qwen_3_4b.safetensors',
@@ -453,9 +453,9 @@ export const INTELLA_ZIMAGE_TURBO: Intella = {
     },
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/diffusion_models/z_image_turbo_bf16.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'diffusion_models/z_image_turbo_bf16.safetensors' },
     },
   ],
   dest: 'diffusion_models/z_image_turbo_bf16.safetensors',
@@ -482,9 +482,9 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
     },
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/text_encoders/qwen_3_4b.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'text_encoders/qwen_3_4b.safetensors' },
     },
   ],
   dest: 'clip/qwen_3_4b.safetensors',
@@ -859,9 +859,9 @@ export const INTELLA_GEMMA_3_12B: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/text_encoders/gemma_3_12B_it.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'split_files/text_encoders/gemma_3_12B_it.safetensors' },
+      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'text_encoders/gemma_3_12B_it.safetensors' },
     },
   ],
   dest: 'text_encoders/gemma_3_12B_it.safetensors',
@@ -988,9 +988,9 @@ export const INTELLA_UMT5_XXL: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors' },
     },
   ],
   dest: 'clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
@@ -1013,9 +1013,9 @@ export const INTELLA_WAN21_VAE: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/vae/wan_2.1_vae.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/vae/wan_2.1_vae.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'vae/wan_2.1_vae.safetensors' },
     },
   ],
   dest: 'vae/wan_2.1_vae.safetensors',
@@ -1024,6 +1024,261 @@ export const INTELLA_WAN21_VAE: Intella = {
   canonica: true,
   contentRating: 'sfw',
   natum: new Date('2026-07-07'),
+}
+
+
+// =============================================================================
+// MiniMax H3 — video+audio generation (noema-372)
+//
+// LICENSING. The H3 weights are NOT openly licensed and are restrictive in the
+// United States. Mony Group LLC — the company that owns noema — requested and
+// received a licence to operate them in the US (rth, 2026-09-01). That grant is
+// why these canonical seeds carry `commercialUse: 'yes'` while the shared
+// register in `modelLicense.ts` maps the bare `minimax-h3` licence id to 'no'.
+// The register is right and this is not an exception to it: `licenseCommercial()`
+// classifies THIRD-PARTY IMPORTS, which are not covered by our grant and must stay
+// fail-closed. A canonical seed carries an explicit verdict instead — the same seam
+// `Intellarum.setLicense` exists for ("one cleared after taking out a commercial
+// licence"). Do not copy 'yes' onto a user-imported H3 derivative.
+//
+// "va" = video + audio: there is a separate audio VAE and the model emits a voice
+// track, so a single mp4 carries both (CreateVideo muxes before SaveVideo).
+//
+// The pruned int8 "convrot" checkpoints are the whole reason this fits: ~56 GB
+// total against 135 GiB at full precision. The nvfp4 text-encoder variant is
+// deliberately NOT seeded — it is Blackwell-only and useless on Ada.
+// =============================================================================
+
+/** MiniMax H3 first/last-frame-to-video DiT (pruned int8 convrot). Serves t2v + fl2v. */
+export const INTELLA_MINIMAX_H3_FL2VA: Intella = {
+  id: 'intella.minimax-h3-fl2va-int8',
+  nomen: 'MiniMax H3 — first/last-frame to video (pruned int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'minimax-h3',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+  sizeGb: 21,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** MiniMax H3 reference-to-video DiT (pruned int8 convrot). Serves ref2v. */
+export const INTELLA_MINIMAX_H3_REF2VA: Intella = {
+  id: 'intella.minimax-h3-ref2va-int8',
+  nomen: 'MiniMax H3 — reference to video (pruned int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'minimax-h3',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+  sizeGb: 21,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 text encoder — Qwen3-VL-32B, int8 convrot.
+ *
+ * The single largest weight in the stack at 26 GB, and the reason the three flows
+ * share one Fundamentum: co-hosted, it is pulled once instead of three times.
+ */
+export const INTELLA_MINIMAX_H3_TEXT_ENCODER: Intella = {
+  id: 'intella.qwen3vl-32b-minimax-h3-int8',
+  nomen: 'Qwen3-VL-32B for MiniMax H3 (int8 convrot)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 32_000_000_000,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+  sizeGb: 27,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** MiniMax H3 video VAE (fp16) — the image half of the decode. */
+export const INTELLA_MINIMAX_H3_VIDEO_VAE: Intella = {
+  id: 'intella.minimax-h3-video-vae',
+  nomen: 'MiniMax H3 — video VAE (fp16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/vae/minimax_h3_video_vae_fp16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'vae/minimax_h3_video_vae_fp16.safetensors' },
+    },
+  ],
+  dest: 'vae/minimax_h3_video_vae_fp16.safetensors',
+  sizeGb: 5,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 audio VAE (fp32) — the voice half of the decode.
+ *
+ * `VAEDecodeAudio` reads this; `CreateVideo` muxes its output into the mp4. Without
+ * it the flows produce silent video, so it is a base weight, not an optional extra.
+ */
+export const INTELLA_MINIMAX_H3_AUDIO_VAE: Intella = {
+  id: 'intella.minimax-h3-audio-vae',
+  nomen: 'MiniMax H3 — audio VAE (fp32)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/vae/minimax_h3_audio_vae_fp32.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'vae/minimax_h3_audio_vae_fp32.safetensors' },
+    },
+  ],
+  dest: 'vae/minimax_h3_audio_vae_fp32.safetensors',
+  sizeGb: 1,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/**
+ * fl2v 4-step turbo LoRA (768p) — BAKED into the t2v/fl2v graphs.
+ *
+ * This is a flow weight, not a user-selectable LoRA: the graph names it in
+ * `LoraLoaderModelOnly` at strength 1.0 and the 4-step schedule depends on it.
+ * It rides `Essentia.intellae` (the weight manifest) and must never reach the
+ * prompt-driven LoRA rail — hence no `familia`, so `triggerMap` cannot surface it.
+ *
+ * Ships in `Comfy-Org/MiniMax-H3` alongside the base checkpoints (rig's fetch-comfy-weights.sh),
+ * so it carries the same licence and the same US grant — not a separate third-party clearance.
+ */
+export const INTELLA_MINIMAX_H3_FL2V_TURBO: Intella = {
+  id: 'intella.minimax-h3-fl2v-turbo-4step',
+  nomen: 'MiniMax H3 fl2v — 4-step turbo LoRA (768p, bf16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'lora',
+  architectura: 'dit',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors' },
+    },
+  ],
+  dest: 'loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+  sizeGb: 2,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
+}
+
+/** ref2v 4-step turbo LoRA — BAKED into the ref2v graph. See the fl2v turbo note. */
+export const INTELLA_MINIMAX_H3_REF2V_TURBO: Intella = {
+  id: 'intella.minimax-h3-ref2v-turbo-4step',
+  nomen: 'MiniMax H3 ref2v — 4-step turbo LoRA (bf16)',
+  license: 'minimax-h3',
+  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  genus: 'lora',
+  architectura: 'dit',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'miladystation',
+      uri: 'https://models.miladystation2.net/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+      format: 'safetensors',
+    },
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MiniMax-H3', branch: 'main', filename: 'loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors' },
+    },
+  ],
+  dest: 'loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+  sizeGb: 2,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-01'),
 }
 
 export const CANONICAL_INTELLAE: Intella[] = [
@@ -1063,4 +1318,11 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_WAN22_I2V_LOW,
   INTELLA_UMT5_XXL,
   INTELLA_WAN21_VAE,
+  INTELLA_MINIMAX_H3_FL2VA,
+  INTELLA_MINIMAX_H3_REF2VA,
+  INTELLA_MINIMAX_H3_TEXT_ENCODER,
+  INTELLA_MINIMAX_H3_VIDEO_VAE,
+  INTELLA_MINIMAX_H3_AUDIO_VAE,
+  INTELLA_MINIMAX_H3_FL2V_TURBO,
+  INTELLA_MINIMAX_H3_REF2V_TURBO,
 ]

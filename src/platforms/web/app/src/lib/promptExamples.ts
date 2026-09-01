@@ -15,6 +15,11 @@ const BY_ID: Record<string, PromptTemplate> = {
   'qwen3-vl-8b': { example: 'what\'s happening in this image? describe the ___', hint: 'question · what to focus on' },
   'shotvl-7b': { example: 'describe the shot: framing, camera angle, and lighting', hint: 'shot size · framing · lighting' },
   'qwen3-vl-caption': { example: 'describe this image in one dense, comma-separated caption', hint: 'subject · attributes · style · composition' },
+  'minimax-h3-t2v': { example: 'a ___ in ___ says: \"___\"', hint: 'subject · setting · what they say aloud' },
+  'minimax-h3-fl2v': { example: 'the ___ in the image ___, and says: \"___\"', hint: 'subject · motion · what they say' },
+  // ref2v's reference convention is the model's own and is not guessable: the prompt has to
+  // name <Picture 1> / <Audio 1> and tag the voice, or the timbre is not carried.
+  'minimax-h3-ref2v': { example: '<Audio 1> is the voice-timbre reference for <Picture 1>. The person in <Picture 1> ___, and says: \"___\"', hint: 'keep the tag · setting · what they say' },
   'make-upscale': { example: 'a ___ of ___, ___ lighting, ___ style — generated then upscaled 4x', hint: 'subject · scene · light · style' },
 };
 
