@@ -13,7 +13,16 @@
 .lab-bar button.on{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
 
 /* ── the candidate ─────────────────────────────────────────────────────────────────────── */
-.cand{--nav-h:70px;padding-bottom:var(--s10)}
+/* The app sets `fund-bearer` / `exec-*` on <html> to step the accent back as the user moves
+   toward anonymity — a signal about *their* session. On a marketing page there is no session to
+   signal, so the page inherited a desaturated slate accent and rendered its primary CTA looking
+   disabled. noema-signature.css says this in its own words: apply the trust fade to the signals,
+   never to a whole surface, because a faded CTA reads as a dead one. The marketing surface takes
+   the accent back. */
+.cand{--nav-h:70px;padding-bottom:var(--s10);
+  --accent:var(--color-accent);
+  --accent-soft:var(--color-accent-hover);
+  --accent-bg:var(--color-accent-subtle)}
 .cand-nav{display:flex;align-items:center;justify-content:space-between;
   padding:var(--s4) var(--px-section);height:var(--nav-h)}
 .cand-nav .right{display:flex;align-items:center;gap:var(--s3)}
@@ -26,10 +35,18 @@
   display:grid;align-content:center;justify-content:stretch}
 .cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:var(--hero-leading,1.12);
   letter-spacing:-.04em;font-weight:600;margin:0;color:var(--text)}
-/* the shipped ad register — Martian Mono 800, uppercase. Kept switchable because retiring it
-   is a taste call, not a finding. */
-.cand-type-marquee .cand-hero h1{font-family:var(--font-marquee);font-weight:800;
-  text-transform:uppercase;font-size:clamp(26px,4.4vw,52px);letter-spacing:-.01em}
+/* The display face is a single token on the marketing surface, so the page's voice can change
+   without touching the app's. Every heading that carries the argument reads from it. */
+.cand{--font-display:var(--font-sans)}
+.cand-face-grotesk{--font-display:"Space Grotesk",var(--font-sans)}
+.cand-face-plex{--font-display:"IBM Plex Sans",var(--font-sans)}
+.cand-face-martian{--font-display:var(--font-marquee)}
+.cand-hero h1,.cand .beat h2,.cand .cat-brag dt,.cand .modes-head h2,
+.cand .pay h2,.cand .open h2,.cand .mint h2,.cand .how h2,.cand .anon h2,
+.cand .cand-end h2,.cand .cat h2{font-family:var(--font-display)}
+/* the marquee register is uppercase and much wider — it needs its own size to fit the same box */
+.cand-face-martian .cand-hero h1{font-weight:800;text-transform:uppercase;
+  font-size:clamp(22px,3.6vw,44px);letter-spacing:-.01em}
 .cand-hero h1 .dim{color:var(--muted)}
 .cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
 .cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
@@ -63,11 +80,13 @@
 .beat p{color:var(--muted);font-size:clamp(15px,1.6vw,19px);line-height:1.55;max-width:520px;
   margin:0 auto}
 .beat .beat-cta{display:block;margin-top:var(--s8)}
-.cand-type-marquee .beat h2{font-family:var(--font-marquee);font-weight:800;text-transform:uppercase;
-  font-size:clamp(22px,3.2vw,38px);letter-spacing:-.01em}
+.cand-face-martian .beat h2{font-weight:800;text-transform:uppercase;
+  font-size:clamp(19px,2.6vw,32px);letter-spacing:-.01em}
 
 /* the closing door — a CTA in normal flow, not a held argument */
 .cand-end{padding:var(--py-section) 0}
+.cand-end .cand-end-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;
+  max-width:38ch;margin:0 auto var(--s7)}
 
 /* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
 .cand-flow{padding:var(--py-section) 0}

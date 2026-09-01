@@ -11,6 +11,13 @@ import { LandingModes } from './LandingModes';
 import { DECK_FORMATS, PLATES, isPlaceholder, platesIn, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
 
+/** Display faces the marketing surface can wear, from what is already self-hosted. The point of
+ *  the control is not to pick one of these — Geist is the default typeface of this whole product
+ *  category and none of these is bespoke — but to prove the seam, so dropping in a licensed face
+ *  later is one `@font-face` and one token. */
+const DISPLAY_FACES = ['geist', 'grotesk', 'plex', 'martian'] as const;
+type DisplayFace = (typeof DISPLAY_FACES)[number];
+
 const STAGGERS = [0, 18, 36];
 const LEADINGS = [1.02, 1.12, 1.22];
 
@@ -45,6 +52,7 @@ const STEPS = [
   { n: '02', t: 'Caption it', d: 'The set is described so a model can be taught from it.' },
   { n: '03', t: 'Train', d: 'A LoRA on a base of your choosing. It lands on your shelf.' },
   { n: '04', t: 'Make with it', d: 'Your trigger works in every workflow the catalogue carries.' },
+  { n: '05', t: 'Publish it', d: 'Put the model, the workflow or the collection out — and start earning on it.' },
 ];
 
 /** The royalty split, read from the hooks that pay it: `spellRoyalty.ts` takes 10% of a run's
@@ -100,7 +108,7 @@ const FOOTER = [
  * specifying.
  */
 export function PlateLab() {
-  const [font, setFont] = useState<'geist' | 'marquee'>('geist');
+  const [display, setDisplay] = useState<DisplayFace>('geist');
   const [leading, setLeading] = useState(1.12);
   const [crop, setCrop] = useState<PlateFormat>('21:9');
   const [stagger, setStagger] = useState(18);
@@ -129,9 +137,10 @@ export function PlateLab() {
         <span className="lab-tag mono">design lab · not public</span>
         <span className="lab-meta mono">{filled}/{PLATES.length} plates · copy is draft</span>
         <span className="lab-ctl">
-          <span className="mono">type</span>
-          <button className={font === 'geist' ? 'on' : ''} onClick={() => setFont('geist')}>geist</button>
-          <button className={font === 'marquee' ? 'on' : ''} onClick={() => setFont('marquee')}>marquee</button>
+          <span className="mono">display</span>
+          {DISPLAY_FACES.map((f) => (
+            <button key={f} className={f === display ? 'on' : ''} onClick={() => setDisplay(f)}>{f}</button>
+          ))}
         </span>
         <span className="lab-ctl">
           <span className="mono">leading</span>
@@ -158,7 +167,7 @@ export function PlateLab() {
         </span>
       </div>
 
-      <div className={`cand cand-type-${font}`} style={{ '--hero-leading': String(leading) } as CSSProperties}>
+      <div className={`cand cand-face-${display}`} style={{ '--hero-leading': String(leading) } as CSSProperties}>
         <nav className="cand-nav">
           <span className="brand"><Wordmark height={22} /></span>
           <span className="cand-navlinks">
@@ -204,8 +213,9 @@ export function PlateLab() {
           <div className="pay-in">
             <h2>Publish it, and it pays you back.</h2>
             <p className="pay-sub">
-              Paid in credits — the same ones everything here runs on. Not cash, deliberately:
-              a model that stays useful keeps paying for the work you make next.
+              Every run pays a cut back to whoever made what it used. In credits — the same ones
+              the platform runs on — so a model that stays useful keeps paying for whatever you
+              make next.
             </p>
             <dl className="pay-split">
               {SPLIT.map((row) => (
@@ -221,8 +231,8 @@ export function PlateLab() {
 
         <section className="how">
           <div className="how-in">
-            <h2>How a visual identity gets made.</h2>
-            <p className="how-sub">The sequence, in the order it is actually driven.</p>
+            <h2>From a folder of references to something you can sell.</h2>
+            <p className="how-sub">The whole path, in the order you actually walk it.</p>
             <ol className="how-steps">
               {STEPS.map((s) => (
                 <li key={s.n}>
@@ -240,9 +250,9 @@ export function PlateLab() {
             <div className="mint-copy">
               <h2>Finished work, ready for market.</h2>
               <p>
-                A collection leaves here as ERC-721 metadata — every approved piece, its traits,
-                and a tokenURI your own contract can point at. You deploy the contract; noema
-                does the part before it.
+                A collection leaves as ERC-721 metadata — every approved piece, its traits, and a
+                tokenURI your own contract can point at. You deploy the contract; noema does
+                everything before it.
               </p>
               <ul className="mint-list">
                 {EXPORT.map((e) => (
@@ -268,7 +278,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
         <section className="anon">
           <div className="anon-in">
             <span className="anon-tag mono"><Ic name="eye-off" /> anonymous by construction</span>
-            <h2>Fund it and make it without leaving a name.</h2>
+            <h2>Nobody has to know it was you.</h2>
             <p>
               Deposit, join the anonymity set, and spend with a zero-knowledge proof — we never
               learn your wallet. Generation runs on external providers today; hardware-sealed
@@ -295,7 +305,10 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
         {/* a closing CTA is not an argument that needs holding — it is a door. */}
         <section className="cand-end">
           <div className="beat">
-            <h2>Make something worth keeping.</h2>
+            <h2>Come and build the catalogue.</h2>
+            <p className="cand-end-sub">
+              Everything on this page was put here by someone. Add the next thing.
+            </p>
             <span className="beat-cta">
               <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
             </span>

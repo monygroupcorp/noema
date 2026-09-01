@@ -33,15 +33,24 @@ export const WORK_MODES: WorkMode[] = [
     name: 'Concierge',
     line: 'Say what you want. It picks the tools and runs them.',
     route: '/chat',
-    shot: null,
-    needsSession: true,
+    shot: {
+      src: '/landing/room-concierge.webp',
+      alt: 'The concierge answering a request: a logline written back, a key frame generated from it, and provenance chips naming where each step ran.',
+      width: 1600,
+      height: 900,
+    },
   },
   {
     id: 'catalogue',
     name: 'Catalogue',
     line: 'Every model the platform carries, one row each.',
     route: '/catalog',
-    shot: null,
+    shot: {
+      src: '/landing/room-catalogue.webp',
+      alt: 'The catalogue listing every model the platform carries, filtered by modality and by what each one does.',
+      width: 1600,
+      height: 900,
+    },
   },
   {
     id: 'canvas',
@@ -65,6 +74,7 @@ export const WORK_MODES: WorkMode[] = [
     line: 'Build the set, caption it, train the identity.',
     route: '/datasets',
     shot: null,
+    needsSession: true,
   },
   {
     id: 'collections',
@@ -72,6 +82,7 @@ export const WORK_MODES: WorkMode[] = [
     line: 'Assemble a body of work and take it to market.',
     route: '/collections',
     shot: null,
+    needsSession: true,
   },
 ];
 
