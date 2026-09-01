@@ -56,6 +56,37 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
 
+/** Wait until the page stops changing, or give up.
+ *
+ *  A fixed pause is not enough for a data-backed screen and is wasted on a static one, and the
+ *  difference matters more than it sounds: two runs that each caught a different moment of the
+ *  same fetch produce a diff that measures loading, not the change under review. The first
+ *  comparison this harness ever produced was doing exactly that — a page counted as 26% changed
+ *  because one run photographed an empty grid and the other a full one.
+ *
+ *  So the walk watches the DOM instead and shoots when it has been still for QUIET_MS. The cap
+ *  keeps a screen that never settles — an animation, a poll — from stalling the walk; it just
+ *  captures whatever is there at the cap, which is the honest outcome for a page that is never
+ *  the same twice. */
+const QUIET_MS = 700;
+const SETTLE_CAP_MS = 12_000;
+
+/** Source, not a closure: the loader that runs this file rewrites function values with a
+ *  `__name` helper that does not exist in a browser, so a closure handed to `evaluate` arrives
+ *  referencing something undefined. The constants are interpolated in for the same reason. */
+const SETTLE_JS = `new Promise(function (resolve) {
+  let timer;
+  const done = function () { observer.disconnect(); clearTimeout(hard); resolve(); };
+  const observer = new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(done, ${QUIET_MS}); });
+  const hard = setTimeout(done, ${SETTLE_CAP_MS});
+  timer = setTimeout(done, ${QUIET_MS});
+  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+})`;
+
+async function settle(page: import('playwright').Page): Promise<void> {
+  await page.evaluate(SETTLE_JS).catch(() => {});
+}
+
 function slug(path: string): string {
   return path === '/' ? 'root' : path.replace(/^\//, '').replace(/[/:]/g, '-');
 }
@@ -133,10 +164,10 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
     try {
       // `networkidle` never fires on a screen holding a live connection — the heavy lazy routes
       // (Canvas, Space, Vault) time out waiting for a quiet network that a streaming app does not
-      // have. Wait for the document, then give the lazy chunk and its first paint a fixed settle.
+      // have. Wait for the document, then for the page to stop changing.
       await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForLoadState('load').catch(() => {});
-      await page.waitForTimeout(1_200);
+      await settle(page);
 
       for (const vp of VIEWPORTS) {
         await page.setViewportSize({ width: vp.width, height: vp.height });
