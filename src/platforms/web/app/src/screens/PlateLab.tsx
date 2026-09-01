@@ -196,6 +196,28 @@ export function PlateLab() {
           <div className="cand-flow"><BeatRun beats={BEATS} /></div>
         )}
 
+        <LandingModes stagger={stagger} progress={mode} />
+
+        <section className="pay">
+          <div className="pay-in">
+            <h2>Publish it, and it pays you back.</h2>
+            <p className="pay-sub">
+              Paid in credits — the same ones everything here runs on. Not cash, deliberately:
+              a model that stays useful keeps paying for the work you make next.
+            </p>
+            <dl className="pay-split">
+              {SPLIT.map((row) => (
+                <div key={row.pct}>
+                  <dt>{row.pct}</dt>
+                  <dd><span className="who">{row.who}</span><span className="sub">{row.sub}</span></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+
+        <LandingOpen />
+
         <section className="how">
           <div className="how-in">
             <h2>How a visual identity gets made.</h2>
@@ -211,10 +233,6 @@ export function PlateLab() {
             </ol>
           </div>
         </section>
-
-        <LandingModes stagger={stagger} progress={mode} />
-
-        <LandingOpen />
 
         <section className="mint">
           <div className="mint-in">
@@ -245,23 +263,6 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
           </div>
         </section>
 
-        <section className="pay">
-          <div className="pay-in">
-            <h2>Publish it, and it pays you back.</h2>
-            <p className="pay-sub">
-              Paid in credits — the same ones everything here runs on. Not cash, deliberately:
-              a model that stays useful keeps paying for the work you make next.
-            </p>
-            <dl className="pay-split">
-              {SPLIT.map((row) => (
-                <div key={row.pct}>
-                  <dt>{row.pct}</dt>
-                  <dd><span className="who">{row.who}</span><span className="sub">{row.sub}</span></dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        </section>
 
         <section className="anon">
           <div className="anon-in">

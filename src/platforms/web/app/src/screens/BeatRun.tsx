@@ -10,8 +10,13 @@ export interface Beat {
   align: 'left' | 'right';
 }
 
-/** How much of a beat's own window is spent arriving and leaving. */
-const EDGE = 0.16;
+/** How much of a beat's own window is spent arriving and leaving. Generous on purpose: a short
+ *  cross between two statements that sit on opposite sides of the page reads as a jump-cut. */
+const EDGE = 0.3;
+
+/** Ease the cross. A linear opacity ramp reads as a hard dissolve; this settles. */
+const ease = (t: number) => t * t * (3 - 2 * t);
+const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
 
 /**
  * A run of statements held in one lock, advancing with the scroll.
@@ -36,13 +41,17 @@ export function BeatRun({ beats }: { beats: Beat[] }) {
         // fades down, so they cross. Queued rather than crossed, there is a moment where the
         // outgoing beat has gone and the incoming one has barely started, and the held screen
         // dims to almost nothing.
-        const enter = i === 0 ? 1 : Math.min(1, Math.max(0, (d + EDGE) / EDGE));
+        const enter = i === 0 ? 1 : ease(clamp01((d + EDGE) / EDGE));
         // leaving: every beat but the last steps back as the next one takes over.
-        const leave = i === beats.length - 1 ? 0 : Math.min(1, Math.max(0, (d - (1 - EDGE)) / EDGE));
+        const leave = i === beats.length - 1 ? 0 : ease(clamp01((d - (1 - EDGE)) / EDGE));
         const on = Math.min(enter, 1 - leave);
+        // each statement arrives from, and leaves toward, the side it sits on, so the swing
+        // across the page is a movement rather than two things blinking in different places.
+        const dir = b.align === 'right' ? 1 : -1;
+        const x = (1 - enter) * 30 * dir - leave * 30 * dir;
         const style = {
           opacity: on,
-          transform: `translateY(${((1 - enter) * 14 - leave * 14).toFixed(2)}px)`,
+          transform: `translate3d(${x.toFixed(1)}px, ${((1 - enter) * 8 - leave * 8).toFixed(1)}px, 0)`,
           pointerEvents: on > 0.5 ? 'auto' : 'none',
         } as CSSProperties;
         return (

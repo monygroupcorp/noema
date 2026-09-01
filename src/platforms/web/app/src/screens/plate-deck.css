@@ -7,6 +7,8 @@
   --deck-n:1;
   --deck-trail:0;   /* extra travel after the last card is uncovered, in cards */
   --deck-aspect:2;
+  --deck-aspect-narrow:var(--deck-aspect);
+  --deck-a:var(--deck-aspect);      /* the crop in force at this width */
   --deck-stagger:18px;                                        /* how far the pile is squared off by */
   --deck-spread:calc((var(--deck-n) - 1) * var(--deck-stagger));
   position:relative;
@@ -21,7 +23,7 @@
 .deck-track{
   position:relative;
   height:0;
-  padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-aspect) + var(--deck-spread));
+  padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread));
 }
 
 .deck-card{
@@ -38,7 +40,7 @@
   left:calc(var(--i) * var(--deck-stagger));
   top:calc(var(--i) * var(--deck-stagger));
   width:calc(100% - var(--deck-spread));
-  aspect-ratio:var(--deck-aspect);
+  aspect-ratio:var(--deck-a);
   z-index:calc(100 - var(--i));
   /* the departing card leaves to the left, far enough to clear its own offset and the frame */
   transform:translate3d(calc(-1 * var(--dp) * (100% + var(--i) * var(--deck-stagger) + 6vw)),0,0);
@@ -60,6 +62,7 @@
   letter-spacing:-.04em;pointer-events:none}
 
 @media(max-width:640px){
-  .deck{--deck-stagger:8px}
+  /* a banner crop is a letterbox slot on a phone — the run takes its narrow composition here */
+  .deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow)}
   .deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
 }

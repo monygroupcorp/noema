@@ -21,6 +21,7 @@ export function PlateDeck({ slots, label, format, ...rest }: PlateDeckProps) {
       {...rest}
       label={label}
       aspect={PLATE_ASPECT[format ?? slots[0].format]}
+      aspectNarrow={2 / 3}
       items={slots.map((slot, i) => (
         <>
           <LandingPlate slot={slot} fill priority={i === 0} />

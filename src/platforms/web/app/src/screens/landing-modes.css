@@ -1,15 +1,24 @@
 /* the rooms — what working here actually looks like. Real captures or a marked gap; never a
    mockup, because a landing page that invents a product screen has invented the product. */
-.modes{padding:var(--py-section) 0}
+/* no bottom padding: the locked run already ends on a whole screen of its own, and a section
+   pad on top of that is the awkward gap before whatever comes next. */
+.modes{padding:var(--py-section) 0 0}
 .modes .modes-in{max-width:1180px;margin:0 auto;padding:0 var(--px-section)}
 .modes h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
   margin:0 0 var(--s4);max-width:16ch}
+.modes .modes-in{padding-bottom:var(--s8)}
 .modes .modes-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
 
 /* the rooms ride the same deck the plates do — one card at a time, the top sliding off to
    uncover the next. The screen fills the card; its name sits on a plate over the bottom, the
    way a caption sits on a photograph rather than under it. */
-.deck-modes{margin-top:var(--s10)}
+/* the heading travels with the run rather than scrolling away above it */
+/* the rooms run is inset rather than full-bleed: at full width a 16:9 card is 857px tall and
+   there is no room left in the pin for the heading that has to travel with it. */
+.modes .modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);
+  max-width:1240px;margin:0 auto;width:100%}
+.modes .modes-run h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px)}
+.deck-modes{margin-top:0}
 .deck-modes .deck-card{background:var(--panel)}
 .modes .mode-shot{position:absolute;inset:0;width:100%;height:100%;
   object-fit:cover;object-position:top left}

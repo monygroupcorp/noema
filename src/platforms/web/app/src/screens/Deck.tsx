@@ -9,6 +9,9 @@ interface DeckProps {
   label: string;
   /** Card crop, as width ÷ height. */
   aspect: number;
+  /** Card crop on a narrow screen. A banner crop that commands a desktop is a letterbox slot on
+   *  a phone, so the run is composed twice. Defaults to `aspect`. */
+  aspectNarrow?: number;
   /** Extra travel after the last card is uncovered, measured in cards, during which nothing
    *  moves. A run whose final card has something of its own to do needs a stretch of scroll
    *  where it is alone — without it, the last card performs while the one above it is still
@@ -48,6 +51,7 @@ export function Deck({
   items,
   label,
   aspect,
+  aspectNarrow,
   trail = 0,
   stagger = 18,
   progress = 'lock',
@@ -98,13 +102,14 @@ export function Deck({
       window.removeEventListener('resize', onScroll);
       reduce.removeEventListener('change', apply);
     };
-  }, [items.length, aspect, trail, stagger, progress]);
+  }, [items.length, aspect, aspectNarrow, trail, stagger, progress]);
 
   if (!items.length) return null;
 
   const style = {
     '--deck-n': String(items.length),
     '--deck-aspect': String(aspect),
+    '--deck-aspect-narrow': String(aspectNarrow ?? aspect),
     '--deck-trail': String(trail),
     '--deck-stagger': `${stagger}px`,
   } as CSSProperties;

@@ -150,21 +150,24 @@ export function LandingModes({
     <RunDemo key="run" count={items.length} trail={MODES_TRAIL} locked={progress === 'lock'} />
   );
   const deck = (
-    <Deck
+    <div className="modes-run">
+      <h2>Every room of the studio.</h2>
+      <Deck
       trail={MODES_TRAIL}
       className="deck-modes"
       label="The rooms of the studio, one at a time"
       aspect={16 / 9}
+      aspectNarrow={3 / 4}
       stagger={stagger}
       progress={progress}
       items={items}
-    />
+      />
+    </div>
   );
 
   return (
     <section className="modes">
       <div className="modes-in">
-        <h2>Every room of the studio.</h2>
         <p className="modes-sub">
           Each one is a whole way of working, not a tab. You can live in one of them or move
           between all of them.
@@ -177,8 +180,8 @@ export function LandingModes({
 
       </div>
 
-      {/* the heading stays in normal flow; only the run locks. A pinned viewport holding a
-          heading and a card is holding one thing too many. */}
+      {/* The heading rides with the cards. Left behind in normal flow it scrolled away before
+          the first card arrived, so the run played with nothing on screen saying what it was. */}
       {/* a longer hold than the plate runs get: the last card is a run that has to execute
           across its own slice of the travel, and a slice of a short hold is not enough scroll
           to execute across. */}

@@ -43,8 +43,7 @@ export function LandingCatalog() {
           actually earned, and whispering them at body scale was the page's own fault. */}
       <dl className="cat-brag">
         <div><dt>{summary.loras}</dt><dd>identities trained here</dd></div>
-        <div><dt>{summary.workflows}</dt><dd>workflows, doing {summary.verbs.length} different things</dd></div>
-        <div><dt>{summary.models}</dt><dd>on the shelf, across {summary.modalities.length} modalities</dd></div>
+        <div><dt>{summary.workflows}</dt><dd>workflows to run them through</dd></div>
       </dl>
 
       <div className="cat-in">
@@ -70,7 +69,7 @@ export function LandingCatalog() {
           </div>
 
           <div className="cat-col">
-            <h3 className="mono">on the shelf</h3>
+            <h3 className="mono">models installed</h3>
             <ul className="cat-bars">
               {summary.kinds.map((k) => (
                 <li key={k.key}>
