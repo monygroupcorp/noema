@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.24.0](https://github.com/monygroupcorp/noema/compare/v5.23.0...v5.24.0) (2026-09-01)
+
+
+### Features
+
+* **design:** give headings a voice, and wire up the role that carries it ([7a6181e](https://github.com/monygroupcorp/noema/commit/7a6181ef33c8163b0b5de379a1a8b92dabdbf118))
+* **design:** give headings a voice, and wire up the role that carries it ([58528d4](https://github.com/monygroupcorp/noema/commit/58528d44553c8e7664b5efafc677580efa31aeb7))
+* **landing:** the deck — the page's image mechanism, and the slots behind it ([a2d9c2c](https://github.com/monygroupcorp/noema/commit/a2d9c2c316746febeb799e8b37acf086147c6687))
+* **landing:** the new page becomes the page ([a6f3ad7](https://github.com/monygroupcorp/noema/commit/a6f3ad7b92b3809af3765510c066456be439048b))
+* **landing:** the new page becomes the page ([e6ebae9](https://github.com/monygroupcorp/noema/commit/e6ebae9cd65a95f4ba8f388032717f402dead4a5))
+* **walk:** name the runs, and make two of them comparable ([9f5131a](https://github.com/monygroupcorp/noema/commit/9f5131ac1439c8975ea5f850ca202a6bb4fd7d0b))
+
+
+### Bug Fixes
+
+* **crystal:** give the MiniMax H3 substrate a pod-provisionable base image ([11e8c91](https://github.com/monygroupcorp/noema/commit/11e8c912fb842d3e009b8842f7ee02a1403e7009))
+
 ## [5.23.0](https://github.com/monygroupcorp/noema/compare/v5.22.0...v5.23.0) (2026-09-01)
 
 
