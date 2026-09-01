@@ -77,9 +77,7 @@ function datasetStore(records: Dataset[]): RecordingDatasets {
       lookups.push(id)
       const d = records.find(r => r.id === id)
       if (!d) return null
-      const access = (d as Dataset & { access?: unknown }).access
-      const isPublic = access === 'public'
-        || (typeof access === 'object' && access !== null && (access as { kind?: string }).kind === 'public')
+      const isPublic = d.access?.kind === 'public'
       const shared = d.sodalitasId !== undefined && (sodalitasIds ?? []).includes(d.sodalitasId)
       return d.owner === owner || shared || isPublic ? d : null
     },
@@ -236,7 +234,7 @@ test('class: internal underscore-prefixed keys ride through a checked aditus unt
 })
 
 test('class: a record whose access kind is public may be named by anyone', async () => {
-  const open = { ...dataset({ id: 'ds-open', owner: OTHER_OWNER }), access: { kind: 'public' } } as Dataset
+  const open: Dataset = { ...dataset({ id: 'ds-open', owner: OTHER_OWNER }), access: { kind: 'public' } }
   const h = harness([TEST_MODUS], { datasets: datasetStore([open]) })
   await assertReachedDispatch(h, TEST_MODUS.id, { board: open.id })
 })
