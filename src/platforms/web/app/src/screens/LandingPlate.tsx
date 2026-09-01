@@ -26,10 +26,10 @@ interface PlateProps {
 export function LandingPlate({ slot, className, priority = false, resolve = false, fill = false }: PlateProps) {
   const style = { '--plate-aspect': String(PLATE_ASPECT[slot.format]) } as CSSProperties;
   const cls = [
-    'plate',
-    fill ? 'plate-fill' : '',
-    resolve ? 'plate-resolve' : '',
-    slot.source ? '' : 'plate-empty',
+    'lp-plate',
+    fill ? 'lp-plate-fill' : '',
+    resolve ? 'lp-plate-resolve' : '',
+    slot.source ? '' : 'lp-plate-empty',
     className ?? '',
   ]
     .filter(Boolean)
@@ -38,7 +38,7 @@ export function LandingPlate({ slot, className, priority = false, resolve = fals
   if (!slot.source) {
     return (
       <div className={cls} style={style} data-format={slot.format} data-subject={slot.subject}>
-        <span className="plate-label mono">{plateLabel(slot)}</span>
+        <span className="lp-plate-label mono">{plateLabel(slot)}</span>
       </div>
     );
   }
@@ -48,7 +48,7 @@ export function LandingPlate({ slot, className, priority = false, resolve = fals
     <picture className={cls} style={style} data-format={slot.format} data-subject={slot.subject}>
       {narrow ? <source media="(max-width: 640px)" srcSet={narrow} /> : null}
       <img
-        className="plate-img"
+        className="lp-plate-img"
         src={src}
         alt={alt}
         width={width}

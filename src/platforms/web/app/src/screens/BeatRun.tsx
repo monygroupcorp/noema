@@ -34,7 +34,7 @@ export function BeatRun({ beats }: { beats: Beat[] }) {
   const f = p * beats.length;
 
   return (
-    <div className="beats" ref={ref}>
+    <div className="lp-beats" ref={ref}>
       {beats.map((b, i) => {
         const d = f - i;
         // Arriving: every beat but the first fades up over the same stretch the one before it
@@ -55,8 +55,8 @@ export function BeatRun({ beats }: { beats: Beat[] }) {
           pointerEvents: on > 0.5 ? 'auto' : 'none',
         } as CSSProperties;
         return (
-          <div key={b.id} className={`beat beat-${b.align}`} style={style} aria-hidden={on < 0.5}>
-            <span className="beat-n mono">{b.n}</span>
+          <div key={b.id} className={`lp-beat lp-beat-${b.align}`} style={style} aria-hidden={on < 0.5}>
+            <span className="lp-beat-n mono">{b.n}</span>
             <h2>{b.title}</h2>
             <p>{b.text}</p>
           </div>

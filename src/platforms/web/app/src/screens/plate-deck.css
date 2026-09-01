@@ -3,7 +3,7 @@
    pile. The top one covers the rest; as the run advances it slides off to the left and
    uncovers the one beneath, which was there the whole time. Nothing arrives from off-screen.
    The whole thing is transforms on absolutely positioned cards — no layout runs on scroll. */
-.deck{
+.lp-deck{
   --deck-n:1;
   --deck-trail:0;   /* extra travel after the last card is uncovered, in cards */
   --deck-aspect:2;
@@ -17,16 +17,16 @@
 }
 /* self-driven: the component writes its own progress onto the banner. In lock mode nothing is
    declared here, so `--p` is inherited from the enclosing stage. */
-.deck-pass{--p:0}
+.lp-deck-pass{--p:0}
 
 /* height is the card's own crop plus the pile's offset, so the stack fills the banner exactly */
-.deck-track{
+.lp-deck-track{
   position:relative;
   height:0;
   padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread));
 }
 
-.deck-card{
+.lp-deck-card{
   --i:0;                                       /* position in the run, set by the component */
   /* how far the run has advanced, in cards. The trail lengthens the travel without adding a
      card, so every departure still finishes at n-1 and the last card is left alone after it. */
@@ -50,19 +50,19 @@
   overflow:hidden;
   box-shadow:-1px 0 0 var(--hair), -30px 0 50px -28px var(--bg);
 }
-.deck-card > .plate{border-radius:0}
+.lp-deck-card > .lp-plate{border-radius:0}
 
 /* An unfilled run is all one flat value, which makes the pile invisible and the motion
    unreadable — so while the cards are empty they alternate ground and carry their position in
    the run. Both go away the moment real plates land. */
-.deck-card:nth-child(even) .plate-empty{background:var(--raised)}
-.deck-card .plate-empty{border-style:solid;border-color:var(--hair)}
-.deck-i{position:absolute;left:var(--s7);bottom:var(--s6);z-index:1;
+.lp-deck-card:nth-child(even) .lp-plate-empty{background:var(--raised)}
+.lp-deck-card .lp-plate-empty{border-style:solid;border-color:var(--hair)}
+.lp-deck-i{position:absolute;left:var(--s7);bottom:var(--s6);z-index:1;
   color:var(--hair-soft);font-size:clamp(64px,9vw,140px);line-height:.8;
   letter-spacing:-.04em;pointer-events:none}
 
 @media(max-width:640px){
   /* a banner crop is a letterbox slot on a phone — the run takes its narrow composition here */
-  .deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow)}
-  .deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
+  .lp-deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow)}
+  .lp-deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
 }

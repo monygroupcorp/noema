@@ -1,36 +1,36 @@
 /* open source — the argument neither benchmark can make, and the page's second live block */
-.open{padding:var(--py-section) 0}
-.open .open-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
-.open h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+.lp-open{padding:var(--py-section) 0}
+.lp-open .lp-open-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-open h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
   margin:0 0 var(--s5);max-width:14ch}
-.open .open-in > p{color:var(--muted);font-size:clamp(14px,1.5vw,18px);line-height:1.6;max-width:52ch;margin:0}
-.open .open-in > p code{font-family:var(--font-mono);font-size:var(--fs-s);color:var(--text)}
+.lp-open .lp-open-in > p{color:var(--muted);font-size:clamp(14px,1.5vw,18px);line-height:1.6;max-width:52ch;margin:0}
+.lp-open .lp-open-in > p code{font-family:var(--font-mono);font-size:var(--fs-s);color:var(--text)}
 
-.open .open-facts{display:flex;flex-wrap:wrap;gap:var(--s9);margin-top:var(--s9)}
-.open .open-facts > div{display:grid;gap:var(--s2)}
-.open .open-facts .n{font-size:clamp(28px,3.6vw,48px);line-height:1;letter-spacing:-.04em;
+.lp-open .lp-open-facts{display:flex;flex-wrap:wrap;gap:var(--s9);margin-top:var(--s9)}
+.lp-open .lp-open-facts > div{display:grid;gap:var(--s2)}
+.lp-open .lp-open-facts .n{font-size:clamp(28px,3.6vw,48px);line-height:1;letter-spacing:-.04em;
   font-weight:600;color:var(--text)}
-.open .open-facts .l{color:var(--faint);font-family:var(--font-mono);font-size:var(--fs-xs);
+.lp-open .lp-open-facts .l{color:var(--faint);font-family:var(--font-mono);font-size:var(--fs-xs);
   letter-spacing:.06em;max-width:22ch;line-height:1.5}
-.open .open-links{display:flex;gap:var(--s3);flex-wrap:wrap;margin-top:var(--s8)}
+.lp-open .lp-open-links{display:flex;gap:var(--s3);flex-wrap:wrap;margin-top:var(--s8)}
 
 /* the ticker. Slow, hairlined, low-contrast — it is a readout of what is installed, not a
    decoration, and it is the real catalogue or it does not run. */
-.open .open-ticker{margin-top:var(--s10);border-top:1px solid var(--hair);
+.lp-open .lp-open-ticker{margin-top:var(--s10);border-top:1px solid var(--hair);
   border-bottom:1px solid var(--hair);overflow:hidden;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
   mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
-.open .open-rail{display:flex;width:max-content}
-.open .open-rail ul{list-style:none;margin:0;padding:0;display:flex;align-items:center}
-.open .open-rail li{color:var(--muted);font-size:var(--fs-base);white-space:nowrap;
+.lp-open .lp-open-rail{display:flex;width:max-content}
+.lp-open .lp-open-rail ul{list-style:none;margin:0;padding:0;display:flex;align-items:center}
+.lp-open .lp-open-rail li{color:var(--muted);font-size:var(--fs-base);white-space:nowrap;
   padding:var(--s5) 0;margin-right:var(--s8);display:flex;align-items:center}
-.open .open-rail li::after{content:"";width:3px;height:3px;border-radius:50%;
+.lp-open .lp-open-rail li::after{content:"";width:3px;height:3px;border-radius:50%;
   background:var(--accent);opacity:.5;margin-left:var(--s8)}
-.open .open-ticker-alt{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);
+.lp-open .lp-open-ticker-alt{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);
   white-space:nowrap}
 
 @media (prefers-reduced-motion: no-preference){
-  .open .open-rail{animation:open-scroll 140s linear infinite}
-  .open .open-ticker:hover .open-rail{animation-play-state:paused}
+  .lp-open .lp-open-rail{animation:open-scroll 140s linear infinite}
+  .lp-open .lp-open-ticker:hover .lp-open-rail{animation-play-state:paused}
 }
 @keyframes open-scroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}

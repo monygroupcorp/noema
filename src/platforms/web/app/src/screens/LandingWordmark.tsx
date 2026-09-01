@@ -16,9 +16,9 @@ import './landing-wordmark.css';
 export function LandingWordmark({ face = 'serif', height = 26 }: { face?: 'mono' | 'serif'; height?: number }) {
   if (face === 'mono') return <Wordmark height={height - 4} />;
   return (
-    <span className="lw" style={{ '--lw-h': `${height}px` } as React.CSSProperties}>
+    <span className="lp-lw" style={{ '--lw-h': `${height}px` } as React.CSSProperties}>
       <Wordmark variant="symbol" height={height} aria-hidden="true" />
-      <span className="lw-name">noema</span>
+      <span className="lp-lw-name">noema</span>
     </span>
   );
 }

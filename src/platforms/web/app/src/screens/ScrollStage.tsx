@@ -136,10 +136,10 @@ export function ScrollStage({ hold, children, className }: ScrollStageProps) {
   return (
     <section
       ref={ref}
-      className={['stage', className ?? ''].filter(Boolean).join(' ')}
+      className={['lp-stage', className ?? ''].filter(Boolean).join(' ')}
       style={{ '--hold': String(hold) } as CSSProperties}
     >
-      <div className="stage-pin">{children}</div>
+      <div className="lp-stage-pin">{children}</div>
     </section>
   );
 }
