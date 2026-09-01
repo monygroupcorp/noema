@@ -53,6 +53,12 @@
 .exec-tee,
 .exec-local{  --accent:#6a7079; --accent-soft:#9298a0; --accent-bg:rgba(106,112,121,.12); }  /* private execution — near-neutral grey, the signal fades */
 
+/* Headings take the display role. The design system has carried a --font-display token and a
+   .ds-h1..h4 ramp all along, and nothing in this app ever used them: headings are bare elements
+   styled here with size and weight and no family at all, so they have been inheriting the body
+   grotesque. One rule wires the role up; the token decides what it is. */
+h1,h2,h3,h4{font-family:var(--font-display);font-optical-sizing:auto}
+
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-sans);
