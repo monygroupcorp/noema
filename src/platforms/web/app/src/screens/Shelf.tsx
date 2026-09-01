@@ -114,8 +114,11 @@ export function Shelf() {
   // state since several cards can be mid-publish at once. A publish settles asynchronously
   // (PublicationWorker; HF weight upload can take a while), so 'pending' is a real, honest
   // terminal state here, not a placeholder for 'done' — we poll briefly and stop rather than
-  // claim success before the edition actually lands.
-  const [pubState, setPubState] = useState<Record<string, 'busy' | 'pending' | 'err'>>({});
+  // claim success before the edition actually lands. `msg` carries a failure's own reason
+  // (e.g. the license gate) inline on the card — deliberately NOT `err`, which is the shelf's
+  // load-failure banner and would otherwise mislabel a publish rejection as "couldn't load
+  // your models".
+  const [pubState, setPubState] = useState<Record<string, { s: 'busy' | 'pending' | 'err'; msg?: string }>>({});
 
   // The global catalog surface (GET /v1/models) — collapsed until asked for.
   const [catOpen, setCatOpen] = useState(false);
@@ -160,7 +163,7 @@ export function Shelf() {
   // 'unlisted' (not 'private') is what actually flips the model to listed: the access
   // reconciler (CrystalApi._reconcile) only sets access:'public' when visibility !== 'private'.
   async function publishModel(id: string) {
-    setPubState((s) => ({ ...s, [id]: 'busy' }));
+    setPubState((s) => ({ ...s, [id]: { s: 'busy' } }));
     try {
       const { edition } = await api.publish({
         artifact: { kind: 'intella', id },
@@ -173,7 +176,7 @@ export function Shelf() {
         setPubState((s) => { const n = { ...s }; delete n[id]; return n; });
         return;
       }
-      setPubState((s) => ({ ...s, [id]: 'pending' }));
+      setPubState((s) => ({ ...s, [id]: { s: 'pending' } }));
       // Brief bounded poll — the worker settles this async (HF weight upload can take a
       // while). Stop and leave it as an honest 'pending' rather than hang indefinitely;
       // the badge catches up on the model's next natural load either way.
@@ -186,13 +189,12 @@ export function Shelf() {
           return;
         }
         if (polled.status === 'failed' || polled.status === 'rejected') {
-          setPubState((s) => ({ ...s, [id]: 'err' }));
+          setPubState((s) => ({ ...s, [id]: { s: 'err', msg: 'publish was rejected' } }));
           return;
         }
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-      setPubState((s) => ({ ...s, [id]: 'err' }));
+      setPubState((s) => ({ ...s, [id]: { s: 'err', msg: e instanceof Error ? e.message : String(e) } }));
     }
   }
 
@@ -313,17 +315,17 @@ export function Shelf() {
                       <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
-                      {!listed && pubState[m.intellaId] !== 'pending' && (
+                      {!listed && pubState[m.intellaId]?.s !== 'pending' && (
                         <button
                           className="btn ghost"
                           onClick={() => publishModel(m.intellaId)}
-                          disabled={pubState[m.intellaId] === 'busy'}
+                          disabled={pubState[m.intellaId]?.s === 'busy'}
                           title="List this model publicly and make it eligible for royalty when others use it"
                         >
-                          {pubState[m.intellaId] === 'busy' ? 'publishing…' : pubState[m.intellaId] === 'err' ? 'publish failed — retry' : 'Publish'}
+                          {pubState[m.intellaId]?.s === 'busy' ? 'publishing…' : pubState[m.intellaId]?.s === 'err' ? 'publish failed — retry' : 'Publish'}
                         </button>
                       )}
-                      {!listed && pubState[m.intellaId] === 'pending' && (
+                      {!listed && pubState[m.intellaId]?.s === 'pending' && (
                         <span className="mc-meta mono" title="Still settling — this can take a few minutes for weight upload">publishing…</span>
                       )}
                       {admin && (
@@ -332,6 +334,9 @@ export function Shelf() {
                         </button>
                       )}
                     </div>
+                    {pubState[m.intellaId]?.s === 'err' && pubState[m.intellaId]?.msg && (
+                      <div className="warn">{pubState[m.intellaId]?.msg}</div>
+                    )}
                   </div>
                 </div>
               );
