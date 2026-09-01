@@ -1,0 +1,57 @@
+/* the breadth block — the live catalogue, counted rather than claimed */
+.cat{padding:var(--py-section) 0}
+.cat .cat-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.cat .cat-wait{min-height:320px}
+.cat h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
+.cat .cat-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:44ch;margin:0}
+
+/* the brag band — the page's one loud moment. Numerals at display scale, hard left, bleeding
+   past the text column, because these are the numbers the platform actually earned. */
+.cat .cat-brag{max-width:1180px;margin:var(--s10) auto var(--s10);padding:0 var(--px-section);
+  display:grid;gap:var(--s7)}
+.cat .cat-brag > div{margin:0;display:grid;grid-template-columns:minmax(0,auto) 1fr;
+  align-items:baseline;gap:var(--s6);border-top:1px solid var(--hair);padding-top:var(--s5)}
+.cat .cat-brag dt{font-size:clamp(72px,13vw,190px);line-height:.82;letter-spacing:-.055em;
+  font-weight:600;color:var(--text)}
+.cat .cat-brag dd{margin:0;color:var(--muted);font-size:clamp(14px,1.6vw,20px);line-height:1.35;
+  max-width:30ch;text-wrap:balance}
+
+@media(max-width:640px){
+  .cat .cat-brag > div{grid-template-columns:1fr;gap:var(--s3)}
+  .cat .cat-brag dt{font-size:clamp(64px,26vw,110px)}
+}
+
+.cat .cat-cols{display:grid;grid-template-columns:1fr 1fr;gap:var(--s10);margin-top:var(--s10)}
+.cat h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;
+  font-weight:400;margin:0 0 var(--s5)}
+.cat .cat-col h3:not(:first-child){margin-top:var(--s9)}
+.cat .cat-h{margin-top:var(--s10)}
+
+.cat .cat-bars{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
+.cat .cat-bars li{display:grid;grid-template-columns:9ch 1fr 3ch;align-items:center;gap:var(--s4)}
+.cat .cat-bars .k{font-size:var(--fs-base);color:var(--text)}
+.cat .cat-bars .bar{height:2px;background:var(--accent);opacity:.65;width:var(--w,0)}
+/* the bars draw themselves once, when the block arrives. Data that grows in front of you reads
+   as measured; data that is simply printed reads as typed. */
+@media (prefers-reduced-motion: no-preference){
+  .cat .cat-bars .bar{transform-origin:left center;animation:cat-draw var(--dur-slow) var(--ease) both;
+    animation-timeline:view();animation-range:entry 15% cover 32%}
+}
+@keyframes cat-draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.cat .cat-bars .n{color:var(--faint);font-size:var(--fs-xs);text-align:right}
+
+.cat .cat-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--s2)}
+.cat .cat-chips li{border:1px solid var(--hair);border-radius:var(--r-pill);padding:var(--s1) var(--s4);
+  font-size:var(--fs-s);color:var(--muted)}
+.cat .cat-chips li .mono{color:var(--faint);font-size:var(--fs-xs)}
+
+.cat .cat-list{list-style:none;margin:0;padding:0;display:grid;gap:var(--s2)}
+.cat .cat-list li{color:var(--muted);font-size:var(--fs-base);border-bottom:1px solid var(--hair-soft);
+  padding-bottom:var(--s2)}
+.cat .cat-list .cat-rest a{color:var(--accent-soft);font-size:var(--fs-s);text-decoration:none}
+.cat .cat-flows{grid-template-columns:repeat(3,1fr);gap:var(--s2) var(--s7);margin-bottom:var(--s7)}
+
+@media(max-width:860px){
+  .cat .cat-cols{grid-template-columns:1fr;gap:var(--s9)}
+  .cat .cat-flows{grid-template-columns:1fr}
+}

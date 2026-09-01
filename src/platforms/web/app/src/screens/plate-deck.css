@@ -1,0 +1,68 @@
+/* the deck — a stack of plates the reader works down through.
+   Every card is already in place, squared up and staggered by a hair so the pile reads as a
+   pile. The top one covers the rest; as the run advances it slides off to the left and
+   uncovers the one beneath, which was there the whole time. Nothing arrives from off-screen.
+   The whole thing is transforms on absolutely positioned cards — no layout runs on scroll. */
+.deck{
+  --deck-n:1;
+  --deck-trail:0;   /* extra travel after the last card is uncovered, in cards */
+  --deck-aspect:2;
+  --deck-aspect-narrow:var(--deck-aspect);
+  --deck-a:var(--deck-aspect);      /* the crop in force at this width */
+  --deck-stagger:18px;                                        /* how far the pile is squared off by */
+  --deck-spread:calc((var(--deck-n) - 1) * var(--deck-stagger));
+  position:relative;
+  overflow:hidden;                                            /* clips the departing card */
+  width:100%;
+}
+/* self-driven: the component writes its own progress onto the banner. In lock mode nothing is
+   declared here, so `--p` is inherited from the enclosing stage. */
+.deck-pass{--p:0}
+
+/* height is the card's own crop plus the pile's offset, so the stack fills the banner exactly */
+.deck-track{
+  position:relative;
+  height:0;
+  padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread));
+}
+
+.deck-card{
+  --i:0;                                       /* position in the run, set by the component */
+  /* how far the run has advanced, in cards. The trail lengthens the travel without adding a
+     card, so every departure still finishes at n-1 and the last card is left alone after it. */
+  --adv:calc(var(--p,0) * (var(--deck-n) - 1 + var(--deck-trail)));
+  /* departures stop at the last card. Capping the advance here is what makes the trail a hold
+     rather than one more slide — without it the final card deals itself away. */
+  --advd:min(var(--adv),calc(var(--deck-n) - 1));
+  --dp:clamp(0,calc(var(--advd) - var(--i)),1); /* this card's own departure, 0→1 */
+  --r:min(max(0,calc(var(--i) - var(--advd))),3);/* depth below the top, drawn 3 layers deep */
+  position:absolute;
+  left:calc(var(--i) * var(--deck-stagger));
+  top:calc(var(--i) * var(--deck-stagger));
+  width:calc(100% - var(--deck-spread));
+  aspect-ratio:var(--deck-a);
+  z-index:calc(100 - var(--i));
+  /* the departing card leaves to the left, far enough to clear its own offset and the frame */
+  transform:translate3d(calc(-1 * var(--dp) * (100% + var(--i) * var(--deck-stagger) + 6vw)),0,0);
+  /* the pile falls away in value, so depth reads before anything has moved */
+  filter:brightness(calc(1 - var(--r) * .14));
+  border-radius:var(--r-lg);
+  overflow:hidden;
+  box-shadow:-1px 0 0 var(--hair), -30px 0 50px -28px var(--bg);
+}
+.deck-card > .plate{border-radius:0}
+
+/* An unfilled run is all one flat value, which makes the pile invisible and the motion
+   unreadable — so while the cards are empty they alternate ground and carry their position in
+   the run. Both go away the moment real plates land. */
+.deck-card:nth-child(even) .plate-empty{background:var(--raised)}
+.deck-card .plate-empty{border-style:solid;border-color:var(--hair)}
+.deck-i{position:absolute;left:var(--s7);bottom:var(--s6);z-index:1;
+  color:var(--hair-soft);font-size:clamp(64px,9vw,140px);line-height:.8;
+  letter-spacing:-.04em;pointer-events:none}
+
+@media(max-width:640px){
+  /* a banner crop is a letterbox slot on a phone — the run takes its narrow composition here */
+  .deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow)}
+  .deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
+}
