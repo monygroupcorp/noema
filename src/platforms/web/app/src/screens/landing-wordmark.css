@@ -1,0 +1,4 @@
+/* the serif lockup — the canonical hemisphere, the name in the page's own voice */
+.lw{display:inline-flex;align-items:center;gap:.42em;font-size:var(--lw-h,26px)}
+.lw .lw-name{font-family:var(--font-display);font-weight:400;font-size:1.28em;line-height:1;
+  letter-spacing:-.02em;color:var(--text);font-optical-sizing:auto}

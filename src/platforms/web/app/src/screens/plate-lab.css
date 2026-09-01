@@ -143,6 +143,20 @@
 /* the primary action stops being a rounded software button and becomes a printed one */
 .cand-theme-editorial .btn{border-radius:2px}
 .cand-theme-editorial .btn-ghost{border-radius:2px}
+
+/* ── accent discipline ──────────────────────────────────────────────────────────────────────
+   Blue was doing buttons, rules, bars, chips and the index at once, and an accent that appears
+   everywhere is not an accent. Three colours, three jobs: ink is the voice, blue is data and
+   instruments, amber is the economy. The CTA leaves the accent and takes the ink.
+   ──────────────────────────────────────────────────────────────────────────────────────────── */
+.cand-cta-ink .btn{background:var(--ink,var(--text));color:var(--bg);border:1px solid transparent}
+.cand-cta-ink .btn:hover{filter:none;background:#fff}
+.cand-cta-outline .btn{background:transparent;color:var(--text);
+  border:1px solid color-mix(in srgb,var(--text) 34%,transparent)}
+.cand-cta-outline .btn:hover{filter:none;border-color:var(--text)}
+/* the hero's rule is punctuation, not a readout — it stops spending the data colour */
+.cand-cta-ink .cand-hero .noema-rule,
+.cand-cta-outline .cand-hero .noema-rule{background:var(--text);opacity:.28}
 .cand-theme-editorial .deck-card{border-radius:3px}
 .cand-theme-editorial .mode-shot{border-radius:0}
 

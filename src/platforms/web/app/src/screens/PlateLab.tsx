@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
-import { Wordmark } from '../ui/Wordmark';
+import { LandingWordmark } from './LandingWordmark';
 import { PlateDeck } from './PlateDeck';
 import { ScrollStage } from './ScrollStage';
 import { BeatRun, type Beat } from './BeatRun';
@@ -120,6 +120,8 @@ export function PlateLab() {
   const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
   const [theme, setTheme] = useState<'current' | 'editorial'>('editorial');
+  const [cta, setCta] = useState<'blue' | 'ink' | 'outline'>('ink');
+  const [mark, setMark] = useState<'mono' | 'serif'>('serif');
 
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
   const deckHold = (n: number) => (n - 1) * 0.45;
@@ -168,6 +170,18 @@ export function PlateLab() {
           ))}
         </span>
         <span className="lab-ctl">
+          <span className="mono">cta</span>
+          {(['blue', 'ink', 'outline'] as const).map((v) => (
+            <button key={v} className={v === cta ? 'on' : ''} onClick={() => setCta(v)}>{v}</button>
+          ))}
+        </span>
+        <span className="lab-ctl">
+          <span className="mono">mark</span>
+          {(['serif', 'mono'] as const).map((v) => (
+            <button key={v} className={v === mark ? 'on' : ''} onClick={() => setMark(v)}>{v}</button>
+          ))}
+        </span>
+        <span className="lab-ctl">
           <span className="mono">theme</span>
           <button className={theme === 'current' ? 'on' : ''} onClick={() => setTheme('current')}>current</button>
           <button className={theme === 'editorial' ? 'on' : ''} onClick={() => setTheme('editorial')}>editorial</button>
@@ -180,11 +194,11 @@ export function PlateLab() {
       </div>
 
       <div
-        className={`cand cand-face-${display} cand-theme-${theme}`}
+        className={`cand cand-face-${display} cand-theme-${theme} cand-cta-${cta}`}
         style={{ '--hero-leading': String(leading) } as CSSProperties}
       >
         <nav className="cand-nav">
-          <span className="brand"><Wordmark height={22} /></span>
+          <span className="brand"><LandingWordmark face={mark} height={26} /></span>
           <span className="cand-navlinks">
             <Link to="/catalog">Catalogue</Link>
             <Link to="/models">Models</Link>
@@ -332,7 +346,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
 
         <footer className="cand-foot">
           <div className="cand-foot-in">
-            <div className="cand-foot-brand"><Wordmark height={20} /></div>
+            <div className="cand-foot-brand"><LandingWordmark face={mark} height={22} /></div>
             {FOOTER.map((col) => (
               <div key={col.h} className="cand-foot-col">
                 <h3 className="mono">{col.h}</h3>
