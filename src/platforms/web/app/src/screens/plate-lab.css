@@ -36,18 +36,27 @@
 .cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:var(--hero-leading,1.12);
   letter-spacing:-.04em;font-weight:600;margin:0;color:var(--text)}
 /* The display face is a single token on the marketing surface, so the page's voice can change
-   without touching the app's. Every heading that carries the argument reads from it. */
-.cand{--font-display:var(--font-sans)}
+   without touching the app's. Every heading that carries the argument reads from it.
+   Fraunces is the default: a display serif, set light and large, on a ground where the whole
+   category ships a neutral geometric sans. */
+.cand{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em}
+.cand-face-geist{--font-display:var(--font-sans);--display-weight:600;--display-track:-.04em}
 .cand-face-instrument{--font-display:"Instrument Serif",Georgia,serif;--display-weight:400;--display-track:-.015em}
 .cand-face-newsreader{--font-display:"Newsreader",Georgia,serif;--display-weight:500;--display-track:-.02em}
-.cand-face-fraunces{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.02em}
+.cand-face-fraunces{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em}
 .cand-face-martian{--font-display:var(--font-marquee)}
 /* A display serif is set light and large, the way Venice sets Canela — a serif at 600 weight is
-   a headline shouting, and the whole reason to reach for one is that it does not have to. */
-.cand{--display-weight:600;--display-track:-.04em}
+   a headline shouting, and the whole reason to reach for one is that it does not have to.
+   `font-optical-sizing` lets the variable face bring its high-contrast cut to the big sizes and
+   its sturdy one to the small, which is the entire argument for a variable serif. */
 .cand-hero h1,.cand .beat h2,.cand .modes-head h2,.cand .pay h2,.cand .open h2,
-.cand .mint h2,.cand .how h2,.cand .anon h2,.cand .cand-end h2,.cand .cat h2{
-  font-weight:var(--display-weight);letter-spacing:var(--display-track)}
+.cand .mint h2,.cand .how h2,.cand .anon h2,.cand .cand-end h2,.cand .cat h2,
+.cand .cat-brag dt{
+  font-weight:var(--display-weight);letter-spacing:var(--display-track);
+  font-optical-sizing:auto}
+/* a serif reads smaller than a grotesque at the same size — the hero takes the size back */
+.cand-hero h1{font-size:clamp(38px,6.6vw,84px)}
+.cand-face-geist .cand-hero h1{font-size:clamp(34px,6vw,74px)}
 .cand-hero h1,.cand .beat h2,.cand .cat-brag dt,.cand .modes-head h2,
 .cand .pay h2,.cand .open h2,.cand .mint h2,.cand .how h2,.cand .anon h2,
 .cand .cand-end h2,.cand .cat h2{font-family:var(--font-display)}

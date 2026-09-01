@@ -144,10 +144,13 @@
   font-display: swap;
   src: url('./newsreader/newsreader-400.woff2') format('woff2-variations');
 }
+/* Fraunces carries a live optical-size axis — 6.9% of rendered pixels change between opsz 9
+   and opsz 144 — so the display sizes get the high-contrast cut and small text gets the sturdy
+   one, from one file, with `font-optical-sizing: auto` doing the work. */
 @font-face {
   font-family: 'Fraunces';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url('./fraunces/fraunces-400.woff2') format('woff2-variations');
+  src: url('./fraunces/fraunces-var.woff2') format('woff2-variations');
 }

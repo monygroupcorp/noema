@@ -21,7 +21,7 @@ import './plate-lab.css';
  *
  *  None of these is the final answer. Proving the seam is the point: a licensed face later is
  *  one `@font-face` and one token. */
-const DISPLAY_FACES = ['geist', 'instrument', 'newsreader', 'fraunces', 'martian'] as const;
+const DISPLAY_FACES = ['fraunces', 'instrument', 'newsreader', 'geist', 'martian'] as const;
 type DisplayFace = (typeof DISPLAY_FACES)[number];
 
 const STAGGERS = [0, 18, 36];
@@ -114,7 +114,7 @@ const FOOTER = [
  * specifying.
  */
 export function PlateLab() {
-  const [display, setDisplay] = useState<DisplayFace>('geist');
+  const [display, setDisplay] = useState<DisplayFace>('fraunces');
   const [leading, setLeading] = useState(1.12);
   const [crop, setCrop] = useState<PlateFormat>('21:9');
   const [stagger, setStagger] = useState(18);
