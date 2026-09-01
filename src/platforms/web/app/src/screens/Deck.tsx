@@ -9,6 +9,11 @@ interface DeckProps {
   label: string;
   /** Card crop, as width ÷ height. */
   aspect: number;
+  /** Extra travel after the last card is uncovered, measured in cards, during which nothing
+   *  moves. A run whose final card has something of its own to do needs a stretch of scroll
+   *  where it is alone — without it, the last card performs while the one above it is still
+   *  sliding off. */
+  trail?: number;
   /** How far each card in the pile is squared off from the one above it, in px. 0 stacks them
    *  exactly, so nothing beneath is visible until the top card moves. */
   stagger?: number;
@@ -43,6 +48,7 @@ export function Deck({
   items,
   label,
   aspect,
+  trail = 0,
   stagger = 18,
   progress = 'lock',
   className,
@@ -92,13 +98,14 @@ export function Deck({
       window.removeEventListener('resize', onScroll);
       reduce.removeEventListener('change', apply);
     };
-  }, [items.length, aspect, stagger, progress]);
+  }, [items.length, aspect, trail, stagger, progress]);
 
   if (!items.length) return null;
 
   const style = {
     '--deck-n': String(items.length),
     '--deck-aspect': String(aspect),
+    '--deck-trail': String(trail),
     '--deck-stagger': `${stagger}px`,
   } as CSSProperties;
 

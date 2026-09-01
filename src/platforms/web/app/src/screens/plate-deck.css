@@ -5,6 +5,7 @@
    The whole thing is transforms on absolutely positioned cards — no layout runs on scroll. */
 .deck{
   --deck-n:1;
+  --deck-trail:0;   /* extra travel after the last card is uncovered, in cards */
   --deck-aspect:2;
   --deck-stagger:18px;                                        /* how far the pile is squared off by */
   --deck-spread:calc((var(--deck-n) - 1) * var(--deck-stagger));
@@ -25,9 +26,14 @@
 
 .deck-card{
   --i:0;                                       /* position in the run, set by the component */
-  --adv:calc(var(--p,0) * (var(--deck-n) - 1));/* how far the run has advanced, in cards */
-  --dp:clamp(0,calc(var(--adv) - var(--i)),1); /* this card's own departure, 0→1 */
-  --r:min(max(0,calc(var(--i) - var(--adv))),3);/* depth below the top, drawn 3 layers deep */
+  /* how far the run has advanced, in cards. The trail lengthens the travel without adding a
+     card, so every departure still finishes at n-1 and the last card is left alone after it. */
+  --adv:calc(var(--p,0) * (var(--deck-n) - 1 + var(--deck-trail)));
+  /* departures stop at the last card. Capping the advance here is what makes the trail a hold
+     rather than one more slide — without it the final card deals itself away. */
+  --advd:min(var(--adv),calc(var(--deck-n) - 1));
+  --dp:clamp(0,calc(var(--advd) - var(--i)),1); /* this card's own departure, 0→1 */
+  --r:min(max(0,calc(var(--i) - var(--advd))),3);/* depth below the top, drawn 3 layers deep */
   position:absolute;
   left:calc(var(--i) * var(--deck-stagger));
   top:calc(var(--i) * var(--deck-stagger));
