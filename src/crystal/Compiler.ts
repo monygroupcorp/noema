@@ -143,7 +143,7 @@ export interface ComfyUICompiledSpec extends CompiledSpecBase {
    * Reaches the pod as `JOB_TIMEOUT` on the comfyrunner launch line, where until now only
    * `RUNPOD_POD_ID` and `COMFYUI_DIR` travelled — so comfyrunner's env-overridable default of
    * 900 s was in practice a hard constant for every substrate. It killed `minimax-h3-fl2v`
-   * (actum 7d5fd175) at `executionMs: 898405`, after the pod, the bootstrap and 56 GB of weights
+   * (the first fl2v run) at `executionMs: 898405`, after the pod, the bootstrap and 56 GB of weights
    * had all been paid for.
    *
    * Emitted only when the fundament declares it. Hash-stable for every substrate that does not.

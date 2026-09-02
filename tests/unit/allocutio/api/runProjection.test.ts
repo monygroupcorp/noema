@@ -73,16 +73,16 @@ test('fractus without error falls back to classified copy for the default messag
 
 /** The three bring-up failures, verbatim, plus the fourth that already worked. */
 const BRINGUP_FAILURES: Array<[label: string, raw: string, stage: string | undefined]> = [
-  ['5effbe17 — a full disk during the weight download',
+  ['a full-disk failure — a full disk during the weight download',
    'model download failed: wget https://…/model.safetensors returned non-zero exit status 3',
    'download'],
-  ['6c0de9a1 — the pod never reached sshd',
+  ['an sshd failure — the pod never reached sshd',
    'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host — abandoned pod-a, pod-b, pod-c',
    'ssh'],
-  ['01a7dc6b attempt 1 — the runner never came up',
+  ['a runner-readiness failure — the runner never came up',
    'comfyrunner did not become ready within timeout',
    'bootstrap'],
-  ['7d5fd175 — a job timeout, which already read well',
+  ['a job timeout — a job timeout, which already read well',
    'Actum expired — pod never reported back',
    undefined],
 ]

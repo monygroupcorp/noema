@@ -1143,7 +1143,7 @@ export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
   },
 
 
-  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
   // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
   // means — this flow's own download + load overhead — and it dominates: the sample itself is
   // ~57 s of the total.
@@ -1212,7 +1212,7 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
   },
 
 
-  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
   // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
   // means — this flow's own download + load overhead — and it dominates: the sample itself is
   // ~57 s of the total.
@@ -1287,7 +1287,7 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
   },
 
 
-  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
   // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
   // means — this flow's own download + load overhead — and it dominates: the sample itself is
   // ~57 s of the total.
