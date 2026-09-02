@@ -294,7 +294,7 @@ export const FUNDAMENTUM_UPSCALE_COMFYUI: Fundamentum = {
  * IMAGE: a RunPod SSH-ready base (the same `runpod/pytorch` ComfyUI uses), NOT a prebuilt
  * `vllm/vllm-openai` image. SecurePodClient bootstraps every pod over SSH; the bare vLLM serving
  * image ships no sshd, so `_waitForSshd` fails ("sshd did not become ready") — verified live
- * 2026-06-11 (run cede4cce, 3/3 attempts). The bootstrap `pip install vllm` brings vLLM onto the
+ * 2026-06-11 (3/3 attempts). The bootstrap `pip install vllm` brings vLLM onto the
  * SSH-capable base instead. (Live-iterate the CUDA/torch tag if vLLM needs a newer one.)
  */
 export const FUNDAMENTUM_QWEN_VL_VLLM: Fundamentum = {
@@ -555,8 +555,8 @@ export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
   // runs there are, not chosen for roundness.
   //
   // JOB — 2400 s (40 min), against a 900 s platform default.
-  //   Measured: t2v (actum 01a7dc6b) executed in 768 s of the 900 s budget — 85%, which is luck
-  //   rather than headroom. fl2v (actum 7d5fd175) blew through it at executionMs 898405; how far
+  //   Measured: t2v (the first successful t2v run) executed in 768 s of the 900 s budget — 85%, which is luck
+  //   rather than headroom. fl2v (the first fl2v run) blew through it at executionMs 898405; how far
   //   past is unknown, because the timeout is the only thing that reported.
   //   Composition: t2v's own pretium note puts the sample at ~57 s, so ~700 s of that 768 is
   //   MODEL LOAD — 48 GB of weights pushed through a 24 GB card with offloading. t2v and fl2v
@@ -574,7 +574,7 @@ export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
   //
   // READY — 900 s (15 min), against a 300 s platform default.
   //   Measured: this same pod reached ready in ~26 s on one run and missed 300 s on the next
-  //   (run 01a7dc6b attempt 1), which cost a whole second pod and a repeat 56 GB weight pull.
+  //   (that run's first attempt), which cost a whole second pod and a repeat 56 GB weight pull.
   //   Variance again, not a reliably slow substrate — what happens inside the window is
   //   comfy-kitchen's CUDA backend enumeration plus comfy-aimdo, neither of which a flux pod
   //   loads at all. Same 3× discipline as the job budget, over a default that is itself ~11× the

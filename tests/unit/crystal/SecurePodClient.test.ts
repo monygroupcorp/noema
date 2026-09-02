@@ -1205,7 +1205,7 @@ test('training launch: a healthy first pod is launched on directly, with no extr
 })
 
 // ── Substrate timeout budgets (noema-392) ─────────────────────────────────────
-// `minimax-h3-fl2v` (actum 7d5fd175) died on `job … timed out after 900s waiting for ComfyUI`
+// `minimax-h3-fl2v` (the first fl2v run) died on `job … timed out after 900s waiting for ComfyUI`
 // at executionMs 898405 — the pod, the bootstrap and 56 GB of weights all already paid for.
 // comfyrunner reads JOB_TIMEOUT from its environment, and the launch line carried only
 // RUNPOD_POD_ID and COMFYUI_DIR, so its 900 s default was in practice a hard platform constant.

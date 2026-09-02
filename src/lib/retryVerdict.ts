@@ -121,10 +121,10 @@ export const FAILURE_MODES: readonly RetryPattern[] = [
   // decision, and retry behaviour is noema-391's, not this change's.
   //
   // The pod ran out of disk fetching weights (`wget … returned non-zero exit status 3`), or
-  // otherwise could not get them down. Recorded on actum 5effbe17.
+  // otherwise could not get them down. Recorded on the first run to reach the weight fetch.
   { nomen: 'model-download-failed', pattern: /model download failed|no space left on device|disk (is )?full|failed to download (the )?(model|weights)/i, verdict: 'quit', stage: 'download' },
   // Every provisioning attempt was abandoned without ever reaching a host we could log into
-  // (SecurePodClient._launchTrainingPod). Recorded on actum 6c0de9a1.
+  // (SecurePodClient._launchTrainingPod). Recorded on the first t2v attempt.
   { nomen: 'ssh-exhausted', pattern: /without reaching an SSH-reachable host/i, verdict: 'quit', stage: 'ssh' },
   // The provisioning budget ran out mid-bootstrap (SecurePodClient._bootstrapAndLaunch).
   { nomen: 'bootstrap-budget', pattern: /bootstrap stopped before command/i, verdict: 'quit', stage: 'bootstrap' },

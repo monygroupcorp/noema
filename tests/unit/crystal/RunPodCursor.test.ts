@@ -152,7 +152,7 @@ test("reserve prices sd1-5's declared curve at its schema defaults", async () =>
  * with a measurement behind it — never to quiet a failing test.
  */
 const ABOVE_GENERIC_BOUND: Record<string, string> = {
-  'minimax-h3-t2v': 'actum 01a7dc6b, cold: 871 impetus measured, 713 s of it a 56 GB weight pull',
+  'minimax-h3-t2v': 'the first cold t2v run: 871 impetus measured, 713 s of it a 56 GB weight pull',
   'minimax-h3-fl2v': 'same substrate and weight set as minimax-h3-t2v',
   'minimax-h3-ref2v': 'same substrate; ref2va DiT is the same 21 GB as fl2va',
 }
