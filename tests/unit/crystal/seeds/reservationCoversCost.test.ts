@@ -12,7 +12,7 @@ import { reservationImpetus, GENERIC_RESERVE_IMPETUS } from '../../../../src/led
 // a 3.3% margin on a cost dominated by a 56 GB download whose duration varies with mirror
 // throughput. This pins that they no longer ride the generic reserve.
 
-/** Measured on actum 01a7dc6b (cold, RTX 4090 @ $0.74/hr), 2026-09-02. */
+/** Measured on the first successful t2v run (cold, RTX 4090 @ $0.74/hr), 2026-09-02. */
 const H3_MEASURED_IMPETUS = 871
 const H3_FLOWS = ['minimax-h3-t2v', 'minimax-h3-fl2v', 'minimax-h3-ref2v']
 

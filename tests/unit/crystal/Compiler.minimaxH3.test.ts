@@ -202,14 +202,14 @@ test('the compiled spec asks for a disk that fits 56 GB of weights', async () =>
   assert.equal(typeof disk, typeof podDiskGbFor(0) === 'number' ? 'undefined' : 'number',
     'small manifests keep the default and emit nothing')
 
-  // …and with real sizes it must exceed the flat default that broke run 5effbe17.
+  // …and with real sizes it must exceed the flat default that broke the first H3 run to reach the weight fetch.
   const real = podDiskGbFor(56)
   assert.ok(real > DEFAULT_POD_DISK_GB, '56 GB of weights must not ride the 40 GB default')
   assert.ok(real >= 56 + POD_DISK_HEADROOM_GB, 'and must leave working room on top')
 })
 
 // ── Timeout budgets (noema-392) ───────────────────────────────────────────────
-// `minimax-h3-fl2v` (actum 7d5fd175) died on `job … timed out after 900s waiting for ComfyUI`
+// `minimax-h3-fl2v` (the first fl2v run) died on `job … timed out after 900s waiting for ComfyUI`
 // with executionMs 898405 — after the pod, the bootstrap and 56 GB of weights had all been paid
 // for. comfyrunner's JOB_TIMEOUT was env-overridable and nothing overrode it. These pin the
 // declaration reaching the spec, and the absent-declaration case staying byte-identical.
@@ -245,8 +245,8 @@ test('the H3 job budget clears the 900s that killed fl2v, with room for load var
 
 test('the H3 readiness budget exceeds the platform default it missed', () => {
   const readyMs = FUNDAMENTUM_MINIMAX_H3_COMFYUI.readyTimeoutMs!
-  // Attempt 1 of run 01a7dc6b missed the 5-minute default and cost a whole second pod.
-  assert.ok(readyMs > 5 * 60_000, 'must exceed the 5 min default that cost run 01a7dc6b a pod')
+  // Attempt 1 of the first successful t2v run missed the 5-minute default and cost a whole second pod.
+  assert.ok(readyMs > 5 * 60_000, 'must exceed the 5 min default that cost the first successful t2v run a pod')
   // But not unbounded: a genuinely dead pod still has to be given up on.
   assert.ok(readyMs <= 30 * 60_000, 'a dead pod must still be abandoned inside half an hour')
 })
