@@ -62,7 +62,7 @@ import { fragmentKey, type Fragment } from '../../../../src/crystal/muse/taxonom
 import type { Actorum } from '../../../../src/types/cursus.js'
 import type { Actum } from '../../../../src/types/actum.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 import { MuseSteerCursor } from '../../../../src/crystal/MuseSteerCursor.js'
 import { MAX_INSTRUCTION_CHARS } from '../../../../src/crystal/muse/steer.js'
 import { OPENROUTER_PROVIDER } from '../../../../src/crystal/apiProviders.js'
@@ -144,6 +144,15 @@ class MemoryDatasets implements Datasets {
       media: d.media.map((m) => (m.id === mediaId ? { ...m, fragments: [...fragments] } : m)),
       mutatum: new Date(),
     }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+
+  // Same semantics as MongoDataset.setAccess: always written in the { kind } form, mutatum bumped.
+  async setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const updated: Dataset = { ...d, access: { kind }, mutatum: new Date() }
     this.store.set(datasetId, updated)
     return updated
   }
@@ -276,6 +285,12 @@ const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: creds.apiKey }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 
@@ -802,6 +817,46 @@ test('a session spawns off an archived mother, and a piece still saves into it',
       method: 'POST', headers: HEADERS,
     })
     assert.equal(saved.status, 201, `an archived mother must still resolve: ${JSON.stringify(saved.body)}`)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a stranger spawns a Muse session on a PUBLIC dataset, and is still refused on an ordinary one', async () => {
+  // The point of `access` (noema-dataset-access-field): a curated public dataset is meant to be
+  // exactly this — a stranger's fastest way into Muse, no ownership or team membership needed.
+  // Proved against `spawnMuseSession` directly, since that is the real HTTP path a "start a Muse
+  // session on this public board" link would fire.
+  const datasets = new MemoryDatasets()
+  const openMother = await datasets.create({
+    owner: OWNER,
+    access: { kind: 'public' },
+    name: 'Open board',
+    modality: 'image',
+    custody: 'local',
+    media: [{
+      id: 'media-open', url: 'https://example.invalid/open.png', source: 'upload',
+      addedAt: new Date(), fragments: FRAGMENTS,
+    }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+  const closedMother = await seedMother(datasets)
+
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const stranger = { 'x-api-key': 'stranger-1' }
+
+    const openSpawn = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: stranger, body: { datasetId: openMother.id },
+    })
+    assert.equal(openSpawn.status, 201, `a public dataset must be spawnable by a non-owner: ${JSON.stringify(openSpawn.body)}`)
+    assert.equal(openSpawn.body.session.motherDatasetId, openMother.id)
+
+    const closedSpawn = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: stranger, body: { datasetId: closedMother.id },
+    })
+    assert.equal(closedSpawn.status, 404, 'an ordinary (non-public) dataset stays closed to a stranger')
   } finally {
     await closeServer(server)
   }

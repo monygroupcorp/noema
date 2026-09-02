@@ -531,6 +531,21 @@ const BindResponseSchema: JsonSchema = {
   required: ['verb', 'modusId'],
 }
 
+/** The response body for `GET /v1/me/partner` — a B2B Partner record. */
+const PartnerSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+  properties: {
+    animaId: { type: 'string', description: 'The partner Anima, same id GET /v1/me/status reports for.' },
+    status: { type: 'string', description: "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status." },
+    org: { type: 'string', description: 'Organization name, if given at request time.' },
+    contactEmail: { type: 'string', description: 'Contact email, if given at request time.' },
+    sourceRequestId: { type: 'string', description: 'The partner-request this record was provisioned from.' },
+    natum: { type: 'string', format: 'date-time', description: 'When this Partner record was created.' },
+  },
+  required: ['animaId', 'status', 'sourceRequestId', 'natum'],
+}
+
 /** The response body for `GET /v1/me/status`. */
 const StatusViewSchema: JsonSchema = {
   type: 'object',
@@ -1442,6 +1457,14 @@ const DatasetSchema: JsonSchema = {
       description:
         'FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only.',
     },
+    access: {
+      type: 'object',
+      description:
+        "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+      properties: {
+        kind: { type: 'string', enum: ['public', 'private'] },
+      },
+    },
     name: { type: 'string' },
     modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
     custody: { type: 'string', enum: ['sealed', 'local', 'remote'] },
@@ -1534,6 +1557,15 @@ const AddDatasetMediaRequestSchema: JsonSchema = {
     actumIds: { type: 'array', items: { type: 'string' }, description: "Required when source === 'generation'." },
   },
   required: ['source'],
+}
+
+/** The request body for `POST /v1/data/datasets/:id/access`. */
+const SetDatasetAccessRequestSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['public', 'private'] },
+  },
+  required: ['kind'],
 }
 
 /** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
@@ -2096,6 +2128,13 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/me/partner',
+      summary: "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
+      auth: true,
+      response: PartnerSchema,
+    },
+    {
+      method: 'GET',
       path: '/me/status',
       summary: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
       auth: true,
@@ -2178,6 +2217,32 @@ export const API_CONTRACT: ApiContract = {
       response: DatasetsListSchema,
     },
     {
+      method: 'GET',
+      path: '/data/datasets/public',
+      summary: 'The public dataset catalog — every dataset with access.kind === "public", scoped to nobody in particular. Public, no auth: browsing what the platform publishes does not require an account, though using one (spawning a Muse session, appending media) still does. Newest first, paginated identically to the caller-scoped list routes.',
+      auth: false,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
+      response: DatasetsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets/:id',
+      summary: 'Read one dataset the caller may reach — its owner, a member of the team it is shared with, or anyone when its access.kind is "public". A dataset the caller has no claim on is reported as not found, exactly as an id that never existed is.',
+      auth: true,
+      response: DatasetEnvelopeSchema,
+    },
+    {
       method: 'POST',
       path: '/data/datasets',
       summary: "Create a Dataset from either v1 ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta) — or with no media at all by omitting source, in which case media is added afterwards through POST /v1/data/datasets/:id/media. An empty dataset is created at version 1.0.0 with a count of 0; its first append records 1.1.0. A source naming neither path, a declared source with an empty media list, and media fields supplied without a source are each rejected with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.",
@@ -2208,6 +2273,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: SetCaptionRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/access',
+      summary: "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: SetDatasetAccessRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {
@@ -2795,10 +2868,13 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.edition', httpStatus: 404 },
     { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },
+    { code: 'not_found.partner', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
+    { code: 'not_found.partner_request', httpStatus: 404 },
+    { code: 'not_found.querela', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
@@ -2812,6 +2888,9 @@ export const API_CONTRACT: ApiContract = {
     // Concurrent writes to the same muse session exhausted the retry budget. Retryable: the
     // stored session is intact, and the same call succeeds once contention clears.
     { code: 'conflict.muse_session', httpStatus: 409, retryable: true },
+    // A partner request PATCH targets a request that already has a decision. NOT retryable:
+    // an already-issued API key is show-once and never re-minted for the same decision.
+    { code: 'conflict.already_decided', httpStatus: 409, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     { code: 'secret.required', httpStatus: 422 },

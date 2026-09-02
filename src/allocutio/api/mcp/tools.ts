@@ -59,6 +59,14 @@ export async function runFlowTool(
   api: CrystalApi,
   auctor: AuctorKey | undefined,
   args: RunFlowArgs,
+  /**
+   * The per-run spend ceiling on the CREDENTIAL this MCP session authenticated with, threaded
+   * from the resolved identity by `mcpRouter`. `run_flow` is `invokeFlow` by another door, so it
+   * carries the ceiling for the same reason `POST /v1/runs` does: without it, a key capped per
+   * run over REST would be uncapped over MCP. Never a tool ARGUMENT — `RunFlowArgs` is written
+   * by the caller, and a limit the caller can set is not a limit.
+   */
+  keyMaxImpetusPerRun?: bigint,
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
@@ -71,6 +79,7 @@ export async function runFlowTool(
         computeStrategy: args.computeStrategy as never,
         gpuClass: args.gpuClass as never,
         ...(args.maxImpetus !== undefined ? { maxImpetus: args.maxImpetus } : {}),
+        ...(keyMaxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun } : {}),
         ...(args.studioId ? { studioId: args.studioId } : {}),
       },
     )

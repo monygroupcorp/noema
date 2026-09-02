@@ -7,6 +7,7 @@ import { Status } from './screens/Status';
 import { Keyring } from './screens/Keyring';
 import { Profile } from './screens/Profile';
 import { Funding } from './screens/Funding';
+import { Partner } from './screens/Partner';
 // Space (three.js), Canvas (React Flow) and Vault (circomlibjs/snarkjs ZK) are heavy —
 // lazy-load so they only ship on open.
 const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Space })));
@@ -113,6 +114,7 @@ export function App() {
       <Route path="/account/:section" element={<AccountSettings />} />
       <Route path="/preferences" element={<Preferences />} />
       <Route path="/funding" element={<Funding />} />
+      <Route path="/partner" element={<Partner />} />
       <Route path="/studio" element={<Studio />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />

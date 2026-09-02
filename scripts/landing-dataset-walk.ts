@@ -97,7 +97,7 @@ import express, { type Express } from 'express'
 
 import { createApiRouter, type ApiFacade, type Identity } from '../src/allocutio/api/apiRouter.js'
 import type { AuctorKey } from '../src/flow/types.js'
-import type { Credentials } from '../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../src/allocutio/api/IdentityResolver.js'
 import type { Run } from '../src/allocutio/api/types.js'
 import type { Collection, CollectionPiece } from '../src/allocutio/api/types.js'
 import type { CreateDatasetInput } from '../src/types/dataset.js'
@@ -1220,6 +1220,12 @@ function buildImageServer(): { app: Express; urlFor: (kind: 'good' | 'bad-warm' 
 function fakeIdentity(): Identity {
   return {
     async resolve(_creds: Credentials): Promise<AuctorKey> {
+      throw Errors.authMissing()
+    },
+    // `Identity` also carries `resolveCaller` — identity plus the limits the CREDENTIAL imposes
+    // (a partner API key's per-run spend ceiling). This walk authenticates nobody, so it refuses
+    // through the same door.
+    async resolveCaller(_creds: Credentials): Promise<ResolvedCaller> {
       throw Errors.authMissing()
     },
   }

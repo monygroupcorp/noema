@@ -123,18 +123,20 @@ export function Dataset() {
 
   // The list read, callable again: a finished decompose writes fragments onto the record
   // server-side, so the chips arrive through a re-read rather than through the run's outputs.
+  // `withDatasetFallback` covers the id this screen actually needs when it isn't in the
+  // caller's own list — a public dataset someone else made (noema-dataset-access-field).
   const loadDatasets = useCallback(async () => {
     const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
-    setDatasets(ds);
-  }, []);
+    setDatasets(await api.withDatasetFallback(ds, id));
+  }, [id]);
 
   useEffect(() => {
     let live = true;
     api.listDatasetsFull()
-      .then(({ datasets: ds }) => { if (live) setDatasets(ds); })
+      .then(async ({ datasets: ds }) => { if (live) setDatasets(await api.withDatasetFallback(ds, id)); })
       .catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
-  }, []);
+  }, [id]);
 
   const d = (datasets ?? []).find((x) => x.id === id);
   const [activeSet, setActiveSet] = useState<string | null>(null);
@@ -230,6 +232,24 @@ export function Dataset() {
   // Adding images (noema-265). The append returns the whole dataset; putting THAT back into the
   // list is what re-reads the screen — nothing here patches a local copy.
   const [addOpen, setAddOpen] = useState(false);
+
+  // Publishing (noema-dataset-access-field). No confirm step, unlike archive — reversible in
+  // either direction with one press, and it destroys nothing.
+  const [pubBusy, setPubBusy] = useState(false);
+  const [pubErr, setPubErr] = useState<string | null>(null);
+  async function togglePublish(dataset: DatasetT) {
+    setPubBusy(true);
+    setPubErr(null);
+    try {
+      const kind = dataset.access?.kind === 'public' ? 'private' : 'public';
+      const updated = await api.setDatasetAccess(dataset.id, kind);
+      setDatasets((ds) => replaceDataset(ds, updated));
+    } catch (e) {
+      setPubErr(errText(e));
+    } finally {
+      setPubBusy(false);
+    }
+  }
 
   // Archiving (noema-267). `asking` is the control whose question is open; `done` is what was just
   // archived, which is what the undo is offered over. `now` only exists so the offer expires on
@@ -380,6 +400,12 @@ export function Dataset() {
           {/* Archiving the SET, with the set's own identity — not buried in a menu. It asks
               once, says what archive means, and offers the set back after. */}
           <div className="right ds-archive">
+            {/* Publish: makes the set listed in the public catalog and Muse-able by anyone.
+                One press, reversible, no confirm — unlike archive this destroys nothing. */}
+            <button className="btn ghost sm" type="button" disabled={pubBusy}
+              onClick={() => void togglePublish(d)}>
+              {pubBusy ? 'working…' : d.access?.kind === 'public' ? 'published — unpublish' : 'publish to the catalog'}
+            </button>
             {archivedSet ? (
               <button className="btn ghost sm" type="button" disabled={archiving}
                 onClick={() => void takeItBack({ kind: 'dataset', datasetId: d.id })}>
@@ -397,6 +423,8 @@ export function Dataset() {
               </>
             )}
             <div className="sub ds-archive-note">{ARCHIVE_MEANING}</div>
+            {d.access?.kind === 'public' && <div className="sub mono">published — anyone can find this set in the catalog and Muse on it.</div>}
+            {pubErr && <div className="sub mono">that did not go through: {pubErr}</div>}
             {archivedSet && <div className="sub mono">this set is archived — it is out of your datasets until you take it back.</div>}
             {archiveErr && <div className="sub mono">that did not go through: {archiveErr}</div>}
           </div>

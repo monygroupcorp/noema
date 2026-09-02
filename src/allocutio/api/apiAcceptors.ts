@@ -18,16 +18,62 @@ import type { AnimaStore } from '../../types/anima.js'
 import type { PersonaStore, PersonaGenus } from '../../types/persona.js'
 import type { IssuerStore } from '../../types/issuer.js'
 import type { ErasedDenylistStore } from '../../types/erasure.js'
-import type { CredentialAcceptors } from './IdentityResolver.js'
+import type { CredentialAcceptors, ApiKeyIdentity } from './IdentityResolver.js'
 import { AgentJwtVerifier, type JwksFetch } from './AgentJwtVerifier.js'
+
+/**
+ * One verified `users.apiKeys[]` record, as the injected key lookup hands it over.
+ *
+ * `maxImpetusPerRun` is carried as the RAW STORED STRING — the store's own shape (a stringified
+ * bigint, so a value larger than a JS number survives Mongo) — and is parsed here, in the
+ * hermetic layer, rather than at the database seam. A key minted before the field existed simply
+ * omits it.
+ */
+export interface ApiKeyAccount {
+  /** The stable account id — the `'api'` persona's externusId. */
+  accountId: string
+  /**
+   * Per-run impetus ceiling recorded on the key, RAW AS STORED and deliberately `unknown`: it
+   * comes out of a schemaless collection, so declaring it `string` here would be a promise the
+   * database never made. `parseKeyImpetusCeiling` below is the only thing that decides what it
+   * means, and it refuses anything it cannot read. Absent → the key sets no ceiling.
+   */
+  maxImpetusPerRun?: unknown
+}
+
+/**
+ * Parse a stored `maxImpetusPerRun` into the bigint the admission check compares against.
+ *
+ *   • `undefined` in  → `undefined` out: the key carries no ceiling (every pre-existing key).
+ *   • a canonical non-negative integer string → that value.
+ *   • ANYTHING ELSE → `null`, meaning "this key is not usable".
+ *
+ * The last case is the one that matters. A stored ceiling that cannot be read must never
+ * degrade to "no ceiling": that would turn a corrupt record into an UNCAPPED key, which is the
+ * exact failure this field exists to prevent. Refusing the key fails closed instead — the
+ * partner gets a 401 and someone fixes the record, and no run is admitted in the meantime.
+ */
+export function parseKeyImpetusCeiling(raw: unknown): bigint | null | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null
+  try {
+    return BigInt(raw)
+  } catch {
+    return null
+  }
+}
 
 export interface AcceptorDeps {
   personae: Pick<PersonaStore, 'findByExternus' | 'findOrCreate'>
   animae: Pick<AnimaStore, 'create'>
   /** Legacy web JWT secret (`process.env.JWT_SECRET`). Absent → JWT auth is unconfigured. */
   jwtSecret?: string
-  /** Validate an API key → a stable account id (its `'api'` persona externusId), or null. Injected. */
-  verifyApiKeyToAccountId?: (apiKey: string) => Promise<string | null>
+  /**
+   * Validate an API key → the stored record behind it (its `'api'` persona externusId, plus
+   * whatever limits the key itself carries), or null when the key does not verify. Injected —
+   * `index.ts` plugs in the `users.apiKeys[]` lookup.
+   */
+  verifyApiKeyToAccountId?: (apiKey: string) => Promise<ApiKeyAccount | null>
   /** Verify a web3 sig bundle → the signer address, or null. Injected. */
   verifyWeb3ToAddress?: (w: { address: string; signature: string; nonce: string }) => Promise<string | null>
   /** Trusted-issuer registry for federated (JWKS) SSO. Absent → no federated acceptor. */
@@ -124,9 +170,16 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
       : undefined,
 
     validateApiKey: verifyApiKeyToAccountId
-      ? async (key: string): Promise<string | null> => {
+      ? async (key: string): Promise<ApiKeyIdentity | null> => {
           const acct = await verifyApiKeyToAccountId(key)
-          return acct ? resolveOrCreateAnima(personae, animae, 'api', acct) : null
+          if (!acct) return null
+          // Read the ceiling BEFORE resolving the anima: an unreadable ceiling refuses the key
+          // outright (see `parseKeyImpetusCeiling`), and refusing it here means the refusal
+          // costs no persona lookup and mints no anima on a key that will not be admitted.
+          const ceiling = parseKeyImpetusCeiling(acct.maxImpetusPerRun)
+          if (ceiling === null) return null
+          const animaId = await resolveOrCreateAnima(personae, animae, 'api', acct.accountId)
+          return ceiling === undefined ? { animaId } : { animaId, maxImpetusPerRun: ceiling }
         }
       : undefined,
 

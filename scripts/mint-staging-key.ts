@@ -5,10 +5,10 @@
 //
 // Run: node --env-file=.env --import tsx scripts/mint-staging-key.ts
 import { MongoClient } from 'mongodb'
-import { randomBytes, createHash } from 'node:crypto'
 import { MongoAnima } from '../src/crystal/MongoAnima.js'
 import { MongoPersona } from '../src/crystal/MongoPersona.js'
 import { MongoSignorum } from '../src/crystal/MongoSignorum.js'
+import { generateApiKeyMaterial, appendApiKeyRecord } from '../src/crystal/apiKeys.js'
 
 const DB = 'noemaplane'                                  // hard target — never prod 'noema'
 if ((DB as string) === 'noema') throw new Error('refuse to seed prod')
@@ -20,9 +20,7 @@ async function main(): Promise<void> {
 const uri = process.env.MONGODB_URI || process.env.MONGO_URI
 if (!uri) throw new Error('no MONGODB_URI in env')
 
-const apiKey = 'ms2_' + randomBytes(24).toString('hex')        // ms2_<48 hex>
-const keyPrefix = apiKey.slice(0, 12)
-const keyHash = createHash('sha256').update(apiKey).digest('hex')
+const { apiKey, keyPrefix, keyHash } = generateApiKeyMaterial()  // ms2_<48 hex>
 
 const client = new MongoClient(uri)
 await client.connect()
@@ -47,11 +45,7 @@ if (existing && existing.activeAnimaId) {
 }
 
 // Append the api key to the user doc keyed by _id = accountId (verifyApiKeyToAccountId).
-await db.collection('users').updateOne(
-  { _id: ACCOUNT as unknown as object },
-  { $push: { apiKeys: { keyPrefix, keyHash, status: 'active' } } as any },
-  { upsert: true },
-)
+await appendApiKeyRecord(db.collection('users'), ACCOUNT, { keyPrefix, keyHash, status: 'active' })
 
 // Fund the anima.
 await signorum.issue({ forma: 'minted', valor: VALOR, animaId, auctor: 'system:koh-train-seed' } as any)

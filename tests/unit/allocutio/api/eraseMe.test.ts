@@ -30,6 +30,7 @@ import { CrystalApi } from '../../../../src/allocutio/api/CrystalApi.js'
 import { ownerKeyOf } from '../../../../src/crystal/ownerKey.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
+import type { ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 
 // ---------------------------------------------------------------------------
 // MeEraser — the orchestration + ordering + idempotency + retention invariants
@@ -222,10 +223,19 @@ function del(base: string): Promise<{ status: number; body: string }> {
   })
 }
 
-const fakeIdentity: Identity = { async resolve(): Promise<AuctorKey> { return { animaId: 'anima-1' } } }
+// `Identity` also carries `resolveCaller` — identity plus the limits the CREDENTIAL imposes
+// (a partner API key's per-run spend ceiling). These stubs mint no ceiling, so it is `resolve`
+// plus an empty limit set: exactly the shape a key with no ceiling resolves to.
+const fakeIdentity: Identity = {
+  async resolve(): Promise<AuctorKey> { return { animaId: 'anima-1' } },
+  async resolveCaller(creds): Promise<ResolvedCaller> { return { auctor: await this.resolve(creds) } },
+}
 // An unauthenticating stub — mirrors a real resolver rejecting a caller with no credentials, so
 // the auth-first ordering is actually exercised (noema-178).
-const unauthIdentity: Identity = { async resolve(): Promise<AuctorKey> { throw Errors.authMissing() } }
+const unauthIdentity: Identity = {
+  async resolve(): Promise<AuctorKey> { throw Errors.authMissing() },
+  async resolveCaller(creds): Promise<ResolvedCaller> { return { auctor: await this.resolve(creds) } },
+}
 
 test('DELETE /v1/me: unauthenticated caller gets 401 and never learns the feature-state', async () => {
   let called = false

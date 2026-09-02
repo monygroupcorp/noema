@@ -516,8 +516,14 @@ export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
   nomen: 'MiniMax H3 · ComfyUI',
   versio: '1.0.0',
   contentHash: '',
-  imageId: 'pytorch/pytorch',
-  imageVersion: '2.13.0-cuda13.0-cudnn9-runtime',
+  // A RUNPOD-NATIVE image, not the `pytorch/pytorch` one the rig's Dockerfile builds FROM.
+  // The rig runs that image under local docker, where nothing needs SSH; the platform
+  // provisions a REMOTE pod and `_waitForSshd` has to reach an sshd inside it, which the stock
+  // Docker Hub pytorch image does not ship. That is why every other ComfyUI fundament rides a
+  // runpod/* image, and it is the difference that makes this substrate provisionable.
+  // Same stack the head-to-head measured on: CUDA 13.0, torch 2.13.0.
+  imageId: 'runpod/pytorch',
+  imageVersion: '1.2.0-rc.162-cu1300-torch2130-ubuntu2404',
   runtime: 'ComfyUI',
   // Recovered from the rig image that produced the measurements above:
   // `comfyui_version.py` reports 0.33.0 at commit dcbcf8c (2026-09-01). Pinned to the TAG
