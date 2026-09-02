@@ -137,11 +137,32 @@ test("reserve prices sd1-5's declared curve at its schema defaults", async () =>
   assert.equal(await cursor.reserve(ESSENTIA_RUNMAKE_SD15, {}), 172n)
 })
 
+/**
+ * Flows whose fitted curve legitimately reserves ABOVE `GENERIC_RESERVE_IMPETUS`, with the
+ * measurement that justifies it.
+ *
+ * The bound below was written when every fitted flow was an image flow — sd1.5 fits to 172
+ * against a generic 900 — so "a real curve lands under the generic" held, and a curve above it
+ * really did mean a mis-fit. MiniMax H3 breaks the premise honestly: one cold run metered 871
+ * impetus, of which ~713 s was a 56 GB weight pull, so 2x that is legitimately above 900.
+ *
+ * What this reveals is not a bad curve but a bad constant: the generic reserve is sized for
+ * image flows and is simultaneously ~5x too generous for sd1.5 and too small for a video flow
+ * carrying tens of GB of weights. See noema-397. Until that is ruled on, a flow lands here only
+ * with a measurement behind it — never to quiet a failing test.
+ */
+const ABOVE_GENERIC_BOUND: Record<string, string> = {
+  'minimax-h3-t2v': 'actum 01a7dc6b, cold: 871 impetus measured, 713 s of it a 56 GB weight pull',
+  'minimax-h3-fl2v': 'same substrate and weight set as minimax-h3-t2v',
+  'minimax-h3-ref2v': 'same substrate; ref2va DiT is the same 21 GB as fl2va',
+}
+
 test('a flow declaring pretium never reserves more than the generic bound', async () => {
   const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
   const modelled = CANONICAL_ESSENTIAE.filter((e) => e.pretium !== undefined)
   assert.ok(modelled.length > 0, 'expected at least one canonical flow to declare a pretium curve')
   for (const essentia of modelled) {
+    if (essentia.id in ABOVE_GENERIC_BOUND) continue
     const reserved = await cursor.reserve(essentia, {})
     assert.ok(
       reserved <= GENERIC_RESERVE_IMPETUS,
@@ -679,5 +700,25 @@ test('raising PROVISION_BUDGET_MS does not change what any cursor reserves', asy
   ] as const) {
     assert.ok(ms >= PROVISION_BUDGET_MS, `${label}: a declared price must not become the deadline`)
     assert.notEqual(BigInt(ms / 1000), 500n, `${label}: deadline tracked the price`)
+  }
+})
+
+test('no ABOVE_GENERIC_BOUND entry is stale', () => {
+  for (const id of Object.keys(ABOVE_GENERIC_BOUND)) {
+    const e = CANONICAL_ESSENTIAE.find((x) => x.id === id)
+    assert.ok(e, `ABOVE_GENERIC_BOUND names '${id}', which is no longer a canonical flow`)
+    assert.ok(e.pretium, `ABOVE_GENERIC_BOUND names '${id}', which no longer declares a curve`)
+  }
+})
+
+test('a flow listed above the generic bound is actually above it (the list is not padded)', async () => {
+  const cursor = new RunPodCursor(makeClient(), makeCompile(), makeModorum(), makeActorum(), BASE_CONFIG)
+  for (const id of Object.keys(ABOVE_GENERIC_BOUND)) {
+    const e = CANONICAL_ESSENTIAE.find((x) => x.id === id)!
+    const reserved = await cursor.reserve(e, {})
+    assert.ok(
+      reserved > GENERIC_RESERVE_IMPETUS,
+      `${id} is listed as above the generic bound but reserves ${reserved} — remove it from the list`,
+    )
   }
 })
