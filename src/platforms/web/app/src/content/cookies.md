@@ -56,4 +56,4 @@ You can clear cookies and site data at any time through your browser settings. C
 
 ## Contact
 
-Questions about cookies: [PRIVACY EMAIL]
+Questions about cookies: mony.group.corporation+privacy@gmail.com

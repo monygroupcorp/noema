@@ -45,10 +45,10 @@ circuit's trusted-setup ceremony is open for contributions rather than finished 
 part, and until it concludes the bearer purse stays unavailable.
 
 If you find a discrepancy between what we say we do and what the code does, we want to know:
-[SECURITY EMAIL]
+mony.group.corporation+security@gmail.com
 
 ## Contact
 
-General: [CONTACT EMAIL]
-Security: [SECURITY EMAIL]
-Press: [PRESS EMAIL]
+General: mony.group.corporation+hello@gmail.com
+Security: mony.group.corporation+security@gmail.com
+Press: mony.group.corporation+press@gmail.com

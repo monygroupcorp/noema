@@ -1,7 +1,7 @@
 # Privacy Policy — DRAFT
 **Last updated:** 2026-08-26
 **Status:** DRAFT. Not legal advice. Requires review before publication.
-**Entity placeholder:** [ENTITY NAME], [JURISDICTION]
+**Controller:** MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina.
 
 ---
 
@@ -25,9 +25,9 @@ The long version follows.
 
 ## 1. Who we are
 
-[ENTITY NAME] operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
+MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina, operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean MONY GROUP LLC. Our registered address is [ADDRESS].
 
-For GDPR purposes, [ENTITY NAME] is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
+For GDPR purposes, MONY GROUP LLC is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
 
 ---
 
@@ -211,13 +211,13 @@ Depending on your jurisdiction, you may have the right to:
 
 We state this plainly rather than promise a deletion we do not perform: erasure severs the person from the record, and the anonymized financial and run rows remain.
 
-To exercise these rights: use the account controls in the product, or contact [CONTACT EMAIL].
+To exercise these rights: use the account controls in the product, or contact mony.group.corporation+privacy@gmail.com.
 
 ---
 
 ## 9. International transfers
 
-If you are located in the EU/EEA, your data may be transferred to and processed in [JURISDICTION]. We rely on [TRANSFER MECHANISM — e.g., Standard Contractual Clauses] for such transfers.
+If you are located in the EU/EEA, your data may be transferred to and processed in the United States. We rely on [TRANSFER MECHANISM — e.g., Standard Contractual Clauses] for such transfers.
 
 ---
 
@@ -229,14 +229,14 @@ The service is not directed to children under 13 (or 16 in the EU). We do not kn
 
 ## 11. Changes
 
-We will notify you of material changes via [email / in-app notice] at least 14 days before they take effect. The "last updated" date at the top of this policy reflects the most recent revision.
+We will notify you of material changes by in-app notice at least 14 days before they take effect. We cannot notify you by email, because we do not hold one. The "last updated" date at the top of this policy reflects the most recent revision.
 
 ---
 
 ## 12. Contact
 
-Privacy questions: [PRIVACY EMAIL]
-Data protection officer (if applicable): [DPO NAME / EMAIL]
+Privacy questions: mony.group.corporation+privacy@gmail.com
+Data protection officer: none appointed. We are below the thresholds that require one; if that changes this section will name the appointee.
 Address: [ADDRESS]
 
 ---

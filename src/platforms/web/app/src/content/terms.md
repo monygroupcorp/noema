@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-11
 **Status:** DRAFT for counsel review. **Not legal advice.** Do not publish without review by
-a qualified attorney. Derived from `docs/legal/compliance-landscape.md`.
+a qualified attorney.
 
 This template encodes the protections the compliance landscape demands. Bracketed
 `[PLACEHOLDERS]` need entity/jurisdiction decisions.
@@ -11,7 +11,7 @@ This template encodes the protections the compliance landscape demands. Brackete
 
 ## 1. The Service
 
-[ENTITY] ("we", "us") provides access to rented GPU compute for running AI models
+MONY GROUP LLC ("we", "us") provides access to rented GPU compute for running AI models
 ("Service"). Two usage modes:
 
 - **Catalog mode** — you select from models we provide and pay per use ("Credits").
@@ -101,7 +101,7 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 ## 10. Governing law & changes
 
 Governed by the laws of [JURISDICTION]. We may update these terms; continued use constitutes
-acceptance. Material changes will be notified via [CHANNEL].
+acceptance. Material changes will be notified by in-app notice.
 
 ---
 
