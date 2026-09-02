@@ -69,6 +69,20 @@ export interface ApiKeyEntry {
   keyHash: string
   name?: string
   status: 'active' | 'inactive'
+  /** Optional per-run spend ceiling minted onto the key itself (used for partner keys) —
+   *  a stringified bigint, string so a value beyond Number.MAX_SAFE_INTEGER survives the
+   *  round trip. Absent on every key minted before this field existed; unchanged behavior
+   *  for those. Parsed and enforced in `apiAcceptors.ts` (`parseKeyImpetusCeiling`), never
+   *  here — this module only reads/writes the raw stored value. */
+  maxImpetusPerRun?: string
+}
+
+/** The shape `verifyApiKeyToAccountId` resolves to — matches `ApiKeyAccount` in
+ *  `apiAcceptors.ts` (not imported from there to avoid a cross-module type dependency for
+ *  what is, structurally, the same shape both sides already agree on). */
+export interface ApiKeyLookupResult {
+  accountId: string
+  maxImpetusPerRun?: unknown
 }
 
 /** The minimal slice of a Mongo `Collection` these functions need — narrow so a
@@ -94,13 +108,15 @@ export async function appendApiKeyRecord(
 }
 
 /**
- * Resolve a raw API key to its account id (the `users` doc's `_id`), or null.
- * MECHANICAL extraction of the closure `src/index.ts` used to define inline as
- * `verifyApiKeyToAccountId` — same checks, same order, same defensive try/catch,
- * only now importable. `src/index.ts` wires this against the real `users`
- * collection; tests wire it against a fake `ApiKeyUsersCollection`.
+ * Resolve a raw API key to its account id (the `users` doc's `_id`) plus any per-run
+ * ceiling minted onto the matched key, or null. MECHANICAL extraction of the closure
+ * `src/index.ts` used to define inline as `verifyApiKeyToAccountId` — same checks, same
+ * order, same defensive try/catch, only now importable and widened to carry
+ * `maxImpetusPerRun` through raw (parsing/enforcement stays in `apiAcceptors.ts`).
+ * `src/index.ts` wires this against the real `users` collection; tests wire it against a
+ * fake `ApiKeyUsersCollection`.
  */
-export async function verifyApiKeyToAccountId(usersCol: ApiKeyUsersCollection, apiKey: string): Promise<string | null> {
+export async function verifyApiKeyToAccountId(usersCol: ApiKeyUsersCollection, apiKey: string): Promise<ApiKeyLookupResult | null> {
   try {
     if (!apiKey.startsWith('ms2_') || apiKey.length < 12) return null
     const prefix = apiKey.slice(0, 12)
@@ -109,7 +125,11 @@ export async function verifyApiKeyToAccountId(usersCol: ApiKeyUsersCollection, a
     const hash = createHash('sha256').update(apiKey).digest('hex')
     const keys = user.apiKeys ?? []
     const match = keys.find(k => k.keyPrefix === prefix && k.keyHash === hash && k.status !== 'inactive')
-    return match ? String(user._id) : null
+    if (!match) return null
+    return {
+      accountId: String(user._id),
+      ...(match.maxImpetusPerRun !== undefined ? { maxImpetusPerRun: match.maxImpetusPerRun } : {}),
+    }
   } catch {
     return null
   }

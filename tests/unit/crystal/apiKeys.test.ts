@@ -92,7 +92,15 @@ test('appendApiKeyRecord + verifyApiKeyToAccountId: round-trips to the account i
   const { apiKey, keyPrefix, keyHash } = generateApiKeyMaterial()
   await appendApiKeyRecord(usersCol, 'acct-1', { keyPrefix, keyHash, status: 'active' })
 
-  assert.equal(await verifyApiKeyToAccountId(usersCol, apiKey), 'acct-1')
+  assert.deepEqual(await verifyApiKeyToAccountId(usersCol, apiKey), { accountId: 'acct-1' })
+})
+
+test('verifyApiKeyToAccountId: carries a stored maxImpetusPerRun through raw', async () => {
+  const usersCol = new FakeUsersCollection()
+  const { apiKey, keyPrefix, keyHash } = generateApiKeyMaterial()
+  await appendApiKeyRecord(usersCol, 'acct-1', { keyPrefix, keyHash, status: 'active', maxImpetusPerRun: '500' })
+
+  assert.deepEqual(await verifyApiKeyToAccountId(usersCol, apiKey), { accountId: 'acct-1', maxImpetusPerRun: '500' })
 })
 
 test('verifyApiKeyToAccountId: garbage / unknown / malformed keys return null', async () => {

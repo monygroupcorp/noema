@@ -7,7 +7,7 @@ import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, MyDeposit, MeView } from '../../../../src/allocutio/api/CrystalApi.js'
 import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
 
@@ -112,6 +112,12 @@ const fakeIdentity: Identity = {
     if (creds.apiKey) return { animaId: 'a1' }
     if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 
@@ -644,6 +650,100 @@ test('ANON_PURSE on: an ownerless x-bursa-token spends unchanged → 200 (post-c
     const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'anon-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
     assert.equal(res.status, 200)
     assert.equal(res.body.run.id, 'r1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// POST /v1/runs — the per-key spend ceiling reaches invokeFlow, and only from
+// the credential
+// ---------------------------------------------------------------------------
+
+/** A server whose identity mints a ceiling for one specific key, and whose api records the
+ *  `InvokeOpts` the route built. */
+function createCeilingServer(): Promise<{ server: http.Server; url: string; seen: () => any }> {
+  let lastOpts: any
+  const api = {
+    async invokeFlow(_auctor: AuctorKey, _t: unknown, _a: unknown, opts: unknown): Promise<Run> {
+      lastOpts = opts
+      return { id: 'r1', status: 'complete', modusId: 'flux-schnell' }
+    },
+  } as unknown as ApiFacade
+  // `capped-key` is a partner key minted with a per-run ceiling; `plain-key` is an ordinary one.
+  const identity: Identity = {
+    async resolve(creds: Credentials): Promise<AuctorKey> {
+      return (await this.resolveCaller(creds)).auctor
+    },
+    async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+      if (creds.apiKey === 'capped-key') return { auctor: { animaId: 'partner' }, maxImpetusPerRun: 250000n }
+      if (creds.apiKey) return { auctor: { animaId: 'a1' } }
+      throw Errors.authMissing()
+    },
+  }
+  return new Promise((resolve, reject) => {
+    const app = express()
+    app.use(express.json())
+    app.use('/v1', createApiRouter({ api, identity }))
+    const server = app.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as { port: number }
+      resolve({ server, url: `http://127.0.0.1:${addr.port}`, seen: () => lastOpts })
+    })
+    server.on('error', reject)
+  })
+}
+
+test("POST /v1/runs threads the KEY's ceiling into invokeFlow as keyMaxImpetusPerRun", async () => {
+  const { server, url, seen } = await createCeilingServer()
+  try {
+    const res = await request(`${url}/v1/runs`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'capped-key' },
+      body: { modusId: 'flux-schnell', aditus: { prompt: 'hi' } },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(seen().keyMaxImpetusPerRun, 250000n, "the credential's ceiling reaches admission")
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs: a key with no ceiling sends no ceiling — the pre-existing shape', async () => {
+  const { server, url, seen } = await createCeilingServer()
+  try {
+    const res = await request(`${url}/v1/runs`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'plain-key' },
+      body: { modusId: 'flux-schnell', aditus: { prompt: 'hi' }, maxImpetus: '9' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal('keyMaxImpetusPerRun' in seen(), false, 'no ceiling field is invented for an ordinary key')
+    assert.equal(seen().maxImpetus, '9', "the caller's own cap is threaded exactly as before")
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs: the request BODY cannot set or raise the key ceiling', async () => {
+  // The bearer of a capped key must not be able to write their own limit. `keyMaxImpetusPerRun`
+  // is not a body field the route reads — the ceiling comes from the resolved credential and
+  // nowhere else — and a body `maxImpetus` above it is just a looser number that `invokeFlow`'s
+  // `min` discards.
+  const { server, url, seen } = await createCeilingServer()
+  try {
+    const res = await request(`${url}/v1/runs`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'capped-key' },
+      body: {
+        modusId: 'flux-schnell',
+        aditus: { prompt: 'hi' },
+        maxImpetus: '999999999',
+        keyMaxImpetusPerRun: '999999999',
+      },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(seen().keyMaxImpetusPerRun, 250000n, 'still the ceiling the CREDENTIAL carries')
+    assert.equal(seen().maxImpetus, '999999999', 'the body cap is passed through, to be MIN-ed below it')
   } finally {
     await closeServer(server)
   }

@@ -4,7 +4,7 @@ import express from 'express'
 import request from 'supertest'
 import { createStorageRouter } from '../../../../src/allocutio/api/storageRouter.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { ObjectStore } from '../../../../src/crystal/R2Uploader.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Bursa, Bursarum } from '../../../../src/types/bursa.js'
@@ -16,6 +16,11 @@ const identity = {
     if (creds.apiKey === 'me') return { animaId: 'me' }
     if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
+  },
+  // Storage admits no spend, but it takes the same `Identity` slice as the run router, which
+  // does. No ceiling is minted here, so this is `resolve` plus an empty limit set.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 

@@ -26,7 +26,7 @@ import type { Actorum } from '../../../../src/types/cursus.js'
 import type { Actum } from '../../../../src/types/actum.js'
 import type { Fragment } from '../../../../src/crystal/muse/taxonomy.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 
 // ── In-memory Datasets double (mirrors MongoDataset's owner-scoped shape, no I/O) ──
 class MemoryDatasets implements Datasets {
@@ -171,6 +171,12 @@ const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: creds.apiKey }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 
