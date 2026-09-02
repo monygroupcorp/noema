@@ -81,6 +81,16 @@ export function AdminWorkspace() {
 
             <div className="byo-row">
               <div className="byo-head">
+                <span className="byo-prov">Partner requests</span>
+              </div>
+              <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s3)' }}>
+                <div className="sub">The B2B partner-program intake queue, awaiting approve/decline.</div>
+                <Link className="btn" to="/admin/partner-requests" style={{ alignSelf: 'flex-start' }}><Ic name="users" /> Open partner requests</Link>
+              </div>
+            </div>
+
+            <div className="byo-row">
+              <div className="byo-head">
                 <span className="byo-prov">Revenue</span>
                 <span className="byo-state connected">trailing 12mo</span>
               </div>
