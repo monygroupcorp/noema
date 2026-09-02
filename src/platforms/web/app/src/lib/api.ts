@@ -728,13 +728,48 @@ export const api = {
     fetch(`/v1/data/datasets/${encodeURIComponent(id)}/media`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
     }).then(j<{ dataset: Dataset }>),
-  // One dataset by id. There is no per-id detail route — listFull + find IS the detail read
-  // (the pattern Datasets.tsx/Dataset.tsx already use); wrapped here so the caption/derive
-  // screens can re-read a dataset after a job writes to it without repeating the find.
+  // One dataset by id: list + find first (the caller's own datasets, cheap, and covers the
+  // common case in one round trip), falling back to the direct read
+  // (`GET /v1/data/datasets/:id`, noema-dataset-access-field) when the id isn't in that list —
+  // which is exactly the case for a dataset the caller may READ but does not own: a public one
+  // someone else made. `listDatasetsFull` stays owner+team scoped on purpose (mixing public
+  // rows into it would conflate "your shelf" with "the catalog"), so this fallback is the only
+  // way a public dataset's own id ever resolves here.
   getDatasetFull: (id: string) =>
     fetch('/v1/data/datasets/full', { headers: readHeaders() })
       .then(j<{ datasets: Dataset[] }>)
-      .then(({ datasets }) => datasets.find((d) => d.id === id) ?? null),
+      .then(({ datasets }) => datasets.find((d) => d.id === id) ?? api.getDataset(id)),
+  // The direct single-dataset read. Resolves for the owner, a team member, or anyone when the
+  // dataset's access is public; not_found otherwise (never forbidden — ids stay
+  // non-enumerable). Auth required, unlike `listPublicDatasets` below — reading ONE dataset by
+  // id still needs an identified caller, same as every other dataset route.
+  getDataset: (id: string): Promise<Dataset | null> =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}`, { headers: readHeaders() })
+      .then(j<{ dataset: Dataset }>)
+      .then(({ dataset }) => dataset)
+      .catch(() => null),
+  // Merge dataset `id` into an already-fetched list when it is missing from it — the fallback
+  // every list-then-find screen needs (Datasets.tsx via Dataset.tsx/Muse.tsx) for a dataset the
+  // caller may read but does not own: `listDatasetsFull` never contains it, so this is the one
+  // extra request that makes it resolvable anyway. A no-op when `id` is absent, already
+  // present, or unreadable by the caller (`getDataset` resolves null, not a thrown error).
+  withDatasetFallback: async (ds: Dataset[], id: string | undefined): Promise<Dataset[]> => {
+    if (!id || ds.some((d) => d.id === id)) return ds;
+    const found = await api.getDataset(id);
+    return found ? [...ds, found] : ds;
+  },
+  // The public dataset catalog — every dataset with access.kind 'public', scoped to nobody in
+  // particular. Public, no auth (mirrors listModels): browsing what the platform publishes
+  // does not require an account, though USING one (spawning a Muse session, appending media)
+  // still does.
+  listPublicDatasets: (opts: { cursor?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.cursor) params.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return fetch(`/v1/data/datasets/public${qs ? `?${qs}` : ''}`)
+      .then(j<{ datasets: Dataset[]; nextCursor?: string }>);
+  },
   // PATCH one caption inside one captionset. Captionsets are editable after generation; the
   // server recomputes that captionset's coverage from the captions present and returns the
   // whole dataset back.

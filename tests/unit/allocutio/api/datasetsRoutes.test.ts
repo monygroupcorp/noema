@@ -53,6 +53,15 @@ class MemoryDatasets implements Datasets {
     const { entries } = await this.list(opts)
     return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: liveMedia(d.media).length, updatedAt: d.mutatum.toISOString() })) }
   }
+  // Same access predicate MongoDataset.listPublic puts in the query: access.kind === 'public'
+  // (or the legacy flat 'public' string), scoped to nobody — no owner/team filter at all.
+  async listPublic(): Promise<DatasetListPage> {
+    const isPublic = (d: Dataset): boolean => {
+      const access = d.access as unknown
+      return access === 'public' || (typeof access === 'object' && access !== null && (access as { kind?: string }).kind === 'public')
+    }
+    return { entries: [...this.store.values()].filter((d) => isPublic(d) && !isArchived(d)) }
+  }
   // Same semantics as MongoDataset.addCaptionset: replace-by-id, coverage derived, mutatum bumped.
   async addCaptionset(datasetId: string, captionset: Captionset): Promise<Dataset | null> {
     const d = this.store.get(datasetId)
@@ -656,6 +665,67 @@ test('a PUBLIC dataset reads for a stranger through getDataset, but stays off bo
       assert.equal(res.status, 404, `${route}: publishing a dataset does not open it to a stranger's writes`)
       assert.equal(res.body.error.code, 'not_found.dataset', `${route}: not_found, never forbidden`)
     }
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/data/datasets/public lists only public datasets, needs no auth, and excludes an archived one', async () => {
+  const datasets = new MemoryDatasets()
+  const open = await datasets.create({
+    owner: 'owner-1', access: { kind: 'public' }, name: 'Open board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  await datasets.create({
+    owner: 'owner-1', name: 'Private board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  const archived = await datasets.create({
+    owner: 'owner-1', access: { kind: 'public' }, name: 'Retired board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  await datasets.archiveDataset(archived.id)
+
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    // No headers at all — the catalog is public, unlike every other dataset route.
+    const res = await request(`${url}/v1/data/datasets/public`)
+    assert.equal(res.status, 200)
+    assert.deepEqual((res.body.datasets as Dataset[]).map((d) => d.id), [open.id])
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /v1/data/datasets/:id resolves for the owner and for a stranger on a public dataset, and 404s otherwise', async () => {
+  const datasets = new MemoryDatasets()
+  const owned = await datasets.create({
+    owner: 'owner-1', access: { kind: 'public' }, name: 'Open board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  const closed = await datasets.create({
+    owner: 'owner-1', name: 'Private board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const owner = { 'x-api-key': 'owner-1' }
+    const stranger = { 'x-api-key': 'stranger-1' }
+
+    const asOwner = await request(`${url}/v1/data/datasets/${owned.id}`, { headers: owner })
+    assert.equal(asOwner.status, 200)
+    assert.equal(asOwner.body.dataset.id, owned.id)
+
+    const asStranger = await request(`${url}/v1/data/datasets/${owned.id}`, { headers: stranger })
+    assert.equal(asStranger.status, 200, 'a public dataset resolves for a caller who neither owns nor shares it')
+    assert.equal(asStranger.body.dataset.id, owned.id)
+
+    const refused = await request(`${url}/v1/data/datasets/${closed.id}`, { headers: stranger })
+    assert.equal(refused.status, 404)
+    assert.equal(refused.body.error.code, 'not_found.dataset')
+
+    const noAuth = await request(`${url}/v1/data/datasets/${owned.id}`)
+    assert.equal(noAuth.status, 401, 'unlike the catalog list, the single-dataset route still requires an identified caller')
   } finally {
     await closeServer(server)
   }

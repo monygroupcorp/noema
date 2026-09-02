@@ -123,18 +123,20 @@ export function Dataset() {
 
   // The list read, callable again: a finished decompose writes fragments onto the record
   // server-side, so the chips arrive through a re-read rather than through the run's outputs.
+  // `withDatasetFallback` covers the id this screen actually needs when it isn't in the
+  // caller's own list — a public dataset someone else made (noema-dataset-access-field).
   const loadDatasets = useCallback(async () => {
     const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
-    setDatasets(ds);
-  }, []);
+    setDatasets(await api.withDatasetFallback(ds, id));
+  }, [id]);
 
   useEffect(() => {
     let live = true;
     api.listDatasetsFull()
-      .then(({ datasets: ds }) => { if (live) setDatasets(ds); })
+      .then(async ({ datasets: ds }) => { if (live) setDatasets(await api.withDatasetFallback(ds, id)); })
       .catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
-  }, []);
+  }, [id]);
 
   const d = (datasets ?? []).find((x) => x.id === id);
   const [activeSet, setActiveSet] = useState<string | null>(null);

@@ -2477,6 +2477,25 @@ export class CrystalApi {
   }
 
   /**
+   * The public dataset catalog — every dataset `access.kind === 'public'` names, scoped to
+   * nobody in particular. Public, NO AUTH: mirrors `listModels`'s catalog precedent — browsing
+   * what the platform publishes should not gate on having an account, even though USING one
+   * still does (spawning a Muse session, appending media, everything else on the dataset
+   * surface stays authenticated through `getDataset`/`_contributableDataset`).
+   *
+   * Falls back to an empty page when the wired store has not implemented `listPublic` — the
+   * same fail-closed convention `findOwned`'s absence follows — rather than throwing, so a
+   * deployment mid-upgrade shows an empty catalog instead of a 500.
+   */
+  async listPublicDatasets(opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
+    const store = this._datasetsStore()
+    if (!store.listPublic) return { datasets: [] }
+    const { entries, nextCursor } = await store.listPublic(opts)
+    const datasets = await Promise.all(entries.map((d) => this._resolveDatasetMedia(d)))
+    return { datasets, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  /**
    * May this caller CONTRIBUTE to this Dataset — the owner, or a member of the team it is
    * shared with? Deliberately narrower than "may read": `access.kind === 'public'` is NOT an
    * arm here. Publishing a dataset makes it usable and viewable by anyone; it does not open it
