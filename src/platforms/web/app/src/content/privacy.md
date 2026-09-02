@@ -9,7 +9,11 @@
 
 We collect as little as we can and we do not track you. Here is what that means in practice:
 
-- Your runs — the inputs you submit and the outputs they produce — are kept as **your own history**, so you can go back to what you made and what it cost. We do not use them to train models.
+- **We never ask who you are.** No email, at any point. Sign up with a wallet and there is no
+  username either — the account is a signature. Anonymous credits work with no account at all.
+- Your runs — the inputs you submit and the outputs they produce — **are kept**, as **your own
+  history**, so you can go back to what you made and what it cost. We can technically read them.
+  We do not use them to train models, and there is no automatic expiry today (see Section 2c).
 - We do not run Google Analytics or any third-party tracking.
 - If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
 - Your session content travels encrypted, but it is **executed on rented third-party GPU hardware**. The operator of that hardware is inside the trust boundary. We do not claim otherwise (see Section 2d).
@@ -34,14 +38,21 @@ For GDPR purposes, [ENTITY NAME] is the data controller for account, billing, an
 | Data | Why we collect it | Retention |
 |---|---|---|
 | Username | Sign-in and account identification | Until you erase your account (see Section 8) |
-| Email address (if you supply one) | Account recovery | Until you erase your account |
 | Password hash | Authentication | Until you erase your account |
 | Account ID (animaId) | Run and billing association | Pseudonymized on erasure; the opaque id is retained (Section 7) |
 | Wallet address (if crypto sign-up) | Payment rail association | Until you erase your account |
 
-We do not currently send email. Verification and reset links are issued in-product; no outbound mail provider is configured in the deployment.
+**We never ask for an email address.** There is no email field in sign-up, no verification mail,
+and no outbound mail provider configured in the deployment. Account recovery does not use email
+either: you bind a wallet or a Telegram account yourself, from your profile, and proving one of
+those is what recovers the account.
 
-You can use anonymous credits without an account. If you do, we hold none of the above.
+**You can hold an account without a username.** Signing up with a wallet mints the account from a
+signature alone — no username, no password, and nothing to remember. In that case the only row
+above we hold is the wallet address and the opaque account id.
+
+You can also use anonymous credits without any account at all. If you do, we hold none of the
+above.
 
 ### 2b. Billing and payment data
 
