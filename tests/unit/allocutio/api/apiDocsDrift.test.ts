@@ -206,6 +206,7 @@ const KNOWN_UNDECLARED = [
   '/api/v1/storage',
   '/api/v1/x402',
   '/v1/admin/partner-requests',
+  '/v1/admin/reports',
   '/v1/auth',
   '/v1/colloquia',
   // Partner program intake — a small hand-rolled router, not built on the CrystalApi

@@ -16694,6 +16694,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.querela",
+      "httpStatus": 404
+    },
+    {
       "code": "input.model_not_resolved",
       "httpStatus": 422
     },

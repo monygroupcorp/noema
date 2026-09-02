@@ -108,6 +108,7 @@ export const Errors = {
   /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
    *  both look identical from the caller's side: "you don't have partner access". */
   notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),
+  notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>
