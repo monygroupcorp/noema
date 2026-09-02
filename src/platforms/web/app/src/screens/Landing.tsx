@@ -78,21 +78,6 @@ const EXPORT = [
   { t: 'Or let us host the URIs', d: 'noema serves the tokenURIs while you deploy. A bridge, not permanent storage — migrate before you rely on it.' },
 ];
 
-/** Where the page still has nothing honest to put. Rendered as marked gaps rather than filled
- *  with invented evidence — a fabricated testimonial is the one thing that cannot be walked
- *  back once it ships. */
-const GAPS = [
-  {
-    id: 'proof',
-    label: 'proof slot — customers, ratings, named artists',
-    note: 'Competitors run logo bars, star ratings and artist stories here. We have none that are real. Stays empty until there are users to quote.',
-  },
-  {
-    id: 'pricing',
-    label: 'pricing slot — plans and numbers',
-    note: 'Blocked: no purchase has ever settled on production, so no number here is claimable yet.',
-  },
-];
 
 const FOOTER = [
   { h: 'Make', links: [['Catalogue', '/catalog'], ['Run a workflow', '/run'], ['Collections', '/collections'], ['Canvas', '/canvas']] },
@@ -293,21 +278,6 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
           </div>
         </section>
 
-        {/* The marked gaps are notes to ourselves about what this page cannot honestly say yet,
-            and they belong in the design lab, not on the front door. Shown to a visitor they
-            announce that we have no customers and have never taken a payment. */}
-        {showPlaceholders && (
-          <section className="lp-gaps">
-            <div className="lp-gaps-in">
-              {GAPS.map((g) => (
-                <div key={g.id} className="gap">
-                  <span className="gap-label mono">{g.label}</span>
-                  <p>{g.note}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* a closing CTA is not an argument that needs holding — it is a door. */}
         <section className="lp-cand-end">
