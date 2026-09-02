@@ -139,7 +139,23 @@ Invoke a flow and return its run handle.
               "type": "string"
             },
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "The classified failure sentence — never raw internal text."
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "provision",
+                "ssh",
+                "bootstrap",
+                "download",
+                "execute"
+              ],
+              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+            },
+            "detail": {
+              "type": "string",
+              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
             }
           },
           "required": [
@@ -239,7 +255,23 @@ Fetch a run by id (poll for completion).
               "type": "string"
             },
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "The classified failure sentence — never raw internal text."
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "provision",
+                "ssh",
+                "bootstrap",
+                "download",
+                "execute"
+              ],
+              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+            },
+            "detail": {
+              "type": "string",
+              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
             }
           },
           "required": [
@@ -339,7 +371,23 @@ Stop an in-flight run and settle it (owner-scoped, idempotent): the pod is termi
               "type": "string"
             },
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "The classified failure sentence — never raw internal text."
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "provision",
+                "ssh",
+                "bootstrap",
+                "download",
+                "execute"
+              ],
+              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+            },
+            "detail": {
+              "type": "string",
+              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
             }
           },
           "required": [

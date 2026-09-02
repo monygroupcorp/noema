@@ -58,6 +58,122 @@ test('fractus without error falls back to classified copy for the default messag
   assert.equal(run.failure?.message, classifyError('run failed'))
 })
 
+// ===========================================================================
+// noema-390 — a failed run tells its owner where it died
+// ===========================================================================
+//
+// Three production runs on the MiniMax H3 bring-up returned the identical body
+// {"code":"run.execution_error","message":"Something went wrong. Please try again."}
+// while the server log named a different cause each time. Two of them cost a full
+// failed run (~20 min, ~$0.17 of pod time) to diagnose by inference.
+//
+// The projection now carries `failure.stage` — a closed enum, no free text, safe for
+// every caller — and, on the OWNER-scoped projection only, `failure.detail`: the
+// recorded text verbatim.
+
+/** The three bring-up failures, verbatim, plus the fourth that already worked. */
+const BRINGUP_FAILURES: Array<[label: string, raw: string, stage: string | undefined]> = [
+  ['5effbe17 — a full disk during the weight download',
+   'model download failed: wget https://…/model.safetensors returned non-zero exit status 3',
+   'download'],
+  ['6c0de9a1 — the pod never reached sshd',
+   'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host — abandoned pod-a, pod-b, pod-c',
+   'ssh'],
+  ['01a7dc6b attempt 1 — the runner never came up',
+   'comfyrunner did not become ready within timeout',
+   'bootstrap'],
+  ['7d5fd175 — a job timeout, which already read well',
+   'Actum expired — pod never reported back',
+   undefined],
+]
+
+test('an actum failed at each stage projects DISTINGUISHABLY — the three bring-up runs', () => {
+  const seen = new Map<string, string[]>()
+  for (const [label, raw, stage] of BRINGUP_FAILURES) {
+    const run = toRun(makeActum({ status: 'fractus', error: raw }))
+    assert.equal(run.failure?.stage, stage, label)
+    const key = `${run.failure?.stage ?? '<none>'}|${run.failure?.message}`
+    seen.set(key, [...(seen.get(key) ?? []), label])
+  }
+  // The point of the item: these four failures are four different answers, not one.
+  for (const [key, labels] of seen) {
+    assert.equal(labels.length, 1, `${labels.join(' and ')} are still indistinguishable (${key})`)
+  }
+})
+
+test('every stage in the lifecycle projects its own value', () => {
+  const cases: Array<[string, string]> = [
+    ['RunPod pod provision failed: no capacity for the requested GPU class', 'provision'],
+    ['Pod pod-3 SSH not ready within 300000ms — no successful status read in 40 polls', 'ssh'],
+    ['comfyrunner not reachable on the pod', 'bootstrap'],
+    ['model download failed: No space left on device', 'download'],
+    ['comfyrunner job failed: CUDA out of memory', 'execute'],
+  ]
+  const stages = new Set<string>()
+  for (const [raw, stage] of cases) {
+    const run = toRun(makeActum({ status: 'fractus', error: raw }))
+    assert.equal(run.failure?.stage, stage, raw)
+    stages.add(stage)
+  }
+  assert.equal(stages.size, 5, 'all five stages are exercised')
+})
+
+test('stage is ABSENT when the recorded cause does not say where — the field never guesses', () => {
+  const run = toRun(makeActum({ status: 'fractus', error: 'a brand new failure nobody has classified' }))
+  assert.ok(run.failure, 'the run still reports a failure')
+  assert.equal(run.failure?.stage, undefined, 'an unplaceable failure gets no stage rather than a plausible one')
+  assert.equal(run.failure?.message, 'Something went wrong. Please try again.')
+})
+
+test('stage carries NO free text — nothing from the raw message can ride out on it', () => {
+  // The whole reason `stage` is safe for a non-owner. Asserted against a raw string
+  // stuffed with the things the original comment was right to keep in: a pod id, a
+  // duration, a URL, a path.
+  const raw = 'model download failed on pod-7f3a after 128476ms: wget https://weights.example/secret/model.safetensors -O /workspace/models/unet/x.safetensors returned non-zero exit status 3'
+  const run = toRun(makeActum({ status: 'fractus', error: raw }))
+  assert.equal(run.failure?.stage, 'download')
+  const publicText = JSON.stringify(run)
+  assert.ok(!/pod-7f3a|128476|weights\.example|\/workspace/.test(publicText),
+    'a non-owner projection leaked raw internal detail')
+})
+
+test('a NON-OWNER gets the classified sentence and nothing else — no detail, ever', () => {
+  // `toRun` is the projection with no ownership behind it. The raw text is an operator
+  // artefact; only the owner-scoped projection may carry it.
+  for (const [, raw] of BRINGUP_FAILURES.map(([l, r]) => [l, r] as const)) {
+    const run = toRun(makeActum({ status: 'fractus', error: raw }))
+    assert.equal(run.failure?.detail, undefined, `toRun must never carry detail (${raw})`)
+    assert.ok(!JSON.stringify(run).includes(raw), 'the raw recorded text reached a non-owner')
+  }
+})
+
+test('the OWNER gets the raw recorded text verbatim, alongside the classified sentence', () => {
+  const raw = 'model download failed: wget https://…/model.safetensors returned non-zero exit status 3'
+  const detail = toRunDetail(makeActum({ status: 'fractus', error: raw }))
+  assert.equal(detail.failure?.detail, raw, 'verbatim — not truncated, not reworded')
+  assert.equal(detail.failure?.message, classifyError(raw), 'the sentence is still the classified one')
+  assert.equal(detail.failure?.stage, 'download')
+})
+
+test('the owner can tell the three bring-up failures apart WITHOUT reading a server log', () => {
+  // Deliverable 1, stated as the operator would experience it.
+  const details = BRINGUP_FAILURES.slice(0, 3).map(([, raw]) =>
+    toRunDetail(makeActum({ status: 'fractus', error: raw })).failure?.detail)
+  assert.equal(new Set(details).size, 3, 'three failures, three distinct causes on the run itself')
+  assert.ok(details.every(d => typeof d === 'string' && d.length > 0))
+})
+
+test('toRunDetail adds no detail when the actum recorded no error', () => {
+  const detail = toRunDetail(makeActum({ status: 'fractus' }))
+  assert.equal(detail.failure?.detail, undefined)
+  assert.equal(detail.failure?.message, classifyError('run failed'))
+})
+
+test('a successful run carries no failure on either projection', () => {
+  assert.equal(toRun(makeActum({ status: 'completus' })).failure, undefined)
+  assert.equal(toRunDetail(makeActum({ status: 'completus', error: 'stale' })).failure, undefined)
+})
+
 test('cost is the impetus bigint serialised as a string', () => {
   const run = toRun(makeActum({ impetus: 12345n }))
   assert.equal(run.cost, '12345')
