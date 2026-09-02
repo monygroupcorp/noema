@@ -51,8 +51,10 @@ import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
 import { AdminWorkspace } from './screens/AdminWorkspace';
+import { AdminPartnerRequests } from './screens/AdminPartnerRequests';
 import { Doc } from './screens/Doc';
 import { Pricing } from './screens/Pricing';
+import { RequestDemo } from './screens/RequestDemo';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
 import featuresMd from './content/features.md?raw';
@@ -101,6 +103,10 @@ export function App() {
       {/* Admin workspace hub (noema-011): links the review queue + read-only revenue/COGS
           cards. me.admin-gated client-side; every report re-gates server-side regardless. */}
       <Route path="/admin" element={<AdminWorkspace />} />
+      {/* B2B partner-program intake review (partner-embed-07): the admin-only queue for
+          /v1/admin/partner-requests, linked from the admin workspace hub the same way
+          /admin/review is. */}
+      <Route path="/admin/partner-requests" element={<AdminPartnerRequests />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />
@@ -125,6 +131,9 @@ export function App() {
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
       <Route path="/pricing" element={<Pricing />} />
+      {/* Public "become a B2B partner" intake (partner-embed-07) — mirrors /pricing: no auth
+          check, public route. Posts to /v1/partner-requests (partnerRequestRouter.ts). */}
+      <Route path="/partners" element={<RequestDemo />} />
       <Route path="/blog" element={<Doc md={blogMd} />} />
       <Route path="/legal/privacy" element={<Doc md={privacyMd} />} />
       <Route path="/legal/cookies" element={<Doc md={cookiesMd} />} />
