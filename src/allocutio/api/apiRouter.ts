@@ -165,6 +165,7 @@ export interface ApiFacade {
   addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
+  setDatasetAccess(auctor: AuctorKey, datasetId: string, kind: 'public' | 'private'): Promise<import('../../types/dataset.js').Dataset>
   archiveDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   restoreDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   archiveDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<import('../../types/dataset.js').Dataset>
@@ -1096,6 +1097,22 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { caption?: unknown }
     const dataset = await api.setCaption(auctor, String(req.params.id), String(req.params.captionsetId), String(req.params.mediaId), body.caption)
     res.status(200).json({ dataset })
+  }))
+
+  // POST /v1/data/datasets/:id/access — publish or unpublish a dataset the caller OWNS.
+  // Owner-only, same reasoning as archive below: the team overlay adds readers and
+  // contributors, not a second principal who decides the set's public face. Body: { kind:
+  // 'public' | 'private' }. Making a set public grants READ only (GET /v1/data/datasets/public,
+  // GET /v1/data/datasets/:id, spawning a Muse session) — appending media, attaching or editing
+  // a captionset still require ownership or team membership regardless. Reversible in either
+  // direction; a stranger's dataset id 404s.
+  router.post('/data/datasets/:id/access', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const kind = (req.body ?? {}) as { kind?: unknown }
+    if (kind.kind !== 'public' && kind.kind !== 'private') {
+      throw Errors.inputMalformed("kind must be 'public' or 'private'")
+    }
+    res.status(200).json({ dataset: await api.setDatasetAccess(auctor, String(req.params.id), kind.kind) })
   }))
 
   // POST /v1/data/datasets/:id/archive — archive a dataset the caller OWNS. Owner-only, and

@@ -786,6 +786,13 @@ export const api = {
   // of the four calls returns the WHOLE dataset back, which is what a caller re-renders from.
   // Writes, so they take `authHeaders()`: ownership is resolved from the caller server-side
   // and never from a parameter.
+  // Publish (kind: 'public') or unpublish (kind: 'private') a dataset the caller owns — makes
+  // it listed in GET /v1/data/datasets/public and readable/Muse-able by anyone, or takes it back
+  // out. Owner-only, like archive/restore below; a team member's attempt 404s the same way.
+  setDatasetAccess: (id: string, kind: 'public' | 'private') =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/access`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind }),
+    }).then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
   archiveDataset: (id: string) =>
     fetch(`/v1/data/datasets/${encodeURIComponent(id)}/archive`, { method: 'POST', headers: authHeaders() })
       .then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
@@ -1475,6 +1482,10 @@ export interface Dataset {
    *  list routes, so it arrives here only as the response to an archive — which is what keeps
    *  the undo reachable on the screen that did it. */
   archivum?: string;
+  /** Present with kind 'public' once published (setDatasetAccess) — listed in the catalog and
+   *  readable/Muse-able by anyone. Absent means owner/team-only, the behaviour every dataset
+   *  had before publishing existed. */
+  access?: { kind: 'public' | 'private' };
 }
 // The body `POST /v1/data/datasets/:id/media` takes — the same discriminated ingestion
 // shape as creation, minus the fields that only make sense when minting a set.

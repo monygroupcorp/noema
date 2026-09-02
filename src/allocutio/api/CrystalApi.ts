@@ -2840,6 +2840,24 @@ export class CrystalApi {
     return this._resolveDatasetMedia(updated)
   }
 
+  /**
+   * Publish (or unpublish) a Dataset — set `access.kind` to `'public'` or back to `'private'`.
+   * OWNER-ONLY, same reasoning as `archiveDataset`: this is a decision about the set's whole
+   * public face, not additive work a team member contributes, so it resolves through
+   * `_ownedDatasetByOwner` rather than `getDataset`/`_contributableDataset`. Reversible in
+   * either direction — `'private'` is a real write here, not an absence, so an owner can always
+   * take a set back out of the catalog. Nothing here spends, and nothing here checks whether
+   * the set has captions or fragments yet: an owner may publish an empty board, and the Muse
+   * screen's own roll button (disabled at zero live fragments) is where that becomes visible,
+   * not a refusal here.
+   */
+  async setDatasetAccess(auctor: AuctorKey, datasetId: string, kind: 'public' | 'private'): Promise<Dataset> {
+    const d = await this._ownedDatasetByOwner(auctor, datasetId)
+    const updated = await this._datasetsStore().setAccess(d.id, kind)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return this._resolveDatasetMedia(updated)
+  }
+
   /** Restore an archived Dataset the caller owns — it returns to both list routes. Same
    *  owner-only resolution as `archiveDataset` (a restore is the other half of the same
    *  lifecycle verb, so it cannot be looser than the archive it undoes); an archived dataset

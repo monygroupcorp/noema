@@ -311,6 +311,23 @@ export class MongoDataset implements Datasets {
     return { ...rest, mutatum }
   }
 
+  /** Set (or clear, via `'private'`) a dataset's access. Always written in the `{ kind }` form
+   *  — the flat `'public'` string `findOwned`/`listPublic` also admit is a read-side allowance
+   *  for a legacy shape this record never actually takes, not something this writes. Bumps
+   *  `mutatum` for the same reason every other setter here does — it is the pagination sort
+   *  key, so publishing a dataset surfaces it at the top of the catalog. Idempotent: setting
+   *  the kind it already has still bumps `mutatum` (unlike archive/restore, there is no
+   *  "first" access to preserve). Returns null when the dataset does not exist. */
+  async setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+
+    const mutatum = new Date()
+    const access = { kind }
+    await this.col.updateOne({ id: datasetId }, { $set: { access, mutatum } })
+    return { ...current, access, mutatum }
+  }
+
   /**
    * Archive ONE media item, and recompute every captionset's coverage against what is left.
    *

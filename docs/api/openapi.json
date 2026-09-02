@@ -4616,6 +4616,246 @@
         }
       }
     },
+    "/data/datasets/{id}/access": {
+      "post": {
+        "summary": "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dataset": {
+                      "type": "object",
+                      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string",
+                          "description": "FK -> Anima, the owning identity."
+                        },
+                        "sodalitasId": {
+                          "type": "string",
+                          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "modality": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "video",
+                            "audio",
+                            "3d"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "sealed",
+                            "local",
+                            "remote"
+                          ]
+                        },
+                        "media": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "upload",
+                                  "generation"
+                                ]
+                              },
+                              "actumId": {
+                                "type": "string",
+                                "description": "FK -> Actum. Present iff source === 'generation'."
+                              },
+                              "addedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "addedBy": {
+                                "type": "string",
+                                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "url",
+                              "source",
+                              "addedAt"
+                            ]
+                          }
+                        },
+                        "captionsets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                              },
+                              "coverage": {
+                                "type": "string",
+                                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+                              },
+                              "captions": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "method",
+                              "coverage"
+                            ]
+                          }
+                        },
+                        "versions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "v": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "number"
+                              },
+                              "when": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "v",
+                              "count",
+                              "when"
+                            ]
+                          }
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "owner",
+                        "name",
+                        "modality",
+                        "custody",
+                        "media",
+                        "captionsets",
+                        "versions",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "dataset"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "private"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/data/datasets/{id}/archive": {
       "post": {
         "summary": "Archive a dataset the caller owns. Owner-only: a team member reads and contributes, but retiring the set stays with its owner. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.",
