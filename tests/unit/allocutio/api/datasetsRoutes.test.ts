@@ -187,6 +187,7 @@ function makeFakeActorum(seed: Actum[]): Actorum {
 const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: creds.apiKey }
+    if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
   },
   // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
@@ -739,7 +740,35 @@ test('GET /v1/data/datasets/:id resolves for the owner and for a stranger on a p
     assert.equal(refused.body.error.code, 'not_found.dataset')
 
     const noAuth = await request(`${url}/v1/data/datasets/${owned.id}`)
-    assert.equal(noAuth.status, 401, 'unlike the catalog list, the single-dataset route still requires an identified caller')
+    assert.equal(noAuth.status, 401, 'no credential at all is still refused — commitment is a real credential, not its absence')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a truly anonymous commitment caller (no account at all) reads a public dataset, and is still refused on a private one', async () => {
+  // rth's ruling, 2026-09-02: sitting at a public dataset and its Muse session needs no
+  // account. Proved against the actual anonymous credential the web client sends by default
+  // (x-commitment) — not a stand-in for "an account nobody happens to own."
+  const datasets = new MemoryDatasets()
+  const owned = await datasets.create({
+    owner: 'owner-1', access: { kind: 'public' }, name: 'Open board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  const closed = await datasets.create({
+    owner: 'owner-1', name: 'Private board', modality: 'image', custody: 'local',
+    media: [], captionsets: [], versions: [{ v: '1.0.0', count: 0, when: new Date() }],
+  })
+  const { server, url } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const anon = { 'x-commitment': '0xanon-visitor' }
+
+    const open = await request(`${url}/v1/data/datasets/${owned.id}`, { headers: anon })
+    assert.equal(open.status, 200, 'no account, no team, no prior visit — just a public dataset')
+    assert.equal(open.body.dataset.id, owned.id)
+
+    const stillClosed = await request(`${url}/v1/data/datasets/${closed.id}`, { headers: anon })
+    assert.equal(stillClosed.status, 404, 'the same anonymous caller still cannot read a private dataset')
   } finally {
     await closeServer(server)
   }

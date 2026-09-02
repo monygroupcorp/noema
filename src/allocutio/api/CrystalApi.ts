@@ -2607,6 +2607,13 @@ export class CrystalApi {
    *  forbidden, so ids stay non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/
    *  `_ownedCollection`).
    *
+   *  NO IDENTITY REQUIREMENT UP FRONT, unlike every other dataset seam — deliberately, since
+   *  2026-09-02: rth's ruling is that an anonymous visitor may sit at a public dataset's Muse
+   *  session (see it, its captions, its decomposed fragments) and configure it, with no account
+   *  at all. `_ownsDataset` already resolves `false` rather than throwing for a caller with no
+   *  `animaId`, so the public arm below is the only way an anonymous caller ever succeeds here —
+   *  a private dataset stays exactly as closed to them as it always was.
+   *
    *  THIS IS THE READ GATE ONLY, no longer the contribute one: `spawnMuseSession`,
    *  `_motherPool` and `promoteMuseSession` resolve a mother dataset through here on purpose
    *  (starting a Muse session, or reading a mother's name, is a read), but the three additive
@@ -2621,7 +2628,6 @@ export class CrystalApi {
    *  Private media is resolved into short-lived links AFTER the gate above, exactly as
    *  `getRun` presigns a run's exitus after its ownership check. */
   async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
-    this._datasetOwner(auctor)
     const d = await this._datasetsStore().find(id)
     const readable = d !== null && (d.access?.kind === 'public' || (await this._ownsDataset(auctor, d)))
     if (!d || !readable) {
@@ -2984,10 +2990,51 @@ export class CrystalApi {
     return store
   }
 
-  /** Muse sessions are animaId-keyed like datasets — an anonymous caller cannot own one. */
+  /**
+   * The key a Muse session is scoped/matched against — an identified account's `animaId`, or
+   * (unlike `_datasetOwner`) an anonymous caller's `commitment`. Sessions off a PUBLIC dataset
+   * are meant to be sat at and configured with no account at all — see the dataset gate
+   * `spawnMuseSession` resolves through (`getDataset`, which already admits `access.kind ===
+   * 'public'`); a session can only ever be SPAWNED off a dataset the caller may read, so
+   * widening this to commitment never opens a session on a private dataset to a stranger.
+   *
+   * `commitment` is a stable per-browser value (`localStorage`, noema-commitment) rather than a
+   * one-shot credential, which is what makes "resume the session I was just configuring" work
+   * for a returning anonymous visitor: the SAME commitment matches `stored.owner` on the next
+   * request. A different anonymous visitor's different commitment does not, so one stranger's
+   * anonymous session stays as closed to another as an owner's does.
+   *
+   * `{ bursaToken }` (the third `AuctorKey` arm, a spend-only bearer credential the client never
+   * sends on a read) falls through to the same refusal `_datasetOwner` gives it — deliberately
+   * not treated as a stable identity to scope a resumable session against.
+   *
+   * DELIBERATELY NOT a green light for keeping, recording, steering or promoting — those
+   * verbs go THROUGH this resolver (via `_museSession`/`_mutateMuseSession`) but are each
+   * additionally gated by `_requireAccount`, rth's product ruling (2026-09-02): an anonymous
+   * visitor may sit at a public dataset's Muse session and configure it — lock, vary, enable or
+   * weight a fragment — but the account (and top-up) modal intercepts before anything actually
+   * spends or persists past the session's own working state. Firing a roll itself is gated
+   * client-side, at the fire button, not here — `createRun` is the generic run route every
+   * anonymous chat/generation already fires through, and narrowing IT for Muse specifically
+   * would need its own aditus-level change this item does not make.
+   */
   private _museSessionOwner(auctor: AuctorKey): string {
     if ('animaId' in auctor) return auctor.animaId
-    throw Errors.authForbidden('Muse sessions require an identified account')
+    if ('commitment' in auctor) return auctor.commitment
+    throw Errors.authForbidden('Muse sessions require an identified account or an anonymous commitment')
+  }
+
+  /**
+   * Require a real, identified account — the far side of `_museSessionOwner`'s configure-freely
+   * boundary. Called FIRST, before any other work, by every Muse verb that goes beyond sitting
+   * at a session and configuring it: `keepMuseRoll`, `recordMusePiece`, `updateMusePiece`,
+   * `saveMusePiece`, `steerMuseSession`, `promoteMuseSession`. Spawning, resuming, reading and
+   * configuring a session (fragment enable/weight, run setup) do NOT call this — the whole point of
+   * the split. A caller refused here still has a real, usable session; they only lose the verbs
+   * gated here until they have an account.
+   */
+  private _requireAccount(auctor: AuctorKey): void {
+    if (!('animaId' in auctor)) throw Errors.authForbidden('this action requires an identified account')
   }
 
   /** The wire projection of a stored session — the floor as an entry array, never a Map. */
@@ -3345,6 +3392,7 @@ export class CrystalApi {
    * in the body is a scope value, and a stranger's session is reported as not found.
    */
   async keepMuseRoll(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { prompt?: unknown; paid?: unknown }
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
     if (!prompt) throw Errors.inputMalformed('prompt is required')
@@ -3360,6 +3408,7 @@ export class CrystalApi {
    * stored, because its lineage could never be resolved afterwards.
    */
   async recordMusePiece(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as {
       runId?: unknown
       rollIndex?: unknown
@@ -3422,6 +3471,7 @@ export class CrystalApi {
    * not hold is reported as not found rather than recorded.
    */
   async updateMusePiece(auctor: AuctorKey, id: string, runId: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { reaction?: unknown; dismissed?: unknown }
     const run = typeof runId === 'string' ? runId.trim() : ''
     if (!run) throw Errors.inputMalformed('runId is required')
@@ -3497,6 +3547,7 @@ export class CrystalApi {
    * session claiming a save that did not happen.
    */
   async saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const run = typeof runId === 'string' ? runId.trim() : ''
     if (!run) throw Errors.inputMalformed('runId is required')
 
@@ -3569,6 +3620,7 @@ export class CrystalApi {
    * `nomen`, which is a label. There is no scope value a caller could send.
    */
   async promoteMuseSession(auctor: AuctorKey, id: string, input?: unknown): Promise<Collection> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { nomen?: unknown }
     const asked = typeof body.nomen === 'string' ? body.nomen.trim() : ''
 
@@ -3630,6 +3682,7 @@ export class CrystalApi {
    * settled at its real token cost.
    */
   async steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<SteerProposalView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { instruction?: unknown }
     const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : ''
     if (!instruction) throw Errors.inputMalformed('instruction is required')
