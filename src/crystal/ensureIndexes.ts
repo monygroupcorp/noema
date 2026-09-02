@@ -184,6 +184,14 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // memoriae — distilled agent memory (one per anima)
     db.collection('memoriae').createIndex({ animaId: 1 }, { unique: true }),
 
+    // partnerRequests — B2B partner program intake queue
+    db.collection('partnerRequests').createIndex({ id: 1 }, { unique: true }),
+    db.collection('partnerRequests').createIndex({ status: 1, natum: -1 }),
+    db.collection('partnerRequests').createIndex({ emailKey: 1, natum: -1 }),
+
+    // partners — approved B2B partner accounts (one per animaId)
+    db.collection('partners').createIndex({ animaId: 1 }, { unique: true }),
+
     // materiae — GPU pod records
     db.collection('materiae').createIndex({ id: 1 }, { unique: true }),
     db.collection('materiae').createIndex({ status: 1, imageRef: 1 }),

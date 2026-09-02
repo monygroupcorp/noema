@@ -144,6 +144,39 @@ test('runFlowTool without auctor returns auth.missing error', async () => {
   assert.ok(result.content[0].text.includes('auth.missing'))
 })
 
+test('runFlowTool threads the credential ceiling into invokeFlow', async () => {
+  // `run_flow` is `invokeFlow` by another door. A partner key capped per run over REST has to be
+  // capped per run over MCP too, or the cap is one route away from being nothing.
+  let seen: any
+  const api = makeFakeApi({
+    invokeFlow: async (_a: unknown, _t: unknown, _ad: unknown, opts: unknown) => { seen = opts; return fakeRunDetail },
+  } as any)
+  const result = await runFlowTool(api, auctor, { modusId: 'flux-schnell', aditus: { prompt: 'hi' } }, 250000n)
+  assert.equal(result.isError, undefined)
+  assert.equal(seen.keyMaxImpetusPerRun, 250000n)
+})
+
+test('runFlowTool: a maxImpetus ARGUMENT cannot replace the credential ceiling', async () => {
+  // The tool's own args are written by the caller, so a `maxImpetus` arg is a request, not a
+  // limit. Both reach `invokeFlow`, which takes the tighter of the two.
+  let seen: any
+  const api = makeFakeApi({
+    invokeFlow: async (_a: unknown, _t: unknown, _ad: unknown, opts: unknown) => { seen = opts; return fakeRunDetail },
+  } as any)
+  await runFlowTool(api, auctor, { modusId: 'flux-schnell', maxImpetus: '999999999' }, 4n)
+  assert.equal(seen.maxImpetus, '999999999')
+  assert.equal(seen.keyMaxImpetusPerRun, 4n)
+})
+
+test('runFlowTool with no credential ceiling sends none — the pre-existing shape', async () => {
+  let seen: any
+  const api = makeFakeApi({
+    invokeFlow: async (_a: unknown, _t: unknown, _ad: unknown, opts: unknown) => { seen = opts; return fakeRunDetail },
+  } as any)
+  await runFlowTool(api, auctor, { modusId: 'flux-schnell' })
+  assert.equal('keyMaxImpetusPerRun' in seen, false)
+})
+
 test('runFlowTool with api throwing ApiError returns that error', async () => {
   const api = makeFakeApi({
     invokeFlow: async () => { throw new ApiError('not_found.flow', "Flow 'x' not found", 404) },

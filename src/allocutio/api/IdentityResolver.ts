@@ -38,6 +38,26 @@ export interface Credentials {
 // verification failure. The real implementations (jwt verify, internal-API key
 // lookup, web3 signature recovery) are wired in at app construction.
 
+/**
+ * A verified API key's identity: the anima it authenticates as, plus any spend
+ * ceiling minted onto the key ITSELF.
+ *
+ * An API key is issued by the platform, not by its bearer, so a limit recorded on
+ * the key is a limit the bearer cannot edit. `maxImpetusPerRun` is that limit at the
+ * per-run altitude — see `CrystalApi.InvokeOpts.keyMaxImpetusPerRun` for how it binds.
+ * Absent (the shape every key had before this field existed) means the key imposes no
+ * ceiling of its own and admission behaves exactly as it always has.
+ *
+ * There is deliberately no AGGREGATE ceiling here: the account's own balance already
+ * bounds everything a key can spend in total, through the settle path every caller
+ * goes through.
+ */
+export interface ApiKeyIdentity {
+  animaId: string
+  /** Hard per-run admission cap (impetus). Absent → the key adds no cap of its own. */
+  maxImpetusPerRun?: bigint
+}
+
 export interface CredentialAcceptors {
   /**
    * Federated SSO (JWKS) verification of a Bearer token, tried BEFORE `verifyJwt`.
@@ -50,8 +70,34 @@ export interface CredentialAcceptors {
    */
   verifyAgentJwt?(token: string): Promise<string | null>
   verifyJwt?(token: string): Promise<string | null>
-  validateApiKey?(key: string): Promise<string | null>
+  /**
+   * API-key verification. Returns the key's `ApiKeyIdentity` — the resolved `animaId`
+   * and any ceiling the key carries — or `null` when the key does not verify.
+   */
+  validateApiKey?(key: string): Promise<ApiKeyIdentity | null>
   verifyWeb3?(w: { address: string; signature: string; nonce: string }): Promise<string | null>
+}
+
+// ---------------------------------------------------------------------------
+// ResolvedCaller — the AuctorKey plus the limits its CREDENTIAL carries
+// ---------------------------------------------------------------------------
+
+/**
+ * What one request's credential resolved to.
+ *
+ * `auctor` is the identity the crystal knows: the same `AuctorKey` `resolve()` has always
+ * returned, and the ONLY part that is ever persisted (it lands verbatim on `Inceptio.by`).
+ * Anything else here describes the CREDENTIAL, not the account, and stays out of the crystal —
+ * which is why it rides alongside the `AuctorKey` rather than inside it.
+ */
+export interface ResolvedCaller {
+  auctor: AuctorKey
+  /**
+   * Per-run spend ceiling minted onto the credential (an API key). Absent for every other
+   * credential kind and for keys that carry none. Routers thread this into
+   * `CrystalApi.invokeFlow`, where it binds as a floor under the caller's own `maxImpetus`.
+   */
+  maxImpetusPerRun?: bigint
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +110,18 @@ export class IdentityResolver {
   /**
    * Resolve raw `Credentials` into an `AuctorKey`.
    *
+   * The identity-only view of `resolveCaller` — unchanged in behaviour and in shape, so
+   * every caller that only needs "who is this" keeps working exactly as before. A route
+   * that ADMITS SPEND wants `resolveCaller` instead: it also carries the limits the
+   * credential itself imposes, which this view drops.
+   */
+  async resolve(creds: Credentials): Promise<AuctorKey> {
+    return (await this.resolveCaller(creds)).auctor
+  }
+
+  /**
+   * Resolve raw `Credentials` into an `AuctorKey` plus whatever limits the credential carries.
+   *
    * Priority order:
    *   1. `commitment` — anonymous arcanum spend, accepted as-is (the real spend
    *      validation / double-spend check happens downstream in ActumInceptor).
@@ -75,10 +133,10 @@ export class IdentityResolver {
    * If a credential is present but its acceptor isn't configured, this throws
    * `auth.invalid` ('<kind> auth not configured').
    */
-  async resolve(creds: Credentials): Promise<AuctorKey> {
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
     // 1. commitment — self-asserting anonymous identity, no acceptor needed.
     if (creds.commitment) {
-      return { commitment: creds.commitment }
+      return { auctor: { commitment: creds.commitment } }
     }
 
     // 2. apiKey
@@ -86,9 +144,15 @@ export class IdentityResolver {
       if (!this.acceptors.validateApiKey) {
         throw Errors.authInvalid('apiKey auth not configured')
       }
-      const animaId = await this.acceptors.validateApiKey(creds.apiKey)
-      if (!animaId) throw Errors.authInvalid('invalid API key')
-      return { animaId }
+      const identity = await this.acceptors.validateApiKey(creds.apiKey)
+      if (!identity) throw Errors.authInvalid('invalid API key')
+      // The ceiling rides BESIDE the AuctorKey, never inside it: `{ animaId }` is what the
+      // crystal persists as `Inceptio.by`, and a per-credential limit is not part of who
+      // the caller is.
+      return {
+        auctor: { animaId: identity.animaId },
+        ...(identity.maxImpetusPerRun !== undefined ? { maxImpetusPerRun: identity.maxImpetusPerRun } : {}),
+      }
     }
 
     // 3. authorization: Bearer <jwt>
@@ -101,7 +165,7 @@ export class IdentityResolver {
       //     its own ApiError (401/503) — never falls through to a catch-all 403.
       if (this.acceptors.verifyAgentJwt) {
         const federatedAnimaId = await this.acceptors.verifyAgentJwt(token)
-        if (federatedAnimaId) return { animaId: federatedAnimaId }
+        if (federatedAnimaId) return { auctor: { animaId: federatedAnimaId } }
       }
 
       // 3b. Legacy web JWT (env-secret HS256).
@@ -110,7 +174,7 @@ export class IdentityResolver {
       }
       const animaId = await this.acceptors.verifyJwt(token)
       if (!animaId) throw Errors.authInvalid('invalid token')
-      return { animaId }
+      return { auctor: { animaId } }
     }
 
     // 4. web3 signature bundle
@@ -120,7 +184,7 @@ export class IdentityResolver {
       }
       const animaId = await this.acceptors.verifyWeb3(creds.web3)
       if (!animaId) throw Errors.authInvalid('web3 verification failed')
-      return { animaId }
+      return { auctor: { animaId } }
     }
 
     // 5. nothing provided

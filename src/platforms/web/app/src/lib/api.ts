@@ -485,6 +485,11 @@ export const api = {
   // param (query params leak into access logs/history).
   streamRun: (id: string) => sseStream(`/v1/runs/${id}/stream`, readHeaders()),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
+  // GET /v1/me/partner — the caller's B2B partner record, if any. A "partner" is just an
+  // ordinary account a platform admin has approved (no on-chain agent/treasury). Uses `jApi`
+  // (not `j`) so a 404 (no/revoked partner) surfaces as a typed `ApiRequestError` the Partner
+  // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
+  mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
 
   // ── Concierge (colloquia, noema-095) ──────────────────────────────────────
   // Same auth pattern as createRun (Decision record Q4, noema-099): an active
@@ -1685,6 +1690,20 @@ export interface MeStatus {
   studios: StudioEntry[];
   joinable: JoinableEntry[];
   takenAt: string;
+}
+
+// The caller's B2B partner record (GET /v1/me/partner) — mirrors the backend's `Partner`
+// (src/types/partner.ts) as a local interface, same convention as `MeStatus`/`SettledRun`
+// above (the web app doesn't import backend source). A "partner" is just an ordinary account
+// a platform admin has approved — no on-chain agent/treasury concept.
+export type PartnerStatus = 'active' | 'revoked';
+export interface Partner {
+  animaId: string;
+  status: PartnerStatus;
+  org?: string;
+  contactEmail?: string;
+  sourceRequestId: string;
+  natum: string;
 }
 
 // A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.

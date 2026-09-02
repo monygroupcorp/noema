@@ -24,13 +24,14 @@ import type { RarityReport } from '../../crystal/rarityReport.js'
 import type { PackView } from '../../ledger/stripePacks.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
-import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
+import { credentialsFromHeaders, type Credentials, type ResolvedCaller } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
 import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
+import type { PartnerStore } from '../../types/partner.js'
 
 const log = makeLogger('api:router')
 
@@ -224,6 +225,13 @@ export interface ApiFacade {
 /** The slice of IdentityResolver this router needs. */
 export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
+  /**
+   * The same resolution, plus the limits the CREDENTIAL carries (a partner API key's per-run
+   * spend ceiling). Required, not optional: the spend-admitting route reads it, and an identity
+   * seam that could omit it would drop a ceiling silently — which is indistinguishable from a
+   * key having none, and is the one failure mode a spend cap cannot tolerate.
+   */
+  resolveCaller(creds: Credentials): Promise<ResolvedCaller>
 }
 
 /**
@@ -268,6 +276,12 @@ export function createApiRouter(deps: {
   anonPurseEnabled?: boolean
   /** Bursa store — used ONLY to resolve `owner` at the spend chokepoint for the gate above. */
   bursarium?: Bursarum
+  /** B2B partner directory (an approved Anima — see types/partner.ts). Backs `GET /v1/me/partner`
+   *  ONLY — this router never creates/mutates a Partner record (that is the admin approval
+   *  route's job, on a different surface entirely). Omitted → the route answers 503
+   *  `internal.unavailable`, never a silent 404 (a deployment with no store wired is not the
+   *  same fact as "this caller isn't a partner"). */
+  partners?: PartnerStore
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -349,7 +363,7 @@ export function createApiRouter(deps: {
    *  and inspect `owner`: an OWNED purse (§7, identified funder) spends unchanged; an ownerless or
    *  unknown/nonexistent bursa is refused 503 (fail-closed — the dev key can forge these). When the
    *  flag is on, the short-circuit is unchanged (post-ceremony restore is a one-flag flip). */
-  const auth = async (req: Request): Promise<AuctorKey> => {
+  const authCaller = async (req: Request): Promise<ResolvedCaller> => {
     const seam = req as SeamRequest
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
     if (bursaToken) {
@@ -363,16 +377,19 @@ export function createApiRouter(deps: {
       // not hashed, not truncated. The caller stays unattributed on the log line.
       seam.__callerHash = undefined
       seam.__callerKind = 'purse'
-      return { bursaToken }
+      return { auctor: { bursaToken } }
     }
-    const auctor = await identity.resolve(
+    const caller = await identity.resolveCaller(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
     // The single place identity is resolved — stamp the keyed digest here so the error
     // seam can attribute a failure without ever seeing the raw id.
-    seam.__callerHash = 'animaId' in auctor ? hashCaller(auctor.animaId) : undefined
-    return auctor
+    seam.__callerHash = 'animaId' in caller.auctor ? hashCaller(caller.auctor.animaId) : undefined
+    return caller
   }
+
+  /** The identity-only view of `authCaller`, for every route that does not admit spend. */
+  const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
   /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
    *  spicyMode on (which required a recorded 18+ attestation to persist) may see `contentRating`-adult
@@ -392,13 +409,23 @@ export function createApiRouter(deps: {
     '/runs',
     wrap(async (req, res) => {
       const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId } = req.body ?? {}
-      const auctor = await auth(req)
+      // Spend admission, so this route resolves the FULL caller: a partner API key can carry its
+      // own per-run ceiling, and `invokeFlow` applies it as a floor under the body's `maxImpetus`.
+      // `keyMaxImpetusPerRun` is deliberately absent from the destructure above — it comes from
+      // the resolved credential and there is no body field that can set or raise it.
+      const { auctor, maxImpetusPerRun } = await authCaller(req)
       const by = 'bursaToken' in auctor ? auctor : undefined
       const run = await api.invokeFlow(
         auctor,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}), ...(by ? { by } : {}) },
+        {
+          pinnedModels, computeStrategy, gpuClass,
+          ...(maxImpetus !== undefined ? { maxImpetus } : {}),
+          ...(maxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun: maxImpetusPerRun } : {}),
+          ...(studioId ? { studioId } : {}),
+          ...(by ? { by } : {}),
+        },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
@@ -975,6 +1002,21 @@ export function createApiRouter(deps: {
       res.json(await api.status(auctor))
     }),
   )
+
+  // GET /v1/me/partner — the caller's B2B Partner record, if any. A "partner" is simply an
+  // ordinary Anima a platform admin has approved (types/partner.ts) — no on-chain agent/treasury
+  // lookup. This is the partner dashboard's access gate: 404 when the caller has no Partner
+  // record, or has one but it was revoked (indistinguishable from the caller's side — "you don't
+  // have partner access" either way); 503 when this deployment has no PartnerStore wired at all.
+  // Auth resolves FIRST, same as every other /me/* route, so an unauthenticated caller always
+  // gets 401 regardless of whether the store is configured.
+  router.get('/me/partner', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
+    if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    res.status(200).json(partner)
+  }))
 
   // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
   // settledAt, and a lifetime running total. Owner-scoped, cursor-paginated, newest first.

@@ -74,7 +74,7 @@ app.use('/widget', createWidgetRouter({
   quoteImpetus: async (id) => (id === 'm2' ? 2400n : id === 'm3' ? 400n : 1200n),
   x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0x' + 'c'.repeat(40) },
   sessionAuth: true,            // sandbox-only: show the sign-in step (mocked endpoints below)
-  frameAncestors: ["'self'"],
+  frameAncestors: () => ["'self'"],
 }))
 
 // MOCK sign-in endpoints (sandbox only — prod serves none, so the widget shows connect-wallet

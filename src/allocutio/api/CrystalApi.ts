@@ -461,6 +461,20 @@ export interface InvokeOpts {
   gpuClass?: GpuClass
   /** Hard spend cap (impetus). Admission refuses if the estimated reservation exceeds it. */
   maxImpetus?: bigint | string
+  /**
+   * A per-run spend ceiling carried by the CREDENTIAL the request authenticated with — an API
+   * key minted with `maxImpetusPerRun` — rather than asked for by the request.
+   *
+   * It binds as a FLOOR under `maxImpetus`: admission uses the MINIMUM of the two, so a caller
+   * can tighten its own run below the key's ceiling but can never raise it by sending a larger
+   * `maxImpetus`. That only holds because routers set this from the RESOLVED IDENTITY and never
+   * from a request body — the field is not part of the run-submit payload, and adding it there
+   * would hand the bearer the pen on their own limit.
+   *
+   * Absent for every credential that carries no ceiling, which is the shape every caller had
+   * before this existed: admission then behaves exactly as it always has.
+   */
+  keyMaxImpetusPerRun?: bigint
   /** Target an existing warm studio (a Modo session) instead of cold-provisioning a pod. */
   studioId?: string
   /**
@@ -753,13 +767,35 @@ export class CrystalApi {
     } catch { /* fail-open: guard error → allow */ }
     if (!promptVerdict.ok) throw Errors.contentRefused(promptVerdict.reason)
 
-    // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
-    // maxImpetus. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
+    // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds the
+    // effective cap. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
     // that will run — so an affine bumping a cost driver (steps/count/resolution) is capped.
-    if (opts.maxImpetus !== undefined) {
+    //
+    // Two independent ceilings can apply and the TIGHTER of them always wins:
+    //   • `opts.maxImpetus`          — what this REQUEST asked to be capped at.
+    //   • `opts.keyMaxImpetusPerRun` — what the CREDENTIAL is capped at (a partner API key).
+    // Taking the minimum is what makes the credential's ceiling unbypassable: `min` can only
+    // ever tighten, so a caller sending a larger `maxImpetus` cannot lift the key's limit, and
+    // a caller sending a smaller one still gets the smaller one. With no credential ceiling
+    // the minimum IS the caller's cap and this is the check it has always been.
+    const callerCap = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : undefined
+    const keyCap = opts.keyMaxImpetusPerRun
+    const cap =
+      callerCap === undefined ? keyCap
+      : keyCap === undefined ? callerCap
+      : keyCap < callerCap ? keyCap
+      : callerCap
+    // The effective cap as a stored/reported string. A caller-supplied cap that is the binding
+    // one is echoed exactly as the caller wrote it, so neither the error body nor the standing
+    // order below shifts for any caller whose credential carries no ceiling.
+    const capAsWritten =
+      cap === undefined ? undefined
+      : cap === callerCap && opts.maxImpetus !== undefined ? String(opts.maxImpetus)
+      : cap.toString()
+    if (cap !== undefined) {
       const est = await this._estimate(modusId, effectiveAditus)
-      if (est > BigInt(opts.maxImpetus)) {
-        throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: String(opts.maxImpetus) })
+      if (est > cap) {
+        throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: capAsWritten })
       }
     }
 
@@ -873,7 +909,7 @@ export class CrystalApi {
     // nowhere downstream (an Actum deliberately carries no identity, and no cap). The order
     // opens holding this attempt, and the runner decides from that attempt's OUTCOME whether
     // asking again is warranted, so nothing is ever re-run on a click alone.
-    const mandatum = await this._openTrainingOrder(modusId, effectiveAditus, inceptio.by, actum.id, opts)
+    const mandatum = await this._openTrainingOrder(modusId, effectiveAditus, inceptio.by, actum.id, opts, capAsWritten)
 
     const run = toRunDetail(actum)
     if (mandatum) run.order = toRunOrder(mandatum)
@@ -893,6 +929,14 @@ export class CrystalApi {
     by: Inceptio['by'],
     actumId: string,
     opts: InvokeOpts,
+    /**
+     * The cap admission actually applied to the launching run — already the minimum of the
+     * caller's `maxImpetus` and any ceiling on the credential. The order records THIS, not the
+     * raw request field: an order fires unattended hours later, past the credential that opened
+     * it, so a ceiling left out here would be a ceiling that stops binding after the first
+     * attempt. With no credential ceiling it IS the caller's `maxImpetus`, verbatim.
+     */
+    effectiveMaxImpetus: string | undefined,
   ): Promise<Mandatum | undefined> {
     const store = this.deps.mandata
     if (!store || modusId !== TRAINING_MODUS_ID || opts.mandatumId) return undefined
@@ -904,7 +948,7 @@ export class CrystalApi {
 
     const now = Date.now()
     const invocatio = {
-      ...(opts.maxImpetus !== undefined ? { maxImpetus: String(opts.maxImpetus) } : {}),
+      ...(effectiveMaxImpetus !== undefined ? { maxImpetus: effectiveMaxImpetus } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
       ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),
     }

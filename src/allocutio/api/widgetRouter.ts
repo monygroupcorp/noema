@@ -15,12 +15,14 @@
 // interactive path is the §5 x402 capability endpoints, which the SDK already speaks.
 //
 // FRAMING is hardened vs the legacy `frame-ancestors *`: every HTML view carries a
-// real per-partner `frame-ancestors` allowlist (deps.frameAncestors), and the iframe
-// posts only non-secret messages (WIDGET_READY / GALLERY_LIGHTBOX). We deliberately do
-// NOT set X-Frame-Options — it cannot express an allowlist and would shadow the CSP.
+// real per-partner `frame-ancestors` allowlist, resolved PER AGENT/COLLECTION via
+// `deps.frameAncestors(legatus)` — a resolved `Legatus.frameAncestors` wins, else the
+// platform-wide list, else `'self'` (see `frame()` below) — and the iframe posts only
+// non-secret messages (WIDGET_READY / GALLERY_LIGHTBOX). We deliberately do NOT set
+// X-Frame-Options — it cannot express an allowlist and would shadow the CSP.
 
 import express, { type Router, type Request, type Response } from 'express'
-import type { LegatusStore } from '../../types/legatus.js'
+import type { Legatus, LegatusStore } from '../../types/legatus.js'
 import type { Appearance } from '../../types/consuetudo.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
@@ -41,8 +43,15 @@ export interface WidgetRouterDeps {
   quoteImpetus?: (modusId: string) => Promise<bigint>
   /** x402 rail config (currency label / markup) for the price display. */
   x402Config?: X402Config
-  /** CSP `frame-ancestors` allowlist — the origins allowed to embed the widgets. */
-  frameAncestors: string[]
+  /**
+   * Resolve the CSP `frame-ancestors` allowlist — the origins allowed to embed a given
+   * agent's (or collection's) widget. Called per-request with the `Legatus` the route
+   * resolved (`undefined` when none applies, e.g. an unknown agent or empty collection).
+   * Implementations should fall back to the platform-wide list when the `Legatus` has no
+   * `frameAncestors` of its own; the router's own `'self'` default applies if the
+   * returned array is empty.
+   */
+  frameAncestors: (legatus: Legatus | undefined) => string[]
   /** Show the identity SIGN-IN affordance (challenge→session). Requires the host to serve
    *  the `/widget/:agentId/auth/wallet/*` endpoints. Default OFF: prod serves none, so the
    *  widget shows only real connect-wallet (no session) — no way to ship a spoofable login. */
@@ -100,13 +109,30 @@ function tileHtml(t: Tile): string {
  *  the agent's Appearance (accent / avatar / banner / background). The `look` field is not
  *  yet wired (no per-look skins exist in the app); trust-fade is available but its viewer-
  *  identity trigger is gated on the auth work, so the agent's accent shows at full strength. */
-function page(opts: { title: string; appearance?: Appearance; header?: string; body: string; script: string }): string {
+function page(opts: {
+  title: string
+  appearance?: Appearance
+  /** Caller-side theme override (gallery route only, ADR-0011 §7 partner-embed program) — the
+   *  SDK's `initGallery({theme})` query params, sanitized. Absent/invalid channels keep the
+   *  hardcoded NOEMA defaults below; presence never changes any other rendering. */
+  theme?: { bg?: string; surface?: string; text?: string; textDim?: string }
+  header?: string
+  body: string
+  script: string
+}): string {
   const a = opts.appearance ?? {}
   const accent = safeColor(a.accent) ?? '#5b8cff'          // NOEMA --accent-500 default
   const bannerUrl = safeUrl(a.bannerUrl)
   const bgUrl = safeUrl(a.backgroundUrl)
   const banner = bannerUrl ? `<div class="banner" style="background-image:url('${esc(bannerUrl)}')"></div>` : ''
   const bgLayer = bgUrl ? `<div class="bgart" style="background-image:url('${esc(bgUrl)}')"></div>` : ''
+  const t = opts.theme ?? {}
+  const bg = t.bg ?? '#08090A'
+  const surface = t.surface ?? '#0c0e10'
+  const surface2 = t.surface ?? '#131619'
+  const text = t.text ?? '#e7eaef'
+  const textMuted = t.textDim ?? '#8b929c'
+  const textSubtle = t.textDim ?? '#5b626c'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(opts.title)}</title>
@@ -115,8 +141,8 @@ function page(opts: { title: string; appearance?: Appearance; header?: string; b
 <style>
   :root {
     --accent:${accent};
-    --bg:#08090A; --surface:#0c0e10; --surface-2:#131619; --border:#1c2024; --border-strong:#2a2f35;
-    --text:#e7eaef; --text-muted:#8b929c; --text-subtle:#5b626c; --success:#5fd0a8;
+    --bg:${bg}; --surface:${surface}; --surface-2:${surface2}; --border:#1c2024; --border-strong:#2a2f35;
+    --text:${text}; --text-muted:${textMuted}; --text-subtle:${textSubtle}; --success:#5fd0a8;
     --radius:10px; --font:'Geist',ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
   }
@@ -332,10 +358,13 @@ const ENTRANCE_JS = `(function(){
 export function createWidgetRouter(deps: WidgetRouterDeps): Router {
   const router = express.Router({ mergeParams: true })
   const limit = deps.limit ?? 24
-  const frameAncestors = deps.frameAncestors.length ? deps.frameAncestors.join(' ') : "'self'"
 
-  /** Apply the per-partner framing allowlist to an embeddable HTML view. */
-  function frame(res: Response): void {
+  /** Apply the per-partner framing allowlist to an embeddable HTML view. `legatus` is
+   *  whatever the route resolved for this request (or `undefined`) — passed through to
+   *  `deps.frameAncestors` so a per-agent list can win over the platform-wide default. */
+  function frame(res: Response, legatus: Legatus | undefined): void {
+    const ancestors = deps.frameAncestors(legatus)
+    const frameAncestors = ancestors.length ? ancestors.join(' ') : "'self'"
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`)
     res.setHeader('Cache-Control', 'no-store')
@@ -354,14 +383,40 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
   router.get('/gallery/:collectionAddress', async (req: Request, res: Response): Promise<void> => {
     const addr = String(req.params.collectionAddress)
     const agents = await deps.legati.listByCollection(addr)
-    const animaIds = agents.filter((a) => a.status !== 'revoked').map((a) => a.animaId)
+    const activeAgents = agents.filter((a) => a.status !== 'revoked')
+    const animaIds = activeAgents.map((a) => a.animaId)
     const items = animaIds.length ? await deps.feed({ visibility: 'feed', authorAnimaIds: animaIds, limit }) : []
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
     const body = tiles.length
       ? `<div class="grid">${tiles.map(tileHtml).join('')}</div>`
       : `<div class="empty">No creations in this collection yet.</div>`
-    frame(res)
-    res.status(200).send(page({ title: 'Gallery', body, script: IFRAME_BRIDGE }))
+    // A collection has no single `Legatus` — every agent in it belongs to the same
+    // partner, so the first one carrying a per-partner `frameAncestors` speaks for the
+    // whole gallery. None set (the common case) → `frame()` falls back to the global list.
+    const perPartner = activeAgents.find((a) => a.frameAncestors && a.frameAncestors.length)
+
+    // Caller-side theme override (`Noema.initGallery({theme})` — widgetSdk.ts). The SDK has
+    // always sent these query params; the server ignored them until now. This route has no
+    // single owner to resolve an `Appearance` from (a collection spans N agents, each its own
+    // Anima), so there is no "stored" accent to layer on top of here — each channel is either
+    // the caller's sanitized value or the page's built-in default, exactly as before this param
+    // existed. Reuses `safeColor()` (the same gate the per-agent route uses for its Appearance
+    // accent) — a malformed/unsafe value is dropped silently, never injected raw, never errors.
+    const themeAccent = safeColor(req.query.accent)
+    const theme = {
+      bg: safeColor(req.query.bg),
+      surface: safeColor(req.query['card-bg']),
+      text: safeColor(req.query.text),
+      textDim: safeColor(req.query['text-dim']),
+    }
+    frame(res, perPartner)
+    res.status(200).send(page({
+      title: 'Gallery',
+      ...(themeAccent ? { appearance: { accent: themeAccent } } : {}),
+      theme,
+      body,
+      script: IFRAME_BRIDGE,
+    }))
   })
 
   // GET /widget/:agentId — a chrome-less, themed, INTERACTIVE per-agent view: run the
@@ -370,7 +425,7 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     const agentId = String(req.params.agentId)
     const legatus = await deps.legati.findByAgentId(agentId)
     if (!legatus || legatus.status === 'revoked') {
-      frame(res)
+      frame(res, legatus ?? undefined)
       res.status(404).send(page({ title: 'Not found', body: `<div class="empty">Agent not found.</div>`, script: IFRAME_BRIDGE }))
       return
     }
@@ -434,11 +489,34 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     const gallery = tiles.length
       ? `<div class="sect">Recent creations</div><div class="grid">${tiles.map(tileHtml).join('')}</div>`
       : (panel ? '' : `<div class="empty">This agent hasn't published anything yet.</div>`)
-    frame(res)
+    // `mode` dispatch (ADR-0011 §7 partner-embed program). `Noema.init({mode})` — widgetSdk.ts —
+    // has always sent this query param (default 'list'); the server ignored it until now.
+    // 'list' — including no `mode` at all, or any value this server doesn't recognize (fail
+    // open, never error a page over a bad query param) — is the pre-existing combined view,
+    // untouched: this is the regression bar for the live route. 'panel' and 'gallery' are new
+    // opt-in single-section renders (the extensibility point for a future widget-presentation
+    // library); nothing reaches them unless a caller explicitly asks for them.
+    const modeParam = typeof req.query.mode === 'string' ? req.query.mode : 'list'
+    let body: string
+    let bodyScript: string
+    if (modeParam === 'panel') {
+      body = panel
+      bodyScript = script
+    } else if (modeParam === 'gallery') {
+      body = tiles.length
+        ? `<div class="sect">Recent creations</div><div class="grid">${tiles.map(tileHtml).join('')}</div>`
+        : `<div class="empty">This agent hasn't published anything yet.</div>`
+      bodyScript = IFRAME_BRIDGE
+    } else {
+      body = panel + gallery
+      bodyScript = script
+    }
+
+    frame(res, legatus)
     res.status(200).send(page({
       title: agentId, ...(appearance ? { appearance } : {}),
       header: agentHeader(agentId, appearance, legatus.ownerAddress, deps.sessionAuth ?? false),
-      body: panel + gallery, script: LOGIN_JS + script,
+      body, script: LOGIN_JS + bodyScript,
     }))
   })
 

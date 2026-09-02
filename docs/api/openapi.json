@@ -2448,6 +2448,75 @@
         }
       }
     },
+    "/me/partner": {
+      "get": {
+        "summary": "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+                  "properties": {
+                    "animaId": {
+                      "type": "string",
+                      "description": "The partner Anima, same id GET /v1/me/status reports for."
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status."
+                    },
+                    "org": {
+                      "type": "string",
+                      "description": "Organization name, if given at request time."
+                    },
+                    "contactEmail": {
+                      "type": "string",
+                      "description": "Contact email, if given at request time."
+                    },
+                    "sourceRequestId": {
+                      "type": "string",
+                      "description": "The partner-request this record was provisioned from."
+                    },
+                    "natum": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When this Partner record was created."
+                    }
+                  },
+                  "required": [
+                    "animaId",
+                    "status",
+                    "sourceRequestId",
+                    "natum"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/me/status": {
       "get": {
         "summary": "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
@@ -17164,6 +17233,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.partner",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.run",
       "httpStatus": 404
     },
@@ -17177,6 +17250,14 @@
     },
     {
       "code": "not_found.dataset",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.partner_request",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.querela",
       "httpStatus": 404
     },
     {
@@ -17209,6 +17290,11 @@
       "code": "conflict.muse_session",
       "httpStatus": 409,
       "retryable": true
+    },
+    {
+      "code": "conflict.already_decided",
+      "httpStatus": 409,
+      "retryable": false
     },
     {
       "code": "license.restricted",
