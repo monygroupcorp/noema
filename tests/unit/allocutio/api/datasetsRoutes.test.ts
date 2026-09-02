@@ -619,6 +619,47 @@ test('a stranger never sees another owner\'s datasets on either list route or ge
   }
 })
 
+test('a PUBLIC dataset reads for a stranger through getDataset, but stays off both list routes and every write', async () => {
+  // `access: 'public'` (noema-dataset-access-field) is a READ grant only. `getDataset` — the
+  // seam `spawnMuseSession` resolves a mother through — now admits it; neither list route does
+  // (a public dataset is discovered through a catalog, not mixed into someone else's own list);
+  // and every write stays exactly as closed as an ordinary stranger's dataset, because
+  // `addDatasetMedia`/`addCaptionset`/`setCaption` resolve through `_contributableDataset`,
+  // which `access` never widens.
+  const datasets = new MemoryDatasets()
+  const owned = await datasets.create({
+    owner: 'owner-1',
+    access: { kind: 'public' },
+    name: 'Open board',
+    modality: 'image',
+    custody: 'local',
+    media: [{ id: 'media-1', url: 'https://r2.example/open.png', source: 'upload', addedAt: new Date() }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+  const { server, url, api } = await createServer(datasets, makeFakeActorum([]))
+  try {
+    const stranger = { 'x-api-key': 'stranger-1' }
+
+    const resolved = await api.getDataset({ animaId: 'stranger-1' }, owned.id)
+    assert.equal(resolved.id, owned.id, 'a public dataset resolves for a caller who neither owns nor shares it')
+
+    assert.deepEqual((await request(`${url}/v1/data/datasets/full`, { headers: stranger })).body.datasets, [])
+    assert.deepEqual((await request(`${url}/v1/data/datasets`, { headers: stranger })).body.datasets, [])
+
+    const refusals: Array<[string, HttpResult]> = [
+      ['media', await request(`${url}/v1/data/datasets/${owned.id}/media`, { method: 'POST', headers: stranger, body: { source: 'upload', mediaUrls: ['https://r2.example/theirs.png'] } })],
+      ['captionsets', await request(`${url}/v1/data/datasets/${owned.id}/captionsets`, { method: 'POST', headers: stranger, body: { id: 'p', name: 'n', method: 'manual' } })],
+      ['caption edit', await request(`${url}/v1/data/datasets/${owned.id}/captionsets/p/captions/media-1`, { method: 'PATCH', headers: stranger, body: { caption: 'theirs' } })],
+    ]
+    for (const [route, res] of refusals) {
+      assert.equal(res.status, 404, `${route}: publishing a dataset does not open it to a stranger's writes`)
+      assert.equal(res.body.error.code, 'not_found.dataset', `${route}: not_found, never forbidden`)
+    }
+  } finally {
+    await closeServer(server)
+  }
+})
 
 // ── Captionset write + edit seam ─────────────────────────────────────────────
 //
