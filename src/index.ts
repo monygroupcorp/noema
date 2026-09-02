@@ -36,6 +36,7 @@ import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
 import { createStorageRouter } from './allocutio/api/storageRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
+import { createModelAdminRouter } from './api/internal/modelAdminRouter.js'
 import { createDepositsAdminRouter } from './api/internal/depositsAdminRouter.js'
 import { alchemyRpc, runBootReconcile, resolveReconcileIntervalMs, startReconcileTimer } from './crystal/DepositReconciler.js'
 import { MongoScanCursor } from './crystal/MongoScanCursor.js'
@@ -1610,6 +1611,13 @@ async function main(): Promise<void> {
     legati: ring.legati,
     animae: ring.animae,
     treasury: camelTreasury,
+    ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
+  }))
+  // Model license clearance/backfill — reaches CrystalApi.setModelLicense's underlying store
+  // logic without needing the caller's session to resolve to PLATFORM_ANIMA_ID (which, at its
+  // documented default, is a phantom identity no session can ever be — see the router's header).
+  app.use('/internal/v1', express.json(), createModelAdminRouter({
+    intellarum: intellae,
     ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
   }))
 

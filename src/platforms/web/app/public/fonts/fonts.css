@@ -120,3 +120,37 @@
   font-display: swap;
   src: url('./martian-mono/martian-mono-800.woff2') format('woff2');
 }
+
+/* ─── Display-serif candidates for the marketing surface ────────────────────────
+   All three are SIL Open Font License (verified under `ofl/` in google/fonts, each
+   with an OFL.txt), so they may be self-hosted and embedded commercially. They span
+   the contrast range on purpose: the open question is whether a high-contrast serif
+   survives a #08090A ground, or goes spindly on it.
+     Instrument Serif — Rodrigo Fuenzalida, Jordan Egstad. Highest contrast.
+     Newsreader       — Production Type. Lower contrast, built for screen text.
+     Fraunces         — Undercase Type. Most character; variable.
+   ──────────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./instrument-serif/instrument-serif-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('./newsreader/newsreader-400.woff2') format('woff2-variations');
+}
+/* Fraunces carries a live optical-size axis — 6.9% of rendered pixels change between opsz 9
+   and opsz 144 — so the display sizes get the high-contrast cut and small text gets the sturdy
+   one, from one file, with `font-optical-sizing: auto` doing the work. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fraunces/fraunces-var.woff2') format('woff2-variations');
+}

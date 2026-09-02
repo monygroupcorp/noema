@@ -74,10 +74,11 @@ export class MongoDataset implements Datasets {
    *
    * Two `access` shapes are admitted because the tree carries two: the flat `'public'` string
    * `Intella` stores, and the `{ kind }` single-axis Access union the schema spec settles on.
-   * `Dataset` carries neither field today, so both arms match nothing — they are here so that
-   * the item which gives datasets an access field is a schema change, not a re-derivation of
-   * who may read what. Team sharing (`sodalitasId`) did NOT light those arms up: sharing with a
-   * named fellowship and publishing to everyone are different decisions.
+   * `Dataset.access` (added after this predicate was written) is only ever written in the
+   * `{ kind }` form — the flat-string arm stays for a legacy shape this record never actually
+   * takes, matching `Intella`'s dual-read precedent rather than re-deriving it. Team sharing
+   * (`sodalitasId`) does NOT light this arm up: sharing with a named fellowship and publishing
+   * to everyone are different decisions, and only `access.kind === 'public'` is the second one.
    *
    * The team overlay IS honoured here: this is the gate a RUN's dataset reference resolves
    * through (`_assertOwnedAditus`), and a member of the team a dataset is shared with may name

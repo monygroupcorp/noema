@@ -15,6 +15,7 @@ import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
+import { DEFAULT_POD_DISK_GB } from './podDisk.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 // The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
@@ -373,6 +374,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input) ? params.input.image?.ociRef : undefined
     const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
+    // Disk the Compiler derived from this flow's weight manifest, when it needs more than the
+    // flat default. Read structurally, like comfyRef/install, so an older spec shape is harmless.
+    const diskGb = isCompiledSpec(params.input) ? (params.input as { diskGb?: number }).diskGb : undefined
 
     const maxAttempts = this.config.podRetries ?? 3
 
@@ -387,7 +391,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       if (attempt > 1) log.info('retrying pod provision', { attempt, cloudType: cloudType ?? 'SECURE' })
       log.info('pod provisioning', { actumId: getTrace()?.actumId, imageName, cloudType: cloudType ?? 'SECURE' })
       try {
-        podId = await this._provisionPod(imageName, cloudType, gpuTypeIds)
+        podId = await this._provisionPod(imageName, cloudType, gpuTypeIds, diskGb)
         break
       } catch (err) {
         lastProvisionErr = err as Error
@@ -439,7 +443,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
           log.info('retrying on new pod', { attempt })
           let retryPodId: string
           try {
-            retryPodId = await this._provisionPod(imageName)
+            retryPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
           } catch (provErr) {
             log.warn(`provision retry ${attempt}/${maxAttempts} failed`, { error: (provErr as Error).message })
             if (attempt === maxAttempts) throw provErr
@@ -900,14 +904,16 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }
 
   // gpuTypeIds=null → omit from request (let RunPod pick any available GPU)
-  private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null): Promise<string> {
+  private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null, diskGb?: number): Promise<string> {
     const resolvedGpus = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
     const body: Record<string, unknown> = {
       name: `noema-${Date.now()}`,
       imageName,
       gpuCount: 1,
       cloudType: cloudType ?? this.config.cloudType ?? 'SECURE',
-      containerDiskInGb: this.config.containerDiskGb ?? 40,
+      // The flow's own requirement wins: a 56 GB weight set on the flat default fills the
+      // disk mid-fetch and surfaces as "model download failed" naming the mirror (noema-372).
+      containerDiskInGb: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
       ports: ['22/tcp', '8188/http', '8080/http'],
       supportPublicIp: true,
     }
@@ -1104,10 +1110,12 @@ export class SecurePodClient implements RunPodClient, Procurator {
       executio.sshReadyMs = Date.now() - startMs
       reportMetrics()  // persist provision/ssh/podId/costPerHr — survives even if download fails
       signal('bootstrapping')
-      // `comfyRef` isn't on CompiledSpecLike yet (Compiler-side follow-up); read it defensively so a
-      // future compiled spec that does carry it is honored without another SecurePodClient change.
+      // The Compiler forwards the fundament's `comfyRef` + `install` onto the spec (noema-372).
+      // Still read defensively: `CompiledSpecLike` is structural and a caller may hand us a spec
+      // shape that predates those fields.
       const specComfyRef = isCompiledSpec(input) ? (input as { comfyRef?: string }).comfyRef : undefined
-      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined, specComfyRef)
+      const specInstall = isCompiledSpec(input) ? (input as { install?: string[] }).install : undefined
+      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined, specComfyRef, specInstall)
 
       // SSH only needed for bootstrap — close before HTTP phase
       await ssh.close()
@@ -1252,7 +1260,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
   /** Bootstrap dispatches on the pod's runtime (ADR-0007). ComfyUI keeps the proven comfyrunner.py
    *  path byte-for-byte; vLLM/llm pods get the multi-runtime runner.py. */
-  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string, comfyRef?: string): Promise<void> {
+  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string, comfyRef?: string, install?: string[]): Promise<void> {
     if (runtime === 'vLLM' || runtime === 'llm') {
       return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
     }
@@ -1270,16 +1278,27 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // just needs the download + R2 tooling. git is ensured inside _bootstrapRunner.
       return this._bootstrapRunner(ssh, podId, 'python-modelcard', 'huggingface_hub boto3')
     }
-    return this._bootstrapComfyUI(ssh, podId, comfyRef)
+    return this._bootstrapComfyUI(ssh, podId, comfyRef, install)
   }
 
-  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string, comfyRef?: string): Promise<void> {
+  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string, comfyRef?: string, install?: string[]): Promise<void> {
     const ref = comfyRef ?? DEFAULT_COMFYUI_REF
-    log.info('bootstrapping pod', { podId, runtime: 'ComfyUI', comfyRef: ref })
+    log.info('bootstrapping pod', { podId, runtime: 'ComfyUI', comfyRef: ref, installSteps: install?.length ?? 0 })
 
     // Install deps, clone a PINNED ComfyUI ref — never HEAD (2026-07-10 P0: unpinned HEAD drifted
     // torch-incompatible and broke every ComfyUI pod). `--branch` works for both tags and branches.
     await ssh.exec('which git || (apt-get update -qq && apt-get install -y -qq git)', { timeout: 120_000 })
+
+    // Substrate bootstrap (`Fundamentum.install`, noema-372) — BEFORE the clone, because these
+    // commands exist to prepare the interpreter that the `pip install` below then uses. A base
+    // image with a PEP 668 externally-managed Python refuses a bare `pip install` until its
+    // substrate says otherwise; MiniMax H3's does. Each command runs in its own shell, so shell
+    // state does not persist between them — a step that must outlive itself has to write real
+    // config (`pip config set …`), not export a variable.
+    for (const cmd of install ?? []) {
+      log.info('substrate install step', { podId, cmd })
+      await ssh.exec(cmd, { timeout: 600_000 })
+    }
     await ssh.exec(`cd /root && rm -rf ComfyUI && git clone --depth 1 --branch ${shellQuote(ref)} https://github.com/comfyanonymous/ComfyUI.git`, { timeout: 120_000 })
     await ssh.exec('cd /root/ComfyUI && pip install -r requirements.txt websocket-client boto3 -q', { timeout: 600_000 })
 

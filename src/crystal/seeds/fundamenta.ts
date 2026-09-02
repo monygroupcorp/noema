@@ -487,6 +487,72 @@ export const FUNDAMENTUM_WAN22_I2V_COMFYUI: Fundamentum = {
   mutatum: new Date('2026-07-10'),
 }
 
+/**
+ * MiniMax H3 · ComfyUI — the video+audio substrate shared by t2v, fl2v and ref2v (noema-372).
+ *
+ * WHY A DIFFERENT BASE IMAGE than every other ComfyUI fundament. H3 needs ComfyUI >= 0.30.0
+ * (native support merged 2026-08-03) and is acutely torch-sensitive: the rig measured a ~2x
+ * throughput swing traced purely to the bundled PyTorch build. `runpod/pytorch:2.4.0-cu124`,
+ * which the flux/sd/wan fundamenta ride, is far too old. This pins the exact base the
+ * head-to-head was measured on (57.5 s/shot warm, 24.0 GB peak VRAM, 77 GB peak host RAM).
+ *
+ * `comfyRef` IS LOAD-BEARING. `SecurePodClient`'s DEFAULT_COMFYUI_REF is v0.26.0 — under
+ * 0.30.0. If this field is ever dropped, the pod boots healthy with no H3 nodes in it and the
+ * failure looks like a bad graph rather than a bad substrate.
+ *
+ * `install` covers what that base needs and the stock bootstrap does not do on its own:
+ * PEP 668 makes the 2.13 image's Python externally-managed, so a bare `pip install` refuses;
+ * and comfy-kitchen supplies the int8 convrot kernels the pruned checkpoints are built on.
+ *
+ * WEIGHT SPLIT. Only the SHARED weights live here — text encoder + both VAEs, ~32 GB. Each
+ * flow adds its own DiT + baked turbo LoRA via `Essentia.intellae`. Co-host key is fundament-id
+ * equality, so all three flows land on one pod and pull the 26 GB encoder ONCE.
+ *
+ * vramGb is 48, not the 24.0 GB measured: that measurement is the peak on a 24 GB card, i.e.
+ * the ceiling with nothing to spare, so it is a bad capacity floor for pod selection.
+ */
+export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
+  id: 'minimax-h3-comfyui',
+  nomen: 'MiniMax H3 · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  // A RUNPOD-NATIVE image, not the `pytorch/pytorch` one the rig's Dockerfile builds FROM.
+  // The rig runs that image under local docker, where nothing needs SSH; the platform
+  // provisions a REMOTE pod and `_waitForSshd` has to reach an sshd inside it, which the stock
+  // Docker Hub pytorch image does not ship. That is why every other ComfyUI fundament rides a
+  // runpod/* image, and it is the difference that makes this substrate provisionable.
+  // Same stack the head-to-head measured on: CUDA 13.0, torch 2.13.0.
+  imageId: 'runpod/pytorch',
+  imageVersion: '1.2.0-rc.162-cu1300-torch2130-ubuntu2404',
+  runtime: 'ComfyUI',
+  // Recovered from the rig image that produced the measurements above:
+  // `comfyui_version.py` reports 0.33.0 at commit dcbcf8c (2026-09-01). Pinned to the TAG
+  // because the bootstrap clones with `--branch`, which takes tags and branches but not a
+  // SHA — so if dcbcf8c sits between tags this is the nearest reproducible ref, a
+  // deliberate hair's-breadth away from the exact bytes benchmarked.
+  comfyRef: 'v0.33.0',
+  install: [
+    // Each bootstrap command runs in its OWN shell, so `export` would not survive to the
+    // bootstrap's `pip install -r requirements.txt`. Write pip's real config instead.
+    'pip config set global.break-system-packages true',
+    // The rig image carries comfy-kitchen 0.2.31. Whether that arrived via ComfyUI's own
+    // requirements.txt or via the rig Dockerfile's explicit install is not distinguishable
+    // from the built image, so this stays: it is idempotent if requirements.txt already
+    // pulls it, and load-bearing if it does not — the int8 convrot kernels the pruned
+    // checkpoints are built on come from this package.
+    'pip install --no-cache-dir comfy-kitchen',
+  ],
+  intellae: [
+    { id: 'intella.qwen3vl-32b-minimax-h3-int8', role: 'clip' },
+    { id: 'intella.minimax-h3-video-vae',        role: 'vae' },
+    { id: 'intella.minimax-h3-audio-vae',        role: 'audio_vae' },
+  ],
+  vramGb: 48,
+  canonica: true,
+  natum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-01'),
+}
+
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */
 export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX_COMFYUI,
@@ -508,4 +574,5 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_LTX_COMFYUI,
   FUNDAMENTUM_WAN22_T2V_COMFYUI,
   FUNDAMENTUM_WAN22_I2V_COMFYUI,
+  FUNDAMENTUM_MINIMAX_H3_COMFYUI,
 ]

@@ -1,0 +1,77 @@
+/* the rooms — what working here actually looks like. Real captures or a marked gap; never a
+   mockup, because a landing page that invents a product screen has invented the product. */
+/* no bottom padding: the locked run already ends on a whole screen of its own, and a section
+   pad on top of that is the awkward gap before whatever comes next. */
+.lp-modes{padding:var(--py-section) 0 0}
+
+/* the rooms ride the same deck the plates do — one card at a time, the top sliding off to
+   uncover the next. The screen fills the card; its name sits on a plate over the bottom, the
+   way a caption sits on a photograph rather than under it. */
+/* the heading travels with the run rather than scrolling away above it */
+/* Everything about the rooms lives inside the lock: the heading, the run, and the index under
+   it. Inset rather than full-bleed, and width-capped against the viewport height, so heading +
+   cards + index always fit the pinned screen instead of overrunning it on a short display. */
+.lp-modes .modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);width:100%;
+  max-width:min(1240px, calc((100svh - 300px) * 1.8));
+  max-width:min(1240px, calc((100vh - 300px) * 1.8));
+  margin:0 auto}
+.lp-modes .modes-head{display:flex;align-items:baseline;justify-content:space-between;
+  gap:var(--s7);flex-wrap:wrap}
+.lp-modes .modes-head h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px);
+  line-height:1.1;letter-spacing:-.03em;font-weight:600}
+.lp-modes .modes-head p{color:var(--muted);font-size:var(--fs-s);line-height:1.5;max-width:42ch;margin:0}
+.lp-deck-modes{margin-top:0}
+.lp-deck-modes .lp-deck-card{background:var(--panel)}
+.lp-modes .mode-shot{position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;object-position:top left}
+.lp-modes .mode-empty{display:grid;place-items:center;padding:var(--s7);text-align:center;
+  background:var(--raised)}
+.lp-modes .mode-empty .mono{color:var(--muted);font-size:var(--fs-s);letter-spacing:.05em;line-height:1.7}
+
+.lp-modes .mode-plate{position:absolute;left:0;right:0;bottom:0;z-index:2;display:block;
+  padding:var(--s9) var(--s7) var(--s6);
+  background:linear-gradient(to top,var(--bg) 12%,transparent)}
+.lp-modes .mode-name{display:block;font-size:clamp(20px,2.4vw,32px);letter-spacing:-.03em;
+  font-weight:600;color:var(--text)}
+.lp-modes .mode-line{display:block;color:var(--muted);font-size:clamp(13px,1.3vw,16px);
+  line-height:1.5;margin-top:var(--s2);max-width:46ch}
+/* the index — the rooms as names you can click, and as a readout of where the run has got to */
+.lp-modes .modes-index{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s6)}
+.lp-modes .modes-index a,.lp-modes .modes-index span{color:var(--faint);font-size:var(--fs-s);
+  text-decoration:none;padding-bottom:var(--s2);border-bottom:1px solid transparent;
+  transition:color var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.lp-modes .modes-index a:hover{color:var(--muted)}
+.lp-modes .modes-index [data-on]{color:var(--text);border-bottom-color:var(--accent)}
+
+/* the run demonstration — the product's own states, walked. Labelled, and carrying none of the
+   numbers a real run reports, so it cannot be mistaken for one. */
+/* the run sits as a panel inside the frame rather than stretching to fill it — a card the size
+   of a banner with four rows of interface in it reads as a broken layout, not a demonstration. */
+.lp-modes .mode-run{position:absolute;inset:0;display:grid;place-items:center;
+  padding:var(--s7) var(--s7) calc(var(--s10) + var(--s7));background:var(--raised)}
+.lp-modes .run-panel{width:min(100%,520px);display:grid;gap:var(--s4);
+  border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);padding:var(--s6)}
+.lp-modes .run-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
+.lp-modes .run-flow{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
+.lp-modes .run-chip{font-size:var(--fs-xs);letter-spacing:.08em;border-radius:var(--r-pill);
+  padding:2px var(--s3);border:1px solid var(--hair);color:var(--muted)}
+.lp-modes .run-chip.st-running{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
+.lp-modes .run-chip.st-complete{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,var(--hair))}
+.lp-modes .run-prompt{color:var(--text);font-size:var(--fs-base);line-height:1.5}
+.lp-modes .run-bar{height:2px;background:var(--hair);overflow:hidden}
+.lp-modes .run-bar > span{display:block;height:100%;background:var(--accent);
+  transition:width var(--dur-slow) var(--ease)}
+.lp-modes .run-out{border:1px solid var(--hair);border-radius:var(--r-sm);background:var(--raised);
+  aspect-ratio:2;display:grid;place-items:center;transition:border-color var(--dur) var(--ease)}
+.lp-modes .run-out[data-done="true"]{border-color:color-mix(in srgb,var(--good) 40%,var(--hair))}
+/* --faint on --raised is 4.24:1 at this size, under AA. --muted clears it. */
+.lp-modes .run-out .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em}
+/* in flow, not floated over the output — a label that collides with the thing it labels is
+   worse than no label, and this one has to stay readable. */
+.lp-modes .run-mark{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.05em}
+
+@media(max-width:640px){
+  .lp-modes .mode-plate{padding:var(--s8) var(--s5) var(--s4)}
+  .lp-modes .mode-run{padding:var(--s5) var(--s5) var(--s10)}
+  .lp-modes .run-panel{padding:var(--s5)}
+}

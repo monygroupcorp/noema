@@ -1,5 +1,60 @@
 # Changelog
 
+## [5.24.0](https://github.com/monygroupcorp/noema/compare/v5.23.0...v5.24.0) (2026-09-01)
+
+
+### Features
+
+* **design:** give headings a voice, and wire up the role that carries it ([7a6181e](https://github.com/monygroupcorp/noema/commit/7a6181ef33c8163b0b5de379a1a8b92dabdbf118))
+* **design:** give headings a voice, and wire up the role that carries it ([58528d4](https://github.com/monygroupcorp/noema/commit/58528d44553c8e7664b5efafc677580efa31aeb7))
+* **landing:** the deck — the page's image mechanism, and the slots behind it ([a2d9c2c](https://github.com/monygroupcorp/noema/commit/a2d9c2c316746febeb799e8b37acf086147c6687))
+* **landing:** the new page becomes the page ([a6f3ad7](https://github.com/monygroupcorp/noema/commit/a6f3ad7b92b3809af3765510c066456be439048b))
+* **landing:** the new page becomes the page ([e6ebae9](https://github.com/monygroupcorp/noema/commit/e6ebae9cd65a95f4ba8f388032717f402dead4a5))
+* **walk:** name the runs, and make two of them comparable ([9f5131a](https://github.com/monygroupcorp/noema/commit/9f5131ac1439c8975ea5f850ca202a6bb4fd7d0b))
+
+
+### Bug Fixes
+
+* **crystal:** give the MiniMax H3 substrate a pod-provisionable base image ([11e8c91](https://github.com/monygroupcorp/noema/commit/11e8c912fb842d3e009b8842f7ee02a1403e7009))
+
+## [5.23.0](https://github.com/monygroupcorp/noema/compare/v5.22.0...v5.23.0) (2026-09-01)
+
+
+### Features
+
+* **api:** create a dataset with no media and populate it afterwards ([41c7112](https://github.com/monygroupcorp/noema/commit/41c7112481a326666fcb9e590be676e8a41bce50))
+* **api:** create a dataset with no media and populate it afterwards ([c23e3f9](https://github.com/monygroupcorp/noema/commit/c23e3f915b3b32103577ad681d140e5db7c84484))
+* **api:** expose run cancellation on the v1 surface ([6699d48](https://github.com/monygroupcorp/noema/commit/6699d4885d17f85fb71bdaaa171e128437af808e))
+* **api:** expose run cancellation on the v1 surface ([5f201a0](https://github.com/monygroupcorp/noema/commit/5f201a034f8c73e12c0deb8a32e0c57db29939f9))
+* **collections:** cancel a collection's in-flight pieces with the collection ([c03a042](https://github.com/monygroupcorp/noema/commit/c03a0424222f99456b2738381d849ec99c0abc6a))
+* **collections:** cancel a collection's in-flight pieces with the collection ([165ff00](https://github.com/monygroupcorp/noema/commit/165ff003c9e996350f81ba10747b0b7c11182055))
+* **crystal:** MiniMax H3 video — t2v, fl2v and ref2v on one ComfyUI substrate ([706cc4a](https://github.com/monygroupcorp/noema/commit/706cc4aac833b35fe3e023fc33e3daad9d0c87eb))
+* **crystal:** open the LoRA rail on the MiniMax H3 flows ([6d684f4](https://github.com/monygroupcorp/noema/commit/6d684f4d32f9d575385565a0fcd850a59ef8908d))
+* **datasets:** resolve a run's dataset reference for the caller's team ([93b232d](https://github.com/monygroupcorp/noema/commit/93b232d3fba06020b89f6acee44537a13e2a614f))
+* **datasets:** resolve a run's dataset reference for the caller's team (ADR-0014 q2) ([d0babad](https://github.com/monygroupcorp/noema/commit/d0babad6583e2f89292551d7bd6f3c2a95476ccb))
+* **ledger:** calibrate the krea-turbo reservation from its own cost curve ([b05260e](https://github.com/monygroupcorp/noema/commit/b05260efd45273c752f4730e3205fd86e5565b2f))
+* **ledger:** calibrate the krea-turbo reservation from its own cost curve ([0219d2a](https://github.com/monygroupcorp/noema/commit/0219d2a68c26c2921cc98b861b6cdba26221164a))
+* **projects:** honour Provincia.sodalitasId — team read + contribution ([4484dd2](https://github.com/monygroupcorp/noema/commit/4484dd22403e1b5d6cdda88ceb9d2dd38c479ed1))
+* **projects:** share a Provincia with a Sodalitas — team read + contribution ([3efa0e4](https://github.com/monygroupcorp/noema/commit/3efa0e48aed2b910e615f4c9b7312265148b68c2))
+* **web:** let a user publish their own private model ([27c7ed7](https://github.com/monygroupcorp/noema/commit/27c7ed7709fbd0121c5ae10702d4ef9928ba95d9))
+* **web:** let a user publish their own private model ([aa5bad9](https://github.com/monygroupcorp/noema/commit/aa5bad972a5ea6e8a831eba788af99b265cbff9f))
+
+
+### Bug Fixes
+
+* **api:** read a studio by id in every state its owner is shown ([e755c35](https://github.com/monygroupcorp/noema/commit/e755c352617a967d9e7fe217f449c90efebb7302))
+* **api:** read a studio by id in every state its owner is shown ([5e63294](https://github.com/monygroupcorp/noema/commit/5e632944b644f90577fd06d29920cad74407d20b))
+* **api:** type the parity test's host keys as HostKey ([8d66f40](https://github.com/monygroupcorp/noema/commit/8d66f40a89373867a1d12b3c694c823e7ec7cd76))
+* **crystal:** correct the MiniMax H3 HuggingFace fallback sources ([bd3c984](https://github.com/monygroupcorp/noema/commit/bd3c9842bfe44c6b8691e65d5d00109affd6c033))
+* **crystal:** count pieces held for review in their collection ([f4c9da3](https://github.com/monygroupcorp/noema/commit/f4c9da3facc4aef29412d9ad2d77530469203433))
+* **crystal:** count pieces held for review in their collection ([acfaf85](https://github.com/monygroupcorp/noema/commit/acfaf851ad54697bca461e0f565913d3fea9fc5e))
+* **crystal:** pin the MiniMax H3 substrate to ComfyUI v0.33.0 ([122a379](https://github.com/monygroupcorp/noema/commit/122a379ee2c8b8d844377840b302a6f96760685a))
+* **datasets:** ingest generation media recorded as a private-output marker ([9c1fe3c](https://github.com/monygroupcorp/noema/commit/9c1fe3c39b5b2075ac8dc0e6d29694c695c01023))
+* **datasets:** ingest generation media recorded as a private-output marker ([c5fb32c](https://github.com/monygroupcorp/noema/commit/c5fb32c9d2aa0778bed9b34187cd0ff953c4495b))
+* **execution:** accrue session spend from the settled amount ([cdf5d8d](https://github.com/monygroupcorp/noema/commit/cdf5d8d9d83422e72e8974527b28366f19c5ea09))
+* **execution:** accrue session spend from the settled amount ([5dea72a](https://github.com/monygroupcorp/noema/commit/5dea72ad9698a41389c810e2dd41afb74c9ebe6f))
+* **scripts:** seed the walk's held pieces as pendingReview, not completed ([e9c878b](https://github.com/monygroupcorp/noema/commit/e9c878b23cc8774046b0c440bcfc10cbc3e812b3))
+
 ## [5.22.0](https://github.com/monygroupcorp/noema/compare/v5.21.0...v5.22.0) (2026-08-31)
 
 

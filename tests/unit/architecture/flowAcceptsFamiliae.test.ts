@@ -38,6 +38,11 @@ const EXEMPT: Record<string, string> = {
   'flux2-klein-4b-comfyui':
     'Native flux2 only. FLUX.2 is a separate architecture from FLUX.1; no acceptance across the two ' +
     'has been established.',
+  'minimax-h3-comfyui':
+    'Native minimax-h3 only. H3 is a video+audio DiT with its own text encoder; no image-model ' +
+    'familia has a LoRA that could apply to it, and the fl2va/ref2va checkpoints share the one ' +
+    'familia, so there is no second family to accept and no direction to encode. The baked 4-step ' +
+    'turbo LoRAs deliberately carry NO familia — they are manifest weights, not rail-selectable.',
 }
 
 function loadTemplate(templateId: string, version: string): { loraCapable?: boolean } {

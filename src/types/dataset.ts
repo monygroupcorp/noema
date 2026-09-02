@@ -185,6 +185,19 @@ export interface Dataset {
    * this field delivers only the first.
    */
   sodalitasId?: string
+  /**
+   * Single-axis access, `docs/spec/intella-schema.md` §6's discriminated union narrowed to the
+   * two kinds a `Dataset` needs beyond owner/team scope: `public` (anyone may read and name it
+   * — the arm `MongoDataset.findOwned`/`_page` have carried, inert, since this field didn't
+   * exist) and `private`, written back explicitly to un-publish one. `group` is not offered:
+   * `sodalitasId` above is that overlay already, and a second route to the same outcome is the
+   * "no new nouns" duplication ADR-0001 forbids. `hidden` and the allowlist form of `private`
+   * (`sharedWith`) are not modelled because nothing reads them yet — add on the item that does.
+   *
+   * Absent -> owner-only (plus `sodalitasId`'s team, if set), the behaviour every dataset
+   * written before this field existed already has.
+   */
+  access?: { kind: 'public' | 'private' }
   name: string
   modality: DatasetModality
   custody: DatasetCustody

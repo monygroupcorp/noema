@@ -14,6 +14,14 @@ const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Spa
 const Canvas = lazy(() => import('./screens/Canvas').then((m) => ({ default: m.Canvas })));
 const Vault = lazy(() => import('./screens/Vault').then((m) => ({ default: m.Vault })));
 const lazyEl = (node: ReactNode) => <Suspense fallback={<div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div>}>{node}</Suspense>;
+// Coded design laboratory for the landing redesign (STANDARD §7.2). The plate slots it renders
+// are unfilled placeholders, and an unfinished slot must never be able to reach a visitor — so
+// the import itself is behind the dev flag, not just the route. With DEV false this collapses to
+// `null`, the dynamic import is unreachable, and neither the component nor its stylesheet is
+// emitted into the production build.
+const PlateLab = import.meta.env.DEV
+  ? lazy(() => import('./screens/PlateLab').then((m) => ({ default: m.PlateLab })))
+  : null;
 import { Projects } from './screens/Projects';
 import { Dashboard } from './screens/Dashboard';
 import { ProjectHub } from './screens/ProjectHub';
@@ -110,6 +118,7 @@ export function App() {
       <Route path="/studio" element={<Studio />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
+      {PlateLab && <Route path="/lab/landing" element={lazyEl(<PlateLab />)} />}
       <Route path="/ceremony" element={<Ceremony />} />
       {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). No email, so
           no verify/reset token pages; recovery is via backup channels bound in the profile. */}

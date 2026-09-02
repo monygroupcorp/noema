@@ -1,0 +1,13 @@
+/* the design lab's own instrument bar. The page it renders styles itself. */
+.lab-bar{position:sticky;top:0;z-index:var(--z-nav);display:flex;align-items:center;gap:var(--s4);
+  flex-wrap:wrap;padding:var(--s2) var(--s4);border-bottom:1px solid var(--hair);
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px)}
+.lab-bar .lab-tag{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase}
+.lab-bar .lab-meta{color:var(--faint);font-size:var(--fs-xs)}
+.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1)}
+.lab-bar .lab-ctl > .mono{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
+.lab-bar button{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);
+  background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s3);cursor:pointer}
+.lab-bar button.on{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
+
