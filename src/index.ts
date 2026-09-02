@@ -1281,6 +1281,7 @@ async function main(): Promise<void> {
     erasureEnabled,
     anonPurseEnabled,
     bursarium: ring.bursarium,
+    partners: ring.partners,
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
   }))
