@@ -491,6 +491,31 @@ export const api = {
   // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
   mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
 
+  // POST /v1/partner-requests — the public "become a B2B partner" intake (partnerRequestRouter.ts).
+  // Public, anon-capable: uses the same authHeaders() every other identity-attach write in this
+  // app uses (bearer if signed in, else the anon commitment) — the backend opportunistically
+  // resolves the caller's animaId when a valid session is present and swallows any resolution
+  // failure otherwise, so this call needs no special-casing for logged-out vs. logged-in.
+  requestPartnership: (body: { contactEmail: string; useCase: string; nomen?: string; org?: string; notes?: string }) =>
+    fetch('/v1/partner-requests', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(jApi<{ id: string }>),
+
+  // ADMIN — GET/PATCH /v1/admin/partner-requests (partnerAdminRouter.ts), platform-admin only
+  // server-side (client gate is cosmetic, same convention as every other admin surface here).
+  // `status` narrows the list; omit for every request regardless of status.
+  adminListPartnerRequests: (status?: PartnerRequestStatus) =>
+    fetch(`/v1/admin/partner-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`, { headers: readHeaders() })
+      .then(jApi<{ requests: PartnerRequest[] }>),
+  // Approving a request with no animaId only flips its status — no Partner record, no API key.
+  // Approving one that carries an animaId provisions both, and `apiKey` in the response is the
+  // ONLY time the raw key is ever shown — the caller must never persist it beyond page state.
+  adminDecidePartnerRequest: (id: string, status: 'approved' | 'declined') =>
+    fetch(`/v1/admin/partner-requests/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status }),
+    }).then(jApi<{ request: PartnerRequest; partner?: Partner; apiKey?: string }>),
+
   // ── Concierge (colloquia, noema-095) ──────────────────────────────────────
   // Same auth pattern as createRun (Decision record Q4, noema-099): an active
   // Vault purse sends ONLY the bursa token, no identity header; otherwise the
@@ -1704,6 +1729,26 @@ export interface Partner {
   contactEmail?: string;
   sourceRequestId: string;
   natum: string;
+}
+
+// A B2B partner-program intake request (POST /v1/partner-requests, admin-reviewed via
+// GET/PATCH /v1/admin/partner-requests) — mirrors the backend's `PartnerRequest`
+// (src/types/partnerRequest.ts) as a local interface, same convention as `Partner` above.
+// `animaId` is present ONLY when the submitter had a resolvable session at submission time;
+// its absence means approval can only flip `status` — no Partner record or API key is minted.
+export type PartnerRequestStatus = 'pending' | 'approved' | 'declined';
+export interface PartnerRequest {
+  id: string;
+  nomen?: string;
+  org?: string;
+  contactEmail: string;
+  animaId?: string;
+  useCase: string;
+  notes?: string;
+  status: PartnerRequestStatus;
+  natum: string;
+  decidedAt?: string;
+  decidedBy?: string;
 }
 
 // A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.
