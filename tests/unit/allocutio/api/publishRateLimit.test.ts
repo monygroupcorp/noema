@@ -10,7 +10,7 @@ import rateLimit from 'express-rate-limit'
 import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
 import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { Edition } from '../../../../src/allocutio/api/types.js'
 import type { PublishOpts } from '../../../../src/allocutio/api/CrystalApi.js'
 
@@ -44,6 +44,12 @@ const fakeIdentity: Identity = {
     if (creds.apiKey === 'owner-a') return { animaId: 'anima-a' }
     if (creds.apiKey === 'owner-b') return { animaId: 'anima-b' }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 

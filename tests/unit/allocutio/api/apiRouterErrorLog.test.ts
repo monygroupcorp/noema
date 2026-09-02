@@ -26,7 +26,7 @@ import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/
 import { ApiError, Errors } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 import { bus } from '../../../../src/lib/bus.js'
 import type { LogEntry } from '../../../../src/lib/logger.js'
 
@@ -56,6 +56,12 @@ const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: SAMPLE_ANIMA_ID }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 

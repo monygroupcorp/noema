@@ -26,7 +26,7 @@ import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
-import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId } from './allocutio/api/apiAcceptors.js'
+import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId, type ApiKeyAccount } from './allocutio/api/apiAcceptors.js'
 import { AgentJwtVerifier, parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
 import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
@@ -1068,16 +1068,26 @@ async function main(): Promise<void> {
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
   // degrades to auth.invalid, never a crash or a write. Real auth is validated on staging.
-  const verifyApiKeyToAccountId = async (apiKey: string): Promise<string | null> => {
+  //
+  // `users.apiKeys[]` entries may carry an OPTIONAL `maxImpetusPerRun` (a stringified bigint —
+  // string so a value beyond Number.MAX_SAFE_INTEGER survives the round trip): a per-run spend
+  // ceiling minted onto the key itself, used for partner keys. It is passed through raw and
+  // parsed in `apiAcceptors` (hermetic, and an unreadable value refuses the key there rather
+  // than degrading to "no ceiling"). A key without the field is unchanged in every respect.
+  const verifyApiKeyToAccountId = async (apiKey: string): Promise<ApiKeyAccount | null> => {
     try {
       if (!apiKey.startsWith('ms2_') || apiKey.length < 12) return null
       const prefix = apiKey.slice(0, 12)
       const user = await mongo.db(DB_NAME).collection('users').findOne({ 'apiKeys.keyPrefix': prefix })
       if (!user) return null
       const hash = createHash('sha256').update(apiKey).digest('hex')
-      const keys = (user.apiKeys ?? []) as Array<{ keyPrefix?: string; keyHash?: string; status?: string }>
+      const keys = (user.apiKeys ?? []) as Array<{ keyPrefix?: string; keyHash?: string; status?: string; maxImpetusPerRun?: unknown }>
       const match = keys.find(k => k.keyPrefix === prefix && k.keyHash === hash && k.status !== 'inactive')
-      return match ? String(user._id) : null
+      if (!match) return null
+      return {
+        accountId: String(user._id),
+        ...(match.maxImpetusPerRun !== undefined ? { maxImpetusPerRun: match.maxImpetusPerRun } : {}),
+      }
     } catch {
       return null
     }

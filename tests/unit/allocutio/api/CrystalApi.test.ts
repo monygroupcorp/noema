@@ -994,6 +994,129 @@ test('invokeFlow with maxImpetus ABOVE the reservation succeeds', async () => {
   assert.equal(run.status, 'complete')
 })
 
+// ── invokeFlow keyMaxImpetusPerRun — the ceiling the CREDENTIAL carries ────────
+//
+// `keyMaxImpetusPerRun` is minted onto a partner's API key; `maxImpetus` is what the request
+// asked for. Admission applies the MINIMUM of the two, which is what makes the key's ceiling
+// unbypassable — `min` can only tighten. Reservation is 5n throughout, as above.
+
+test('invokeFlow: a key ceiling BELOW the reservation throws economy.cap_too_low', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; key ceiling = 4n; the caller asked for no cap at all → refused.
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { keyMaxImpetusPerRun: 4n }),
+    (e: unknown) => {
+      // The EXISTING cap contract, not a new one: same code, same status, same details keys.
+      assert.ok(e instanceof ApiError)
+      assert.equal(e.code, 'economy.cap_too_low')
+      assert.equal(e.httpStatus, 422)
+      assert.deepEqual(e.opts.details, { estimated: '5', maxImpetus: '4' })
+      return true
+    },
+  )
+})
+
+test('invokeFlow: a key ceiling ABOVE the reservation succeeds', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; key ceiling = 10n → admitted.
+  const run = await api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { keyMaxImpetusPerRun: 10n })
+  assert.equal(run.status, 'complete')
+})
+
+test('invokeFlow: a caller maxImpetus ABOVE the key ceiling does NOT lift it', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; the caller asks for 1_000_000n, the key allows 4n. If the caller's number won,
+  // this run would be admitted and real money would move past the partner's own limit.
+  await assert.rejects(
+    () => api.invokeFlow(
+      auctor,
+      { modusId: 'flux-schnell' },
+      { prompt: 'hi' },
+      { maxImpetus: 1_000_000n, keyMaxImpetusPerRun: 4n },
+    ),
+    (e: unknown) => {
+      assert.ok(e instanceof ApiError)
+      assert.equal(e.code, 'economy.cap_too_low')
+      // The KEY's ceiling is what bound the request, and it is what gets reported.
+      assert.deepEqual(e.opts.details, { estimated: '5', maxImpetus: '4' })
+      return true
+    },
+  )
+})
+
+test('invokeFlow: a caller maxImpetus BELOW the key ceiling still binds', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; caller cap 4n, key ceiling 1_000_000n. The key's ceiling never LOOSENS a
+  // tighter cap the caller set on itself — `min` runs in both directions.
+  await assert.rejects(
+    () => api.invokeFlow(
+      auctor,
+      { modusId: 'flux-schnell' },
+      { prompt: 'hi' },
+      { maxImpetus: 4n, keyMaxImpetusPerRun: 1_000_000n },
+    ),
+    (e: unknown) => {
+      assert.ok(e instanceof ApiError)
+      assert.equal(e.code, 'economy.cap_too_low')
+      assert.deepEqual(e.opts.details, { estimated: '5', maxImpetus: '4' })
+      return true
+    },
+  )
+})
+
+test('invokeFlow: a run inside BOTH caps is admitted', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // reserve = 5n; caller cap 10n, key ceiling 1_000_000n → the tighter one is 10n, which admits.
+  const run = await api.invokeFlow(
+    auctor,
+    { modusId: 'flux-schnell' },
+    { prompt: 'hi' },
+    { maxImpetus: 10n, keyMaxImpetusPerRun: 1_000_000n },
+  )
+  assert.equal(run.status, 'complete')
+})
+
+// ── The regression bar: a credential with NO ceiling behaves exactly as before ─
+//
+// This is the assertion that matters most on this change. Every existing API key, and every
+// caller that authenticates any other way, resolves with `keyMaxImpetusPerRun` absent — and for
+// them admission must be bit-for-bit the check it has always been.
+
+test('invokeFlow: with no key ceiling, admission is unchanged in all three of its states', async () => {
+  const { deps } = makeDeps()
+  const api = new CrystalApi(deps)
+
+  // 1. No cap of any kind → no estimate gate at all, exactly as before the field existed.
+  const uncapped = await api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' })
+  assert.equal(uncapped.status, 'complete')
+
+  // 2. A caller cap above the reservation → admitted, unchanged.
+  const capped = await api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { maxImpetus: 10n })
+  assert.equal(capped.status, 'complete')
+
+  // 3. A caller cap below the reservation → the same refusal, with the same details body the
+  //    pre-existing error carried (the caller's cap echoed as the caller wrote it).
+  await assert.rejects(
+    () => api.invokeFlow(auctor, { modusId: 'flux-schnell' }, { prompt: 'hi' }, { maxImpetus: '4' }),
+    (e: unknown) => {
+      assert.ok(e instanceof ApiError)
+      assert.equal(e.code, 'economy.cap_too_low')
+      assert.deepEqual(e.opts.details, { estimated: '5', maxImpetus: '4' })
+      return true
+    },
+  )
+})
+
 // ── saveFlow ──────────────────────────────────────────────────────────────────
 
 test('saveFlow from modusId registers a derived flow and returns its slug id', async () => {
