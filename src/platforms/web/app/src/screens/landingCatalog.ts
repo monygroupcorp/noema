@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type FlowSummary, type ModelCard } from '../lib/api';
+import { api, type FlowSummary, type ModelCard, type Pack } from '../lib/api';
 
 // The landing page's breadth claim is not written down anywhere. It is read from the same
 // catalogue the product runs on, so it cannot drift from what noema actually carries and it
@@ -102,6 +102,23 @@ export function summariseApi(doc: unknown): ApiSummary | null {
   return { endpoints: keys.length, mcp: keys.some((k) => k === '/mcp' || k.startsWith('/mcp/')) };
 }
 
+/** What a credit pack costs, and what it buys. Read from the same catalogue the checkout
+ *  charges against, so the landing page cannot quote a price the till does not honour.
+ *
+ *  `creditsPerUsd` is derived here rather than served: it is the only number on the block that
+ *  answers "is a bigger pack better", and deriving it means it cannot disagree with the pair it
+ *  came from. */
+export interface PackRate extends Pack {
+  creditsPerUsd: number;
+}
+
+export function ratePacks(packs: Pack[]): PackRate[] {
+  return packs
+    .filter((p) => p.usd > 0 && p.credits > 0)
+    .map((p) => ({ ...p, creditsPerUsd: p.credits / p.usd }))
+    .sort((a, b) => a.usd - b.usd);
+}
+
 export type CatalogState = 'loading' | 'ready' | 'error';
 
 export interface LandingCatalog {
@@ -112,6 +129,9 @@ export interface LandingCatalog {
   /** null until it loads, and null for good if it cannot be read — the API block simply does
    *  not render rather than claiming a shape of contract it did not see. */
   api: ApiSummary | null;
+  /** The sellable credit packs, cheapest first. Empty until they load, and empty for good if
+   *  they cannot be read — the pricing block renders nothing rather than a guessed price. */
+  packs: PackRate[];
 }
 
 /**
@@ -127,6 +147,7 @@ export function useLandingCatalog(): LandingCatalog {
   const [models, setModels] = useState<ModelCard[]>([]);
   // named for the summary, not `api` — that is the client this module already imports
   const [contract, setContract] = useState<ApiSummary | null>(null);
+  const [packs, setPacks] = useState<PackRate[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -136,6 +157,21 @@ export function useLandingCatalog(): LandingCatalog {
       .then((r) => (r.ok ? r.json() : null))
       .then((doc) => {
         if (live) setContract(summariseApi(doc));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Packs are fetched on their own for the same reason the contract is: an unreachable till
+  // costs the pricing block and nothing else.
+  useEffect(() => {
+    let live = true;
+    api
+      .listPacks()
+      .then((p) => {
+        if (live) setPacks(ratePacks(p ?? []));
       })
       .catch(() => {});
     return () => {
@@ -166,5 +202,6 @@ export function useLandingCatalog(): LandingCatalog {
     flows,
     models,
     api: contract,
+    packs,
   };
 }

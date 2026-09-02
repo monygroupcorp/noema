@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { modelFamily, summariseApi, summariseCatalog } from './landingCatalog';
-import type { FlowSummary, ModelCard } from '../lib/api';
+import { modelFamily, ratePacks, summariseApi, summariseCatalog } from './landingCatalog';
+import type { FlowSummary, ModelCard, Pack } from '../lib/api';
 
 const flow = (over: Partial<FlowSummary>): FlowSummary => ({ id: 'f', ...over });
 const model = (over: Partial<ModelCard>): ModelCard =>
@@ -150,5 +150,41 @@ describe('modelFamily', () => {
       { intellaId: 'c', nomen: 'CLIP-L (text encoder)', genus: 'embedding' },
     ] as never[];
     expect(summariseCatalog([], models).families).toEqual(['FLUX']);
+  });
+});
+
+describe('ratePacks — the price block is read, not written', () => {
+  // The four ratified packs as production serves them today. Not a fixture of invented
+  // numbers: if `stripePacks.PACKS` changes, this test still passes and the page still tells
+  // the truth, because neither of them is the source.
+  const live: Pack[] = [
+    { id: 'starter_10', usd: 10, credits: 2080, label: 'Starter' },
+    { id: 'standard_25', usd: 25, credits: 5720, label: 'Standard' },
+    { id: 'plus_50', usd: 50, credits: 12480, label: 'Plus' },
+    { id: 'studio_100', usd: 100, credits: 27040, label: 'Studio', bestRate: true },
+  ];
+
+  it('derives the rate rather than carrying a second copy of it', () => {
+    const rated = ratePacks(live);
+    expect(rated.map((p) => Math.round(p.creditsPerUsd))).toEqual([208, 229, 250, 270]);
+  });
+
+  it('orders cheapest first, whatever order the till answered in', () => {
+    const rated = ratePacks([...live].reverse());
+    expect(rated.map((p) => p.usd)).toEqual([10, 25, 50, 100]);
+  });
+
+  it('drops a pack that cannot be priced, rather than printing Infinity or NaN at a visitor', () => {
+    const rated = ratePacks([
+      ...live,
+      { id: 'free', usd: 0, credits: 100, label: 'Broken' },
+      { id: 'empty', usd: 5, credits: 0, label: 'Broken' },
+    ]);
+    expect(rated.map((p) => p.id)).toEqual(['starter_10', 'standard_25', 'plus_50', 'studio_100']);
+  });
+
+  // The block's whole failure posture: no packs means no section, never a guessed price.
+  it('returns nothing when the till answers with nothing', () => {
+    expect(ratePacks([])).toEqual([]);
   });
 });
