@@ -293,16 +293,21 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
           </div>
         </section>
 
-        <section className="lp-gaps">
-          <div className="lp-gaps-in">
-            {GAPS.map((g) => (
-              <div key={g.id} className="gap">
-                <span className="gap-label mono">{g.label}</span>
-                <p>{g.note}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        {/* The marked gaps are notes to ourselves about what this page cannot honestly say yet,
+            and they belong in the design lab, not on the front door. Shown to a visitor they
+            announce that we have no customers and have never taken a payment. */}
+        {showPlaceholders && (
+          <section className="lp-gaps">
+            <div className="lp-gaps-in">
+              {GAPS.map((g) => (
+                <div key={g.id} className="gap">
+                  <span className="gap-label mono">{g.label}</span>
+                  <p>{g.note}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* a closing CTA is not an argument that needs holding — it is a door. */}
         <section className="lp-cand-end">
