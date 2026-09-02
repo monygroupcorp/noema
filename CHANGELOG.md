@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.26.0](https://github.com/monygroupcorp/noema/compare/v5.25.0...v5.26.0) (2026-09-02)
+
+
+### Features
+
+* **api:** a failed run says where it died, and to whom ([62f9247](https://github.com/monygroupcorp/noema/commit/62f92479993dc2568faade8943fd95020d84d8f8))
+* **crystal:** let a substrate declare its own pod timeout budgets ([1962103](https://github.com/monygroupcorp/noema/commit/19621039f8e09c2c044f6a528e02971f8f71e7bd))
+* **landing:** name what it runs, instead of borrowing a wall of logos ([d8b4a45](https://github.com/monygroupcorp/noema/commit/d8b4a45fa30c11afcdf61da8b6ff8dfac025ed29))
+* **landing:** the plate runs carry work made on the platform ([59939fd](https://github.com/monygroupcorp/noema/commit/59939fd5e315d9eabab1a3b2ab7e4e66444ac0f8))
+* **landing:** the price block is read from the till, not written into the page ([fe9d0ca](https://github.com/monygroupcorp/noema/commit/fe9d0cacfb45d15f4715fd1d4eafbe700368ee01))
+* **landing:** the price block is read from the till, not written into the page ([4a7f945](https://github.com/monygroupcorp/noema/commit/4a7f945f9f2e97fb42f6173d5258e9fa637e2425))
+* **muse:** an anonymous visitor sits at a public dataset's Muse session ([21c91c8](https://github.com/monygroupcorp/noema/commit/21c91c8d4a019fd33d806953293cead98f4e4b57))
+* **muse:** anonymous browse+configure, gated at execution with an account modal ([7c47c5a](https://github.com/monygroupcorp/noema/commit/7c47c5a2a9caba34fdd14270b456e5c7a98ff79a))
+* **muse:** the account modal gates firing, then offers a top-up ([08da718](https://github.com/monygroupcorp/noema/commit/08da718c090291972cb25b2edc1b06d6a527fd1f))
+* **porta:** let a numeric port declare its legality, and refuse a violation before reserving ([567d684](https://github.com/monygroupcorp/noema/commit/567d684c4cf2cc263dee3e6d30766e4419559deb))
+* **web:** partner intake form and admin review screen ([e595242](https://github.com/monygroupcorp/noema/commit/e5952428e8bef4706bf0e8a7b5ea0556811dfb0d))
+* **web:** partner intake form and admin review screen ([784b840](https://github.com/monygroupcorp/noema/commit/784b840420a47e5cb2d186d104eda54d0c8bdb8c))
+
+
+### Bug Fixes
+
+* **crystal:** give the MiniMax H3 flows their own cost curve ([b96e803](https://github.com/monygroupcorp/noema/commit/b96e803eab885529ab24a66a13e58a0f440341db))
+* **landing:** the deployed page is unstyled, and three published documents disagree ([0ac820f](https://github.com/monygroupcorp/noema/commit/0ac820ffdfaad30bf74ee8ba2249853ad661b422))
+
 ## [5.25.0](https://github.com/monygroupcorp/noema/compare/v5.24.0...v5.25.0) (2026-09-02)
 
 
