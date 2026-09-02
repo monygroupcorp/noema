@@ -322,13 +322,16 @@ export function Muse() {
   const sessionParam = searchParams.get(SESSION_PARAM);
   const [datasets, setDatasets] = useState<DatasetT[] | null>(null);
 
+  // `withDatasetFallback` covers the mother this screen actually needs when it isn't in the
+  // caller's own list — a public dataset someone else made (noema-dataset-access-field), which
+  // is exactly the case a "start a Muse session on this public board" link lands on.
   useEffect(() => {
     let live = true;
     api.listDatasetsFull()
-      .then(({ datasets: ds }) => { if (live) setDatasets(ds); })
+      .then(async ({ datasets: ds }) => { if (live) setDatasets(await api.withDatasetFallback(ds, id)); })
       .catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
-  }, []);
+  }, [id]);
 
   const d = (datasets ?? []).find((x) => x.id === id);
 
@@ -859,11 +862,11 @@ export function Muse() {
     void (async () => {
       const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
       if (!live) return;
-      setDatasets(ds);
+      setDatasets(await api.withDatasetFallback(ds, id));
       setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
     })();
     return () => { live = false; };
-  }, [decomposeRun, decomposeTerminal, decomposeStream.error]);
+  }, [decomposeRun, decomposeTerminal, decomposeStream.error, id]);
   // noema-278 — the whole-set path, off by default and offered from BOTH decompose controls on
   // this screen. An item that already carries fragments has been through the extractor, and a
   // decompose spends one model call per item it runs, so the default pass is the new work only.
@@ -1045,7 +1048,7 @@ export function Muse() {
   async function refreshDatasets() {
     try {
       const { datasets: ds } = await api.listDatasetsFull();
-      setDatasets(ds);
+      setDatasets(await api.withDatasetFallback(ds, id));
     } catch (e) {
       setCaptionMsg({ ok: false, text: `couldn't re-read the set: ${errText(e)}` });
     }
@@ -3205,10 +3208,12 @@ export function MuseSessions() {
   }, [id]);
 
   // The dataset's name, for the crumb only — the list above does not wait on it.
+  // `getDatasetFull` covers a public dataset's own name too (noema-dataset-access-field).
   useEffect(() => {
+    if (!id) return;
     let live = true;
-    api.listDatasetsFull()
-      .then(({ datasets }) => { if (live) setName(datasets.find((x) => x.id === id)?.name ?? null); })
+    api.getDatasetFull(id)
+      .then((d) => { if (live) setName(d?.name ?? null); })
       .catch(() => { /* the crumb falls back to the id */ });
     return () => { live = false; };
   }, [id]);

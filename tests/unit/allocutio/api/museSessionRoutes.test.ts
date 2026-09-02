@@ -813,6 +813,46 @@ test('a session spawns off an archived mother, and a piece still saves into it',
   }
 })
 
+test('a stranger spawns a Muse session on a PUBLIC dataset, and is still refused on an ordinary one', async () => {
+  // The point of `access` (noema-dataset-access-field): a curated public dataset is meant to be
+  // exactly this — a stranger's fastest way into Muse, no ownership or team membership needed.
+  // Proved against `spawnMuseSession` directly, since that is the real HTTP path a "start a Muse
+  // session on this public board" link would fire.
+  const datasets = new MemoryDatasets()
+  const openMother = await datasets.create({
+    owner: OWNER,
+    access: { kind: 'public' },
+    name: 'Open board',
+    modality: 'image',
+    custody: 'local',
+    media: [{
+      id: 'media-open', url: 'https://example.invalid/open.png', source: 'upload',
+      addedAt: new Date(), fragments: FRAGMENTS,
+    }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+  const closedMother = await seedMother(datasets)
+
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const stranger = { 'x-api-key': 'stranger-1' }
+
+    const openSpawn = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: stranger, body: { datasetId: openMother.id },
+    })
+    assert.equal(openSpawn.status, 201, `a public dataset must be spawnable by a non-owner: ${JSON.stringify(openSpawn.body)}`)
+    assert.equal(openSpawn.body.session.motherDatasetId, openMother.id)
+
+    const closedSpawn = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: stranger, body: { datasetId: closedMother.id },
+    })
+    assert.equal(closedSpawn.status, 404, 'an ordinary (non-public) dataset stays closed to a stranger')
+  } finally {
+    await closeServer(server)
+  }
+})
+
 test('an archived media item does not seed a session spawned after the archive', async () => {
   const datasets = new MemoryDatasets()
   const mother = await seedMother(datasets)

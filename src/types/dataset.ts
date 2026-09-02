@@ -246,6 +246,14 @@ export interface DatasetListOpts {
   limit?: number
 }
 
+/** Cursor-paginated read opts for `Datasets.listPublic` — no `owner`, deliberately: the public
+ *  catalog is the same page for every caller, unlike `DatasetListOpts` which is scoped per
+ *  reader. */
+export interface DatasetPublicListOpts {
+  cursor?: string
+  limit?: number
+}
+
 export interface DatasetListPage {
   entries: Dataset[]
   nextCursor?: string
@@ -334,9 +342,7 @@ export interface Datasets {
    * record for a later comparison to be skipped on.
    *
    * The predicate is: the caller owns it, OR it is shared with one of `sodalitasIds`, OR its
-   * access kind is `public` (the single-axis Access union). A `Dataset` carries no access
-   * field today, so the public arm matches nothing yet; it is written in the query so that
-   * adding the field is a schema change rather than a re-derivation of who may read what.
+   * access kind is `public` (the single-axis Access union, `Dataset.access`).
    *
    * `sodalitasIds` — FK[] -> Sodalitas, the teams the caller is a member of, resolved at the
    * API layer from the AUTHENTICATED caller and never from a request parameter. It rides in as
@@ -359,6 +365,17 @@ export interface Datasets {
    */
   findOwned?(id: string, owner: string, sodalitasIds?: string[]): Promise<Dataset | null>
   list(opts: DatasetListOpts): Promise<DatasetListPage>
+  /** Every LIVE dataset with `access.kind === 'public'` — no owner, no team, discoverable by
+   *  anyone. This is the catalog read: `list`/`listSummaries` stay owner+team scoped on purpose
+   *  (mixing public rows into a caller's own listing would conflate "your shelf" with "the
+   *  catalog"), so a public dataset is found here or not at all until its id is already known.
+   *  Same cursor pagination and archived-exclusion as `list`.
+   *
+   *  OPTIONAL on the interface for the same reason `findOwned` is: a store double is not
+   *  obliged to implement it, and `CrystalApi.listPublicDatasets` treats an unimplemented store
+   *  as an empty catalog rather than throwing — fail-closed, the `_ownedStudio`/`findOwned`
+   *  convention, never a crash for a fake that predates this method. */
+  listPublic?(opts: DatasetPublicListOpts): Promise<DatasetListPage>
   listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage>
   /** Append media to a dataset. APPEND-ONLY: the supplied items are added after the media
    *  already present and nothing existing is replaced, reordered or dropped — every captionset's
