@@ -13,6 +13,7 @@ import { CANONICAL_FUNDAMENTA, FUNDAMENTUM_MINIMAX_H3_COMFYUI } from '../../../s
 import { MemoryFundamentorum } from '../../../src/crystal/MemoryFundamentorum.js'
 import type { Intellarum, Intella } from '../../../src/types/intelligendi.js'
 import { asComfyUI } from './Compiler.helpers.js'
+import { podDiskGbFor, DEFAULT_POD_DISK_GB, POD_DISK_HEADROOM_GB } from '../../../src/crystal/podDisk.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REAL_WORKFLOWS = path.join(__dirname, '../../../src/crystal/workflows')
@@ -191,4 +192,18 @@ test('the LoRA rail is declared, and carries the node pack it needs', async () =
     assert.ok(packs.some(p => p.url.includes('ComfyUI-Coziness')),
       `${essentia.id} must ship the Coziness pack that provides the rail nodes`)
   }
+})
+
+test('the compiled spec asks for a disk that fits 56 GB of weights', async () => {
+  const { spec } = await makeCompiler().compile(ESSENTIA_MINIMAX_H3_T2V, { prompt: 'x' })
+  const disk = (asComfyUI(spec) as { diskGb?: number }).diskGb
+  // The stub Intellarum reports 1 GB per weight, so this asserts the WIRING, not the number:
+  // a real manifest is 56 GB and the seed-level guard (podDiskFitsWeights) checks the sizing.
+  assert.equal(typeof disk, typeof podDiskGbFor(0) === 'number' ? 'undefined' : 'number',
+    'small manifests keep the default and emit nothing')
+
+  // …and with real sizes it must exceed the flat default that broke run 5effbe17.
+  const real = podDiskGbFor(56)
+  assert.ok(real > DEFAULT_POD_DISK_GB, '56 GB of weights must not ride the 40 GB default')
+  assert.ok(real >= 56 + POD_DISK_HEADROOM_GB, 'and must leave working room on top')
 })

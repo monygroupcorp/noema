@@ -15,6 +15,7 @@ import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
+import { DEFAULT_POD_DISK_GB } from './podDisk.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 // The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
@@ -373,6 +374,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
     // Derive image from spec if available, else fall back to config
     const specOciRef = isCompiledSpec(params.input) ? params.input.image?.ociRef : undefined
     const imageName = specOciRef ?? this.config.imageName ?? 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
+    // Disk the Compiler derived from this flow's weight manifest, when it needs more than the
+    // flat default. Read structurally, like comfyRef/install, so an older spec shape is harmless.
+    const diskGb = isCompiledSpec(params.input) ? (params.input as { diskGb?: number }).diskGb : undefined
 
     const maxAttempts = this.config.podRetries ?? 3
 
@@ -387,7 +391,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       if (attempt > 1) log.info('retrying pod provision', { attempt, cloudType: cloudType ?? 'SECURE' })
       log.info('pod provisioning', { actumId: getTrace()?.actumId, imageName, cloudType: cloudType ?? 'SECURE' })
       try {
-        podId = await this._provisionPod(imageName, cloudType, gpuTypeIds)
+        podId = await this._provisionPod(imageName, cloudType, gpuTypeIds, diskGb)
         break
       } catch (err) {
         lastProvisionErr = err as Error
@@ -439,7 +443,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
           log.info('retrying on new pod', { attempt })
           let retryPodId: string
           try {
-            retryPodId = await this._provisionPod(imageName)
+            retryPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
           } catch (provErr) {
             log.warn(`provision retry ${attempt}/${maxAttempts} failed`, { error: (provErr as Error).message })
             if (attempt === maxAttempts) throw provErr
@@ -900,14 +904,16 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }
 
   // gpuTypeIds=null → omit from request (let RunPod pick any available GPU)
-  private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null): Promise<string> {
+  private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null, diskGb?: number): Promise<string> {
     const resolvedGpus = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
     const body: Record<string, unknown> = {
       name: `noema-${Date.now()}`,
       imageName,
       gpuCount: 1,
       cloudType: cloudType ?? this.config.cloudType ?? 'SECURE',
-      containerDiskInGb: this.config.containerDiskGb ?? 40,
+      // The flow's own requirement wins: a 56 GB weight set on the flat default fills the
+      // disk mid-fetch and surfaces as "model download failed" naming the mirror (noema-372).
+      containerDiskInGb: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
       ports: ['22/tcp', '8188/http', '8080/http'],
       supportPublicIp: true,
     }
