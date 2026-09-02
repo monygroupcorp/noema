@@ -8,6 +8,7 @@ import { BeatRun, type Beat } from './BeatRun';
 import { LandingCatalog } from './LandingCatalog';
 import { LandingOpen } from './LandingOpen';
 import { LandingModes } from './LandingModes';
+import { LandingPricing } from './LandingPricing';
 import { platesIn, type PlateFormat } from './landingPlates';
 import './landing-page.css';
 
@@ -261,6 +262,8 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
           </div>
         </section>
 
+
+        <LandingPricing />
 
         <section className="lp-anon">
           <div className="lp-anon-in">

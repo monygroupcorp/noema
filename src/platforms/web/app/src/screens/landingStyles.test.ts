@@ -62,6 +62,7 @@ describe('landing page styling', () => {
   it('namespaces every top-level selector, so no rule reaches the rest of the app', () => {
     const LANDING_CSS = [
       'landing-page.css', 'landing-catalog.css', 'landing-modes.css', 'landing-plate.css',
+      'landing-pricing.css',
       'landing-open.css', 'plate-deck.css', 'scroll-stage.css', 'beat-run.css',
       'landing-wordmark.css',
     ];

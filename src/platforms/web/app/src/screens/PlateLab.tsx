@@ -13,11 +13,6 @@ const GAPS = [
     label: 'proof slot — customers, ratings, named artists',
     note: 'Competitors run logo bars, star ratings and artist stories here. We have none that are real. Stays empty until there are users to quote.',
   },
-  {
-    id: 'pricing',
-    label: 'pricing slot — plans and numbers',
-    note: 'Blocked: no purchase has ever settled on production, so no number here is claimable yet.',
-  },
 ];
 
 const DISPLAY_FACES = ['fraunces', 'instrument', 'newsreader', 'geist', 'martian'] as const;
