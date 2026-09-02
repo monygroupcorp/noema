@@ -246,3 +246,117 @@ test('gallery: unknown collection (no agents at all) still gets the global defau
   assert.equal(res.status, 200)
   assert.equal(res.headers['content-security-policy'], `frame-ancestors ${GLOBAL_ANCESTORS.join(' ')}`)
 })
+
+// ── `mode` dispatch (partner-embed program item 03) ─────────────────────────────────────
+
+test('mode regression: no mode param is byte-identical to ?mode=list (today\'s combined view)', async () => {
+  const build = () => app({ feed: async () => [imgItem('https://cdn.test/a.png')], appearance: async () => ({ accent: '#ff0088' }) })
+  const noParam = await request(build()).get('/widget/camel42')
+  const listParam = await request(build()).get('/widget/camel42?mode=list')
+  assert.equal(noParam.status, 200)
+  assert.equal(noParam.text, listParam.text)
+  // And it is the pre-existing combined shape: the gallery, themed.
+  assert.match(noParam.text, /Recent creations/)
+  assert.match(noParam.text, /https:\/\/cdn\.test\/a\.png/)
+})
+
+test('mode regression: no mode param matches the exact pre-mode-dispatch combined view (interactive agent)', async () => {
+  const res = await request(interactive()).get('/widget/camel42?code=purse-abc')
+  assert.equal(res.status, 200)
+  // Exactly the prior fixed test's assertions for the combined (code-holding) view — proves
+  // the run panel is untouched by the new mode plumbing.
+  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)
+  assert.match(res.text, /id="runbtn">Run · ~\d+ cr/)
+})
+
+test('mode=panel: renders only the run panel/gate, suppresses the trailing gallery grid', async () => {
+  const res = await request(interactive()).get('/widget/camel42?code=purse-abc&mode=panel')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)   // panel present
+  assert.doesNotMatch(res.text, /Recent creations/)               // gallery section suppressed
+  assert.doesNotMatch(res.text, /class="grid"><div class="tile"/) // no tile grid rendered
+})
+
+test('mode=panel: entrance gate case also suppresses the gallery block', async () => {
+  const a = app({
+    legati: { findByAgentId: async () => legatus({ workspaceModusId: 'm1' }), listByCollection: async () => [] },
+    modorum: { find: async (id) => (id === 'm1' ? MODUS : null), list: async () => [MODUS] },
+    quoteImpetus: async () => 1000n,
+    x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0xReceiver' },
+    feed: async () => [imgItem('https://cdn.test/a.png')],
+  })
+  const res = await request(a).get('/widget/camel42?mode=panel')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /id="gateform"/)
+  assert.doesNotMatch(res.text, /Recent creations/)
+  assert.doesNotMatch(res.text, /cdn\.test\/a\.png/)
+})
+
+test('mode=gallery: renders only this agent\'s own feed, suppresses the run panel/gate', async () => {
+  const res = await request(interactive()).get('/widget/camel42?code=purse-abc&mode=gallery')
+  assert.equal(res.status, 200)
+  assert.doesNotMatch(res.text, /id="runwrap"/)                   // no run panel
+  assert.doesNotMatch(res.text, /id="gateform"/)                  // no entrance gate
+  assert.match(res.text, /No creations|Recent creations|empty/)   // gallery-shaped body present
+})
+
+test('mode=gallery: shows the agent\'s own feed tiles when present', async () => {
+  const a = app({
+    legati: { findByAgentId: async () => legatus({}), listByCollection: async () => [] },
+    feed: async () => [imgItem('https://cdn.test/solo.png')],
+  })
+  const res = await request(a).get('/widget/camel42?mode=gallery')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /Recent creations/)
+  assert.match(res.text, /https:\/\/cdn\.test\/solo\.png/)
+})
+
+test('mode=gallery: empty feed shows the empty state, not a blank panel-shaped page', async () => {
+  const a = app({
+    legati: { findByAgentId: async () => legatus({}), listByCollection: async () => [] },
+    feed: async () => [],
+  })
+  const res = await request(a).get('/widget/camel42?mode=gallery')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /This agent hasn't published anything yet\./)
+})
+
+test('mode: unrecognized value fails open to list behavior, never errors', async () => {
+  const build = () => app({ feed: async () => [imgItem('https://cdn.test/a.png')], appearance: async () => ({ accent: '#ff0088' }) })
+  const bogus = await request(build()).get('/widget/camel42?mode=not-a-real-mode')
+  const list = await request(build()).get('/widget/camel42?mode=list')
+  assert.equal(bogus.status, 200)
+  assert.equal(bogus.text, list.text)
+})
+
+// ── gallery theme override (partner-embed program item 03) ──────────────────────────────
+
+test('gallery theme: no theme params renders identically to before theme support existed', async () => {
+  const build = () => app({ feed: async () => [imgItem('https://cdn.test/g.png')] })
+  const bare = await request(build()).get('/widget/gallery/0xCOLLECTION')
+  const explicitNone = await request(build()).get('/widget/gallery/0xCOLLECTION?')
+  assert.equal(bare.status, 200)
+  assert.equal(bare.text, explicitNone.text)
+  assert.match(bare.text, /--accent:#5b8cff/)                     // untouched default accent
+  assert.match(bare.text, /--bg:#08090A/)                         // untouched default bg
+})
+
+test('gallery theme: valid theme query params are applied to the CSS custom properties', async () => {
+  const a = app({ feed: async () => [imgItem('https://cdn.test/g.png')] })
+  const res = await request(a).get('/widget/gallery/0xCOLLECTION?accent=%23ff0088&bg=%23111111&card-bg=%23222222&text=%23eeeeee&text-dim=%23999999')
+  assert.equal(res.status, 200)
+  assert.match(res.text, /--accent:#ff0088/)
+  assert.match(res.text, /--bg:#111111/)
+  assert.match(res.text, /--surface:#222222/)
+  assert.match(res.text, /--text:#eeeeee/)
+  assert.match(res.text, /--text-muted:#999999/)
+})
+
+test('gallery theme: malformed/unsafe theme params are ignored, never injected raw', async () => {
+  const a = app({ feed: async () => [imgItem('https://cdn.test/g.png')] })
+  const res = await request(a).get('/widget/gallery/0xCOLLECTION?accent=' + encodeURIComponent('red;}</style><script>alert(1)</script>'))
+  assert.equal(res.status, 200)
+  assert.doesNotMatch(res.text, /<script>alert/)                  // never injected raw
+  assert.doesNotMatch(res.text, /red;\}/)
+  assert.match(res.text, /--accent:#5b8cff/)                      // fell back to the built-in default
+})
