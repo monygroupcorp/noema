@@ -5,6 +5,23 @@
 .lp-cat h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
 .lp-cat .lp-cat-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:44ch;margin:0}
 
+/* the roster — the model families the platform runs, named rather than borrowed as logos.
+   Set in the display face so it reads as a claim the page is making, not as a caption. */
+.lp-cat-roster{max-width:1180px;margin:0 auto var(--s10);padding:0 var(--px-section)}
+.lp-cat-roster h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;
+  text-transform:uppercase;font-weight:400;margin:0 0 var(--s6)}
+.lp-cat-roster ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;
+  gap:var(--s4) var(--s8);align-items:baseline}
+.lp-cat-roster li{font-family:var(--font-display);font-optical-sizing:auto;
+  font-size:clamp(20px,2.4vw,34px);line-height:1.1;letter-spacing:-.02em;color:var(--text)}
+.lp-cat-roster li::after{content:"·";color:var(--faint);margin-left:var(--s8);
+  font-family:var(--font-mono);font-size:var(--fs-s);vertical-align:middle}
+.lp-cat-roster li:last-child::after{content:none}
+@media(max-width:640px){
+  .lp-cat-roster ul{gap:var(--s3) var(--s5)}
+  .lp-cat-roster li::after{margin-left:var(--s5)}
+}
+
 /* the brag band — the page's one loud moment. Numerals at display scale, hard left, bleeding
    past the text column, because these are the numbers the platform actually earned. */
 .lp-cat .lp-cat-brag{max-width:1180px;margin:var(--s10) auto var(--s10);padding:0 var(--px-section);
