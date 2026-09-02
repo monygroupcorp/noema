@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summariseApi, summariseCatalog } from './landingCatalog';
+import { modelFamily, summariseApi, summariseCatalog } from './landingCatalog';
 import type { FlowSummary, ModelCard } from '../lib/api';
 
 const flow = (over: Partial<FlowSummary>): FlowSummary => ({ id: 'f', ...over });
@@ -90,6 +90,7 @@ describe('summariseCatalog', () => {
     const s = summariseCatalog([], []);
     expect(s).toEqual({
       workflows: 0, verbs: [], modalities: [], models: 0, kinds: [], loras: 0, bases: [],
+      families: [],
     });
   });
 });
@@ -113,5 +114,41 @@ describe('summariseApi', () => {
     expect(summariseApi({})).toBeNull();
     expect(summariseApi({ paths: 'nope' })).toBeNull();
     expect(summariseApi('<!doctype html>')).toBeNull();
+  });
+});
+
+describe('modelFamily', () => {
+  it('reduces a precise catalogue name to the family a roster wants', () => {
+    expect(modelFamily('Wan2.2 T2V — high-noise unet (14B, fp8 scaled)')).toBe('Wan');
+    expect(modelFamily('FLUX.2 Klein 4B (fp8)')).toBe('FLUX');
+    expect(modelFamily('FLUX.1 Schnell')).toBe('FLUX');
+    expect(modelFamily('Krea 2 Turbo (fp8 scaled)')).toBe('Krea');
+    expect(modelFamily('MiniMax H3 — reference to video (pruned int8 convrot)')).toBe('MiniMax');
+  });
+
+  it('keeps two-word and hyphenated family names whole', () => {
+    expect(modelFamily('Stable Diffusion XL Base 1.0')).toBe('Stable Diffusion');
+    expect(modelFamily('Stable Diffusion 1.5 (pruned emaonly)')).toBe('Stable Diffusion');
+    expect(modelFamily('Z-Image Turbo (bf16)')).toBe('Z-Image');
+    expect(modelFamily('MOSS-Music 8B Instruct')).toBe('MOSS-Music');
+    expect(modelFamily('Qwen3-VL 8B Instruct')).toBe('Qwen3-VL');
+  });
+
+  it('collapses the four Wan variants and both FLUX Schnells to one entry each', () => {
+    const models = [
+      'Wan2.2 T2V — high-noise unet (14B, fp8 scaled)', 'Wan2.2 T2V — low-noise unet (14B, fp8 scaled)',
+      'Wan2.2 I2V — high-noise unet (14B, fp8 scaled)', 'Wan2.2 I2V — low-noise unet (14B, fp8 scaled)',
+      'FLUX.1 Schnell', 'FLUX.1 Schnell (fp8 scaled)',
+    ].map((nomen) => ({ intellaId: nomen, nomen, genus: 'model' })) as never[];
+    expect(summariseCatalog([], models).families).toEqual(['FLUX', 'Wan']);
+  });
+
+  it('rosters only base models — 262 trained identities would swamp it', () => {
+    const models = [
+      { intellaId: 'a', nomen: 'FLUX.1 Schnell', genus: 'model' },
+      { intellaId: 'b', nomen: 'somebody-flux-klein', genus: 'lora' },
+      { intellaId: 'c', nomen: 'CLIP-L (text encoder)', genus: 'embedding' },
+    ] as never[];
+    expect(summariseCatalog([], models).families).toEqual(['FLUX']);
   });
 });

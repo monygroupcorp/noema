@@ -11,15 +11,15 @@
 /* Everything about the rooms lives inside the lock: the heading, the run, and the index under
    it. Inset rather than full-bleed, and width-capped against the viewport height, so heading +
    cards + index always fit the pinned screen instead of overrunning it on a short display. */
-.lp-modes .modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);width:100%;
+.lp-modes .lp-modes-run{display:grid;gap:var(--s5);padding:0 var(--px-section);width:100%;
   max-width:min(1240px, calc((100svh - 300px) * 1.8));
   max-width:min(1240px, calc((100vh - 300px) * 1.8));
   margin:0 auto}
-.lp-modes .modes-head{display:flex;align-items:baseline;justify-content:space-between;
+.lp-modes .lp-modes-head{display:flex;align-items:baseline;justify-content:space-between;
   gap:var(--s7);flex-wrap:wrap}
-.lp-modes .modes-head h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px);
+.lp-modes .lp-modes-head h2{margin:0;max-width:none;font-size:clamp(22px,2.6vw,34px);
   line-height:1.1;letter-spacing:-.03em;font-weight:600}
-.lp-modes .modes-head p{color:var(--muted);font-size:var(--fs-s);line-height:1.5;max-width:42ch;margin:0}
+.lp-modes .lp-modes-head p{color:var(--muted);font-size:var(--fs-s);line-height:1.5;max-width:42ch;margin:0}
 .lp-deck-modes{margin-top:0}
 .lp-deck-modes .lp-deck-card{background:var(--panel)}
 .lp-modes .mode-shot{position:absolute;inset:0;width:100%;height:100%;
@@ -36,12 +36,12 @@
 .lp-modes .mode-line{display:block;color:var(--muted);font-size:clamp(13px,1.3vw,16px);
   line-height:1.5;margin-top:var(--s2);max-width:46ch}
 /* the index — the rooms as names you can click, and as a readout of where the run has got to */
-.lp-modes .modes-index{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s6)}
-.lp-modes .modes-index a,.lp-modes .modes-index span{color:var(--faint);font-size:var(--fs-s);
+.lp-modes .lp-modes-index{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s6)}
+.lp-modes .lp-modes-index a,.lp-modes .lp-modes-index span{color:var(--faint);font-size:var(--fs-s);
   text-decoration:none;padding-bottom:var(--s2);border-bottom:1px solid transparent;
   transition:color var(--dur) var(--ease),border-color var(--dur) var(--ease)}
-.lp-modes .modes-index a:hover{color:var(--muted)}
-.lp-modes .modes-index [data-on]{color:var(--text);border-bottom-color:var(--accent)}
+.lp-modes .lp-modes-index a:hover{color:var(--muted)}
+.lp-modes .lp-modes-index [data-on]{color:var(--text);border-bottom-color:var(--accent)}
 
 /* the run demonstration — the product's own states, walked. Labelled, and carrying none of the
    numbers a real run reports, so it cannot be mistaken for one. */

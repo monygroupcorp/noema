@@ -47,6 +47,20 @@ export function LandingCatalog() {
         <div><dt>{summary.workflows}</dt><dd>workflows to run them through</dd></div>
       </dl>
 
+      {/* The roster. A competitor puts a wall of borrowed logos here; we hold none of those marks
+          and would rather not imply we do, so the page names what it runs instead — read from the
+          catalogue, so it can never be a list somebody forgot to update. */}
+      {summary.families.length > 0 && (
+        <div className="lp-cat-roster">
+          <h3 className="mono">what it runs</h3>
+          <ul>
+            {summary.families.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="lp-cat-in">
 
         <div className="lp-cat-cols">

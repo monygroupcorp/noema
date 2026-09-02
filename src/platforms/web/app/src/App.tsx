@@ -53,12 +53,12 @@ import { Review } from './screens/Review';
 import { AdminWorkspace } from './screens/AdminWorkspace';
 import { AdminPartnerRequests } from './screens/AdminPartnerRequests';
 import { Doc } from './screens/Doc';
+import { Blog, BlogPost } from './screens/Blog';
 import { Pricing } from './screens/Pricing';
 import { RequestDemo } from './screens/RequestDemo';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
 import featuresMd from './content/features.md?raw';
-import blogMd from './content/blog.md?raw';
 import privacyMd from './content/privacy.md?raw';
 import cookiesMd from './content/cookies.md?raw';
 import termsMd from './content/terms.md?raw';
@@ -134,7 +134,8 @@ export function App() {
       {/* Public "become a B2B partner" intake (partner-embed-07) — mirrors /pricing: no auth
           check, public route. Posts to /v1/partner-requests (partnerRequestRouter.ts). */}
       <Route path="/partners" element={<RequestDemo />} />
-      <Route path="/blog" element={<Doc md={blogMd} />} />
+      <Route path="/blog" element={<Blog />} />
+      <Route path="/blog/:slug" element={<BlogPost />} />
       <Route path="/legal/privacy" element={<Doc md={privacyMd} />} />
       <Route path="/legal/cookies" element={<Doc md={cookiesMd} />} />
       <Route path="/legal/terms" element={<Doc md={termsMd} />} />
