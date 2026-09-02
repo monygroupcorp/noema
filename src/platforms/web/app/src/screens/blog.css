@@ -1,0 +1,14 @@
+/* the guide index — a list of doors, not a grid of cards */
+.blog-index{list-style:none;margin:var(--s8) 0 0;padding:0;display:grid;gap:0}
+.blog-index li{border-top:1px solid var(--hair);padding:var(--s6) 0;position:relative}
+.blog-index li:last-child{border-bottom:1px solid var(--hair)}
+.blog-index a{display:grid;gap:var(--s2);text-decoration:none;color:inherit}
+.blog-index .blog-title{font-family:var(--font-display);font-size:var(--fs-xl);letter-spacing:-.02em;
+  color:var(--text);font-optical-sizing:auto}
+.blog-index a:hover .blog-title{color:var(--accent-soft)}
+.blog-index .blog-blurb{color:var(--muted);font-size:var(--fs-base);line-height:1.6;max-width:60ch}
+.blog-index .blog-date{position:absolute;top:var(--s6);right:0;color:var(--faint);font-size:var(--fs-xs)}
+.blog-empty{color:var(--muted)}
+@media(max-width:760px){
+  .blog-index .blog-date{position:static;display:block;margin-top:var(--s2)}
+}
