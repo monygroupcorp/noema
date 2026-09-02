@@ -60,6 +60,59 @@ const log = makeLogger('cursor:runpod:secure')
 const DEFAULT_COMFYUI_REF = 'v0.26.0'
 
 /**
+ * The two per-substrate timeout budgets a compiled spec may carry (noema-392), read off it
+ * structurally the way `comfyRef`/`install` are — an older spec shape simply declares neither.
+ *
+ * They are TWO knobs, not one, because they bound disjoint phases with different failure
+ * economics. Readiness bounds an import graph, fires before any of the run's cost is sunk, and
+ * has a pod retry behind it. The job window bounds model load plus sampling, fires at the very
+ * end when provisioning and the whole weight pull have already been paid for, and has nothing
+ * behind it at all. Collapsing them would force the cheap-to-fail phase to wait out the
+ * expensive one's budget.
+ *
+ * `substrateRef` is not a budget; it rides along so the pod-side timeout message can name the
+ * substrate whose budget it exceeded.
+ */
+export interface PodTimeoutBudgets {
+  readyTimeoutMs?: number
+  jobTimeoutMs?: number
+  substrateRef?: string
+}
+
+/** Platform readiness budget when a substrate declares none. Mirrors comfyrunner's own
+ *  `COMFY_READY_TIMEOUT` default of 300 s on the pod side; a substrate that needs longer says so
+ *  rather than making every stuck flux pod take longer to give up. */
+export const DEFAULT_COMFY_READY_TIMEOUT_MS = 5 * 60 * 1000
+
+/** How long Crystal holds the completion SSE open. This is the OUTER bound on the job: it must
+ *  stay strictly longer than the pod's own `JOB_TIMEOUT`, or Crystal gives up first and the
+ *  pod-side message — the one that names the budget and says whether any node ran — never
+ *  reaches the webhook. `_streamTimeoutMs` enforces that ordering for declared budgets. */
+export const DEFAULT_JOB_STREAM_TIMEOUT_MS = 45 * 60 * 1000
+
+/** Slack kept between a substrate's declared job budget and Crystal's SSE deadline: the pod must
+ *  be the one that times out, and it still needs time to upload outputs and post the webhook
+ *  after a slow-but-successful run. */
+export const JOB_STREAM_MARGIN_MS = 5 * 60 * 1000
+
+/**
+ * Read the substrate's timeout budgets off a compiled spec. Structural and defensive, like the
+ * `comfyRef`/`install` reads — a caller may hand us a spec shape that predates these fields, and
+ * a non-positive number is treated as no declaration rather than as an instant timeout.
+ */
+export function podTimeoutBudgets(input: unknown): PodTimeoutBudgets {
+  if (!isCompiledSpec(input)) return {}
+  const spec = input as { readyTimeoutMs?: unknown; jobTimeoutMs?: unknown; image?: { ociRef?: string } }
+  const positive = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined
+  return {
+    ...(positive(spec.readyTimeoutMs) ? { readyTimeoutMs: positive(spec.readyTimeoutMs) } : {}),
+    ...(positive(spec.jobTimeoutMs) ? { jobTimeoutMs: positive(spec.jobTimeoutMs) } : {}),
+    ...(spec.image?.ociRef ? { substrateRef: spec.image.ociRef } : {}),
+  }
+}
+
+/**
  * The wall-clock budget for PROVISIONING a pod — renting the machine and building the
  * environment on it, before any of the work the run actually pays for begins.
  *
@@ -234,9 +287,13 @@ export interface SecurePodConfig {
   /** How long a RUNNING pod may report no public IP before it is abandoned for a fresh one.
    *  Default: SSH_IPLESS_BAILOUT_MS. */
   sshIplessBailoutMs?: number
-  comfyReadyTimeoutMs?: number   // default: 5 min
+  /** Platform readiness budget. A substrate that needs longer declares
+   *  `Fundamentum.readyTimeoutMs`, which wins upward only (noema-392). */
+  comfyReadyTimeoutMs?: number   // default: DEFAULT_COMFY_READY_TIMEOUT_MS (5 min)
   comfyPollIntervalMs?: number   // default: 2000
-  jobTimeoutMs?: number          // default: 15 min
+  /** How long Crystal holds the completion SSE open — the OUTER bound. The pod's own
+   *  `JOB_TIMEOUT` is the inner one and must fire first; see `_streamTimeoutMs`. */
+  jobTimeoutMs?: number          // default: DEFAULT_JOB_STREAM_TIMEOUT_MS (45 min)
   /** How many times to retry the COMPLETED webhook POST on failure (default: 3). */
   webhookRetries?: number        // default: 3
   /** Base delay between webhook retries in ms; doubles each attempt (default: 1000). */
@@ -1115,14 +1172,17 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // shape that predates those fields.
       const specComfyRef = isCompiledSpec(input) ? (input as { comfyRef?: string }).comfyRef : undefined
       const specInstall = isCompiledSpec(input) ? (input as { install?: string[] }).install : undefined
-      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined, specComfyRef, specInstall)
+      // …and its timeout budgets (noema-392), which must reach the pod on the launch line —
+      // comfyrunner reads JOB_TIMEOUT / COMFY_READY_TIMEOUT from its environment ONCE, at start.
+      const budgets = podTimeoutBudgets(input)
+      await this._bootstrap(ssh, podId, isCompiledSpec(input) ? input.runtime : undefined, specComfyRef, specInstall, budgets)
 
       // SSH only needed for bootstrap — close before HTTP phase
       await ssh.close()
       ssh = null
 
       const runnerBase = SecurePodClient.runnerBase(podId)
-      await this._waitForRunner(runnerBase)
+      await this._waitForRunner(runnerBase, budgets)
       signal('comfy-ready')
 
       const jobId = externusJobId ?? podId
@@ -1136,7 +1196,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // (so we can terminate/warm the pod). comfyrunner records its own Progressus timeline
       // through the in-process recorder seam — no stage callback needed (#6e).
       await awaitViaStream(
-        this.fetchFn, runnerBase, jobId, this.config.jobTimeoutMs ?? 45 * 60 * 1000,
+        this.fetchFn, runnerBase, jobId, this._streamTimeoutMs(budgets),
         (m) => { Object.assign(executio, m); reportMetrics() },
       )
       jobSucceeded = true
@@ -1238,9 +1298,41 @@ export class SecurePodClient implements RunPodClient, Procurator {
     return `https://${podId}-8080.proxy.runpod.net`
   }
 
-  /** Poll comfyrunner /health until it reports 'ready' or 'busy'. */
-  private async _waitForRunner(runnerBase: string): Promise<void> {
-    const timeoutMs = this.config.comfyReadyTimeoutMs ?? 5 * 60 * 1000
+  /**
+   * How long to hold the completion SSE open (noema-392).
+   *
+   * The pod must be the side that times out. Its message names the budget, the substrate, and
+   * whether any node executed — the difference between "stalled loading models" and "sampling is
+   * slow" — and comfyrunner owns the failure webhook once it has accepted the job. If Crystal's
+   * stream deadline expires first, all of that is lost and the caller gets a dropped stream.
+   *
+   * So a substrate whose declared job budget would reach or exceed the configured stream deadline
+   * pushes the stream deadline out past it by `JOB_STREAM_MARGIN_MS`. A shorter declaration
+   * changes nothing.
+   */
+  private _streamTimeoutMs(budgets: PodTimeoutBudgets = {}): number {
+    const configured = this.config.jobTimeoutMs ?? DEFAULT_JOB_STREAM_TIMEOUT_MS
+    const declared = budgets.jobTimeoutMs
+    if (declared === undefined) return configured
+    return Math.max(configured, declared + JOB_STREAM_MARGIN_MS)
+  }
+
+  /**
+   * Poll comfyrunner /health until it reports 'ready' or 'busy'.
+   *
+   * A substrate's declared `readyTimeoutMs` wins over `config.comfyReadyTimeoutMs` (noema-392) —
+   * but ONLY upward, and only in production. A test injects a deliberately tiny
+   * `comfyReadyTimeoutMs` to make the give-up path fast, and a 15-minute substrate declaration
+   * must not turn that into a 15-minute test; taking the max in the other direction would.
+   * `Math.max` of the two is wrong for the same reason, so the rule is explicit: honour the
+   * declaration when it is LONGER than the configured budget, and let a configured budget that
+   * is already longer stand.
+   */
+  private async _waitForRunner(runnerBase: string, budgets: PodTimeoutBudgets = {}): Promise<void> {
+    const configured = this.config.comfyReadyTimeoutMs ?? DEFAULT_COMFY_READY_TIMEOUT_MS
+    const declared   = budgets.readyTimeoutMs
+    const usingDeclared = declared !== undefined && declared > configured
+    const timeoutMs = usingDeclared ? declared! : configured
     const pollMs    = this.config.comfyPollIntervalMs ?? 2000
     const deadline  = Date.now() + timeoutMs
     while (Date.now() < deadline) {
@@ -1255,12 +1347,22 @@ export class SecurePodClient implements RunPodClient, Procurator {
       }
       await sleep(pollMs)
     }
-    throw new Error('comfyrunner did not become ready within timeout')
+    // Name the budget, where it came from, and the substrate it was sized for. Without those
+    // three the message is "did not become ready within timeout" and the next occurrence starts
+    // its investigation from zero (noema-390).
+    throw new Error(
+      `comfyrunner did not become ready within ` +
+      // Seconds read better for every production budget; a sub-second one (only a test injects
+      // those) would round to a nonsense "0s", so it reports its own unit.
+      `${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs}ms`} ` +
+      `(${usingDeclared ? 'substrate-declared budget' : 'platform default budget'}` +
+      `${budgets.substrateRef ? `, substrate ${budgets.substrateRef}` : ''})`,
+    )
   }
 
   /** Bootstrap dispatches on the pod's runtime (ADR-0007). ComfyUI keeps the proven comfyrunner.py
    *  path byte-for-byte; vLLM/llm pods get the multi-runtime runner.py. */
-  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string, comfyRef?: string, install?: string[]): Promise<void> {
+  private async _bootstrap(ssh: SshTransportLike, podId: string, runtime?: string, comfyRef?: string, install?: string[], budgets?: PodTimeoutBudgets): Promise<void> {
     if (runtime === 'vLLM' || runtime === 'llm') {
       return this._bootstrapRunner(ssh, podId, 'vLLM', 'vllm huggingface_hub boto3')
     }
@@ -1278,10 +1380,10 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // just needs the download + R2 tooling. git is ensured inside _bootstrapRunner.
       return this._bootstrapRunner(ssh, podId, 'python-modelcard', 'huggingface_hub boto3')
     }
-    return this._bootstrapComfyUI(ssh, podId, comfyRef, install)
+    return this._bootstrapComfyUI(ssh, podId, comfyRef, install, budgets)
   }
 
-  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string, comfyRef?: string, install?: string[]): Promise<void> {
+  private async _bootstrapComfyUI(ssh: SshTransportLike, podId: string, comfyRef?: string, install?: string[], budgets?: PodTimeoutBudgets): Promise<void> {
     const ref = comfyRef ?? DEFAULT_COMFYUI_REF
     log.info('bootstrapping pod', { podId, runtime: 'ComfyUI', comfyRef: ref, installSteps: install?.length ?? 0 })
 
@@ -1306,11 +1408,29 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const script = fs.readFileSync(COMFYRUNNER_SCRIPT_PATH, 'utf8')
     const b64 = Buffer.from(script).toString('base64').replace(/\n/g, '')
     await ssh.exec(`echo '${b64}' | base64 -d > /root/comfyrunner.py`, { timeout: 10_000 })
+    // Substrate timeout budgets (`Fundamentum.readyTimeoutMs` / `jobTimeoutMs`, noema-392).
+    // comfyrunner reads both from its environment and, until now, nothing ever set them: the
+    // launch line carried only RUNPOD_POD_ID and COMFYUI_DIR, so its 900 s job default was a hard
+    // constant for every substrate on the platform. That is what killed minimax-h3-fl2v.
+    // Omitted entirely when the substrate declares nothing, so the launch line for every existing
+    // pod is unchanged. SUBSTRATE_REF travels alongside so the pod-side timeout message can name
+    // the substrate whose budget it exceeded (noema-390).
+    const runnerEnv = [
+      `RUNPOD_POD_ID=${podId}`,
+      'COMFYUI_DIR=/root/ComfyUI',
+      ...(budgets?.substrateRef ? [`SUBSTRATE_REF=${shellQuote(budgets.substrateRef)}`] : []),
+      ...(budgets?.jobTimeoutMs ? [`JOB_TIMEOUT=${Math.ceil(budgets.jobTimeoutMs / 1000)}`] : []),
+      ...(budgets?.readyTimeoutMs ? [`COMFY_READY_TIMEOUT=${Math.ceil(budgets.readyTimeoutMs / 1000)}`] : []),
+    ].join(' ')
     await ssh.exec(
-      `RUNPOD_POD_ID=${podId} COMFYUI_DIR=/root/ComfyUI nohup python3 /root/comfyrunner.py >> /tmp/comfyrunner.log 2>&1 &`,
+      `${runnerEnv} nohup python3 /root/comfyrunner.py >> /tmp/comfyrunner.log 2>&1 &`,
       { timeout: 5_000 },
     )
-    log.info('comfyrunner started', { podId })
+    log.info('comfyrunner started', {
+      podId,
+      jobTimeoutMs: budgets?.jobTimeoutMs ?? null,
+      readyTimeoutMs: budgets?.readyTimeoutMs ?? null,
+    })
   }
 
   /**

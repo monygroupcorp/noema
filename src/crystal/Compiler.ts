@@ -124,6 +124,31 @@ export interface ComfyUICompiledSpec extends CompiledSpecBase {
    * modelcard repo's deps.
    */
   install?: string[]
+  /**
+   * Substrate readiness budget in ms, forwarded from `Fundamentum.readyTimeoutMs` (noema-392).
+   *
+   * Bounds BOTH ends of the same wait: SecurePodClient's `/health` poll and, via the launch
+   * line's `COMFY_READY_TIMEOUT`, comfyrunner's own wait for ComfyUI to answer `/system_stats`.
+   * They must move together — comfyrunner does not serve `/health` at all until ComfyUI is up
+   * and `sys.exit(1)`s when its own budget lapses, so lengthening only the client half buys
+   * nothing but a longer wait on a process that has already quit.
+   *
+   * Emitted only when the fundament declares it, so a substrate that does not stays
+   * byte-identical (the `comfyRef`/`install` grain).
+   */
+  readyTimeoutMs?: number
+  /**
+   * Per-job execution budget in ms, forwarded from `Fundamentum.jobTimeoutMs` (noema-392).
+   *
+   * Reaches the pod as `JOB_TIMEOUT` on the comfyrunner launch line, where until now only
+   * `RUNPOD_POD_ID` and `COMFYUI_DIR` travelled — so comfyrunner's env-overridable default of
+   * 900 s was in practice a hard constant for every substrate. It killed `minimax-h3-fl2v`
+   * (actum 7d5fd175) at `executionMs: 898405`, after the pod, the bootstrap and 56 GB of weights
+   * had all been paid for.
+   *
+   * Emitted only when the fundament declares it. Hash-stable for every substrate that does not.
+   */
+  jobTimeoutMs?: number
   workflow: {
     templateId: string
     templateVersion: string
@@ -446,6 +471,16 @@ export class Compiler {
       ...(diskGb > DEFAULT_POD_DISK_GB ? { diskGb } : {}),
       ...(fundamentum.install && fundamentum.install.length > 0
         ? { install: fundamentum.install }
+        : {}),
+      // Timeout budgets (noema-392). Conditional on a positive declaration for the same reason
+      // comfyRef/install are: an absent key keeps every existing substrate's spec — and its
+      // content hash — byte-identical. A non-positive value is treated as no declaration rather
+      // than emitted, so a typo cannot ship a pod that times out instantly.
+      ...(fundamentum.readyTimeoutMs && fundamentum.readyTimeoutMs > 0
+        ? { readyTimeoutMs: fundamentum.readyTimeoutMs }
+        : {}),
+      ...(fundamentum.jobTimeoutMs && fundamentum.jobTimeoutMs > 0
+        ? { jobTimeoutMs: fundamentum.jobTimeoutMs }
         : {}),
       ...(template.customNodes && template.customNodes.length > 0
         ? { customNodes: template.customNodes }

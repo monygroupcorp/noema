@@ -115,6 +115,38 @@ export interface Fundamentum {
    */
   readyProbe?: string
 
+  /**
+   * How long this substrate may take to come up before the runner is declared stuck, in ms
+   * (noema-392). Absent → the platform default (5 min).
+   *
+   * A DECLARATION, not a derivation: unlike pod disk (`podDiskGbFor`, arithmetic over the weight
+   * manifest) there is no quantity to compute this from. What has to happen inside the window is
+   * a fact about the substrate — comfyrunner starts ComfyUI, which imports the substrate's custom
+   * node packs and initialises their backends. MiniMax H3 enumerates `comfy-kitchen`'s CUDA
+   * backends and loads `comfy-aimdo`; a flux pod does neither.
+   *
+   * Resist raising the platform default instead. A flux pod that has not answered in five minutes
+   * is genuinely stuck, and a larger global budget makes every such failure slower without making
+   * a single one rarer.
+   */
+  readyTimeoutMs?: number
+
+  /**
+   * How long ONE queued job may run on this substrate before the pod aborts it, in ms
+   * (noema-392). Absent → the pod-side default (900 s).
+   *
+   * Separate from `readyTimeoutMs` because it bounds a disjoint phase with different economics:
+   * readiness is bounded by an import graph and has a pod retry behind it, while the job window
+   * is bounded by model load + sampling and has NOTHING behind it — it fires at the very end,
+   * after provisioning and the whole weight pull have already been paid for.
+   *
+   * On an offloading substrate this is dominated by model load, not by the sample: MiniMax H3
+   * pushes 48 GB of weights through a 24 GB card before the first node runs, so a 4-step turbo
+   * sample sits behind ~700 s of loading. Size it from a measured job, with a multiple for
+   * pod-to-pod load variance — not from the sample step count.
+   */
+  jobTimeoutMs?: number
+
   /** True = platform-canonical fundament. False = a user-authored one (the /arm custom path). */
   canonica: boolean
   /** "auctor" = author/creator — owner of a user-authored fundament. Canonical ones leave it undefined. */
