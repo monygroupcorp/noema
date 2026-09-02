@@ -52,7 +52,7 @@ not log private-session content beyond what these controls require.
   commercial use, and only offer models so licensed. Some models carry **use-based
   restrictions** (e.g., OpenRAIL-M, Meta Llama Community License); by using them you agree to
   comply with those upstream restrictions, which **flow down** to you as a condition of use.
-  The applicable restrictions are listed at [MODEL_LICENSE_PAGE_URL].
+  The applicable restrictions are those of the upstream model's own licence, which travels with the weights; we do not publish a consolidated list of them today.
 - **BYO mode:** you represent and warrant that you hold all rights necessary to use the
   weights you supply, and you indemnify us against any claim arising from your model. We do
   not review or license your supplied weights.
@@ -100,7 +100,7 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 
 ## 10. Governing law & changes
 
-Governed by the laws of [JURISDICTION]. We may update these terms; continued use constitutes
+Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
 acceptance. Material changes will be notified by in-app notice.
 
 ---

@@ -25,7 +25,7 @@ The long version follows.
 
 ## 1. Who we are
 
-MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina, operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean MONY GROUP LLC. Our registered address is [ADDRESS].
+MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina, operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean MONY GROUP LLC. Our registered address is 116 Agnes Rd, Ste 200, Knoxville, TN 37919-6306.
 
 For GDPR purposes, MONY GROUP LLC is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
 
@@ -237,7 +237,7 @@ We will notify you of material changes by in-app notice at least 14 days before 
 
 Privacy questions: mony.group.corporation+privacy@gmail.com
 Data protection officer: none appointed. We are below the thresholds that require one; if that changes this section will name the appointee.
-Address: [ADDRESS]
+Address: 116 Agnes Rd, Ste 200, Knoxville, TN 37919-6306
 
 ---
 

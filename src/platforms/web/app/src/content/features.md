@@ -11,7 +11,7 @@ Access the best open-source and frontier language models — Llama, Qwen, Mistra
 
 **Runs on:** vLLM, llama.cpp runtimes. OpenAI-compatible API.
 
-[Start generating →]
+[Start generating →](/catalog)
 
 
 ## Image generation
@@ -22,7 +22,7 @@ FLUX Schnell and other leading image models. We never train on your prompts or o
 
 **Runs on:** FLUX.1 Schnell, SDXL, and others via ComfyUI workflows.
 
-[Create images →]
+[Create images →](/catalog)
 
 
 ## Video generation
@@ -31,7 +31,7 @@ FLUX Schnell and other leading image models. We never train on your prompts or o
 
 Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
-[Generate video →]
+[Generate video →](/catalog)
 
 
 ## Audio and music
@@ -40,7 +40,7 @@ Text-to-video and image-to-video generation through the same composable workflow
 
 Music generation, text-to-speech, and audio processing. Describe what you want; get a finished output. We never train on your productions. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
-[Make audio →]
+[Make audio →](/catalog)
 
 
 ## The canvas workspace
@@ -51,7 +51,7 @@ Most AI interfaces give you one model at a time. Noema's canvas lets you compose
 
 This isn't a chatbot wrapper. It's a production workspace for people who build with AI.
 
-[Explore the canvas →]
+[Explore the canvas →](/canvas)
 
 
 ## Anonymous credits — coming soon
@@ -62,7 +62,7 @@ Fund anonymously today from a shielded or fresh on-chain wallet — no identity 
 
 No other AI platform has this. Venice's "crypto = private" angle does the opposite — a wallet address is a permanent, publicly traceable identity on-chain.
 
-[How purse works →]
+[How purse works →](/funding)
 
 
 ## API
@@ -71,4 +71,4 @@ No other AI platform has this. Venice's "crypto = private" angle does the opposi
 
 Every modality through a single API: text, image, video, audio, embeddings. Swap out your OpenAI base URL and your existing stack works. Use a session key today; anonymous bearer-token billing via an `x-bursa-token` header is coming soon.
 
-[API docs →]
+[API docs →](/docs)
