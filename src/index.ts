@@ -21,6 +21,9 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
+import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
+import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
@@ -1068,20 +1071,8 @@ async function main(): Promise<void> {
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
   // degrades to auth.invalid, never a crash or a write. Real auth is validated on staging.
-  const verifyApiKeyToAccountId = async (apiKey: string): Promise<string | null> => {
-    try {
-      if (!apiKey.startsWith('ms2_') || apiKey.length < 12) return null
-      const prefix = apiKey.slice(0, 12)
-      const user = await mongo.db(DB_NAME).collection('users').findOne({ 'apiKeys.keyPrefix': prefix })
-      if (!user) return null
-      const hash = createHash('sha256').update(apiKey).digest('hex')
-      const keys = (user.apiKeys ?? []) as Array<{ keyPrefix?: string; keyHash?: string; status?: string }>
-      const match = keys.find(k => k.keyPrefix === prefix && k.keyHash === hash && k.status !== 'inactive')
-      return match ? String(user._id) : null
-    } catch {
-      return null
-    }
-  }
+  const usersCol = mongo.db(DB_NAME).collection('users')
+  const verifyApiKeyToAccountId = (apiKey: string): Promise<string | null> => verifyApiKeyToAccountIdCore(usersCol, apiKey)
   const apiResolver = new ApiIdentityResolver(makeCredentialAcceptors({
     personae: ring.personae,
     animae: ring.animae,
@@ -1101,6 +1092,25 @@ async function main(): Promise<void> {
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
   app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+
+  // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
+  // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution
+  // failure is never fatal — see partnerRequestRouter.ts's header). Mirrors querelaRouter's
+  // shape (own hand-rolled counted-window rate limit, no CrystalApi facade).
+  app.use('/v1/partner-requests', express.json(), createPartnerRequestRouter({
+    partnerRequests: ring.partnerRequests,
+    identity: apiResolver,
+  }))
+  // Admin review + approval-provisioning of those requests. Platform-admin only — see
+  // partnerAdminRouter.ts's header for why the gate is reproduced there rather than
+  // imported from CrystalApi, mirroring querelaAdminRouter.ts's precedent.
+  app.use('/v1/admin/partner-requests', express.json(), createPartnerAdminRouter({
+    partnerRequests: ring.partnerRequests,
+    partners: ring.partners,
+    identity: apiResolver,
+    personae: ring.personae,
+    usersCol,
+  }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.
