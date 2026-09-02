@@ -1,5 +1,28 @@
 # Changelog
 
+## [5.25.0](https://github.com/monygroupcorp/noema/compare/v5.24.0...v5.25.0) (2026-09-02)
+
+
+### Features
+
+* **api:** internal route for model license clearance ([db5311f](https://github.com/monygroupcorp/noema/commit/db5311f5421ebcaf717d00e68bd6714d6d614aa4))
+* **api:** internal route for model license clearance ([5cfe280](https://github.com/monygroupcorp/noema/commit/5cfe2801f57cbad77277166b7f85044674846fff))
+* **api:** per-key per-run spend ceiling on partner API keys ([11d610f](https://github.com/monygroupcorp/noema/commit/11d610f902cbe1b812a8b863171418813f4e3665))
+* **datasets:** a public dataset catalog, with a link straight into Muse ([d4789f9](https://github.com/monygroupcorp/noema/commit/d4789f927f9a7ba3f99cee7295d1a86cdc6b4ee3))
+* **datasets:** a public dataset catalog, with a link straight into Muse ([02ed47c](https://github.com/monygroupcorp/noema/commit/02ed47c2d4acc8503c5368a601d75cb7fe072071))
+* **datasets:** an owner can publish a dataset to the catalog ([3c400ce](https://github.com/monygroupcorp/noema/commit/3c400cea783bb86f6b06abe51aab57c6a5729356))
+* **datasets:** an owner can publish a dataset to the catalog ([3eb7dcc](https://github.com/monygroupcorp/noema/commit/3eb7dcc1e65b92febbf8deb8019c435314f7e817))
+* **partner:** B2B partner program — intake, approval, dashboard, spend ceiling, embed scoping ([819a8fd](https://github.com/monygroupcorp/noema/commit/819a8fdd5318774d3da033c07f6e96fbd1b9b84b))
+* **partner:** request-a-demo intake, admin review, and approval provisioning ([66bebe5](https://github.com/monygroupcorp/noema/commit/66bebe5c1c34f6c5fca28b5914e7f574d488d4cc))
+* **web:** partner self-service dashboard ([58e2b19](https://github.com/monygroupcorp/noema/commit/58e2b1923e9824e4a116cdba5ba775ebab2aa0ed))
+
+
+### Bug Fixes
+
+* CI failures — stale web-app lockfile, two typecheck fakes missed on merge ([08ed94a](https://github.com/monygroupcorp/noema/commit/08ed94a5f25b814ccbaf6710b1ba59e838717453))
+* **crystal:** a public dataset is readable, and spawnable into Muse, by anyone ([fdf126f](https://github.com/monygroupcorp/noema/commit/fdf126f22a4bd4f9f63470bcfaaacf6547b0b0b5))
+* **crystal:** size the pod disk from the flow's weight manifest ([212a48a](https://github.com/monygroupcorp/noema/commit/212a48a8911553809ed5128dfefcaefe45d7f26b))
+
 ## [5.24.0](https://github.com/monygroupcorp/noema/compare/v5.23.0...v5.24.0) (2026-09-01)
 
 

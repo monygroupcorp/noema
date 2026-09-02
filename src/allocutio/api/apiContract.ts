@@ -1559,6 +1559,15 @@ const AddDatasetMediaRequestSchema: JsonSchema = {
   required: ['source'],
 }
 
+/** The request body for `POST /v1/data/datasets/:id/access`. */
+const SetDatasetAccessRequestSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['public', 'private'] },
+  },
+  required: ['kind'],
+}
+
 /** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
 const DatasetEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -2264,6 +2273,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: SetCaptionRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/access',
+      summary: "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: SetDatasetAccessRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {

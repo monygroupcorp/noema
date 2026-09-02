@@ -412,6 +412,9 @@ export interface Datasets {
    *  is append-only and a positional write re-binds to a different item as soon as media is
    *  added. Owner scoping lives at the API layer, as above. */
   setFragments(datasetId: string, mediaId: string, fragments: Fragment[]): Promise<Dataset | null>
+  /** Set (or clear) a dataset's `access`. Owner scoping lives at the API layer, as above — this
+   *  seam trusts the caller. Bumps `mutatum`. Returns null when the dataset does not exist. */
+  setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null>
   /** Archive a dataset: stamp `archivum` and bump `mutatum`. `list` and `listSummaries` stop
    *  returning it; `find` still does, so every reference into it keeps resolving. Idempotent —
    *  an already-archived dataset keeps its original `archivum` and is returned unchanged.

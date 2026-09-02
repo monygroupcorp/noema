@@ -148,6 +148,15 @@ class MemoryDatasets implements Datasets {
     return updated
   }
 
+  // Same semantics as MongoDataset.setAccess: always written in the { kind } form, mutatum bumped.
+  async setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const updated: Dataset = { ...d, access: { kind }, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+
   // ── Archive (noema-266) ──────────────────────────────────────────────────
   // Mirrors MongoDataset exactly: `list`/`listSummaries` exclude archived datasets and `find`
   // does not; archiving or restoring media recomputes every captionset's coverage through the
