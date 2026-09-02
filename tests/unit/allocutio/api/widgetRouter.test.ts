@@ -14,6 +14,8 @@ function legatus(over: Partial<Legatus>): Legatus {
   return { agentId: 'camel42', animaId: 'anima-1', ownerAddress: '0xowner', status: 'active', ...over } as Legatus
 }
 
+const GLOBAL_ANCESTORS = ['https://camelcabal.fun']
+
 function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilter }) {
   const rawFeed = over.feed ?? (async () => [])
   const deps: WidgetRouterDeps = {
@@ -23,7 +25,8 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
     },
     feed: async (filter) => { if (capture) capture.filter = filter; return rawFeed(filter) },
     appearance: over.appearance ?? (async () => undefined),
-    frameAncestors: over.frameAncestors ?? ['https://camelcabal.fun'],
+    // Mirrors the real src/index.ts resolver: a per-`Legatus` list wins, else the global list.
+    frameAncestors: over.frameAncestors ?? ((l) => (l?.frameAncestors?.length ? l.frameAncestors : GLOBAL_ANCESTORS)),
     ...(over.modorum ? { modorum: over.modorum } : {}),
     ...(over.quoteImpetus ? { quoteImpetus: over.quoteImpetus } : {}),
     ...(over.x402Config ? { x402Config: over.x402Config } : {}),
@@ -191,7 +194,55 @@ test('XSS/URL safety: javascript: urls dropped, malicious accent rejected', asyn
 })
 
 test('empty allowlist → frame-ancestors defaults to self', async () => {
-  const a = app({ frameAncestors: [] })
+  const a = app({ frameAncestors: () => [] })
   const res = await request(a).get('/widget/camel42')
   assert.equal(res.headers['content-security-policy'], "frame-ancestors 'self'")
+})
+
+test('per-agent frameAncestors on the Legatus wins over the global list', async () => {
+  const a = app({
+    legati: {
+      findByAgentId: async () => legatus({ frameAncestors: ['https://partner-a.example'] }),
+      listByCollection: async () => [],
+    },
+  })
+  const res = await request(a).get('/widget/camel42')
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-security-policy'], 'frame-ancestors https://partner-a.example')
+})
+
+test('agent without a per-agent frameAncestors falls back to the global list unchanged (regression)', async () => {
+  const a = app({
+    legati: { findByAgentId: async () => legatus({}), listByCollection: async () => [] },  // no frameAncestors set
+  })
+  const res = await request(a).get('/widget/camel42')
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-security-policy'], `frame-ancestors ${GLOBAL_ANCESTORS.join(' ')}`)
+})
+
+test('gallery: a collection whose agent has a per-agent frameAncestors uses it', async () => {
+  const a = app({
+    legati: {
+      findByAgentId: async () => null,
+      listByCollection: async (addr) =>
+        addr.toLowerCase() === '0xcollection'
+          ? [legatus({ adapter: '0xcollection', frameAncestors: ['https://partner-b.example'] })]
+          : [],
+    },
+  })
+  const res = await request(a).get('/widget/gallery/0xCOLLECTION')
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-security-policy'], 'frame-ancestors https://partner-b.example')
+})
+
+test('gallery: a collection with no per-agent frameAncestors is unaffected (regression)', async () => {
+  const res = await request(app()).get('/widget/gallery/0xCOLLECTION')
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-security-policy'], `frame-ancestors ${GLOBAL_ANCESTORS.join(' ')}`)
+})
+
+test('gallery: unknown collection (no agents at all) still gets the global default', async () => {
+  const res = await request(app()).get('/widget/gallery/0xUNKNOWN')
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-security-policy'], `frame-ancestors ${GLOBAL_ANCESTORS.join(' ')}`)
 })
