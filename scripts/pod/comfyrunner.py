@@ -52,8 +52,13 @@ COMFYUI_WS_URL       = "ws://localhost:8188/ws"
 CLIENT_ID            = uuid.uuid4().hex
 PORT                 = int(os.environ.get("RUNNER_PORT", "8080"))
 POD_ID               = os.environ.get("RUNPOD_POD_ID", "")
+# Both budgets are set on the launch line from the substrate's declared `Fundamentum.jobTimeoutMs`
+# / `readyTimeoutMs` (noema-392). Absent a declaration these defaults stand, which is what every
+# image-sized substrate has always run on. SUBSTRATE_REF names the substrate in the timeout
+# messages, so a failure says whose budget it exceeded (noema-390).
 JOB_TIMEOUT          = int(os.environ.get("JOB_TIMEOUT", "900"))
 COMFY_READY_TIMEOUT  = int(os.environ.get("COMFY_READY_TIMEOUT", "300"))
+SUBSTRATE_REF        = os.environ.get("SUBSTRATE_REF", "")
 NODE_INSTALL_TIMEOUT = int(os.environ.get("NODE_INSTALL_TIMEOUT", "600"))
 
 logging.basicConfig(
@@ -169,7 +174,10 @@ def _wait_for_comfy_http(timeout: int = COMFY_READY_TIMEOUT) -> bool:
         except Exception:
             pass
         time.sleep(3)
-    log.error("ComfyUI HTTP never became ready")
+    log.error(
+        f"ComfyUI HTTP never became ready within {timeout}s "
+        f"(substrate {SUBSTRATE_REF or 'unknown'}). comfyui.log tail:\n{_tail_comfy_log()}"
+    )
     return False
 
 
@@ -657,8 +665,17 @@ def _process_job(job_spec: dict) -> None:
         deadline = time.time() + JOB_TIMEOUT
         while not comfy_event.wait(timeout=15):
             if time.time() >= deadline:
+                # Name the budget, the substrate it was sized for, and whether ANY node ran.
+                # nodesExecuted == 0 after the whole budget means the graph never started —
+                # stuck loading models, not sampling slowly — and that is the difference between
+                # "raise the budget" and "the substrate is broken" (noema-390/392).
+                with _lock:
+                    stalled_nodes = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
+                where = "stalled loading models (no node ran)" if stalled_nodes == 0 \
+                    else f"executing ({stalled_nodes} nodes ran)"
                 raise RuntimeError(
-                    f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI. "
+                    f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI "
+                    f"(substrate {SUBSTRATE_REF or 'unknown'}; {where}). "
                     f"comfyui.log tail:\n{_tail_comfy_log()}"
                 )
             # Backstop: the WS execution_success/error event can be missed (it's

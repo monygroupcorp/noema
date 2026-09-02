@@ -1203,3 +1203,176 @@ test('training launch: a healthy first pod is launched on directly, with no extr
   assert.equal(provisionPosts(calls).length, 1)
   assert.equal(terminateSpy.calls.length, 0, 'a launch that bootstrapped is not terminated')
 })
+
+// ── Substrate timeout budgets (noema-392) ─────────────────────────────────────
+// `minimax-h3-fl2v` (actum 7d5fd175) died on `job … timed out after 900s waiting for ComfyUI`
+// at executionMs 898405 — the pod, the bootstrap and 56 GB of weights all already paid for.
+// comfyrunner reads JOB_TIMEOUT from its environment, and the launch line carried only
+// RUNPOD_POD_ID and COMFYUI_DIR, so its 900 s default was in practice a hard platform constant.
+// These pin the declaration all the way to the launch line, and the no-declaration case to a
+// byte-identical one.
+
+/** A minimally-shaped ComfyUI compiled spec — enough for `isCompiledSpec` to narrow. */
+function makeSpec(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    image: { imageId: 'runpod/pytorch', imageVersion: '1.2.0', ociRef: 'runpod/pytorch:1.2.0' },
+    models: [],
+    genFlags: {},
+    sourceTool: { id: 'minimax-h3-fl2v', versio: '1.0.0' },
+    runtime: 'ComfyUI',
+    workflow: { templateId: 't', templateVersion: '1', inputTemplate: {} },
+    seed: 42,
+    ...extra,
+  }
+}
+
+function runnerLaunchLine(execCalls: string[]): string | undefined {
+  return execCalls.find(c => c.includes('comfyrunner.py') && c.includes('nohup'))
+}
+
+test('substrate budgets: a declared job budget reaches the comfyrunner launch line as JOB_TIMEOUT', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: makeSpec({ jobTimeoutMs: 2_400_000, readyTimeoutMs: 900_000 }) })
+  await new Promise(r => setTimeout(r, 50))
+
+  const launch = runnerLaunchLine(ssh.execCalls)
+  assert.ok(launch, 'expected a comfyrunner launch command')
+  // Seconds, not ms — comfyrunner does `int(os.environ.get("JOB_TIMEOUT", "900"))` and compares
+  // it against `time.time()`. Shipping 2400000 here would be a 27-day budget, not a 40-minute one.
+  assert.match(launch!, /(^|\s)JOB_TIMEOUT=2400(\s|$)/, 'JOB_TIMEOUT must travel, in seconds')
+  assert.match(launch!, /(^|\s)COMFY_READY_TIMEOUT=900(\s|$)/, 'COMFY_READY_TIMEOUT must travel too')
+  // Without this the pod-side message says "timed out after 2400s" and nothing about whose
+  // budget that was (noema-390).
+  assert.match(launch!, /SUBSTRATE_REF=/, 'the launch line must name the substrate')
+  // And the two that always travelled still do.
+  assert.match(launch!, /RUNPOD_POD_ID=/)
+  assert.match(launch!, /COMFYUI_DIR=\/root\/ComfyUI/)
+})
+
+test('substrate budgets: the readiness budget reaches BOTH ends of the same wait', async () => {
+  // comfyrunner does not serve /health at all until ComfyUI answers, and `sys.exit(1)`s when its
+  // own COMFY_READY_TIMEOUT lapses. Lengthening only Crystal's poll would buy a longer wait on a
+  // process that had already quit — so the declaration has to reach the pod as well.
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: makeSpec({ readyTimeoutMs: 900_000 }) })
+  await new Promise(r => setTimeout(r, 50))
+
+  const launch = runnerLaunchLine(ssh.execCalls)
+  assert.match(launch!, /COMFY_READY_TIMEOUT=900/, 'the pod half of the readiness budget')
+  assert.doesNotMatch(launch!, /JOB_TIMEOUT=/, 'declaring one budget must not synthesise the other')
+})
+
+test('substrate budgets: a spec declaring none leaves the launch line exactly as it was', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: makeSpec() })
+  await new Promise(r => setTimeout(r, 50))
+
+  const launch = runnerLaunchLine(ssh.execCalls)
+  assert.ok(launch, 'expected a comfyrunner launch command')
+  assert.doesNotMatch(launch!, /JOB_TIMEOUT=/, 'no JOB_TIMEOUT when the substrate declares none')
+  assert.doesNotMatch(launch!, /COMFY_READY_TIMEOUT=/, 'no COMFY_READY_TIMEOUT either')
+  // The pod-side defaults (900 s / 300 s) are what every existing substrate has always run on.
+  // This is the regression guard for that: the env prefix is the historical one, unchanged
+  // apart from SUBSTRATE_REF, which is diagnostic and carries no budget.
+  assert.match(launch!, /^RUNPOD_POD_ID=pod-xyz COMFYUI_DIR=\/root\/ComfyUI SUBSTRATE_REF=/,
+    'the historical launch prefix is preserved')
+})
+
+test('substrate budgets: a raw (non-compiled) input carries no budgets and no substrate ref', async () => {
+  const { fetch } = makeFetchMock()
+  const ssh = makeSshTransport()
+  const client = makeClient(makeConfig(), () => ssh, fetch)
+  await client.submit({ input: {} })            // a bare workflow, the legacy caller shape
+  await new Promise(r => setTimeout(r, 50))
+
+  const launch = runnerLaunchLine(ssh.execCalls)
+  assert.equal(launch, 'RUNPOD_POD_ID=pod-xyz COMFYUI_DIR=/root/ComfyUI nohup python3 /root/comfyrunner.py >> /tmp/comfyrunner.log 2>&1 &',
+    'a caller with no compiled envelope gets byte-identical the command it always got')
+})
+
+test('substrate budgets: the readiness timeout error names the budget, its source and the substrate', async () => {
+  // The old message was "comfyrunner did not become ready within timeout" — no number, no
+  // substrate, so the next occurrence starts its investigation from zero (noema-390).
+  const { fetch, webhookPayloads } = makeFetchMock('pod-slowboot', { runnerHealthStatus: 'starting' })
+  const client = makeClient(
+    makeConfig({ comfyReadyTimeoutMs: 40, comfyPollIntervalMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  await client.submit({ input: makeSpec(), webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.match(failed!.error ?? '', /did not become ready within \d+ms/, 'the budget, as a number with its unit')
+  assert.match(failed!.error ?? '', /platform default budget/, 'and where that number came from')
+  assert.match(failed!.error ?? '', /substrate runpod\/pytorch:1\.2\.0/, 'and whose it was')
+})
+
+test('substrate budgets: a declared readiness budget only ever lengthens the poll, never shortens it', async () => {
+  // A test injects a tiny comfyReadyTimeoutMs to make the give-up path fast. A substrate
+  // declaring 15 minutes must not turn that into a 15-minute test — and equally, a substrate
+  // declaring 10 seconds must not shorten a production budget of 5 minutes. Both directions are
+  // the same rule: honour the declaration only when it is LONGER.
+  const { fetch, webhookPayloads } = makeFetchMock('pod-shortdecl', { runnerHealthStatus: 'starting' })
+  const client = makeClient(
+    makeConfig({ comfyReadyTimeoutMs: 40, comfyPollIntervalMs: 0 }),
+    () => makeSshTransport(),
+    fetch,
+  )
+  const started = Date.now()
+  await client.submit({ input: makeSpec({ readyTimeoutMs: 5 }), webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.match(failed!.error ?? '', /platform default budget/,
+    'a shorter declaration must not displace the configured budget')
+  assert.ok(Date.now() - started < 5_000, 'and the give-up path stays fast')
+})
+
+test('substrate budgets: a LONGER declared readiness budget keeps polling past the configured one', async () => {
+  // The half that matters in production: the H3 pod that reached ready in ~26s on one run and
+  // missed the 5-minute default on the next. The declaration has to actually extend the poll,
+  // not merely be carried. Health stays 'starting' well past the configured budget and only then
+  // flips — with the declaration ignored this run fails; with it honoured it completes.
+  const podId = 'pod-latereadu'
+  const runnerBase = `https://${podId}-8080.proxy.runpod.net`
+  let healthCalls = 0
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('rest.runpod.io') && !url.includes(podId)) {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response(JSON.stringify({
+        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 12345, '8080': 18080 },
+      }), { status: 200 })
+    }
+    if (method === 'GET' && url === `${runnerBase}/health`) {
+      healthCalls++
+      // 'starting' for the first ~150ms of polling — past the 20ms configured budget, inside
+      // the 3000ms declared one.
+      return new Response(JSON.stringify({ status: healthCalls > 15 ? 'ready' : 'starting' }), { status: 200 })
+    }
+    if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) return makeSseStream([{ type: 'complete' }])
+    return new Response('{}', { status: 200 })
+  }) as unknown as typeof globalThis.fetch
+
+  const client = makeClient(
+    makeConfig({ comfyReadyTimeoutMs: 20, comfyPollIntervalMs: 10 }),
+    () => makeSshTransport(),
+    fetchFn,
+  )
+  await client.submit({ input: makeSpec({ readyTimeoutMs: 3000 }), webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 600))
+
+  assert.ok(healthCalls > 15, `expected polling to outlast the 20ms configured budget, got ${healthCalls} polls`)
+  assert.equal(terminateSpy.calls.length, 1, 'the pod is terminated once, after a job that RAN')
+})
