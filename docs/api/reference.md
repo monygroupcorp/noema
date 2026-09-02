@@ -1843,6 +1843,54 @@ Rebind a canon verb (make, chat) to a specific flow for the authenticated caller
 }
 ```
 
+### GET /v1/me/partner
+
+Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+  "properties": {
+    "animaId": {
+      "type": "string",
+      "description": "The partner Anima, same id GET /v1/me/status reports for."
+    },
+    "status": {
+      "type": "string",
+      "description": "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status."
+    },
+    "org": {
+      "type": "string",
+      "description": "Organization name, if given at request time."
+    },
+    "contactEmail": {
+      "type": "string",
+      "description": "Contact email, if given at request time."
+    },
+    "sourceRequestId": {
+      "type": "string",
+      "description": "The partner-request this record was provisioned from."
+    },
+    "natum": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this Partner record was created."
+    }
+  },
+  "required": [
+    "animaId",
+    "status",
+    "sourceRequestId",
+    "natum"
+  ]
+}
+```
+
 ### GET /v1/me/status
 
 Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.
@@ -13451,6 +13499,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.edition` | 404 | no |
 | `not_found.model` | 404 | no |
 | `not_found.adapter` | 404 | no |
+| `not_found.partner` | 404 | no |
 | `not_found.run` | 404 | no |
 | `not_found.muse_session` | 404 | no |
 | `not_found.muse_piece` | 404 | no |

@@ -531,6 +531,21 @@ const BindResponseSchema: JsonSchema = {
   required: ['verb', 'modusId'],
 }
 
+/** The response body for `GET /v1/me/partner` — a B2B Partner record. */
+const PartnerSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+  properties: {
+    animaId: { type: 'string', description: 'The partner Anima, same id GET /v1/me/status reports for.' },
+    status: { type: 'string', description: "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status." },
+    org: { type: 'string', description: 'Organization name, if given at request time.' },
+    contactEmail: { type: 'string', description: 'Contact email, if given at request time.' },
+    sourceRequestId: { type: 'string', description: 'The partner-request this record was provisioned from.' },
+    natum: { type: 'string', format: 'date-time', description: 'When this Partner record was created.' },
+  },
+  required: ['animaId', 'status', 'sourceRequestId', 'natum'],
+}
+
 /** The response body for `GET /v1/me/status`. */
 const StatusViewSchema: JsonSchema = {
   type: 'object',
@@ -2096,6 +2111,13 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/me/partner',
+      summary: "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
+      auth: true,
+      response: PartnerSchema,
+    },
+    {
+      method: 'GET',
       path: '/me/status',
       summary: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
       auth: true,
@@ -2795,6 +2817,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.edition', httpStatus: 404 },
     { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },
+    { code: 'not_found.partner', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
