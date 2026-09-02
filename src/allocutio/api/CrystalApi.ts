@@ -2477,7 +2477,30 @@ export class CrystalApi {
   }
 
   /**
-   * May this caller reach this Dataset — the owner, or a member of the team it is shared with?
+   * The public dataset catalog — every dataset `access.kind === 'public'` names, scoped to
+   * nobody in particular. Public, NO AUTH: mirrors `listModels`'s catalog precedent — browsing
+   * what the platform publishes should not gate on having an account, even though USING one
+   * still does (spawning a Muse session, appending media, everything else on the dataset
+   * surface stays authenticated through `getDataset`/`_contributableDataset`).
+   *
+   * Falls back to an empty page when the wired store has not implemented `listPublic` — the
+   * same fail-closed convention `findOwned`'s absence follows — rather than throwing, so a
+   * deployment mid-upgrade shows an empty catalog instead of a 500.
+   */
+  async listPublicDatasets(opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
+    const store = this._datasetsStore()
+    if (!store.listPublic) return { datasets: [] }
+    const { entries, nextCursor } = await store.listPublic(opts)
+    const datasets = await Promise.all(entries.map((d) => this._resolveDatasetMedia(d)))
+    return { datasets, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  /**
+   * May this caller CONTRIBUTE to this Dataset — the owner, or a member of the team it is
+   * shared with? Deliberately narrower than "may read": `access.kind === 'public'` is NOT an
+   * arm here. Publishing a dataset makes it usable and viewable by anyone; it does not open it
+   * to a stranger appending media or editing captions onto a set someone else curated. See
+   * `getDataset`'s docstring for the read/contribute split this predicate is one half of.
    *
    * `Collectio`'s `_ownsCollection` verbatim in shape: the direct owner, then the `Sodalitas`
    * overlay resolved through the team store. Absent `sodalitasId`, absent team store, or an
@@ -2490,6 +2513,21 @@ export class CrystalApi {
     if (d.sodalitasId === undefined) return false
     const team = await this.deps.sodalitatum?.find(d.sodalitasId)
     return team?.membra.includes(auctor.animaId) ?? false
+  }
+
+  /** Resolve a Dataset the caller may CONTRIBUTE to — `_ownsDataset` alone, never widened by
+   *  `access: 'public'`. `addDatasetMedia`/`addCaptionset`/`setCaption` resolve through THIS,
+   *  not `getDataset`, exactly because `getDataset` now also admits a public read: were they to
+   *  share that gate, publishing a dataset would silently open it to anyone's writes. Returns
+   *  the raw record (unresolved private-media markers) — every caller here reads only `.id`,
+   *  `.media` (id membership) or `.captionsets`, never a URL, so no marker needs resolving. */
+  private async _contributableDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
+    this._datasetOwner(auctor)
+    const d = await this._datasetsStore().find(id)
+    if (!d || !(await this._ownsDataset(auctor, d))) {
+      throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
+    }
+    return d
   }
 
   /**
@@ -2520,22 +2558,29 @@ export class CrystalApi {
     return { ...d, media }
   }
 
-  /** Resolve a Dataset the caller may reach — theirs, or shared with a team they belong to —
-   *  or 404 (a caller with no claim on it gets not_found, not forbidden, so ids stay
-   *  non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/`_ownedCollection`).
+  /** Resolve a Dataset the caller may READ — theirs, shared with a team they belong to, or
+   *  `access.kind === 'public'` — or 404 (a caller with no claim on it gets not_found, not
+   *  forbidden, so ids stay non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/
+   *  `_ownedCollection`).
    *
-   *  This is the READ gate and the CONTRIBUTE gate: every additive write (append media, attach
-   *  or edit a captionset) resolves through it, so a member works on the shared set. The
-   *  DESTRUCTIVE verbs do not — archive/restore of the dataset and of one media item re-check
-   *  `_ownedDatasetByOwner`, the same way `extendCollection` re-checks `_isFunder` on the one
-   *  verb a team member must not perform on the principal's behalf.
+   *  THIS IS THE READ GATE ONLY, no longer the contribute one: `spawnMuseSession`,
+   *  `_motherPool` and `promoteMuseSession` resolve a mother dataset through here on purpose
+   *  (starting a Muse session, or reading a mother's name, is a read), but the three additive
+   *  writes — append media, attach or edit a captionset — resolve through
+   *  `_contributableDataset` instead, which does NOT admit `public`. Splitting these was the
+   *  point of adding `access`: without it, widening this gate for public reads would have
+   *  silently opened every public dataset to a stranger's writes too. The DESTRUCTIVE verbs sit
+   *  apart from both — archive/restore re-check `_ownedDatasetByOwner`, the same way
+   *  `extendCollection` re-checks `_isFunder` on the one verb a team member must not perform on
+   *  the principal's behalf.
    *
    *  Private media is resolved into short-lived links AFTER the gate above, exactly as
    *  `getRun` presigns a run's exitus after its ownership check. */
   async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
     this._datasetOwner(auctor)
     const d = await this._datasetsStore().find(id)
-    if (!d || !(await this._ownsDataset(auctor, d))) {
+    const readable = d !== null && (d.access?.kind === 'public' || (await this._ownsDataset(auctor, d)))
+    if (!d || !readable) {
       throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
     }
     return this._resolveDatasetMedia(d)
@@ -2690,11 +2735,13 @@ export class CrystalApi {
    * consequences for caption maps, for fragments already decomposed off an item, and for the
    * provenance of a model trained from the dataset, and it is a separate decision.
    *
-   * Access resolves through `getDataset` — the same seam `addCaptionset` uses — so the caller
-   * comes from the authentication and never from a request parameter; a dataset the caller has
-   * no claim on reports as not found, exactly as an id that never existed does. THIS IS THE
-   * CONTRIBUTION SEAM: the dataset's owner, or a member of the `Sodalitas` it is shared with,
-   * may append. What a member appends is still their OWN work — `_mintMedia` keeps requiring
+   * Access resolves through `_contributableDataset` — the same seam `addCaptionset` uses, never
+   * `getDataset` (which also admits a public read) — so the caller comes from the
+   * authentication and never from a request parameter; a dataset the caller has no claim on
+   * reports as not found, exactly as an id that never existed does. THIS IS THE CONTRIBUTION
+   * SEAM: the dataset's owner, or a member of the `Sodalitas` it is shared with, may append. A
+   * public reader may not — publishing a dataset does not open it to a stranger's uploads. What
+   * a member appends is still their OWN work — `_mintMedia` keeps requiring
    * every named Actum to be the caller's own and `completus`, which the team overlay does not
    * touch. Each item is stamped with the contributor's animaId (`DatasetMediaItem.addedBy`).
    *
@@ -2702,7 +2749,7 @@ export class CrystalApi {
    * through the same path; a body matching neither shape is a 400.
    */
   async addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
 
     const body = (input ?? {}) as Partial<IngestMediaInput>
     if (body.source !== 'upload' && body.source !== 'generation') {
@@ -2721,12 +2768,12 @@ export class CrystalApi {
    *  so a re-run of the same caption pass replaces its previous result instead of accumulating
    *  duplicates.
    *
-   *  Access resolves through `getDataset` — one place decides what "the caller may reach
-   *  this" means, and a stranger gets `not_found`, never `forbidden`. Caption keys must
-   *  be media ids actually on the dataset: a key bound to nothing would still count
-   *  toward coverage. `coverage` is derived here, never taken from the body. */
+   *  Access resolves through `_contributableDataset` — never `getDataset`, which also admits a
+   *  public read now; a stranger gets `not_found`, never `forbidden`, same as before `access`
+   *  existed. Caption keys must be media ids actually on the dataset: a key bound to nothing
+   *  would still count toward coverage. `coverage` is derived here, never taken from the body. */
   async addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
     const body = (input ?? {}) as Partial<Captionset>
 
     const id = typeof body.id === 'string' ? body.id.trim() : ''
@@ -2750,11 +2797,12 @@ export class CrystalApi {
     return this._resolveDatasetMedia(updated)
   }
 
-  /** Edit one caption of one captionset on a Dataset the caller may reach (a captionset is
-   *  editable after generation). Same access resolution as `addCaptionset` — owner or team
-   *  member; the captionset must already exist and the media id must be on the dataset. */
+  /** Edit one caption of one captionset on a Dataset the caller may CONTRIBUTE to (a captionset
+   *  is editable after generation). Same access resolution as `addCaptionset` — owner or team
+   *  member, never a public reader; the captionset must already exist and the media id must be
+   *  on the dataset. */
   async setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
 
     if (typeof caption !== 'string' || !caption.trim()) throw Errors.inputMalformed('caption must be a non-empty string')
     if (!d.media.some((m) => m.id === mediaId)) {

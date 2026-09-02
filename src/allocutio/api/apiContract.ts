@@ -1442,6 +1442,14 @@ const DatasetSchema: JsonSchema = {
       description:
         'FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only.',
     },
+    access: {
+      type: 'object',
+      description:
+        "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+      properties: {
+        kind: { type: 'string', enum: ['public', 'private'] },
+      },
+    },
     name: { type: 'string' },
     modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
     custody: { type: 'string', enum: ['sealed', 'local', 'remote'] },
@@ -2176,6 +2184,32 @@ export const API_CONTRACT: ApiContract = {
         },
       ],
       response: DatasetsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets/public',
+      summary: 'The public dataset catalog — every dataset with access.kind === "public", scoped to nobody in particular. Public, no auth: browsing what the platform publishes does not require an account, though using one (spawning a Muse session, appending media) still does. Newest first, paginated identically to the caller-scoped list routes.',
+      auth: false,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
+      response: DatasetsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets/:id',
+      summary: 'Read one dataset the caller may reach — its owner, a member of the team it is shared with, or anyone when its access.kind is "public". A dataset the caller has no claim on is reported as not found, exactly as an id that never existed is.',
+      auth: true,
+      response: DatasetEnvelopeSchema,
     },
     {
       method: 'POST',

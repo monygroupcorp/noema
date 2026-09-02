@@ -119,6 +119,50 @@ test('list paginates with cursor, newest first', async () => {
   assert.equal(page2.entries[0].id, a.id)
 })
 
+test('listPublic returns only datasets whose access kind is public, in either shape, and nothing else', async () => {
+  const flatPublic = await store.create(base)
+  const unionPublic = await store.create({ ...base, name: 'union' })
+  await col.updateOne({ id: flatPublic.id }, { $set: { access: 'public' } })
+  await col.updateOne({ id: unionPublic.id }, { $set: { access: { kind: 'public' } } })
+  await store.create({ ...base, name: 'ordinary' }) // owner-only, no access field at all
+  await store.create({ ...base, name: 'shared', sodalitasId: 'team-1' }) // team overlay, not public
+
+  const page = await store.listPublic({})
+  assert.deepEqual(page.entries.map((d) => d.id).sort(), [flatPublic.id, unionPublic.id].sort())
+})
+
+test('listPublic is not scoped to any caller — it is the same page regardless of who is asking', async () => {
+  const open = await store.create(base)
+  await col.updateOne({ id: open.id }, { $set: { access: { kind: 'public' } } })
+  // No owner/caller argument exists on this read at all — the point of the assertion above.
+  const page = await store.listPublic({})
+  assert.equal(page.entries.length, 1)
+  assert.equal(page.entries[0].owner, base.owner, 'the row still names its real owner; it is just readable by anyone')
+})
+
+test('listPublic excludes an archived public dataset, same as list does for an owner\'s own', async () => {
+  const open = await store.create(base)
+  await col.updateOne({ id: open.id }, { $set: { access: { kind: 'public' } } })
+  await store.archiveDataset(open.id)
+  assert.equal((await store.listPublic({})).entries.length, 0)
+})
+
+test('listPublic paginates with cursor, newest first — the same mechanics list uses', async () => {
+  const a = await store.create(base)
+  await col.updateOne({ id: a.id }, { $set: { access: { kind: 'public' } } })
+  await new Promise((r) => setTimeout(r, 5))
+  const b = await store.create({ ...base, name: 'second' })
+  await col.updateOne({ id: b.id }, { $set: { access: { kind: 'public' } } })
+
+  const page1 = await store.listPublic({ limit: 1 })
+  assert.equal(page1.entries.length, 1)
+  assert.equal(page1.entries[0].id, b.id)
+  assert.ok(page1.nextCursor)
+  const page2 = await store.listPublic({ limit: 1, cursor: page1.nextCursor })
+  assert.equal(page2.entries.length, 1)
+  assert.equal(page2.entries[0].id, a.id)
+})
+
 // ── Captionset write + edit seam ─────────────────────────────────────────────
 //
 // NOT hermetic: this file opens a MongoClient in `before`, so it is not in the

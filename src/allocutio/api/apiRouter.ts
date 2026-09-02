@@ -159,6 +159,7 @@ export interface ApiFacade {
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   listDatasets(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
+  listPublicDatasets(opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   getDataset(auctor: AuctorKey, id: string): Promise<import('../../types/dataset.js').Dataset>
   createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
   addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
@@ -1023,6 +1024,30 @@ export function createApiRouter(deps: {
     const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
     const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
     res.json(await api.listDatasets(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/data/datasets/public — the public dataset catalog: every `access.kind === 'public'`
+  // dataset, scoped to nobody in particular. PUBLIC, no auth — mirrors `GET /v1/models`'s
+  // catalog precedent, browsing what the platform publishes should not require an account.
+  // Registered BEFORE `GET /v1/data/datasets/:id` below so Express matches this literal path
+  // first; were the order reversed, `:id` would swallow `public` as an id.
+  router.get('/data/datasets/public', wrap(async (req, res) => {
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listPublicDatasets({ ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/data/datasets/:id — the single-dataset read `getDataset` has always backed with no
+  // route of its own; every screen instead fetched the caller's own full list and found the id
+  // client-side, which is fine for a dataset the caller owns but can never resolve one they
+  // don't (a public dataset someone else made). This is that missing route: owner, team member,
+  // or `access.kind === 'public'` — same three-way gate `getDataset` already resolves through.
+  // Still auth-required (unlike the catalog list above) — every OTHER dataset route is, and
+  // loosening that is a separate call, not a side effect of adding this one.
+  router.get('/data/datasets/:id', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.json({ dataset: await api.getDataset(auctor, String(req.params.id)) })
   }))
 
   // POST /v1/data/datasets — create a Dataset via either v1 ingestion path (Q2): a

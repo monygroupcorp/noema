@@ -69,6 +69,22 @@ export function Datasets() {
     return () => { live = false; };
   }, []);
 
+  // The public catalog (GET /v1/data/datasets/public) — collapsed until asked for, mirroring
+  // Shelf.tsx's "your shelf" + "browse the catalog" split: this list above is YOUR OWN
+  // datasets, this one is everything the platform publishes for anyone to start Muse-ing on.
+  const [catOpen, setCatOpen] = useState(false);
+  const [catalog, setCatalog] = useState<Dataset[] | null>(null);
+  const [catErr, setCatErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!catOpen || catalog !== null) return;
+    let live = true;
+    api.listPublicDatasets()
+      .then(({ datasets: d }) => { if (live) setCatalog(d); })
+      .catch((e) => { if (live) setCatErr(msg(e)); });
+    return () => { live = false; };
+  }, [catOpen, catalog]);
+
   // An archived set is simply not here. The list route already excludes it server-side; this
   // filter is what holds when a record on this screen is archived after it was fetched, so the
   // shelf never keeps a card for a set that has left it (noema-267).
@@ -178,6 +194,58 @@ export function Datasets() {
             <div className="s mono">drop media · or seed from a generation</div>
           </button>
         </div>
+
+        {/* ── The public catalog ───────────────────────────────────────────────
+            Datasets NOEMA (or another member) has published — no set-up needed to try one.
+            Each card goes straight into a Muse session, not the detail page: the fastest path
+            onto the fun part, with nothing here that isn't yours to click. */}
+        <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
+          <div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>no set of your own yet?</div>
+            <h2>Browse the catalog</h2>
+            <div className="sub">Published boards, ready to Muse on right now.</div>
+          </div>
+          <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+          </button>
+        </div>
+
+        {catOpen && (
+          <>
+            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
+            {catalog && catalog.length === 0 && <div className="empty"><div className="t">Nothing published yet.</div></div>}
+
+            {catalog && catalog.length > 0 && (
+              <div className="dsgrid">
+                {catalog.map((d) => {
+                  const media = liveRecords(d.media);
+                  const hasMedia = media.length > 0;
+                  const tiles = hasMedia ? media.slice(0, 4).map((m) => m.url) : TILE_FALLBACK;
+                  return (
+                    <Link key={d.id} className="dscard" to={`/datasets/${d.id}/muse`}>
+                      <div className="ds-mosaic">
+                        {tiles.map((t, i) => (
+                          <span key={i} style={hasMedia ? { backgroundImage: `url(${t})`, backgroundSize: 'cover' } : { background: t }} />
+                        ))}
+                      </div>
+                      <div className="ds-body">
+                        <div className="ds-title">
+                          <b>{d.name}</b>
+                          <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
+                        </div>
+                        <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'}</div>
+                        <div className="ds-ready">
+                          <span className="ds-action">muse on this →</span>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
 
         {open && (
           <div className="modal-scrim" onClick={closeModal}>
