@@ -2799,6 +2799,7 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
+    { code: 'not_found.partner_request', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
@@ -2812,6 +2813,9 @@ export const API_CONTRACT: ApiContract = {
     // Concurrent writes to the same muse session exhausted the retry budget. Retryable: the
     // stored session is intact, and the same call succeeds once contention clears.
     { code: 'conflict.muse_session', httpStatus: 409, retryable: true },
+    // A partner request PATCH targets a request that already has a decision. NOT retryable:
+    // an already-issued API key is show-once and never re-minted for the same decision.
+    { code: 'conflict.already_decided', httpStatus: 409, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     { code: 'secret.required', httpStatus: 422 },

@@ -16617,6 +16617,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.partner_request",
+      "httpStatus": 404
+    },
+    {
       "code": "input.model_not_resolved",
       "httpStatus": 422
     },
@@ -16646,6 +16650,11 @@
       "code": "conflict.muse_session",
       "httpStatus": 409,
       "retryable": true
+    },
+    {
+      "code": "conflict.already_decided",
+      "httpStatus": 409,
+      "retryable": false
     },
     {
       "code": "license.restricted",

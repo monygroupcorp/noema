@@ -13455,6 +13455,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.muse_session` | 404 | no |
 | `not_found.muse_piece` | 404 | no |
 | `not_found.dataset` | 404 | no |
+| `not_found.partner_request` | 404 | no |
 | `input.model_not_resolved` | 422 | no |
 | `economy.insufficient_signa` | 402 | no |
 | `economy.cap_too_low` | 422 | no |
@@ -13462,6 +13463,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.run_in_flight` | 409 | yes |
 | `conflict.nothing_to_decompose` | 409 | no |
 | `conflict.muse_session` | 409 | yes |
+| `conflict.already_decided` | 409 | no |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
 | `secret.required` | 422 | no |

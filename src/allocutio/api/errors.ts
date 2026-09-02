@@ -99,6 +99,12 @@ export const Errors = {
   secretRequired: (provider: string, message?: string) =>
     new ApiError('secret.required', message ?? `Connect a ${provider} token to import this gated model`, 422, { details: { provider } }),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
+  notFoundPartnerRequest: (id: string) => new ApiError('not_found.partner_request', `Partner request '${id}' not found`, 404),
+  /** A partner request PATCH targets a request that already has a decision (approved/declined).
+   *  Refused rather than re-run — re-approving would risk minting a SECOND API key for the
+   *  same request, and an already-issued key is never re-shown (show-once). */
+  conflictAlreadyDecided: (id: string, status: string) =>
+    new ApiError('conflict.already_decided', `Partner request '${id}' was already ${status}`, 409),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>
