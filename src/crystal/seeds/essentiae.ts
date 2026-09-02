@@ -1125,6 +1125,25 @@ export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
     video: { type: 'video', description: 'Generated video with audio (mp4)' },
   },
 
+
+  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
+  },
+
   workflowTemplate: 'minimax-h3-t2v',
   workflowTemplateVersion: '1',
   seedInputKey: 'input_seed',
@@ -1173,6 +1192,25 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
 
   exitus: {
     video: { type: 'video', description: 'Generated video with audio (mp4)' },
+  },
+
+
+  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
   },
 
   workflowTemplate: 'minimax-h3-fl2v',
@@ -1229,6 +1267,25 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
 
   exitus: {
     video: { type: 'video', description: 'Generated video with the referenced voice (mp4)' },
+  },
+
+
+  // Cost curve, from the first cold run (actum 01a7dc6b, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
   },
 
   workflowTemplate: 'minimax-h3-ref2v',
