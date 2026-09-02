@@ -56,6 +56,20 @@ export const Errors = {
   inputMalformed: (message = 'Malformed request body') => new ApiError('input.malformed', message, 400),
   invalidAditus: (details?: Record<string, unknown>) =>
     new ApiError('input.invalid_aditus', 'Inputs do not match the flow schema', 422, { details }),
+  /**
+   * A value that violates the legality its port DECLARES (`Porta.min/max/step`, noema-396) — as
+   * distinct from a key the flow does not declare at all. Same code, because both are the same
+   * fact ("these inputs do not match this flow's schema") and codes are append-only; the message
+   * is the one that differs, because the whole point is that the caller is told the rule instead
+   * of discovering it 28 minutes into a paid run.
+   */
+  aditusOutOfRange: (porta: string, regula: string, value?: number) =>
+    new ApiError(
+      'input.invalid_aditus',
+      `Input '${porta}' must be ${regula}${value !== undefined ? ` — got ${value}` : ''}`,
+      422,
+      { details: { porta, regula, ...(value !== undefined ? { value } : {}) } },
+    ),
   notFoundFlow: (id: string) => new ApiError('not_found.flow', `Flow '${id}' not found`, 404),
   notFoundFundamentum: (id: string) => new ApiError('not_found.fundamentum', `Fundamentum '${id}' not found`, 404),
   notFoundStudio: (id: string) => new ApiError('not_found.studio', `Studio '${id}' not found`, 404),

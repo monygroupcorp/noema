@@ -11,6 +11,7 @@
 // =============================================================================
 
 import type { Forma, Porta } from '../../types/modus.js'
+import { describeConstraint } from '../../execution/portaConstraints.js'
 
 /** A minimal JSON-Schema object (draft-2020-12 style). */
 export interface JsonSchema {
@@ -29,6 +30,25 @@ export interface JsonSchemaProperty {
   /** Enumerated choices carried through from the Porta, unmodified. Advisory only — the
    *  UI renders a select from these, but the value is not validated against the list. */
   optiones?: Array<{ value: string; label: string }>
+  /** JSON Schema `minimum` — the port's declared inclusive lower bound (`Porta.min`). */
+  minimum?: number
+  /** JSON Schema `maximum` — the port's declared inclusive upper bound (`Porta.max`). */
+  maximum?: number
+  /**
+   * JSON Schema `multipleOf`, emitted ONLY when the port's step really is a multiple rule —
+   * i.e. `min` is unset or is itself a multiple of `step`. MiniMax H3's `{min: 5, step: 17}`
+   * is NOT (legal lengths are 17k+5, not 17k), so no `multipleOf` is emitted for it: a wrong
+   * standard keyword is worse than an absent one, because an off-the-shelf validator would
+   * reject every legal H3 clip length.
+   */
+  multipleOf?: number
+  /**
+   * The port's step, spaced from `minimum` (`Porta.step`). Non-standard, like `optiones`:
+   * draft-2020-12 cannot express an OFFSET step, so a generic validator will ignore this and
+   * under-reject. The API is the authority — this keyword and the rule sentence appended to
+   * `description` are how a caller learns the real rule before spending on a run.
+   */
+  step?: number
 }
 
 /**
@@ -61,9 +81,30 @@ function portaTypeToSchema(type: string): JsonSchemaProperty {
 function portaToProperty(porta: Porta): JsonSchemaProperty {
   const property = portaTypeToSchema(porta.type)
   if (porta.default !== undefined) property.default = porta.default
-  if (porta.description !== undefined) property.description = porta.description
   if (porta.label !== undefined) property.title = porta.label
   if (porta.optiones !== undefined) property.optiones = porta.optiones
+
+  // A declared numeric constraint (noema-396) is published, not just enforced: the point of
+  // declaring it is that a caller reads it BEFORE spending ~28 minutes of pod time discovering
+  // it. `minimum`/`maximum` are exact standard keywords; `multipleOf` is emitted only when the
+  // step really is a multiple rule; `step` carries the offset case a generic validator cannot
+  // express, and the rendered sentence goes into `description` for the many callers (agents
+  // especially) that read prose rather than keywords. Rendered by the SAME function the refusal
+  // message uses, so the docs and the 422 can never disagree.
+  const regula = describeConstraint(porta)
+  if (porta.min !== undefined) property.minimum = porta.min
+  if (porta.max !== undefined) property.maximum = porta.max
+  if (porta.step !== undefined) {
+    property.step = porta.step
+    if (porta.min === undefined || porta.min % porta.step === 0) property.multipleOf = porta.step
+  }
+
+  const description =
+    porta.description !== undefined && regula !== undefined ? `${porta.description} Must be ${regula}.`
+    : regula !== undefined ? `Must be ${regula}.`
+    : porta.description
+  if (description !== undefined) property.description = description
+
   return property
 }
 

@@ -593,6 +593,15 @@ export const ESSENTIA_UPSCALE: Essentia = {
 // unets (high-noise → low-noise, KSamplerAdvanced split at step 10) share the umt5 text encoder
 // + Wan2.1 VAE (FUNDAMENTUM_WAN22_T2V_COMFYUI). Render-proven graph (wan-artifacts/wan22-t2v.api.json
 // rendered a real mp4 on this box). categoria 'video'.
+//
+// `frames` DELIBERATELY DECLARES NO CONSTRAINT (noema-396), on both wan22 flows. The port has the
+// same free-int shape H3's had, but H3's rule was known (17k+5, `n % 17 == 5`, corroborated by the
+// rig scripts and the node's own INPUT_TYPES) and Wan's is not: the only frame count anything here
+// has PROVEN is the default 33, and the latent node's own step is advisory — an off-step length is
+// floor-divided in latent space rather than refused, so a run that works today would start failing
+// if a guessed `step: 4` were declared. Declaring a constraint we have not measured trades a rare
+// wasted run for a class of refused legal ones, which is the worse trade. Measure the real range on
+// a pod, then declare it here.
 export const ESSENTIA_WAN22_T2V: Essentia = {
   id: 'wan22-t2v',
   nomen: 'Wan2.2 — text to video',
@@ -1081,6 +1090,14 @@ export const ESSENTIA_LTX_I2V: Essentia = {
 // GEOMETRY IS BAKED at the rig-proven 960x768. `frames` is the only geometry the caller
 // touches, and it is not a free int: legal H3 clip lengths are 17k+5, and the speech
 // budget is ~2.55 words/s — an overrun silently DROPS a sentence rather than speeding up.
+//
+// That rule is now DECLARED rather than described (noema-396): `{min: 5, step: 17}` on the
+// `frames` port, `step` being spacing measured from `min`, which is exactly the ComfyUI
+// `MiniMaxH3ImageToVideo` INPUT_TYPES declaration the constraint comes from. The run entry
+// point refuses an off-step value before anything is reserved, so `frames: 100` costs a 422
+// instead of a pod, a 56 GB weight pull and ~28 minutes of GPU time before failing at
+// execution. No `max`: nothing measured on the rig establishes one, and a guessed ceiling
+// would refuse clip lengths that work.
 // =============================================================================
 
 /**
@@ -1117,7 +1134,7 @@ export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
 
   aditus: {
     prompt:     { type: 'text', required: true,  description: 'What the video should show and say. Dialogue is spoken aloud — budget ~2.55 words per second of clip.' },
-    frames:     { type: 'int',  required: false, default: 209, description: 'Clip length in frames at 24fps (209 = 8.7s). Must be 17k+5.' },
+    frames:     { type: 'int',  required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
     input_seed: { type: 'int',  required: false,               description: 'Random seed — omit to shuffle' },
   },
 
@@ -1186,7 +1203,7 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
   aditus: {
     prompt:      { type: 'text',  required: true,  description: 'What should happen in the clip. Dialogue is spoken aloud — budget ~2.55 words per second.' },
     first_frame: { type: 'image', required: true,  description: 'The still the video opens on' },
-    frames:      { type: 'int',   required: false, default: 209, description: 'Clip length in frames at 24fps (209 = 8.7s). Must be 17k+5.' },
+    frames:      { type: 'int',   required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
     input_seed:  { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
   },
 
@@ -1261,7 +1278,7 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
     prompt:     { type: 'text',  required: true,  description: 'The scene and the dialogue. Reference the inputs as <Picture 1> and <Audio 1>, and say "<Audio 1> is the voice-timbre reference for <Picture 1>" to carry the voice.' },
     ref_image:  { type: 'image', required: true,  description: 'Reference image — the character or subject' },
     ref_audio:  { type: 'audio', required: true,  description: 'Reference audio — the voice timbre to speak in' },
-    frames:     { type: 'int',   required: false, default: 209, description: 'Clip length in frames at 24fps (209 = 8.7s). Must be 17k+5.' },
+    frames:     { type: 'int',   required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
     input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
   },
 

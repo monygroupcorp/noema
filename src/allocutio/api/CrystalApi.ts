@@ -153,6 +153,7 @@ import type {
 import type { Corporum } from '../../types/corpus.js'
 import { parseManifest } from '../../crystal/datasetManifest.js'
 import { checkOwnedAditus, type OwnedResourceLookups } from '../../execution/ownedResources.js'
+import { findConstraintViolation } from '../../execution/portaConstraints.js'
 import { floorToEntries, isMuseSessionVersionConflict } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
@@ -742,6 +743,28 @@ export class CrystalApi {
         const ports = resolvedModus?.aditus ?? {}
         effectiveAditus = applyAccountDefaults(ports, aditus, affines, generatio)
       }
+    }
+
+    // A value that violates the legality its port DECLARES is refused here (noema-396). A port may
+    // state `min`/`max`/`step` on an 'int' or 'float' (`Porta`); MiniMax H3's clip length is
+    // `{min: 5, step: 17}` because the model accepts 17k+5 frames and nothing else. Before this,
+    // `frames: 100` provisioned a pod, pulled 56 GB of weights over ~12 minutes and failed at
+    // execution — ~28 minutes and real GPU spend to reject an input that was illegal before the
+    // run started. Refused HERE, above the `Inceptio` literal and therefore above
+    // `dispatchInceptio`, so a refusal reserves no signa, creates no actum and provisions no pod.
+    //
+    // NOT the Compiler's job: it already carries too much flow-specific knowledge, and by the time
+    // it runs the caller is committed. NOT `validateAditus`'s either — that keeps its tolerant
+    // coercion semantics at every internal call site, where single ports are validated mid-draft
+    // and a blanket throw is the wrong shape. This is the same boundary, and the same "costs
+    // nothing" guarantee, as the undeclared-key refusal above and the owned-resource check below.
+    //
+    // Runs on the EFFECTIVE aditus so an account default that fills a constrained port is checked
+    // exactly like a cast-time one. A port declaring no constraint is untouched, which is why this
+    // is a strict no-op for every flow but the three that declare one.
+    if (resolvedModus?.aditus) {
+      const violation = findConstraintViolation(resolvedModus.aditus, effectiveAditus)
+      if (violation) throw Errors.aditusOutOfRange(violation.porta, violation.regula, violation.value)
     }
 
     // ── Lever (b): spicy alt-model routing (noema-091) ──────────────────────────
