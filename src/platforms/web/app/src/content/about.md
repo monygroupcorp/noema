@@ -1,31 +1,27 @@
-# About — Page Content Draft
-*For web/marketing use. Internal working draft.*
+# A boutique studio for generative AI
 
----
+Curated open- and closed-source models and a concierge that builds with you — with privacy claims
+we keep honest, and a public record of which ones are not true yet.
 
-## Hero
-
-**Headline:** A boutique studio for generative AI.
-
-**Subhead:** Curated open- and closed-source models and a concierge that builds with you — funded anonymously, with privacy claims we keep honest.
-
----
-
-## Mission section
-
-### What we believe
+## What we believe
 
 The most powerful AI should feel like a studio, not a settings panel. You describe what you want; a concierge picks the models and tools and makes it — and you can open the controls whenever you care to.
 
-We also believe you shouldn't have to hand over your identity to use it. You can fund and use Noema anonymously, with no email and no wallet linkage.
+We also believe you shouldn't have to hand over your identity to use it. There is no email
+address anywhere in signing up: an account is a username and a password, and recovery runs
+through a wallet or a Telegram account you choose to bind. Funding with crypto today does leave a
+link — the depositing address reaches us and is retained for compliance, as the privacy policy
+says. The unlinkable bearer purse that removes that link unlocks after the trusted-setup ceremony.
 
-### How we built it
+## How we built it
 
-Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We do not retain your prompts or outputs after a request, and we never train on them.
+Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We never train on your prompts or outputs. We do retain run records until you erase your account
+— the privacy policy states exactly what is kept and why, including the parts we would rather be
+able to state differently.
 
-The credits you spend are zero-knowledge proofs. We verify the math; we cannot link the spend to you. This is real anonymity — about *who* you are, not a claim that the compute provider can't see your work.
-
----
+Purse credits are zero-knowledge proofs: we verify the math and cannot link that spend to you.
+That is anonymity about *who* you are — never a claim that the compute provider cannot see the
+work itself, which would require the hardware-sealed tier we have not shipped.
 
 ## What we are
 
@@ -34,30 +30,25 @@ Noema is a boutique generative-AI studio. We provide:
 - **A concierge + studio** — describe what you want; curated open- and closed-source models make it
 - **AI generation** — text, image, video, audio, via best-in-class open-source and frontier models
 - **A creative workspace** — a typed, composable canvas for building multi-step AI flows
-- **Anonymous billing** — zero-knowledge credit proofs; no identity required
+- **Billing without an identity** — no email to sign up; zero-knowledge credit proofs once the bearer purse ships
 
-We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own anonymous payment rails.
-
----
+We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own payment rails.
 
 ## The team
 
-[TEAM SECTION — placeholder for bios]
-
 We are a small team of engineers and researchers. We care about craft, about giving people the best open- and closed-source models in one place, and about being precise regarding what we do and don't protect — we'd rather under-claim than oversell.
-
----
 
 ## Transparency
 
-The zero-knowledge circuit for purse credits is open source and has undergone a trusted setup ceremony.
+The whole platform is open source, the zero-knowledge circuit for purse credits included. That
+circuit's trusted-setup ceremony is open for contributions rather than finished — you can take
+part, and until it concludes the bearer purse stays unavailable.
 
-If you find a discrepancy between what we say we do and what the code does, we want to know: [SECURITY EMAIL]
-
----
+If you find a discrepancy between what we say we do and what the code does, we want to know:
+mony.group.corporation+security@gmail.com
 
 ## Contact
 
-General: [CONTACT EMAIL]
-Security: [SECURITY EMAIL]
-Press: [PRESS EMAIL]
+General: mony.group.corporation+hello@gmail.com
+Security: mony.group.corporation+security@gmail.com
+Press: mony.group.corporation+press@gmail.com

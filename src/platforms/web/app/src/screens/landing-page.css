@@ -38,11 +38,11 @@
    Aeonik Fono); the mono half is the one most pages forget. */
 .lp{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em;
   --font-label:var(--font-mono)}
-.lp .mono,.lp .cat-brag dd,.lp .modes-index,.lp .cat-chips li .mono{
+.lp .mono,.lp .lp-cat-brag dd,.lp .lp-modes-index,.lp .lp-cat-chips li .mono{
   font-family:var(--font-label)}
 /* body text under a display serif wants a touch more room than UI copy does */
-.lp .lp-beat p,.lp .lp-cand-hero p,.lp .cat-sub,.lp .modes-head p,
-.lp .pay-sub,.lp .how-sub{line-height:1.65}
+.lp .lp-beat p,.lp .lp-cand-hero p,.lp .lp-cat-sub,.lp .lp-modes-head p,
+.lp .lp-pay-sub,.lp .lp-how-sub{line-height:1.65}
 .lp-face-geist{--font-display:var(--font-sans);--display-weight:600;--display-track:-.04em}
 .lp-face-instrument{--font-display:"Instrument Serif",Georgia,serif;--display-weight:400;--display-track:-.015em}
 .lp-face-newsreader{--font-display:"Newsreader",Georgia,serif;--display-weight:500;--display-track:-.02em}
@@ -52,15 +52,15 @@
    a headline shouting, and the whole reason to reach for one is that it does not have to.
    `font-optical-sizing` lets the variable face bring its high-contrast cut to the big sizes and
    its sturdy one to the small, which is the entire argument for a variable serif. */
-.lp-cand-hero h1,.lp .lp-beat h2,.lp .modes-head h2,.lp .lp-pay h2,.lp .open h2,
+.lp-cand-hero h1,.lp .lp-beat h2,.lp .lp-modes-head h2,.lp .lp-pay h2,.lp .open h2,
 .lp .lp-mint h2,.lp .lp-how h2,.lp .lp-anon h2,.lp .lp-cand-end h2,.lp .lp-cat h2,
-.lp .cat-brag dt{
+.lp .lp-cat-brag dt{
   font-weight:var(--display-weight);letter-spacing:var(--display-track);
   font-optical-sizing:auto}
 /* a serif reads smaller than a grotesque at the same size — the hero takes the size back */
 .lp-cand-hero h1{font-size:clamp(38px,6.6vw,84px)}
 .lp-face-geist .lp-cand-hero h1{font-size:clamp(34px,6vw,74px)}
-.lp-cand-hero h1,.lp .lp-beat h2,.lp .cat-brag dt,.lp .modes-head h2,
+.lp-cand-hero h1,.lp .lp-beat h2,.lp .lp-cat-brag dt,.lp .lp-modes-head h2,
 .lp .lp-pay h2,.lp .open h2,.lp .lp-mint h2,.lp .lp-how h2,.lp .lp-anon h2,
 .lp .lp-cand-end h2,.lp .lp-cat h2{font-family:var(--font-display)}
 /* the marquee register is uppercase and much wider — it needs its own size to fit the same box */
@@ -69,7 +69,7 @@
 .lp-cand-hero h1 .dim{color:var(--muted)}
 .lp-cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
 .lp-cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
-.lp-cand-hero .cand-cta{display:block;margin-top:var(--s7)}
+.lp-cand-hero .lp-cand-cta{display:block;margin-top:var(--s7)}
 /* app.css:1184 sets `.btn.lg{flex-direction:column}` — written for a stacked label/sub-label,
    but the landing CTAs pass a trailing icon, so the arrow lands under the words. Corrected
    locally here; the shared rule is a live defect on `/` and is not this file's to change. */
@@ -86,19 +86,19 @@
    `.lp-beat` centres itself with `margin: 0 auto`, and an auto margin on a grid item makes it
    shrink-to-fit and re-centre — so an aligned beat has to drop the margin on the side it is
    pinning to, not just change `text-align`. */
-.lp-beat.beat-left,.lp-beat.beat-right{max-width:none;width:auto}
-.lp-beat.beat-left{margin-left:0;margin-right:auto;text-align:left}
-.lp-beat.beat-right{margin-left:auto;margin-right:0;text-align:right}
-.lp-beat.beat-left h2,.lp-beat.beat-right h2{max-width:18ch}
-.lp-beat.beat-left p{max-width:38ch;margin-left:0;margin-right:0}
-.lp-beat.beat-right p{max-width:38ch;margin-left:auto;margin-right:0}
-.lp-beat .beat-n{display:block;color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.18em;
+.lp-beat.lp-beat-left,.lp-beat.lp-beat-right{max-width:none;width:auto}
+.lp-beat.lp-beat-left{margin-left:0;margin-right:auto;text-align:left}
+.lp-beat.lp-beat-right{margin-left:auto;margin-right:0;text-align:right}
+.lp-beat.lp-beat-left h2,.lp-beat.lp-beat-right h2{max-width:18ch}
+.lp-beat.lp-beat-left p{max-width:38ch;margin-left:0;margin-right:0}
+.lp-beat.lp-beat-right p{max-width:38ch;margin-left:auto;margin-right:0}
+.lp-beat .lp-beat-n{display:block;color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.18em;
   margin-bottom:var(--s6)}
 .lp-beat h2{font-size:clamp(30px,4.6vw,58px);line-height:1.06;letter-spacing:-.035em;font-weight:600;
   margin:0 0 var(--s5)}
 .lp-beat p{color:var(--muted);font-size:clamp(15px,1.6vw,19px);line-height:1.55;max-width:520px;
   margin:0 auto}
-.lp-beat .beat-cta{display:block;margin-top:var(--s8)}
+.lp-beat .lp-beat-cta{display:block;margin-top:var(--s8)}
 .lp-face-martian .lp-beat h2{font-weight:800;text-transform:uppercase;
   font-size:clamp(19px,2.6vw,32px);letter-spacing:-.01em}
 
@@ -124,8 +124,8 @@
 }
 .lp-theme-editorial .lp-cand-hero h1,
 .lp-theme-editorial .lp-beat h2,
-.lp-theme-editorial .cat-brag dt,
-.lp-theme-editorial .modes-head h2,
+.lp-theme-editorial .lp-cat-brag dt,
+.lp-theme-editorial .lp-modes-head h2,
 .lp-theme-editorial .lp-cat h2,
 .lp-theme-editorial .lp-pay h2,
 .lp-theme-editorial .open h2,
@@ -155,25 +155,25 @@
 
 /* the closing door — a CTA in normal flow, not a held argument */
 .lp-cand-end{padding:var(--py-section) 0}
-.lp-cand-end .cand-end-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;
+.lp-cand-end .lp-cand-end-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;
   max-width:38ch;margin:0 auto var(--s7)}
 
 /* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
 .lp-cand-flow{padding:var(--py-section) 0}
 
 /* nav as a capability map — the competitors' nav names jobs; ours named two settings pages */
-.lp-cand-nav .cand-navlinks{display:flex;align-items:center;gap:var(--s6)}
-.lp-cand-nav .cand-navlinks a{color:var(--muted);font-size:var(--fs-base);text-decoration:none}
-.lp-cand-nav .cand-navlinks a:hover{color:var(--text)}
-.lp-cand-hero .cand-cta{display:flex;align-items:center;justify-content:center;gap:var(--s3);flex-wrap:wrap}
+.lp-cand-nav .lp-cand-navlinks{display:flex;align-items:center;gap:var(--s6)}
+.lp-cand-nav .lp-cand-navlinks a{color:var(--muted);font-size:var(--fs-base);text-decoration:none}
+.lp-cand-nav .lp-cand-navlinks a:hover{color:var(--text)}
+.lp-cand-hero .lp-cand-cta{display:flex;align-items:center;justify-content:center;gap:var(--s3);flex-wrap:wrap}
 /* the only thing in the hero that is not the message: a hairline that draws itself downward,
    once a cycle, so the screen admits there is something under it without saying "scroll". */
-.lp-cand-hero .cand-more{position:absolute;left:50%;bottom:var(--s9);width:1px;height:56px;
+.lp-cand-hero .lp-cand-more{position:absolute;left:50%;bottom:var(--s9);width:1px;height:56px;
   transform:translateX(-50%);overflow:hidden}
-.lp-cand-hero .cand-more::after{content:"";position:absolute;inset:0;background:var(--accent);
+.lp-cand-hero .lp-cand-more::after{content:"";position:absolute;inset:0;background:var(--accent);
   opacity:.5}
 @media (prefers-reduced-motion: no-preference){
-  .lp-cand-hero .cand-more::after{animation:cand-draw 2.8s var(--ease) infinite}
+  .lp-cand-hero .lp-cand-more::after{animation:cand-draw 2.8s var(--ease) infinite}
 }
 @keyframes cand-draw{
   0%{transform:translateY(-100%)}
@@ -182,38 +182,38 @@
 
 /* how it works — the sequence as a designed object, not three narrated boxes */
 .lp-how{padding:var(--py-section) 0}
-.lp-how .how-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-how .lp-how-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
 .lp-how h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
-.lp-how .how-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);margin:0}
-.lp-how .how-steps{list-style:none;margin:var(--s10) 0 0;padding:0;display:grid;
+.lp-how .lp-how-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);margin:0}
+.lp-how .lp-how-steps{list-style:none;margin:var(--s10) 0 0;padding:0;display:grid;
   grid-template-columns:repeat(4,1fr);gap:var(--s7)}
-.lp-how .how-steps li{border-top:1px solid var(--hair);padding-top:var(--s5)}
-.lp-how .how-steps .mono{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.16em}
-.lp-how .how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
-.lp-how .how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
+.lp-how .lp-how-steps li{border-top:1px solid var(--hair);padding-top:var(--s5)}
+.lp-how .lp-how-steps .mono{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.16em}
+.lp-how .lp-how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
+.lp-how .lp-how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
 
 /* ready for market — the block that breaks the page's centred rhythm, and the one that shows
    machinery instead of describing it. A visitor who reads the two lines of baseURI knows more
    about what this does than three paragraphs would tell them. */
 .lp-mint{padding:var(--py-section) 0}
-.lp-mint .mint-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);
+.lp-mint .lp-mint-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);
   display:grid;grid-template-columns:1fr 1fr;gap:var(--s10);align-items:start}
 .lp-mint h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
   margin:0 0 var(--s5);max-width:14ch}
-.lp-mint .mint-copy > p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0}
-.lp-mint .mint-list{list-style:none;margin:var(--s8) 0 0;padding:0;display:grid;gap:var(--s5)}
-.lp-mint .mint-list li{border-top:1px solid var(--hair);padding-top:var(--s4)}
-.lp-mint .mint-list .t{display:block;color:var(--text);font-size:var(--fs-md)}
-.lp-mint .mint-list .d{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.55;margin-top:var(--s2)}
+.lp-mint .lp-mint-copy > p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0}
+.lp-mint .lp-mint-list{list-style:none;margin:var(--s8) 0 0;padding:0;display:grid;gap:var(--s5)}
+.lp-mint .lp-mint-list li{border-top:1px solid var(--hair);padding-top:var(--s4)}
+.lp-mint .lp-mint-list .t{display:block;color:var(--text);font-size:var(--fs-md)}
+.lp-mint .lp-mint-list .d{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.55;margin-top:var(--s2)}
 
-.lp-mint .mint-code{border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);
+.lp-mint .lp-mint-code{border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);
   overflow:hidden}
-.lp-mint .mint-code-h{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;
+.lp-mint .lp-mint-code-h{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;
   padding:var(--s4) var(--s6);border-bottom:1px solid var(--hair)}
-.lp-mint .mint-code pre{margin:0;padding:var(--s7) var(--s6);overflow-x:auto}
-.lp-mint .mint-code pre:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.lp-mint .mint-code code{color:var(--accent-soft);font-size:var(--fs-s);line-height:1.9;white-space:pre}
-.lp-mint .mint-code-f{color:var(--faint);font-size:var(--fs-xs);line-height:1.6;padding:var(--s5) var(--s6);
+.lp-mint .lp-mint-code pre{margin:0;padding:var(--s7) var(--s6);overflow-x:auto}
+.lp-mint .lp-mint-code pre:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.lp-mint .lp-mint-code code{color:var(--accent-soft);font-size:var(--fs-s);line-height:1.9;white-space:pre}
+.lp-mint .lp-mint-code-f{color:var(--faint);font-size:var(--fs-xs);line-height:1.6;padding:var(--s5) var(--s6);
   border-top:1px solid var(--hair);background:var(--bg)}
 
 /* royalties — the sentence neither benchmark can say, bound to the rates that pay it */
@@ -224,34 +224,34 @@
   background:radial-gradient(120% 100% at 15% 50%, var(--amber-bg) 0%, transparent 68%);
   border-top:1px solid color-mix(in srgb,var(--amber) 18%,transparent);
   border-bottom:1px solid color-mix(in srgb,var(--amber) 18%,transparent)}
-.lp-pay .pay-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-pay .lp-pay-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
 .lp-pay h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
   margin:0 0 var(--s4);max-width:18ch;color:var(--gold)}
-.lp-pay .pay-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
-.lp-pay .pay-split{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin:var(--s10) 0 0}
-.lp-pay .pay-split > div{border-top:1px solid color-mix(in srgb,var(--amber) 28%,transparent);
+.lp-pay .lp-pay-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
+.lp-pay .lp-pay-split{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin:var(--s10) 0 0}
+.lp-pay .lp-pay-split > div{border-top:1px solid color-mix(in srgb,var(--amber) 28%,transparent);
   padding-top:var(--s5)}
-.lp-pay .pay-split dt{font-size:clamp(40px,5.4vw,76px);line-height:1;letter-spacing:-.045em;
+.lp-pay .lp-pay-split dt{font-size:clamp(40px,5.4vw,76px);line-height:1;letter-spacing:-.045em;
   font-weight:600;color:var(--amber)}
-.lp-pay .pay-split dd{margin:var(--s5) 0 0}
-.lp-pay .pay-split .who{display:block;color:var(--text);font-size:var(--fs-md);line-height:1.45}
-.lp-pay .pay-split .sub{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.5;margin-top:var(--s2)}
+.lp-pay .lp-pay-split dd{margin:var(--s5) 0 0}
+.lp-pay .lp-pay-split .who{display:block;color:var(--text);font-size:var(--fs-md);line-height:1.45}
+.lp-pay .lp-pay-split .sub{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.5;margin-top:var(--s2)}
 
 /* anonymity — the block that sits where a competitor puts SOC 2 */
 .lp-anon{padding:var(--py-section) 0}
-.lp-anon .anon-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);max-width:720px;text-align:center}
-.lp-anon .anon-tag{display:inline-flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);
+.lp-anon .lp-anon-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);max-width:720px;text-align:center}
+.lp-anon .lp-anon-tag{display:inline-flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);
   letter-spacing:.14em;text-transform:uppercase;color:var(--accent-soft);
   border:1px solid var(--hair);border-radius:var(--r-pill);padding:var(--s1) var(--s4)}
-.lp-anon .anon-tag svg.lucide{width:13px;height:13px}
+.lp-anon .lp-anon-tag svg.lucide{width:13px;height:13px}
 .lp-anon h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
   margin:var(--s6) 0 var(--s5)}
 .lp-anon p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0 auto;max-width:52ch}
-.lp-anon .anon-links{display:flex;gap:var(--s3);justify-content:center;flex-wrap:wrap;margin-top:var(--s7)}
+.lp-anon .lp-anon-links{display:flex;gap:var(--s3);justify-content:center;flex-wrap:wrap;margin-top:var(--s7)}
 
 /* the marked gaps — where the page has nothing honest to put yet */
 .lp-gaps{padding:var(--py-section) 0}
-.lp-gaps .gaps-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+.lp-gaps .lp-gaps-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
   grid-template-columns:1fr 1fr;gap:var(--s6)}
 .lp-gaps .gap{border:1px dashed var(--faint);border-radius:var(--r-lg);padding:var(--s7);min-height:180px}
 .lp-gaps .gap-label{display:block;color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em;
@@ -260,7 +260,7 @@
 
 /* footer as a capability index — the cheapest information density on the page */
 .lp-cand-foot{border-top:1px solid var(--hair);padding:var(--s10) 0 var(--s9)}
-.lp-cand-foot .cand-foot-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+.lp-cand-foot .lp-cand-foot-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
   grid-template-columns:1.4fr repeat(4,1fr);gap:var(--s7)}
 .lp-cand-foot h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;
   font-weight:400;margin:0 0 var(--s4)}
@@ -269,10 +269,10 @@
 .lp-cand-foot a:hover{color:var(--text)}
 
 @media(max-width:860px){
-  .lp-cand-nav .cand-navlinks{display:none}
-  .lp-how .how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
-  .lp-pay .pay-split{grid-template-columns:1fr;gap:var(--s6)}
-  .lp-mint .mint-in{grid-template-columns:1fr;gap:var(--s8)}
-  .lp-gaps .gaps-in{grid-template-columns:1fr}
-  .lp-cand-foot .cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
+  .lp-cand-nav .lp-cand-navlinks{display:none}
+  .lp-how .lp-how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+  .lp-pay .lp-pay-split{grid-template-columns:1fr;gap:var(--s6)}
+  .lp-mint .lp-mint-in{grid-template-columns:1fr;gap:var(--s8)}
+  .lp-gaps .lp-gaps-in{grid-template-columns:1fr}
+  .lp-cand-foot .lp-cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
 }

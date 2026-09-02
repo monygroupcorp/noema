@@ -16,7 +16,7 @@ import './onboard.css';
 //
 // Door A now carries the REAL fiat session (username/password rail): "Continue with a
 // username" expands inline into a sign-in / create-account form (useSession). No email —
-// registering logs you straight in. Wallet/Passkey remain cosmetic placeholders. Door B
+// registering logs you straight in. Wallet sign-up is live (it mints an account from a signature alone, no username); Passkey is not. Door B
 // (anonymous) is the bearer identity skin — funding-side anonymity, our compute.
 //
 // ADDITIVE MODE (`/onboard?add=1`, Keyring Decision 3): reached via "Add account" from the

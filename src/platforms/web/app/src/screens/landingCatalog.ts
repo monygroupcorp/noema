@@ -22,10 +22,32 @@ export interface CatalogSummary {
   kinds: Tally[];
   /** Low-rank adaptations specifically — the trained identities. */
   loras: number;
+  /** The model families the platform runs, alphabetical. The roster — what a competitor would
+   *  put up as a wall of borrowed logos, and what we can state as fact instead. */
+  families: string[];
   /** What those identities were trained on, commonest base first. Aggregate rather than a list
    *  of names: it answers what people actually build on here, and it does not put a stranger's
    *  slug on the front page. */
   bases: Tally[];
+}
+
+/**
+ * The family a model belongs to, from its own name.
+ *
+ * The catalogue stores what it runs, precisely: `Wan2.2 T2V — high-noise unet (14B, fp8 scaled)`.
+ * A roster wants the family, once — `Wan` — not four quantisations of it. So the name is cut at
+ * its first qualifier, reduced to its leading token, and stripped of a trailing version.
+ *
+ * It is approximate on purpose, and it is derived rather than listed: a hand-kept roster is a
+ * second place the truth lives, and it goes stale the first time someone adds a model.
+ */
+export function modelFamily(nomen: string): string {
+  const head = nomen.split(/\s+—\s+| \(/)[0].trim();
+  if (/^Stable Diffusion/i.test(head)) return 'Stable Diffusion';
+  const first = head.split(/\s+/)[0] ?? '';
+  // `FLUX.2` and `Wan2.2` are the same families as `FLUX.1` and `Wan`; `Z-Image` and `Qwen3-VL`
+  // carry no trailing version and are left whole.
+  return first.replace(/[\d.]+$/, '') || first;
 }
 
 function tally(values: Array<string | null | undefined>): Tally[] {
@@ -52,6 +74,11 @@ export function summariseCatalog(flows: FlowSummary[], models: ModelCard[]): Cat
     modalities: tally(flows.map((f) => asText(f.categoria))),
     models: models.length,
     kinds,
+    families: [
+      ...new Set(models.filter((m) => m.genus === 'model' && m.nomen).map((m) => modelFamily(m.nomen))),
+    ]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
     loras: kinds.find((k) => k.key === 'lora')?.count ?? 0,
     bases: tally(loras.map((m) => m.basis)),
   };
