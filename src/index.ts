@@ -1121,8 +1121,6 @@ async function main(): Promise<void> {
     partnerRequests: ring.partnerRequests,
     partners: ring.partners,
     identity: apiResolver,
-    personae: ring.personae,
-    usersCol,
   }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
@@ -1288,6 +1286,7 @@ async function main(): Promise<void> {
     anonPurseEnabled,
     bursarium: ring.bursarium,
     partners: ring.partners,
+    apiKeys: { personae: ring.personae, usersCol },
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
   }))

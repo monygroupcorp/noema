@@ -9,6 +9,8 @@ import {
   appendApiKeyRecord,
   verifyApiKeyToAccountId,
   mintPartnerApiKey,
+  rotatePartnerApiKey,
+  PARTNER_KEY_NAME,
   type ApiKeyEntry,
   type ApiKeyUsersCollection,
   type MintPartnerApiKeyDeps,
@@ -31,7 +33,11 @@ class FakeUsersCollection implements ApiKeyUsersCollection {
     return null
   }
 
-  async updateOne(filter: Record<string, unknown>, update: Record<string, unknown>, options?: { upsert?: boolean }): Promise<unknown> {
+  async updateOne(
+    filter: Record<string, unknown>,
+    update: Record<string, unknown>,
+    options?: { upsert?: boolean; arrayFilters?: Record<string, unknown>[] },
+  ): Promise<unknown> {
     const id = String(filter._id)
     let doc = this.docs.get(id)
     if (!doc) {
@@ -41,6 +47,15 @@ class FakeUsersCollection implements ApiKeyUsersCollection {
     }
     const push = (update as { $push?: { apiKeys: ApiKeyEntry } }).$push
     if (push?.apiKeys) doc.apiKeys.push(push.apiKeys)
+    const set = (update as { $set?: Record<string, unknown> })['$set']
+    if (set && 'apiKeys.$[elem].status' in set) {
+      const filterSpec = options?.arrayFilters?.[0] as { 'elem.name'?: string; 'elem.status'?: string } | undefined
+      for (const k of doc.apiKeys) {
+        if (filterSpec?.['elem.name'] !== undefined && k.name !== filterSpec['elem.name']) continue
+        if (filterSpec?.['elem.status'] !== undefined && k.status !== filterSpec['elem.status']) continue
+        k.status = set['apiKeys.$[elem].status'] as ApiKeyEntry['status']
+      }
+    }
     return { matchedCount: 1 }
   }
 }
@@ -170,4 +185,48 @@ test('mintPartnerApiKey: REFUSES to mint when the externusId already resolves to
   )
   // No key written anywhere.
   assert.equal(usersCol.docs.size, 0)
+})
+
+test('mintPartnerApiKey: tags every entry name=PARTNER_KEY_NAME (so rotate can find, and other keys can be spared)', async () => {
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  await mintPartnerApiKey({ personae, usersCol }, 'anima-real')
+  assert.equal(usersCol.docs.get('anima-real')?.apiKeys[0]?.name, PARTNER_KEY_NAME)
+})
+
+test('rotatePartnerApiKey: first call has nothing to retire, mints one active key', async () => {
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  const apiKey = await rotatePartnerApiKey({ personae, usersCol }, 'anima-real')
+  assert.match(apiKey, /^ms2_[0-9a-f]{48}$/)
+  const keys = usersCol.docs.get('anima-real')?.apiKeys ?? []
+  assert.equal(keys.length, 1)
+  assert.equal(keys[0]?.status, 'active')
+})
+
+test('rotatePartnerApiKey: a second call retires the first (real rotation, not accumulation)', async () => {
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  const first = await rotatePartnerApiKey({ personae, usersCol }, 'anima-real')
+  const second = await rotatePartnerApiKey({ personae, usersCol }, 'anima-real')
+  assert.notEqual(first, second)
+  const keys = usersCol.docs.get('anima-real')?.apiKeys ?? []
+  assert.equal(keys.length, 2, 'both entries kept — the old one is retired, not deleted')
+  const active = keys.filter(k => k.status === 'active')
+  assert.equal(active.length, 1, 'exactly one live key after rotation')
+  assert.equal(await verifyApiKeyToAccountId(usersCol, first), null, 'the retired key no longer resolves')
+  assert.deepEqual(await verifyApiKeyToAccountId(usersCol, second), { accountId: 'anima-real' })
+})
+
+test('rotatePartnerApiKey: never touches a key minted some other way on the same account', async () => {
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  // A key minted by some other path (e.g. mint-staging-key.ts) — no `name` tag.
+  const { keyPrefix, keyHash } = generateApiKeyMaterial()
+  await appendApiKeyRecord(usersCol, 'anima-real', { keyPrefix, keyHash, status: 'active' })
+
+  await rotatePartnerApiKey({ personae, usersCol }, 'anima-real')
+
+  const untaggedKey = usersCol.docs.get('anima-real')?.apiKeys.find(k => k.keyPrefix === keyPrefix)
+  assert.equal(untaggedKey?.status, 'active', 'a key with no partner tag survives rotation untouched')
 })

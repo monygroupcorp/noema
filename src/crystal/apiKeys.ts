@@ -89,7 +89,11 @@ export interface ApiKeyLookupResult {
  *  hermetic test can pass an in-memory fake without a real `mongodb.Collection`. */
 export interface ApiKeyUsersCollection {
   findOne(filter: Record<string, unknown>): Promise<{ _id: unknown; apiKeys?: ApiKeyEntry[] } | null>
-  updateOne(filter: Record<string, unknown>, update: Record<string, unknown>, options?: { upsert?: boolean }): Promise<unknown>
+  updateOne(
+    filter: Record<string, unknown>,
+    update: Record<string, unknown>,
+    options?: { upsert?: boolean; arrayFilters?: Record<string, unknown>[] },
+  ): Promise<unknown>
 }
 
 /** Append `entry` to `users.{_id: accountId}.apiKeys[]` (upsert if the doc is
@@ -144,6 +148,11 @@ export interface MintPartnerApiKeyDeps {
   usersCol: ApiKeyUsersCollection
 }
 
+/** The `name` tag every partner-minted key carries — lets `rotatePartnerApiKey` deactivate
+ *  ONLY keys this flow issued, never a key the same account holder minted some other way
+ *  (e.g. `mint-staging-key.ts` for their own testing). */
+export const PARTNER_KEY_NAME = 'partner'
+
 /**
  * Mint an API key that resolves back to EXACTLY `animaId` through the real
  * `verifyApiKeyToAccountId` -> `makeCredentialAcceptors.validateApiKey` ->
@@ -154,6 +163,9 @@ export interface MintPartnerApiKeyDeps {
  * externusId but points at a DIFFERENT anima — this should be unreachable
  * (the externusId IS `animaId`), so hitting it means something upstream is
  * already broken; refusing is safer than minting a misattributed key.
+ *
+ * Tags the entry `name: PARTNER_KEY_NAME` so `rotatePartnerApiKey` can find and
+ * retire it later without touching any other key on the same account.
  */
 export async function mintPartnerApiKey(deps: MintPartnerApiKeyDeps, animaId: string): Promise<string> {
   const persona = await deps.personae.findOrCreate('api', animaId, { animaId })
@@ -164,6 +176,24 @@ export async function mintPartnerApiKey(deps: MintPartnerApiKeyDeps, animaId: st
     )
   }
   const { apiKey, keyPrefix, keyHash } = generateApiKeyMaterial()
-  await appendApiKeyRecord(deps.usersCol, animaId, { keyPrefix, keyHash, status: 'active' })
+  await appendApiKeyRecord(deps.usersCol, animaId, { keyPrefix, keyHash, status: 'active', name: PARTNER_KEY_NAME })
   return apiKey
+}
+
+/**
+ * Self-serve issue/rotate for the partner who OWNS `animaId` — never called from the admin
+ * approval path (see `partnerAdminRouter.ts`'s header for why: the admin approving a request
+ * is frequently not the partner, so handing the raw key to the admin instead of the partner
+ * is the wrong recipient entirely). Deactivates every currently-active `name: PARTNER_KEY_NAME`
+ * entry on this account first (a real rotation, not an accumulation of live keys), then mints
+ * one fresh key the same way `mintPartnerApiKey` always has. Keys minted some other way on the
+ * same account (a different `name`, or none) are never touched.
+ */
+export async function rotatePartnerApiKey(deps: MintPartnerApiKeyDeps, animaId: string): Promise<string> {
+  await deps.usersCol.updateOne(
+    { _id: animaId as unknown as object },
+    { $set: { 'apiKeys.$[elem].status': 'inactive' } },
+    { arrayFilters: [{ 'elem.name': PARTNER_KEY_NAME, 'elem.status': 'active' }] },
+  )
+  return mintPartnerApiKey(deps, animaId)
 }
