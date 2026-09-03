@@ -30,6 +30,13 @@ export interface Editio {
   updatedAt: string;                          // ISO
 }
 
+// The `GET /v1/editiones/:id/preview` response (admin-only) — the media behind a held
+// publication, resolved server-side the same way the moderation gate resolved it to make
+// its hold decision. `items` carries richer per-item metadata (e.g. a sample's prompt) when
+// the artifact output has it; `mediaUrls` alone is always present.
+export interface EditionPreviewItem { url: string; prompt?: string }
+export interface EditionPreview { mediaUrls: string[]; items?: EditionPreviewItem[] }
+
 export interface FeedFilter {
   visibility?: EditioVisibility;
   destination?: string;

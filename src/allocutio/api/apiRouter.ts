@@ -195,6 +195,7 @@ export interface ApiFacade {
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
   getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail>
+  previewHeldEdition(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').EditionPreview>
   approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition>
@@ -731,6 +732,15 @@ export function createApiRouter(deps: {
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).
   router.post('/editiones/:id/retract', wrap(async (req, res) => {
     res.json({ edition: await api.retractEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/editiones/:id/preview — the media a reviewer needs to adjudicate a HELD
+  // publication (spec publish-review-visibility.md §2): resolves the SAME view the
+  // moderation gate used to make its hold decision, for ANY artifact kind — not just an
+  // `actum` generation run. PLATFORM-ADMIN ONLY, same gate as approve/reject/confirm-csam;
+  // never exposes preview urls to a non-admin caller, author included.
+  router.get('/editiones/:id/preview', wrap(async (req, res) => {
+    res.json(await api.previewHeldEdition(await auth(req), String(req.params.id)))
   }))
 
   // POST /v1/editiones/:id/approve — clear a moderation HOLD → the item re-settles and

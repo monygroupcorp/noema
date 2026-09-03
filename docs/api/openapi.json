@@ -14574,6 +14574,82 @@
         ]
       }
     },
+    "/editiones/{id}/preview": {
+      "get": {
+        "summary": "The media behind a held publication, for a reviewer to inspect before adjudicating (spec publish-review-visibility.md §2) — resolves the same view the moderation gate used to make its hold decision, for any artifact kind. Restricted to the platform administrator, same gate as approve/reject/confirm-csam.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The media behind a held publication, for a reviewer to inspect before adjudicating.",
+                  "properties": {
+                    "mediaUrls": {
+                      "type": "array",
+                      "description": "Every media url the moderation gate scanned for this artifact.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "description": "Richer per-item metadata when the artifact output carries it (e.g. an intella sample prompt). Omitted when unavailable.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "prompt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "mediaUrls"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/editiones/{id}/approve": {
       "post": {
         "summary": "Clear a moderation HOLD so the held publication re-settles and publishes (spec §4). Restricted to the platform administrator — an author cannot clear their own held content.",

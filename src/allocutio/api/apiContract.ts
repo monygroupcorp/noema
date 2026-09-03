@@ -1265,6 +1265,27 @@ const EditionModerationSchema: JsonSchema = {
   required: ['id', 'status', 'moderation'],
 }
 
+/** The response of `GET /v1/editiones/:id/preview` — what a reviewer needs to see to
+ *  adjudicate a held publication, resolved server-side the same way the moderation gate
+ *  resolved it to make its hold decision. */
+const EditionPreviewSchema: JsonSchema = {
+  type: 'object',
+  description: 'The media behind a held publication, for a reviewer to inspect before adjudicating.',
+  properties: {
+    mediaUrls: { type: 'array', description: 'Every media url the moderation gate scanned for this artifact.', items: { type: 'string' } },
+    items: {
+      type: 'array',
+      description: 'Richer per-item metadata when the artifact output carries it (e.g. an intella sample prompt). Omitted when unavailable.',
+      items: {
+        type: 'object',
+        properties: { url: { type: 'string' }, prompt: { type: 'string' } },
+        required: ['url'],
+      },
+    },
+  },
+  required: ['mediaUrls'],
+}
+
 /** One entry in the public feed (`GET /v1/feed`). */
 const FeedItemSchema: JsonSchema = {
   type: 'object',
@@ -2721,6 +2742,13 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.',
       auth: true,
       response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/editiones/:id/preview',
+      summary: 'The media behind a held publication, for a reviewer to inspect before adjudicating (spec publish-review-visibility.md §2) — resolves the same view the moderation gate used to make its hold decision, for any artifact kind. Restricted to the platform administrator, same gate as approve/reject/confirm-csam.',
+      auth: true,
+      response: EditionPreviewSchema,
     },
     {
       method: 'POST',

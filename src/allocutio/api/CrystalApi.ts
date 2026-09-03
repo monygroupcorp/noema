@@ -431,6 +431,21 @@ export interface PublishOpts {
   owners?: Array<{ animaId: string; weight: number }>
 }
 
+/** One item of a held editio's preview media — a sample url plus its prompt when known. */
+export interface EditionPreviewItem {
+  url: string
+  prompt?: string
+}
+
+/** What `previewHeldEdition` returns — the same view the moderation gate resolved to make
+ *  its hold decision, so a reviewer sees exactly what the gate saw. `items` is populated only
+ *  when the artifact's output carries per-item metadata worth showing (e.g. an intella's
+ *  sample prompts); `mediaUrls` alone is always present, even when `items` isn't. */
+export interface EditionPreview {
+  mediaUrls: string[]
+  items?: EditionPreviewItem[]
+}
+
 /** Inputs to import a model by URL (Civitai/HF/direct → a private Intella). */
 export interface ImportModelOpts {
   /** Civitai page/`?modelVersionId`, HuggingFace repo, or a direct `.safetensors`/`.ckpt` URL. */
@@ -1884,6 +1899,38 @@ export class CrystalApi {
       ...(e.reviewOutcome !== undefined ? { reviewOutcome: e.reviewOutcome } : {}),
       moderation: e.moderation ?? null,
     }
+  }
+
+  /**
+   * PREVIEW a held publication's media (docs/spec/publish-review-visibility.md §2): resolves
+   * the SAME view the moderation gate itself used to make its hold decision —
+   * `_artifactOutput` → `allMediaUrls` — for ANY artifact kind the editio references, not just
+   * an `actum` generation run. This is what closes the "reviewer adjudicates a model hold
+   * blind" gap: an `intella` promotion's sample images are otherwise invisible on this screen.
+   * PLATFORM-ADMIN ONLY — the SAME gate `approveHeldEdition`/`rejectHeldEdition` use, so a
+   * held item's preview urls are never exposed to a non-admin caller (the author included).
+   * Only a `reviewOutcome:'pending'` Editio has a preview; anything else 404s, same contract
+   * as approve/reject.
+   */
+  async previewHeldEdition(auctor: AuctorKey, id: string): Promise<EditionPreview> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    const output = await this._artifactOutput(e.artifactRef)
+    const mediaUrls = allMediaUrls(output)
+    // Richer per-item metadata when the output carries it (an intella's `samples[]` — see
+    // `_artifactOutput`'s `intella` branch, each entry `{ url, pathInRepo, prompt? }`).
+    // Kind-agnostic on purpose: any future artifact output shaped as `samples: {url,prompt?}[]`
+    // gets the same richer preview for free, no new branch needed here.
+    const samples = output?.samples
+    const items = Array.isArray(samples)
+      ? samples
+          .filter((s): s is { url: string; prompt?: string } => !!s && typeof s === 'object' && typeof (s as { url?: unknown }).url === 'string')
+          .map((s) => ({ url: s.url, ...(s.prompt ? { prompt: s.prompt } : {}) }))
+      : undefined
+    return { mediaUrls, ...(items && items.length > 0 ? { items } : {}) }
   }
 
   /**
