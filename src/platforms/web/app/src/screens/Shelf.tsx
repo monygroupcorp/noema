@@ -114,8 +114,12 @@ export function Shelf() {
   // state since several cards can be mid-publish at once. A publish settles asynchronously
   // (PublicationWorker; HF weight upload can take a while), so 'pending' is a real, honest
   // terminal state here, not a placeholder for 'done' — we poll briefly and stop rather than
-  // claim success before the edition actually lands.
-  const [pubState, setPubState] = useState<Record<string, 'busy' | 'pending' | 'err'>>({});
+  // claim success before the edition actually lands. 'held' is a DISTINCT state from 'pending':
+  // the moderation gate escalated this publish to a human reviewer (reviewOutcome:'pending')
+  // rather than leaving it genuinely still-settling — conflating the two left the button stuck
+  // on a bare "publishing…" forever, indistinguishable from a hang (publish-review-visibility
+  // spec, Gap A).
+  const [pubState, setPubState] = useState<Record<string, 'busy' | 'pending' | 'held' | 'err'>>({});
 
   // The global catalog surface (GET /v1/models) — collapsed until asked for.
   const [catOpen, setCatOpen] = useState(false);
@@ -187,6 +191,15 @@ export function Shelf() {
         }
         if (polled.status === 'failed' || polled.status === 'rejected') {
           setPubState((s) => ({ ...s, [id]: 'err' }));
+          return;
+        }
+        // A HELD item stays status:'pending' through every poll — reviewOutcome is the
+        // separate axis that says why. Without this branch the loop just exhausts silently:
+        // the button is left reading "publishing…" forever, with no way to tell a HOLD
+        // apart from a hang. Stop polling — an admin approval settles it, it never resolves
+        // on its own.
+        if (polled.reviewOutcome === 'pending') {
+          setPubState((s) => ({ ...s, [id]: 'held' }));
           return;
         }
       }
@@ -313,7 +326,7 @@ export function Shelf() {
                       <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
-                      {!listed && pubState[m.intellaId] !== 'pending' && (
+                      {!listed && pubState[m.intellaId] !== 'pending' && pubState[m.intellaId] !== 'held' && (
                         <button
                           className="btn ghost"
                           onClick={() => publishModel(m.intellaId)}
@@ -325,6 +338,12 @@ export function Shelf() {
                       )}
                       {!listed && pubState[m.intellaId] === 'pending' && (
                         <span className="mc-meta mono" title="Still settling — this can take a few minutes for weight upload">publishing…</span>
+                      )}
+                      {!listed && pubState[m.intellaId] === 'held' && (
+                        <span className="mc-meta mono" title="A moderator needs to clear this before it can go live">
+                          held for review
+                          {admin && <> · <Link to="/admin/review">see admin/review</Link></>}
+                        </span>
                       )}
                       {admin && (
                         <button className="btn ghost" onClick={() => reclassify(m.intellaId)} disabled={licBusy === m.intellaId} title="Admin: re-derive license from the base model">
