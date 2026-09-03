@@ -152,7 +152,7 @@ import type {
 } from '../../types/dataset.js'
 import type { Corporum } from '../../types/corpus.js'
 import { parseManifest } from '../../crystal/datasetManifest.js'
-import { checkOwnedAditus, type OwnedResourceLookups } from '../../execution/ownedResources.js'
+import { ownedAditusVerdict, type OwnedResourceStores } from '../../execution/ownedAditusGuard.js'
 import { findConstraintViolation } from '../../execution/portaConstraints.js'
 import { floorToEntries, isMuseSessionVersionConflict } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
@@ -1313,6 +1313,11 @@ export class CrystalApi {
     if (!isDraft || opts.modusId !== undefined) {
       const modus = await this.deps.modorum.find(modusId)
       if (!modus) throw Errors.notFoundFlow(modusId)
+      // Resource scope comes from the CALLER, and this is where it has to be settled: the
+      // `aditusBase` stored here is spread into every piece `CollectioCursor` later dispatches,
+      // and those dispatches carry the collection's funder, not the caller who wrote this base.
+      // Checked once, at the write, rather than on every dispatch tick.
+      await this._assertOwnedAditus(auctor, modus, aditusBase)
       // Pin the provenance hash to the resolved flow version.
       provenance = provenanceHash({ modusId, modusVersio: modus.versio, tractus, aditusBase })
     }
@@ -1428,6 +1433,10 @@ export class CrystalApi {
     // Only a NEWLY-named flow is validated — an already-stored one keeps the pre-existing
     // lenient behaviour (an unresolvable modus simply pins an undefined version).
     if (patch.modusId !== undefined && !modus) throw Errors.notFoundFlow(patch.modusId)
+    // A flow change re-reads the SAME stored `aditusBase` through a different set of declared
+    // ports, so a value that named nothing under the old flow can become a reference under the
+    // new one. Re-checked against the caller making the change, for that reason.
+    if (patch.modusId !== undefined) await this._assertOwnedAditus(auctor, modus, c.aditusBase ?? {})
     const provenance = modusId
       ? provenanceHash({ modusId, modusVersio: modus?.versio, tractus, aditusBase: c.aditusBase })
       : ''
@@ -3859,29 +3868,22 @@ export class CrystalApi {
     modus: Modus | null,
     values: Record<string, unknown>,
   ): Promise<void> {
-    const aditus = modus?.aditus
-    if (!aditus) return
-    if (!Object.values(aditus).some(porta => porta.owned !== undefined)) return
-
-    const owner = 'animaId' in auctor ? auctor.animaId : undefined
-    const datasets = this.deps.datasets
-    const corpora = this.deps.corpora
-
-    // Resolved once, here, only when there is a dataset seam that can use it — the teams of the
-    // caller doing the dispatching, never of anyone the aditus names.
-    const canResolveDataset = Boolean(owner && datasets?.findOwned)
-    const sodalitasIds = canResolveDataset ? await this._callerTeamIds(auctor) : []
-
-    const lookups: OwnedResourceLookups = {
-      inline: raw => parseManifest(raw) !== null,
-      ...(owner && datasets?.findOwned
-        ? { dataset: (id: string) => datasets.findOwned!(id, owner, sodalitasIds) }
-        : {}),
-      ...(owner && corpora ? { corpus: (id: string) => corpora.findOwned(id, owner) } : {}),
-    }
-
-    const verdict = await checkOwnedAditus(aditus, values, lookups)
+    const verdict = await ownedAditusVerdict(this._ownedResourceStores(), auctor, modus, values)
     if (!verdict.ok) throw Errors.invalidAditus({ field: verdict.field })
+  }
+
+  /**
+   * The stores an owned reference resolves through, in the shape the shared guard takes. Named
+   * once here because three entry points need the same set: the run route, and the two collection
+   * writes that fix what a later dispatch will name.
+   */
+  private _ownedResourceStores(): OwnedResourceStores {
+    return {
+      ...(this.deps.datasets ? { datasets: this.deps.datasets } : {}),
+      ...(this.deps.corpora ? { corpora: this.deps.corpora } : {}),
+      ...(this.deps.sodalitatum ? { sodalitatum: this.deps.sodalitatum } : {}),
+      inline: raw => parseManifest(raw) !== null,
+    }
   }
 
   /** Binding a run asks the LIVENESS question, so this keeps `getStudio`'s default (live-only)

@@ -9,6 +9,7 @@ import { MongoFlowContextStore } from './flow/MongoFlowContextStore.js'
 import { FlowRouter } from './flow/FlowRouter.js'
 import type { StepCallback, ResolutionCallback } from './flow/FlowRouter.js'
 import { ExecuteFlow } from './flow/flows/ExecuteFlow.js'
+import { parseManifest } from './crystal/datasetManifest.js'
 import { TelegramAllocutio } from './allocutio/telegram/TelegramAllocutio.js'
 import type { RouterDeps, IdentityResolver } from './allocutio/telegram/TelegramAllocutio.js'
 import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.js'
@@ -730,6 +731,16 @@ async function main(): Promise<void> {
     inceptor: ring.inceptor,
     actumIndex: ring.actumIndex,
     compositusCursor: ring.compositusCursor,
+    // `/run` casts any canonical atomic modus, three of which take the id of a stored,
+    // owner-bearing record. Wired for the same reason the REST run route is: the flow resolves
+    // that reference for the casting identity, and a store it cannot reach is a reference it
+    // has to refuse.
+    ownedResources: {
+      datasets: ring.datasets,
+      corpora: ring.corpora,
+      sodalitatum: ring.sodalitates,
+      inline: raw => parseManifest(raw) !== null,
+    },
   })
   router.register(executeFlow)
 
