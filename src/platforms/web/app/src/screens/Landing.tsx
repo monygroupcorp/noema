@@ -233,6 +233,11 @@ export function Landing({
           </div>
         </section>
 
+        {/* The coda. A second, shorter pass so the imagery returns once without becoming a
+            gallery — the slots and their briefs were written for it, and nothing rendered
+            them, so a filled coda slot had nowhere to appear. */}
+        {deck(platesIn('deck-coda'), 'A second, shorter run of work made in noema', 'lp-deck-coda')}
+
         <section className="lp-mint">
           <div className="lp-mint-in">
             <div className="lp-mint-copy">

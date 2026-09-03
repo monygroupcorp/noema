@@ -4,24 +4,32 @@
 // Every slot below declares the format, subject class and framing brief its plate must
 // satisfy, and carries `source: null` until one lands.
 //
-// The nine plates standing here now are work made on the platform: each is a crop of a
-// preview sample published by a model in the catalogue, and every one of those models
-// belongs to us — `noema-art` and `ms2stationthis` on Hugging Face. That matters more than
-// it looks. A landing page showing a stranger's output has to answer for the stranger's
-// consent, and none of these do. They are interim rather than final: the sources are square
-// 1024s, so a 21:9 plate is a crop of a composition rather than a composition, and the
-// trained house look these are standing in for is still the art track's to make.
-//
-// The cost of that, measured rather than guessed: a deck card is a 1586px box at a 1440
-// viewport, so a 1024-wide plate is upscaled about 1.55x, and more again on a 2x display.
-// It reads soft. Nothing here can fix that — the horizontal pixels are all the sample has,
-// and cropping to a wide format spends height, not width. The fix is art shot for the
-// format, which is the whole point of the slot briefs above.
+// The six plates standing here are work made on the platform: each is a preview sample
+// published by a model in the catalogue, and every one of those models is in `noema-art`
+// on Hugging Face. That matters more than it looks. A landing page showing a stranger's
+// output has to answer for the stranger's consent, and none of these do.
 //
 // Which model each plate came from, so the provenance survives without a second document:
-//   deck-1 Lawb          deck-2 cyberdreamsss   deck-3 0__11Xx
-//   deck-4 borukeinosatie deck-5 supernal       coda-1 ru_neo
-//   coda-2 supernal      coda-3 fullyarmoredgirl coda-4 0__11Xx
+//   deck-1 supernal   deck-2 fullyarmoredgirl   deck-3 colvilleflux-klein
+//   deck-4 impresstation   deck-5 cheeseworld1flux-klein   coda-1 rugcoreflux-klein
+//
+// The three remaining coda slots are `null` on purpose rather than filled with the
+// next-best thing. An unfilled slot renders nothing, so the coda is a one-card pass — which
+// is what its own brief asks for, "the imagery returns once without ever becoming a
+// gallery". A run does not get better by being longer.
+//
+// deck-2 is the one plate that is not a straight crop. Its sample is a mech on flat white,
+// and the card it lands in is `#0c0e10`, so an untouched crop is a white slab punched into
+// a near-black page. The ground is matted out instead — flood-filled from the border
+// through bright neutral pixels only, so the mech's own white panels survive — and the
+// plate ships with alpha rather than a baked ground, so it takes whatever the card is
+// standing on if the theme ever changes.
+//
+// The limit worth recording rather than rediscovering: a deck card is a 1586px box at a
+// 1440 viewport, so a 1024-wide plate is upscaled about 1.55x, and more on a 2x display.
+// It reads soft. Cropping to a wide format spends height, not width, so there is no
+// sharper version of these — the fix is art shot for the format, or a pass through the
+// platform's own `4x-UltraSharp`, which is the whole point of the slot briefs above.
 //
 // THE SWAP: fill a slot's `source` in this file. Nothing else in the app names an image
 // path, so replacing placeholders with finished plates is one edit here, not a hunt through
@@ -109,7 +117,7 @@ export const PLATES: PlateSlot[] = [
       'The card held longest, and the one the page opens its imagery on. Composed for a wide crop with the subject off-centre left, so it still reads while the right fifth is covered by the next card.',
     source: {
       src: '/landing/plate-deck-1.webp',
-      alt: 'A woman photographed indoors in low warm light, looking straight into the lens.',
+      alt: 'A close crop of a green eye, framed by torn foliage and printed graphic edges.',
       width: 1024,
       height: 439,
     },
@@ -123,7 +131,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'Arrives from behind the first card. Its left edge is seen before anything else of it, so the left edge has to be worth seeing.',
     source: {
       src: '/landing/plate-deck-2.webp',
-      alt: 'An armoured knight with feathered wings, sword raised against a clear blue sky.',
+      alt: 'A white and yellow armoured mech with shoulder cannons, cut out against the page.',
       width: 1024,
       height: 439,
     },
@@ -137,7 +145,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'The change of register at the middle of the run — drawn where the neighbours are photographed, same light, same grade.',
     source: {
       src: '/landing/plate-deck-3.webp',
-      alt: 'A hooded figure looking out over a coastline at dusk, drawn inside a pale circle.',
+      alt: 'A hound with its head down, crossing a bare snow-streaked slope below dark trees.',
       width: 1024,
       height: 439,
     },
@@ -151,7 +159,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'Returns to the figure after the illustrated card, so the run reads as a loop rather than a list.',
     source: {
       src: '/landing/plate-deck-4.webp',
-      alt: 'A drawn portrait on a dark ground, hair lit from the left.',
+      alt: 'A figure in sunglasses below a glass tower, in the flat look of an early-2000s game.',
       width: 1024,
       height: 439,
     },
@@ -161,11 +169,11 @@ export const PLATES: PlateSlot[] = [
     name: 'deck',
     section: 'deck',
     format: '21:9',
-    subject: 'mechanical',
+    subject: 'illustrated',
     brief: 'The card left standing when the banner exits. It is the last thing seen, so it carries the closing note of the run.',
     source: {
       src: '/landing/plate-deck-5.webp',
-      alt: 'Ornate white and blue plate armour standing against a sunlit sky, a red printed bar down one edge.',
+      alt: 'A rhinoceros in a suit at a control console, watching a tower of cheese in orbit.',
       width: 1024,
       height: 439,
     },
@@ -182,7 +190,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'Opens the second pass in the register the first one closed away from.',
     source: {
       src: '/landing/plate-coda-1.webp',
-      alt: 'A figure lying in bright green grass among discarded monitors, captioned "no signal".',
+      alt: 'A millefleurs tapestry: a unicorn resting inside a low round fence beneath a tree.',
       width: 1024,
       height: 512,
     },
@@ -194,12 +202,7 @@ export const PLATES: PlateSlot[] = [
     format: '2:1',
     subject: 'figure',
     brief: 'Tighter crop than anything in the first run — the second pass is closer, not louder.',
-    source: {
-      src: '/landing/plate-coda-2.webp',
-      alt: 'A close crop of a green eye, framed by torn foliage and printed graphic edges.',
-      width: 1024,
-      height: 512,
-    },
+    source: null,
   },
   {
     id: 'coda-3',
@@ -208,12 +211,7 @@ export const PLATES: PlateSlot[] = [
     format: '2:1',
     subject: 'mechanical',
     brief: 'Detail rather than whole object; the run has already established the object.',
-    source: {
-      src: '/landing/plate-coda-3.webp',
-      alt: 'A line drawing of a heavy mechanical suit, seen from the waist down.',
-      width: 512,
-      height: 256,
-    },
+    source: null,
   },
   {
     id: 'coda-4',
@@ -222,12 +220,7 @@ export const PLATES: PlateSlot[] = [
     format: '2:1',
     subject: 'illustrated',
     brief: 'The last image on the page. Quietest of the eight, and the one the closing action sits under.',
-    source: {
-      src: '/landing/plate-coda-4.webp',
-      alt: 'A small figure in white before a spiral of coloured light in deep space.',
-      width: 1024,
-      height: 512,
-    },
+    source: null,
   },
 ];
 
