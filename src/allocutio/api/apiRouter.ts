@@ -32,6 +32,7 @@ import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
 import type { PartnerStore } from '../../types/partner.js'
+import { rotatePartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
 
 const log = makeLogger('api:router')
 
@@ -283,6 +284,10 @@ export function createApiRouter(deps: {
    *  `internal.unavailable`, never a silent 404 (a deployment with no store wired is not the
    *  same fact as "this caller isn't a partner"). */
   partners?: PartnerStore
+  /** Backs `POST /v1/me/partner/api-key` — self-serve issue/rotate, gated the same as
+   *  `GET /v1/me/partner` (must have an active Partner record first). Omitted → 503, same
+   *  reasoning as `partners` above. */
+  apiKeys?: MintPartnerApiKeyDeps
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -1017,6 +1022,23 @@ export function createApiRouter(deps: {
     const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
     if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
     res.status(200).json(partner)
+  }))
+
+  // POST /v1/me/partner/api-key — self-serve issue-or-rotate. NOT reachable from the admin
+  // approval surface (partnerAdminRouter.ts) on purpose: the admin approving a request is
+  // frequently not the partner, so the raw key belongs here, in the hands of whoever can
+  // actually authenticate as the approved account, never in an admin's approval response.
+  // Each call retires every key this route previously issued (rotatePartnerApiKey — a real
+  // rotation, not an accumulation of live keys) and returns a fresh one, shown ONCE — this
+  // response is the only time it is ever retrievable; only its hash is stored afterward.
+  router.post('/me/partner/api-key', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    if (!deps.apiKeys) throw Errors.partnerDirectoryUnavailable()
+    const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
+    if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    const apiKey = await rotatePartnerApiKey(deps.apiKeys, (auctor as { animaId: string }).animaId)
+    res.status(200).json({ apiKey })
   }))
 
   // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),

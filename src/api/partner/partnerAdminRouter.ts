@@ -19,27 +19,24 @@
 // `querelaAdminRouter.ts`. If `_assertPlatformAdmin` ever changes, this must
 // change with it.
 //
-// PROVISIONING ON APPROVAL — the identity-critical half of this router:
+// PROVISIONING ON APPROVAL:
 //   - Approving a request that carries an `animaId` creates exactly one
 //     `Partner` record for that animaId (reused if one already exists — see
-//     inline comment) and mints a fresh API key ATTACHED TO THAT EXACT
-//     animaId via `mintPartnerApiKey` (src/crystal/apiKeys.ts) — read that
-//     module's header before touching this logic; it explains why the key is
-//     minted this way rather than via `mint-staging-key.ts`'s account-resolution
-//     path (that path can mint a FRESH, WRONG anima for an unrecognized
-//     "account" string; this router must never do that).
+//     inline comment). It does NOT mint an API key. The admin approving a
+//     request is frequently NOT the partner (the whole point of a review
+//     queue is a third party deciding on someone else's application) — handing
+//     the raw key to whoever clicked Approve would hand a credential to the
+//     wrong person. Key issuance is self-serve, by the partner themselves,
+//     once they can see they're approved: see `rotatePartnerApiKey`
+//     (`src/crystal/apiKeys.ts`) called from the partner-only route in
+//     `apiRouter.ts`. This router never touches a key at all.
 //   - Approving a request with NO `animaId` (a fully anonymous submission)
-//     ONLY flips `status` to `'approved'`. No `Partner` record, no API key.
+//     ONLY flips `status` to `'approved'`. No `Partner` record either.
 //     This is a DELIBERATE gap: there is no email-verified signup flow in this
 //     codebase to safely close it (an email address alone is not proof of
 //     control over any account). Not a bug — see `partnerRequest.ts`'s header.
-//   - The raw API key is returned in the PATCH response EXACTLY ONCE — it is
-//     never stored, never retrievable again (only its hash is persisted,
-//     exactly as `scripts/mint-staging-key.ts` already worked).
 //   - A request that already has a decision (`status !== 'pending'`) refuses
-//     a second PATCH with `409 conflict.already_decided` — re-running
-//     provisioning on an already-approved request would mint a SECOND key
-//     silently, which nothing above would notice.
+//     a second PATCH with `409 conflict.already_decided`.
 // =============================================================================
 
 import express, { type Request, type Response, type Router } from 'express'
@@ -50,7 +47,6 @@ import type { Credentials } from '../../allocutio/api/IdentityResolver.js'
 import { credentialsFromHeaders } from '../../allocutio/api/IdentityResolver.js'
 import { ApiError, Errors } from '../../allocutio/api/errors.js'
 import { makeLogger } from '../../lib/logger.js'
-import { mintPartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
 
 const log = makeLogger('partner:admin-router')
 
@@ -58,8 +54,6 @@ export interface PartnerAdminRouterDeps {
   partnerRequests: PartnerRequestStore
   partners: PartnerStore
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
-  personae: MintPartnerApiKeyDeps['personae']
-  usersCol: MintPartnerApiKeyDeps['usersCol']
 }
 
 const REQUEST_STATUSES = ['pending', 'approved', 'declined'] as const
@@ -77,7 +71,7 @@ function assertPlatformAdmin(auctor: AuctorKey): void {
 }
 
 export function createPartnerAdminRouter(deps: PartnerAdminRouterDeps): Router {
-  const { partnerRequests, partners, identity, personae, usersCol } = deps
+  const { partnerRequests, partners, identity } = deps
   const router = express.Router()
 
   /** Resolve the caller's AuctorKey and assert platform-admin. Any credential
@@ -140,20 +134,18 @@ export function createPartnerAdminRouter(deps: PartnerAdminRouterDeps): Router {
       throw Errors.conflictAlreadyDecided(id, existing.status)
     }
 
-    let apiKey: string | undefined
     let partnerAnimaId: string | undefined
 
     if (status === 'approved' && existing.animaId) {
       const animaId = existing.animaId
       // Reuse an existing Partner record for this animaId if one is already there (e.g. a
       // second, unrelated partner request from someone already approved once) — never a
-      // second Partner row for the same animaId. `mintPartnerApiKey` is called regardless,
-      // so a second approval for the same anima still gets its own fresh key.
+      // second Partner row for the same animaId. No key is minted here — see this file's
+      // header: the partner mints their own, self-serve, once they see they're approved.
       const existingPartner = await partners.find(animaId)
       if (!existingPartner) {
         await partners.create({ animaId, sourceRequestId: existing.id, ...(existing.org ? { org: existing.org } : {}), contactEmail: existing.contactEmail })
       }
-      apiKey = await mintPartnerApiKey({ personae, usersCol }, animaId)
       partnerAnimaId = animaId
     }
 
@@ -162,7 +154,6 @@ export function createPartnerAdminRouter(deps: PartnerAdminRouterDeps): Router {
     res.status(200).json({
       request: updated,
       ...(partnerAnimaId ? { partner: await partners.find(partnerAnimaId) } : {}),
-      ...(apiKey ? { apiKey } : {}),
     })
   }))
 
