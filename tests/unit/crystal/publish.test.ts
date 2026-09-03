@@ -106,6 +106,13 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
     ['lora-ok', { id: 'lora-ok', nomen: 'OK LoRA', genus: 'lora', slug: 'ok', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'apache-2.0', commercialUse: 'yes', sources: [{ provenance: 'civitai', uri: 'https://civitai/ok' }] } as unknown as Intella],
     // A CONDITIONAL import (Krea 2 / SD3 — allowed under-threshold): promotes.
     ['lora-cond', { id: 'lora-cond', nomen: 'Cond LoRA', genus: 'lora', slug: 'cond', familia: 'krea2', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'krea-community', commercialUse: 'conditional', provenance: { repo: 'civitai:5', base: 'Krea 2' }, sources: [{ provenance: 'civitai', uri: 'https://civitai/cond' }] } as unknown as Intella],
+    // The `brutalite` shape (docs/spec/model-base-provenance.md): a klein-4B LoRA trained before
+    // the base-provenance fix, so it carries no `baseModel` — only `familia:'flux2'`, no
+    // `provenance`, and `nomen` = the trigger word (matches nothing in BASE_TABLE). It was
+    // MANUALLY cleared to the correct license through a different admin route (bypassing
+    // reclassify, which can't derive it). `classifyModelLicense` would still recompute 'unknown'
+    // for it — the reclassify guard must leave the manually-cleared value alone.
+    ['lora-manual', { id: 'lora-manual', nomen: 'brutalite', genus: 'lora', slug: 'brutalite', familia: 'flux2', ownerAnimaId: 'anima-1', access: 'private', canonica: false, license: 'apache-2.0', commercialUse: 'yes', sources: [{ provenance: 'miladystation', uri: 'https://x/brutalite.safetensors' }] } as unknown as Intella],
   ])
   // A fake Collectio store: one COMPLETE owned drop (with a team owners[] split) and
   // one still AGENS (in-flight) — both funded by anima-1.
@@ -115,6 +122,7 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
   ])
   const collectiones = { find: async (id: string) => collections.get(id) ?? null }
   const accessCalls: Array<{ id: string; access: 'public' | 'private' }> = []
+  const setLicenseCalls: Array<{ id: string; patch: { license?: string; commercialUse?: string } }> = []
   const intellarum = {
     find: async (id: string) => models.get(id) ?? null,
     setAccess: async (id: string, access: 'public' | 'private') => {
@@ -133,6 +141,7 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
       return m
     },
     setLicense: async (id: string, patch: { license?: string; commercialUse?: string }) => {
+      setLicenseCalls.push({ id, patch })
       const m = models.get(id); if (!m) return null
       Object.assign(m as object, patch)
       return m
@@ -161,7 +170,7 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
   // The durable worker drives every settle (publish() only enqueues a pending Editio).
   // `flush` drains it deterministically — the test analogue of the in-process loop.
   const worker = new PublicationWorker({ editiones, settle: (id) => api.settlePublication(id), leaseMs: 60_000 })
-  return { api, editiones, puts, dels, models, collections, accessCalls, flush: () => worker.drainOnce() }
+  return { api, editiones, puts, dels, models, collections, accessCalls, setLicenseCalls, flush: () => worker.drainOnce() }
 }
 
 const anima1 = { animaId: 'anima-1' }
@@ -319,6 +328,30 @@ test('setModelLicense(): reclassify re-derives the verdict from the recorded bas
   assert.equal(card.license, 'krea-community')
   assert.equal(card.commercialUse, 'conditional')
   assert.equal((models.get('lora-cond') as { license?: string }).license, 'krea-community')
+})
+
+test('setModelLicense(): reclassify never downgrades an already-classified record to unknown', async () => {
+  // The real incident this guards against: an admin manually clears/corrects a model's license
+  // through a different route (bypassing reclassify, because reclassify itself can't derive the
+  // right answer for it — the exact `brutalite` shape, `lora-manual` here). Clicking "reclassify"
+  // on that SAME model must not silently wipe the correct value back to 'unknown', because the
+  // classifier still has no way to derive it — there was never a better answer to fall back to.
+  const admin = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const { api, models, setLicenseCalls } = makeApi()
+
+  const before = models.get('lora-manual') as { license?: string; commercialUse?: string }
+  assert.equal(before.license, 'apache-2.0')
+
+  const card = await api.setModelLicense(admin, 'lora-manual', { reclassify: true })
+
+  // The stored, manually-cleared value survives untouched — not silently downgraded.
+  assert.equal(card.license, 'apache-2.0')
+  assert.equal(card.commercialUse, 'yes')
+  const after = models.get('lora-manual') as { license?: string; commercialUse?: string }
+  assert.equal(after.license, 'apache-2.0')
+  assert.equal(after.commercialUse, 'yes')
+  // The guard short-circuits BEFORE writing — registry.setLicense is never called with 'unknown'.
+  assert.deepEqual(setLicenseCalls, [])
 })
 
 test('publish(): a public model promotion is gated — a denied scan rejects it, access stays private', async () => {

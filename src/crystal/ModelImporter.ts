@@ -211,6 +211,10 @@ export class ModelImporter {
       // commercial gate. A private import is allowed regardless; only PUBLIC promotion checks it.
       license: resolved.license,
       commercialUse: resolved.commercialUse,
+      // The same classifier-usable base descriptor `familia`/`license` were derived from (§3,
+      // docs/spec/model-base-provenance.md) — imports already classify correctly; this just gives
+      // every genus one consistent field for a later reclassify to read.
+      ...(resolved.baseModel ? { baseModel: resolved.baseModel } : {}),
       slug: resolved.slug,
       ...(resolved.trigger ? { trigger: resolved.trigger } : {}),
       ...(resolved.description ? { description: resolved.description } : {}),

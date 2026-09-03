@@ -274,6 +274,7 @@ export function classifyBaseModel(base: string): BaseClassification {
  * plain BSON) and the API (which sees a typed `Intella`) call ONE classifier.
  */
 export interface LicenseClassifiable {
+  baseModel?: string
   provenance?: { base?: string } | null
   nomen?: string
   familia?: string | null
@@ -281,16 +282,20 @@ export interface LicenseClassifiable {
 
 /**
  * Derive `{ license, commercialUse }` for an already-stored model from the most trustworthy base
- * string it carries. Priority: `provenance.base` (author-declared lineage, e.g. 'FLUX.1-dev') >
- * `nomen` (descriptive title, e.g. 'FLUX.1 Schnell (fp8 scaled)') > `familia` (the compat key —
- * bare, license-ambiguous: 'flux' can't tell schnell from dev, so it's the last resort → 'unknown').
+ * string it carries. Priority: `baseModel` (the literal resolved training/import-time source of
+ * truth — see docs/spec/model-base-provenance.md) > `provenance.base` (author-declared EXTERNAL
+ * retrain lineage, e.g. 'FLUX.1-dev' — a different statement than `baseModel`) > `nomen`
+ * (descriptive title, e.g. 'FLUX.1 Schnell (fp8 scaled)') > `familia` (the compat key — bare,
+ * license-ambiguous: 'flux' can't tell schnell from dev, so it's the last resort → 'unknown').
+ * A record written before `baseModel` existed simply lacks it and falls through the chain
+ * unchanged — fail-closed, same as any other unclassifiable case here.
  *
  * This is the single source for BOTH the admin `reclassify` path (`CrystalApi.setModelLicense`) and
  * the license backfill sweep, so a model gets the same verdict whichever runs it. Fail-closed: an
  * unrecognised base yields `{ license:'unknown', commercialUse:'unknown' }` (NOT catalog-eligible).
  */
 export function classifyModelLicense(m: LicenseClassifiable): { license: string; commercialUse: CommercialVerdict } {
-  const base = m.provenance?.base || m.nomen || m.familia || ''
+  const base = m.baseModel || m.provenance?.base || m.nomen || m.familia || ''
   const license = classifyBaseModel(base).license
   return { license, commercialUse: licenseCommercial(license) }
 }

@@ -246,6 +246,17 @@ export interface Intella {
   provenance?: { repo: string; base?: string }
 
   /**
+   * The resolved, classifier-usable base-model descriptor this Intella was trained or imported
+   * against (e.g. 'black-forest-labs/FLUX.2-klein-base-4B') — NOT the raw preset alias a caller
+   * passed in ('klein-4b'). Set unconditionally, wherever a real descriptor is available, at
+   * training finality and at import; a DIFFERENT statement from `provenance.base` (external
+   * retrain lineage, gated on `provenanceRepo`, and never set for the ordinary local-training
+   * path). `classifyModelLicense`'s fallback chain reads this FIRST — see
+   * docs/spec/model-base-provenance.md.
+   */
+  baseModel?: string
+
+  /**
    * License id of this model (e.g. 'apache-2.0', 'openrail-m', 'flux-1-dev-nc', 'krea-community',
    * 'unknown'). For imports: the artifact's own license folded with its base's (most-restrictive).
    * Display + audit; the commercial-catalog verdict lives in `commercialUse`.
