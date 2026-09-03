@@ -109,7 +109,7 @@ export const PLATES: PlateSlot[] = [
       'The card held longest, and the one the page opens its imagery on. Composed for a wide crop with the subject off-centre left, so it still reads while the right fifth is covered by the next card.',
     source: {
       src: '/landing/plate-deck-1.webp',
-      alt: 'A woman photographed indoors in low warm light, looking straight into the lens.',
+      alt: 'A red crustacean character in a leather jacket, standing in a burning neon city street.',
       width: 1024,
       height: 439,
     },
