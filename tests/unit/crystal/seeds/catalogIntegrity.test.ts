@@ -80,3 +80,22 @@ test('every required media aditus is slot-mapped, or the pod cannot receive the 
     }
   }
 })
+
+test('ref2v does not inherit fl2va lengths (they are different checkpoints)', () => {
+  // 209 frames runs on fl2va — t2v and fl2v both use it — and fails inside ComfyUI on ref2va
+  // with a tensor shape error, after the pod, the weights and the model load are all paid for.
+  // Verified on prod: ref2v completes at 124 and fails at 209. This pins the default so a future
+  // tidy-up does not "unify" the three flows' geometry back into one number.
+  const byId = new Map(CANONICAL_ESSENTIAE.map(e => [e.id, e]))
+  const ref2v = byId.get('minimax-h3-ref2v')
+  const fl2v = byId.get('minimax-h3-fl2v')
+  assert.ok(ref2v && fl2v)
+  assert.equal(ref2v.aditus.frames?.default, 124, 'ref2v defaults to the length proven on ref2va')
+  assert.notEqual(
+    ref2v.aditus.frames?.default, fl2v.aditus.frames?.default,
+    'the two checkpoints do not accept the same lengths — a shared default is the bug this pins',
+  )
+  // No maximum: the real ceiling is somewhere in (124, 209] and nobody has bisected it.
+  // Guessing one would refuse lengths that may work.
+  assert.equal((ref2v.aditus.frames as { max?: number }).max, undefined)
+})

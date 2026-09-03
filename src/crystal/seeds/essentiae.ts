@@ -1242,6 +1242,16 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
 /**
  * MiniMax H3 — reference to video.
  *
+ * LENGTH IS NOT SHARED WITH THE OTHER TWO FLOWS. ref2va and fl2va are different checkpoints and
+ * they do not accept the same clip lengths. 209 frames runs fine on fl2va (t2v and fl2v both use
+ * it) and fails inside ComfyUI on ref2va with `shape '[21504, 5376]' is invalid for input of size
+ * 55090912` — an execution error, after the pod, the weights and the model load are all paid for.
+ * 124 is the length the rig proved ref2va at, and the length verified here on prod.
+ *
+ * No `maximum` is declared: the real ceiling is somewhere in (124, 209] and nobody has bisected it.
+ * Guessing one would refuse lengths that may work, which is the same mistake noema-396 declined to
+ * make on wan22. The default is the proven value, and the description says what is known.
+ *
  * The interesting one: a reference image drives the character and a reference audio clip
  * carries VOICE TIMBRE, so one pass produces the character, the motion, the speech and the
  * ambience together, in sync.
@@ -1278,7 +1288,7 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
     prompt:     { type: 'text',  required: true,  description: 'The scene and the dialogue. Reference the inputs as <Picture 1> and <Audio 1>, and say "<Audio 1> is the voice-timbre reference for <Picture 1>" to carry the voice.' },
     ref_image:  { type: 'image', required: true,  description: 'Reference image — the character or subject' },
     ref_audio:  { type: 'audio', required: true,  description: 'Reference audio — the voice timbre to speak in' },
-    frames:     { type: 'int',   required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
+    frames:     { type: 'int',   required: false, default: 124, min: 5, step: 17, description: 'Clip length in frames at 24fps (124 = 5.2s). Must be 5 or more, in steps of 17 from 5. ref2va is proven at 124; 209 — which fl2v runs happily — fails on this checkpoint with a tensor shape error.' },
     input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
   },
 
