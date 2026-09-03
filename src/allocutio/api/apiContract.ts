@@ -1214,6 +1214,7 @@ const EditionSchema: JsonSchema = {
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
     status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
     reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'], description: 'Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path.' },
+    moderationNote: { type: 'string', description: "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
     externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
     owners: {
       type: 'array',
@@ -1239,6 +1240,29 @@ const EditionListEnvelopeSchema: JsonSchema = {
   type: 'object',
   properties: { editions: { type: 'array', items: EditionSchema } },
   required: ['editions'],
+}
+
+/** `GET /editiones/:id/moderation`'s response — the RAW moderation verdict, admin-only. */
+const EditionModerationSchema: JsonSchema = {
+  type: 'object',
+  description: "The moderation gate's raw verdict for one publication, platform-admin only.",
+  properties: {
+    id: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'] },
+    reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'] },
+    moderation: {
+      type: 'object',
+      nullable: true,
+      description: 'The recorded verdict, or null when this Editio was never held or rejected.',
+      properties: {
+        reason: { type: 'string', description: "The classifier's raw verdict text." },
+        hold: { type: 'boolean', description: 'True only when this verdict HELD (vs. terminally rejected).' },
+        scannedAt: { type: 'string', format: 'date-time' },
+      },
+      required: ['reason', 'scannedAt'],
+    },
+  },
+  required: ['id', 'status', 'moderation'],
 }
 
 /** One entry in the public feed (`GET /v1/feed`). */
@@ -2683,6 +2707,13 @@ export const API_CONTRACT: ApiContract = {
       summary: 'Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.',
       auth: true,
       response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/editiones/:id/moderation',
+      summary: "The moderation gate's raw verdict for one publication (why it was held or rejected), regardless of current status — the companion to `/editiones/review` for a terminal `rejected` item, which has no queue entry to inspect. Restricted to the platform administrator; the raw reason text is not surfaced to the publishing author.",
+      auth: true,
+      response: EditionModerationSchema,
     },
     {
       method: 'POST',

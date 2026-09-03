@@ -349,6 +349,11 @@ export interface Edition {
    *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
    *  on the normal path. */
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
+  /** Present when the moderation gate HELD or REJECTED this publication. A generic,
+   *  author-safe message — NEVER the classifier's raw verdict text (which may describe
+   *  detection internals). A platform admin sees the raw reason via
+   *  `GET /v1/editiones/:id/moderation` instead. Absent when never flagged. */
+  moderationNote?: string
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   /** Rights split snapshot (animaId → weight), when team-owned. */
@@ -357,6 +362,21 @@ export interface Edition {
   license?: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * EditionModerationDetail — `GET /v1/editiones/:id/moderation`'s response (spec:
+ * moderation-reject-reason). PLATFORM-ADMIN ONLY: carries the moderation gate's RAW
+ * verdict, unlike `Edition.moderationNote`'s generic author-facing form. Reaches any
+ * Editio by id regardless of status — the companion to the review queue for a
+ * TERMINAL `rejected` item, which has no queue entry of its own to inspect.
+ */
+export interface EditionModerationDetail {
+  id: string
+  status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
+  reviewOutcome?: 'pending' | 'approved' | 'rejected'
+  /** The recorded verdict, or null when this Editio was never held or rejected. */
+  moderation: { reason: string; hold?: boolean; scannedAt: string } | null
 }
 
 /**

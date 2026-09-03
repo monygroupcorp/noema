@@ -60,7 +60,7 @@ import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledg
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import type {
-  Run, RunOrder, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage,
+  Run, RunOrder, Collection, CollectionPiece, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage,
   ActivityKind, ActivityDoor, ActivityRow, ActivityPage,
 } from './types.js'
 
@@ -1863,6 +1863,30 @@ export class CrystalApi {
   }
 
   /**
+   * Admin-only raw moderation-verdict read (docs/spec/moderation-reject-reason.md §3(a)).
+   * `listHeldEditions` only surfaces items still `reviewOutcome:'pending'` — a TERMINAL
+   * `rejected` Editio has no queue entry to inspect, so a reviewer asking "why was X
+   * rejected" had nothing to look at. This reaches any Editio by id regardless of status,
+   * PLATFORM-ADMIN ONLY: `verdict.reason` is the classifier's raw text, which may describe
+   * detection internals not meant for the rejected author to read verbatim (the author-
+   * facing surface is the generic `Edition.moderationNote` from `toEdition`, not this).
+   * `moderation` is null when the Editio was never held or rejected by the gate.
+   */
+  async getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e) throw Errors.notFoundEdition(id)
+    return {
+      id: e.id,
+      status: e.status,
+      ...(e.reviewOutcome !== undefined ? { reviewOutcome: e.reviewOutcome } : {}),
+      moderation: e.moderation ?? null,
+    }
+  }
+
+  /**
    * APPROVE a held publication (spec §4) → clears the hold (`reviewOutcome:'approved'`);
    * the worker re-settles it with the gate BYPASSED, so it publishes. PLATFORM-ADMIN
    * ONLY — an author must never clear their own possibly-CSAM hold (that would defeat
@@ -2010,14 +2034,25 @@ export class CrystalApi {
       }
 
       if (!verdict.ok) {
+        // Persist the gate's verdict on the Editio itself — HOLD is not actually better
+        // off than REJECT here (docs/spec/moderation-reject-reason.md §1): neither branch
+        // used to write `verdict.reason` anywhere, so a rejected item had NO recoverable
+        // signal for why. Written on BOTH branches, alongside the existing status write.
+        const moderation = {
+          reason: verdict.reason,
+          ...(verdict.hold ? { hold: true } : {}),
+          scannedAt: new Date().toISOString(),
+        }
         if (verdict.hold) {
           // HOLD for human review: NOT a reject, NOT a report. Stays `pending`, but the
           // worker's claim skips reviewOutcome:'pending' so it won't re-scan — it waits
           // for an admin to approve (→ re-settle, gate bypassed) or reject.
-          await editiones.update(editioId, { reviewOutcome: 'pending' })
+          log.warn('publication HELD by moderation gate', { editioId: e.id, artifactRef: e.artifactRef, reason: verdict.reason, hold: true })
+          await editiones.update(editioId, { reviewOutcome: 'pending', moderation })
           return
         }
-        await editiones.update(editioId, { status: 'rejected' })
+        log.warn('publication REJECTED by moderation gate', { editioId: e.id, artifactRef: e.artifactRef, reason: verdict.reason, hold: false })
+        await editiones.update(editioId, { status: 'rejected', moderation })
         return
       }
     }
