@@ -134,8 +134,6 @@ function RequestRow({ request, onDecided, onError }: {
   onError: (e: string) => void;
 }) {
   const [busy, setBusy] = useState<null | 'approved' | 'declined'>(null);
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   async function decide(status: 'approved' | 'declined') {
     setBusy(status);
@@ -143,20 +141,11 @@ function RequestRow({ request, onDecided, onError }: {
     try {
       const res = await api.adminDecidePartnerRequest(request.id, status);
       onDecided(res.request);
-      if (res.apiKey) setApiKey(res.apiKey);
     } catch (e) {
       onError(msg(e));
     } finally {
       setBusy(null);
     }
-  }
-
-  async function copyKey() {
-    if (!apiKey) return;
-    try {
-      await navigator.clipboard.writeText(apiKey);
-      setCopied(true);
-    } catch { /* clipboard unavailable — the key is still selectable text */ }
   }
 
   const decided = request.status !== 'pending';
@@ -181,20 +170,15 @@ function RequestRow({ request, onDecided, onError }: {
         {request.animaId ? (
           <div className="sub mono" style={{ fontSize: 'var(--fs-xs)' }}>
             <Ic name="circle-user" /> account attached ({request.animaId})
+            {decided && request.status === 'approved' && (
+              <span style={{ display: 'block', marginTop: 4 }}>
+                Approved — they generate their own API key from their partner dashboard (never shown here).
+              </span>
+            )}
           </div>
         ) : (
           <div className="sub" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-            no account attached — approval won't provision access (no Partner record, no API key)
-          </div>
-        )}
-
-        {apiKey && (
-          <div className="warn" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div><b>Copy this now — it will never be shown again.</b></div>
-            <code className="mono" style={{ userSelect: 'all', wordBreak: 'break-all' }}>{apiKey}</code>
-            <button className="btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={copyKey}>
-              {copied ? 'Copied' : 'Copy key'}
-            </button>
+            no account attached — approval won't provision access (no Partner record, no dashboard to log into)
           </div>
         )}
       </div>

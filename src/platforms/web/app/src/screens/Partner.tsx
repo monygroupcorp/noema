@@ -18,9 +18,11 @@ import { useSession } from '../state/session';
 // card" component to import; Status.tsx's inline pattern IS the precedent, mirrored here rather
 // than re-invented.
 //
-// The API key is NEVER re-fetched or re-displayed: it was shown exactly once, at approval time,
-// by the ADMIN-facing route (see partnerAdminRouter.ts on the intake branch) — this screen only
-// notes that fact. No lost-key-recovery flow exists; that is a deliberate, out-of-scope gap.
+// The API key is issued/rotated HERE, self-serve, by the partner themselves — never by whoever
+// approved their application (see partnerAdminRouter.ts: approval provisions the Partner record
+// only, no key). POST /v1/me/partner/api-key retires any key this flow previously issued and
+// mints a fresh one; the response is the ONLY time the raw key is ever retrievable, so it lives
+// only in this component's state — never localStorage, never re-fetched on reload.
 //
 // Feedback/support: ReportModal (POST /v1/reports) is already mounted globally inside AppShell
 // (bottom-right flag button on every screen) — that already satisfies "a way to message us" for
@@ -35,6 +37,11 @@ export function Partner() {
   const [gate, setGate] = useState<Gate>('loading');
   const [partner, setPartner] = useState<PartnerRecord | null>(null);
   const [gateErr, setGateErr] = useState<string | null>(null);
+
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyErr, setKeyErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const [balance, setBalance] = useState<{ impetus: string; usd: number } | null>(null);
   const [spend, setSpend] = useState<SettledRun[]>([]);
@@ -92,6 +99,28 @@ export function Partner() {
 
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 
+  async function issueOrRotateKey() {
+    setKeyBusy(true);
+    setKeyErr(null);
+    setCopied(false);
+    try {
+      const res = await api.rotatePartnerApiKey();
+      setApiKey(res.apiKey);
+    } catch (e) {
+      setKeyErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function copyKey() {
+    if (!apiKey) return;
+    try {
+      await navigator.clipboard.writeText(apiKey);
+      setCopied(true);
+    } catch { /* clipboard unavailable — the key is still selectable text */ }
+  }
+
   return (
     <AppShell crumb="Partner">
       <div className="page"><div className="pw">
@@ -143,9 +172,41 @@ export function Partner() {
               <div className="byo-head"><span className="byo-prov">API key</span></div>
               <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s2)' }}>
                 <div className="sub">
-                  <Ic name="key-round" /> Your API key was shown once, when your partnership was
-                  approved. We can't display it again here — if you've lost it, use the report
-                  button below to reach us.
+                  <Ic name="key-round" /> Generate or rotate your own key here, any time. Rotating
+                  immediately retires the previous one — update anywhere it's in use before you rotate again.
+                </div>
+
+                <button className="btn" onClick={issueOrRotateKey} disabled={keyBusy}>
+                  {keyBusy ? 'Working…' : apiKey ? 'Rotate API key' : 'Generate API key'}
+                </button>
+
+                {keyErr && <div className="warn">Couldn't issue a key — {keyErr}</div>}
+
+                {apiKey && (
+                  <div className="warn" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div><b>Copy this now — it will never be shown again.</b></div>
+                    <code className="mono" style={{ userSelect: 'all', wordBreak: 'break-all' }}>{apiKey}</code>
+                    <button className="btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={copyKey}>
+                      {copied ? 'Copied' : 'Copy key'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="byo-row">
+              <div className="byo-head"><span className="byo-prov">Quick start</span></div>
+              <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s2)' }}>
+                <div className="sub">
+                  Authenticate with <code className="mono">x-api-key</code>. Once you've generated a key above:
+                </div>
+                <pre className="mono" style={{ background: 'var(--surface-2, #131619)', padding: 'var(--s3)', borderRadius: 'var(--radius)', overflowX: 'auto', margin: 0, fontSize: 'var(--fs-xs)' }}>
+{`curl https://noema.art/v1/me/status \\
+  -H "x-api-key: ${apiKey ?? 'YOUR_API_KEY'}"`}
+                </pre>
+                <div className="sub" style={{ fontSize: 'var(--fs-xs)' }}>
+                  Full API reference (always current — generated straight from the live contract):{' '}
+                  <a href="/v1/openapi.json" target="_blank" rel="noreferrer">/v1/openapi.json</a>
                 </div>
               </div>
             </div>

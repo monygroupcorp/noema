@@ -25,6 +25,10 @@ import { Errors } from '../../../../src/allocutio/api/errors.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { Partner, PartnerStore } from '../../../../src/types/partner.js'
+import { verifyApiKeyToAccountId, type ApiKeyEntry, type ApiKeyUsersCollection } from '../../../../src/crystal/apiKeys.js'
+import { makeCredentialAcceptors, type AcceptorDeps } from '../../../../src/allocutio/api/apiAcceptors.js'
+import { IdentityResolver as ApiIdentityResolver } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Persona, PersonaGenus } from '../../../../src/types/persona.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -71,6 +75,62 @@ function makePartnerStore(seed: Partner[]): PartnerStore {
   }
 }
 
+class FakeUsersCollection implements ApiKeyUsersCollection {
+  docs = new Map<string, { _id: string; apiKeys: ApiKeyEntry[] }>()
+  async findOne(filter: Record<string, unknown>): Promise<{ _id: unknown; apiKeys?: ApiKeyEntry[] } | null> {
+    if (filter._id !== undefined) return this.docs.get(String(filter._id)) ?? null
+    const prefix = filter['apiKeys.keyPrefix']
+    if (typeof prefix === 'string') {
+      for (const doc of this.docs.values()) if (doc.apiKeys.some(k => k.keyPrefix === prefix)) return doc
+    }
+    return null
+  }
+  async updateOne(
+    filter: Record<string, unknown>,
+    update: Record<string, unknown>,
+    options?: { upsert?: boolean; arrayFilters?: Record<string, unknown>[] },
+  ): Promise<unknown> {
+    const id = String(filter._id)
+    let doc = this.docs.get(id)
+    if (!doc) {
+      if (!options?.upsert) return { matchedCount: 0 }
+      doc = { _id: id, apiKeys: [] }
+      this.docs.set(id, doc)
+    }
+    const push = (update as { $push?: { apiKeys: ApiKeyEntry } }).$push
+    if (push?.apiKeys) doc.apiKeys.push(push.apiKeys)
+    const set = (update as { $set?: Record<string, unknown> })['$set']
+    if (set && 'apiKeys.$[elem].status' in set) {
+      const filterSpec = options?.arrayFilters?.[0] as { 'elem.name'?: string; 'elem.status'?: string } | undefined
+      for (const k of doc.apiKeys) {
+        if (filterSpec?.['elem.name'] !== undefined && k.name !== filterSpec['elem.name']) continue
+        if (filterSpec?.['elem.status'] !== undefined && k.status !== filterSpec['elem.status']) continue
+        k.status = set['apiKeys.$[elem].status'] as ApiKeyEntry['status']
+      }
+    }
+    return { matchedCount: 1 }
+  }
+}
+
+function fakePersonae() {
+  const byKey = new Map<string, Persona>()
+  return {
+    async findByExternus(genus: PersonaGenus, externusId: string): Promise<Persona | null> {
+      return byKey.get(`${genus}\0${externusId}`) ?? null
+    },
+    async findOrCreate(genus: PersonaGenus, externusId: string, defaults?: { animaId: string }): Promise<Persona> {
+      const existing = byKey.get(`${genus}\0${externusId}`)
+      if (existing) return existing
+      const p: Persona = {
+        id: `persona-${byKey.size + 1}`, activeAnimaId: defaults!.animaId, animaIds: [defaults!.animaId],
+        genus, externusId, status: 'active', natum: new Date(), visum: new Date(),
+      }
+      byKey.set(`${genus}\0${externusId}`, p)
+      return p
+    },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server helpers
 // ---------------------------------------------------------------------------
@@ -91,6 +151,18 @@ function serve(router: express.Router): Promise<{ base: string; close: () => voi
 function getPartner(base: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const req = http.request(`${base}/v1/me/partner`, { method: 'GET', headers }, (res) => {
+      let data = ''
+      res.on('data', (c) => (data += c))
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : undefined }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+function postApiKey(base: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(`${base}/v1/me/partner/api-key`, { method: 'POST', headers }, (res) => {
       let data = ''
       res.on('data', (c) => (data += c))
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : undefined }))
@@ -183,5 +255,98 @@ test('GET /v1/me/partner: 503 internal.unavailable when no PartnerStore is wired
     const res = await getPartner(s.base, { 'x-api-key': 'partner-key' })
     assert.equal(res.status, 503)
     assert.equal(res.body.error.code, 'internal.unavailable')
+  } finally { s.close() }
+})
+
+// ---------------------------------------------------------------------------
+// POST /v1/me/partner/api-key — self-serve issue/rotate. NEVER reachable from
+// the admin approval surface (partnerAdminRouter.ts) — this is the only place
+// a partner's raw key is ever returned, to the partner's own authenticated
+// request, never to whoever approved their application.
+// ---------------------------------------------------------------------------
+
+test('POST /v1/me/partner/api-key: mints a key that round-trips to the EXACT calling animaId (real chain, not assumed)', async () => {
+  const animaId = 'anima-partner'
+  const partners = makePartnerStore([
+    { animaId, status: 'active', sourceRequestId: 'req-1', natum: new Date() },
+  ])
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol } })
+  const s = await serve(router)
+  try {
+    const res = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
+    assert.equal(res.status, 200)
+    assert.match(res.body.apiKey, /^ms2_[0-9a-f]{48}$/)
+
+    // THE load-bearing assertion: the returned raw key round-trips through the REAL
+    // verifyApiKeyToAccountId -> makeCredentialAcceptors -> IdentityResolver chain to
+    // the EXACT animaId that called this route — not assumed, proven. A fake `animae`
+    // that throws on create() proves no new anima was minted along the way.
+    const acc: AcceptorDeps['personae'] = personae
+    const animae: AcceptorDeps['animae'] = { async create() { throw new Error('must not mint a new anima') } }
+    const acceptors = makeCredentialAcceptors({ personae: acc, animae, verifyApiKeyToAccountId: (k: string) => verifyApiKeyToAccountId(usersCol, k) })
+    const resolver = new ApiIdentityResolver(acceptors)
+    const resolved = await resolver.resolve({ apiKey: res.body.apiKey })
+    assert.deepEqual(resolved, { animaId })
+  } finally { s.close() }
+})
+
+test('POST /v1/me/partner/api-key: rotating retires the PREVIOUS key — old one no longer resolves', async () => {
+  const animaId = 'anima-partner'
+  const partners = makePartnerStore([{ animaId, status: 'active', sourceRequestId: 'req-1', natum: new Date() }])
+  const personae = fakePersonae()
+  const usersCol = new FakeUsersCollection()
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol } })
+  const s = await serve(router)
+  try {
+    const first = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
+    const second = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
+    assert.notEqual(first.body.apiKey, second.body.apiKey)
+
+    const acceptors = makeCredentialAcceptors({
+      personae, animae: { async create() { throw new Error('must not mint a new anima') } },
+      verifyApiKeyToAccountId: (k: string) => verifyApiKeyToAccountId(usersCol, k),
+    })
+    const resolver = new ApiIdentityResolver(acceptors)
+    // The old key is dead.
+    await assert.rejects(() => resolver.resolve({ apiKey: first.body.apiKey }))
+    // The new one works.
+    assert.deepEqual(await resolver.resolve({ apiKey: second.body.apiKey }), { animaId })
+    // Exactly one live key on the account.
+    assert.equal(usersCol.docs.get(animaId)?.apiKeys.filter(k => k.status === 'active').length, 1)
+  } finally { s.close() }
+})
+
+test('POST /v1/me/partner/api-key: 404 not_found.partner for a non-partner caller — mints nothing', async () => {
+  const partners = makePartnerStore([])
+  const usersCol = new FakeUsersCollection()
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol } })
+  const s = await serve(router)
+  try {
+    const res = await postApiKey(s.base, { 'x-api-key': 'stranger-key' })
+    assert.equal(res.status, 404)
+    assert.equal(res.body.error.code, 'not_found.partner')
+    assert.equal(usersCol.docs.size, 0)
+  } finally { s.close() }
+})
+
+test('POST /v1/me/partner/api-key: unauthenticated caller gets 401 before any store lookup', async () => {
+  const partners = makePartnerStore([{ animaId: 'anima-partner', status: 'active', sourceRequestId: 'req-1', natum: new Date() }])
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol: new FakeUsersCollection() } })
+  const s = await serve(router)
+  try {
+    const res = await postApiKey(s.base)
+    assert.equal(res.status, 401)
+  } finally { s.close() }
+})
+
+test('POST /v1/me/partner/api-key: 503 when apiKeys deps are not wired', async () => {
+  const partners = makePartnerStore([{ animaId: 'anima-partner', status: 'active', sourceRequestId: 'req-1', natum: new Date() }])
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners }) // `apiKeys` omitted
+  const s = await serve(router)
+  try {
+    const res = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
+    assert.equal(res.status, 503)
   } finally { s.close() }
 })
