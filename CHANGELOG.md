@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.27.0](https://github.com/monygroupcorp/noema/compare/v5.26.0...v5.27.0) (2026-09-04)
+
+
+### Features
+
+* **api:** persist and surface the moderation gate's refusal reason ([#544](https://github.com/monygroupcorp/noema/issues/544)) ([6c1472d](https://github.com/monygroupcorp/noema/commit/6c1472db8161098bbe944105600b86e9700476f4))
+* **crystal:** classify a trained LoRA's license from the base it actually trained on ([#546](https://github.com/monygroupcorp/noema/issues/546)) ([b8faca0](https://github.com/monygroupcorp/noema/commit/b8faca08d57ff065ec755bc08c59a79b69d53a0b))
+* **landing:** the plates are the six pictures we chose, and the coda run renders ([#536](https://github.com/monygroupcorp/noema/issues/536)) ([00ce647](https://github.com/monygroupcorp/noema/commit/00ce6475df7b1b6081bcd67f82dad5f5e8973f88))
+* **web:** make the partner dashboard reachable after approval ([#547](https://github.com/monygroupcorp/noema/issues/547)) ([8b51ade](https://github.com/monygroupcorp/noema/commit/8b51adec0d635639ea5582cc6eb86aeb9bd99387))
+
+
+### Bug Fixes
+
+* **crystal:** a finished job no longer shortens a pod's warm window ([#541](https://github.com/monygroupcorp/noema/issues/541)) ([97f1d71](https://github.com/monygroupcorp/noema/commit/97f1d7167bcbeceb14694fa100f49fb2be97bc88))
+* **crystal:** resolve declared owned-resource references at every dispatch entry point ([#540](https://github.com/monygroupcorp/noema/issues/540)) ([5c1cffb](https://github.com/monygroupcorp/noema/commit/5c1cffbd4e27540f9d8eef814bacaa6c9d3bc6cb))
+* **partner:** self-serve API key issuance, moved off the admin approval path ([#537](https://github.com/monygroupcorp/noema/issues/537)) ([d26c8f5](https://github.com/monygroupcorp/noema/commit/d26c8f5a509b27e474644649646e5d19016ae75e))
+
 ## [5.26.0](https://github.com/monygroupcorp/noema/compare/v5.25.0...v5.26.0) (2026-09-02)
 
 
