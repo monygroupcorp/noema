@@ -26,7 +26,13 @@ import {
   listCollectionsTool,
 } from './tools.js'
 
-export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): McpServer {
+export function buildMcpServer(
+  api: CrystalApi,
+  auctor: AuctorKey | undefined,
+  /** Per-run spend ceiling carried by the credential this session authenticated with — see
+   *  `runFlowTool`. Undefined for every credential that carries none. */
+  keyMaxImpetusPerRun?: bigint,
+): McpServer {
   const server = new McpServer({ name: 'noema-crystal', version: 'v1' })
 
   // ── Tools ─────────────────────────────────────────────────────────────────
@@ -47,7 +53,7 @@ export function buildMcpServer(api: CrystalApi, auctor: AuctorKey | undefined): 
         studioId: z.string().optional(),
       },
     },
-    (args) => runFlowTool(api, auctor, args),
+    (args) => runFlowTool(api, auctor, args, keyMaxImpetusPerRun),
   )
 
   server.registerTool(

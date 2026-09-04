@@ -43,6 +43,11 @@ const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
   'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] + [klein] 9B Non-Commercial (only klein 4B is Apache)
   'closed': 'no',                 // FLUX.1 pro / API-only — not self-hostable
   'cc-by-nc': 'no',               // any non-commercial Creative Commons variant
+  'minimax-h3': 'no',             // MiniMax H3 — restrictive in the US; ❌ unless separately
+                                  // licensed. Mony Group LLC holds a US operating licence
+                                  // (rth 2026-09-01), so the CANONICAL H3 seeds carry an
+                                  // explicit commercialUse:'yes'. This entry governs THIRD-PARTY
+                                  // imports, which our grant does not cover — keep it 'no'.
   'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
   'krea-community': 'conditional',       // Krea 2 Community — commercial only for entities <$1M revenue
   'unknown': 'unknown',
@@ -269,6 +274,7 @@ export function classifyBaseModel(base: string): BaseClassification {
  * plain BSON) and the API (which sees a typed `Intella`) call ONE classifier.
  */
 export interface LicenseClassifiable {
+  baseModel?: string
   provenance?: { base?: string } | null
   nomen?: string
   familia?: string | null
@@ -276,16 +282,20 @@ export interface LicenseClassifiable {
 
 /**
  * Derive `{ license, commercialUse }` for an already-stored model from the most trustworthy base
- * string it carries. Priority: `provenance.base` (author-declared lineage, e.g. 'FLUX.1-dev') >
- * `nomen` (descriptive title, e.g. 'FLUX.1 Schnell (fp8 scaled)') > `familia` (the compat key —
- * bare, license-ambiguous: 'flux' can't tell schnell from dev, so it's the last resort → 'unknown').
+ * string it carries. Priority: `baseModel` (the literal resolved training/import-time source of
+ * truth — see docs/spec/model-base-provenance.md) > `provenance.base` (author-declared EXTERNAL
+ * retrain lineage, e.g. 'FLUX.1-dev' — a different statement than `baseModel`) > `nomen`
+ * (descriptive title, e.g. 'FLUX.1 Schnell (fp8 scaled)') > `familia` (the compat key — bare,
+ * license-ambiguous: 'flux' can't tell schnell from dev, so it's the last resort → 'unknown').
+ * A record written before `baseModel` existed simply lacks it and falls through the chain
+ * unchanged — fail-closed, same as any other unclassifiable case here.
  *
  * This is the single source for BOTH the admin `reclassify` path (`CrystalApi.setModelLicense`) and
  * the license backfill sweep, so a model gets the same verdict whichever runs it. Fail-closed: an
  * unrecognised base yields `{ license:'unknown', commercialUse:'unknown' }` (NOT catalog-eligible).
  */
 export function classifyModelLicense(m: LicenseClassifiable): { license: string; commercialUse: CommercialVerdict } {
-  const base = m.provenance?.base || m.nomen || m.familia || ''
+  const base = m.baseModel || m.provenance?.base || m.nomen || m.familia || ''
   const license = classifyBaseModel(base).license
   return { license, commercialUse: licenseCommercial(license) }
 }

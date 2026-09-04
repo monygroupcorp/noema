@@ -184,7 +184,20 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       const patch: { status: 'terminated' | 'idle'; warmUntil?: Date } = { status: nextStatus }
       // Re-arm the idle deadline so the reaper gives this pod a fresh warm window
       // past *this* job's delivery (a follow-up within the window reuses it).
-      if (nextStatus === 'idle') patch.warmUntil = new Date(Date.now() + (this.config.warmTtlMs ?? 60_000))
+      //
+      // EXTEND ONLY, NEVER SHORTEN. A host who bought a longer window — the warm-window
+      // buttons stamp `warmUntil` directly, and `/arm` parks with the leased `warmMs` —
+      // owns that deadline and is paying Census for it. Assigning `now + ttl`
+      // unconditionally let the first job delivered on the pod collapse a 30-minute
+      // window to the 60-second default, killing the pod under the host and ending any
+      // chain of guests after the first. Re-read the stored deadline rather than trusting
+      // `this.materia`, which is the snapshot taken when this client was built and does
+      // not see a window set while the job was running.
+      if (nextStatus === 'idle') {
+        const floor = new Date(Date.now() + (this.config.warmTtlMs ?? 60_000))
+        const stored = (await this.materiae.findById(id).catch(() => null))?.warmUntil
+        patch.warmUntil = stored && stored > floor ? stored : floor
+      }
       await this.materiae.update(id, patch).catch(() => {})
     }
   }

@@ -166,6 +166,54 @@ test('Materia status: sets to idle when no podPolicy set (default)', async () =>
   assert.ok(idleUpdate, 'expected an idle status update')
 })
 
+test('warm window: a job never shortens a host-set deadline', async () => {
+  // The host bought 30 minutes from the warm-window buttons. Delivering a job on the pod
+  // must not collapse that to the 60 s default — the host owns the deadline and pays
+  // Census for it, and truncating it kills the pod under any chain of guests after the first.
+  const hostWindow = new Date(Date.now() + 30 * 60_000)
+  const materia = makeMateria({ warmUntil: hostWindow })
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, store, fetch, { warmTtlMs: 60_000 })
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.ok(idleUpdate, 'expected an idle status update')
+  assert.equal((idleUpdate!.patch as { warmUntil?: Date }).warmUntil?.getTime(), hostWindow.getTime())
+})
+
+test('warm window: a deadline set WHILE the job runs still survives it', async () => {
+  // `this.materia` is the snapshot taken when the client was built. A host pressing the
+  // warm-window buttons mid-run writes straight to the store, so the deadline has to be
+  // re-read at completion or the run silently reverts it.
+  const materia = makeMateria()
+  const stored = makeMateria()
+  const store = makeMateriaStore(stored)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const client = new WarmPodClient(materia, store, fetch, { warmTtlMs: 60_000 })
+  const midRunWindow = new Date(Date.now() + 10 * 60_000)
+  stored.warmUntil = midRunWindow
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  assert.equal((idleUpdate!.patch as { warmUntil?: Date }).warmUntil?.getTime(), midRunWindow.getTime())
+})
+
+test('warm window: an expired or absent deadline is re-armed to the configured TTL', async () => {
+  // The ordinary case, unchanged: a pod whose window has already lapsed (or was never set)
+  // gets a fresh one past this job's delivery so a follow-up can reuse it.
+  const materia = makeMateria({ warmUntil: new Date(Date.now() - 5_000) })
+  const store = makeMateriaStore(materia)
+  const { fetch } = makeComfyrunnerFetch('pod-xyz')
+  const before = Date.now()
+  const client = new WarmPodClient(materia, store, fetch, { warmTtlMs: 60_000 })
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 100))
+  const idleUpdate = store.updates.find(u => (u.patch as { status?: string }).status === 'idle')
+  const armed = (idleUpdate!.patch as { warmUntil?: Date }).warmUntil!.getTime()
+  assert.ok(armed >= before + 60_000, `expected a fresh 60 s window, got ${armed - before} ms`)
+})
+
 test('Materia status: sets to terminated for private pod', async () => {
   const materia = makeMateria({ podPolicy: 'private' })
   const store = makeMateriaStore(materia)

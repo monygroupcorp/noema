@@ -33,6 +33,12 @@ class MemoryQuerela implements QuerelaStore {
   async findByOwnerAndHash(ownerKey: string, contentHash: string): Promise<Querela | null> {
     return this.records.find(q => q.ownerKey === ownerKey && q.contentHash === contentHash) ?? null
   }
+  async list(filter?: { kind?: Querela['kind']; status?: Querela['status'] }): Promise<Querela[]> {
+    return this.records.filter(q =>
+      (filter?.kind === undefined || q.kind === filter.kind) &&
+      (filter?.status === undefined || q.status === filter.status),
+    )
+  }
 }
 
 const fakeIdentity = {

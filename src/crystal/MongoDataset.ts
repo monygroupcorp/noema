@@ -8,6 +8,7 @@ import type {
   DatasetListOpts,
   DatasetListPage,
   DatasetMediaItem,
+  DatasetPublicListOpts,
   DatasetSummary,
   DatasetSummaryListPage,
   Datasets,
@@ -74,10 +75,11 @@ export class MongoDataset implements Datasets {
    *
    * Two `access` shapes are admitted because the tree carries two: the flat `'public'` string
    * `Intella` stores, and the `{ kind }` single-axis Access union the schema spec settles on.
-   * `Dataset` carries neither field today, so both arms match nothing — they are here so that
-   * the item which gives datasets an access field is a schema change, not a re-derivation of
-   * who may read what. Team sharing (`sodalitasId`) did NOT light those arms up: sharing with a
-   * named fellowship and publishing to everyone are different decisions.
+   * `Dataset.access` (added after this predicate was written) is only ever written in the
+   * `{ kind }` form — the flat-string arm stays for a legacy shape this record never actually
+   * takes, matching `Intella`'s dual-read precedent rather than re-deriving it. Team sharing
+   * (`sodalitasId`) does NOT light this arm up: sharing with a named fellowship and publishing
+   * to everyone are different decisions, and only `access.kind === 'public'` is the second one.
    *
    * The team overlay IS honoured here: this is the gate a RUN's dataset reference resolves
    * through (`_assertOwnedAditus`), and a member of the team a dataset is shared with may name
@@ -105,23 +107,15 @@ export class MongoDataset implements Datasets {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
-  private async _page(opts: DatasetListOpts): Promise<{ entries: Dataset[]; nextCursor?: string }> {
+  /** The shared paginator every dataset list reads through — `access` is the ONE thing that
+   *  differs between a caller's own listing and the public catalog; cursor mechanics, the
+   *  archived-exclusion and the sort are identical for both, so they live here once. The access
+   *  clause and the cursor clause are BOTH `$or`s, so they are composed under `$and` rather than
+   *  written onto the same key — a second `filter.$or` would silently replace the first, and
+   *  the one it replaced is the access predicate. */
+  private async _page(access: Filter<Document>, opts: { cursor?: string; limit?: number }): Promise<{ entries: Dataset[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
 
-    // ACCESS, in the query. The caller's own datasets UNION the datasets shared with a team the
-    // caller is a member of (`Dataset.sodalitasId` — the team overlay; `opts.sodalitasIds` is
-    // resolved at the API layer from the authenticated caller, never from a request parameter).
-    // With no team ids the clause is the bare `{ owner }` this list has always used, so a
-    // caller in no team reads exactly what they read before.
-    const teamIds = opts.sodalitasIds ?? []
-    const access: Filter<Document> =
-      teamIds.length > 0
-        ? { $or: [{ owner: opts.owner }, { sodalitasId: { $in: teamIds } }] }
-        : { owner: opts.owner }
-
-    // The access clause and the cursor clause are BOTH `$or`s, so they are composed under
-    // `$and` rather than written onto the same key — a second `filter.$or` would silently
-    // replace the first, and the one it replaced is the access predicate.
     const clauses: Filter<Document>[] = [access]
 
     if (opts.cursor) {
@@ -160,7 +154,28 @@ export class MongoDataset implements Datasets {
   }
 
   async list(opts: DatasetListOpts): Promise<DatasetListPage> {
-    return this._page(opts)
+    // The caller's own datasets UNION the datasets shared with a team the caller is a member of
+    // (`Dataset.sodalitasId` — the team overlay; `opts.sodalitasIds` is resolved at the API
+    // layer from the authenticated caller, never from a request parameter). With no team ids
+    // the clause is the bare `{ owner }` this list has always used, so a caller in no team
+    // reads exactly what they read before. Deliberately NOT `access: 'public'` — see
+    // `listPublic`, the separate read that surface is behind.
+    const teamIds = opts.sodalitasIds ?? []
+    const access: Filter<Document> =
+      teamIds.length > 0
+        ? { $or: [{ owner: opts.owner }, { sodalitasId: { $in: teamIds } }] }
+        : { owner: opts.owner }
+    return this._page(access, opts)
+  }
+
+  /** Every LIVE dataset with `access.kind === 'public'` — the catalog read, scoped to nobody in
+   *  particular. Same two `access` shapes `findOwned` admits (the flat `'public'` string and
+   *  the `{ kind }` union), same reason: `Dataset.access` is only ever written in the `{ kind }`
+   *  form, but the flat-string arm stays so this predicate matches `findOwned`'s rather than
+   *  re-deriving it. Deliberately its OWN read, not a widened `list` — mixing public rows into
+   *  a caller's own listing would conflate "your shelf" with "the catalog". */
+  async listPublic(opts: DatasetPublicListOpts): Promise<DatasetListPage> {
+    return this._page({ $or: [{ access: 'public' }, { 'access.kind': 'public' }] }, opts)
   }
 
   /**
@@ -296,6 +311,23 @@ export class MongoDataset implements Datasets {
     return { ...rest, mutatum }
   }
 
+  /** Set (or clear, via `'private'`) a dataset's access. Always written in the `{ kind }` form
+   *  — the flat `'public'` string `findOwned`/`listPublic` also admit is a read-side allowance
+   *  for a legacy shape this record never actually takes, not something this writes. Bumps
+   *  `mutatum` for the same reason every other setter here does — it is the pagination sort
+   *  key, so publishing a dataset surfaces it at the top of the catalog. Idempotent: setting
+   *  the kind it already has still bumps `mutatum` (unlike archive/restore, there is no
+   *  "first" access to preserve). Returns null when the dataset does not exist. */
+  async setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null> {
+    const current = await this.find(datasetId)
+    if (!current) return null
+
+    const mutatum = new Date()
+    const access = { kind }
+    await this.col.updateOne({ id: datasetId }, { $set: { access, mutatum } })
+    return { ...current, access, mutatum }
+  }
+
   /**
    * Archive ONE media item, and recompute every captionset's coverage against what is left.
    *
@@ -347,7 +379,7 @@ export class MongoDataset implements Datasets {
   // persisted shape, just a `.map()` at read time (mirrors CrystalApi.listFlows'
   // Modus -> FlowSummary projection).
   async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
-    const { entries, nextCursor } = await this._page(opts)
+    const { entries, nextCursor } = await this.list(opts)
     return { entries: entries.map(toSummary), ...(nextCursor ? { nextCursor } : {}) }
   }
 }

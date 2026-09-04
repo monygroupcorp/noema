@@ -21,7 +21,7 @@ import { MemoryTabula } from '../../../../src/crystal/MemoryTabula.js'
 import { ESSENTIA_RUNMAKE_SD15, ESSENTIA_UPSCALE } from '../../../../src/crystal/seeds/essentiae.js'
 import type { Modus, Modi, Modorum } from '../../../../src/types/modus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 
 // ── A minimal in-memory Modorum fake (find/register/list only — enough for compile+publish) ──
 function makeFakeModorum(seed: Modus[]): Modorum {
@@ -44,6 +44,12 @@ const fakeIdentity: Identity = {
     if (creds.apiKey) return { animaId: creds.apiKey }
     if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 

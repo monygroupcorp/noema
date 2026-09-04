@@ -7,12 +7,21 @@ import { Status } from './screens/Status';
 import { Keyring } from './screens/Keyring';
 import { Profile } from './screens/Profile';
 import { Funding } from './screens/Funding';
+import { Partner } from './screens/Partner';
 // Space (three.js), Canvas (React Flow) and Vault (circomlibjs/snarkjs ZK) are heavy —
 // lazy-load so they only ship on open.
 const Space = lazy(() => import('./screens/Space').then((m) => ({ default: m.Space })));
 const Canvas = lazy(() => import('./screens/Canvas').then((m) => ({ default: m.Canvas })));
 const Vault = lazy(() => import('./screens/Vault').then((m) => ({ default: m.Vault })));
 const lazyEl = (node: ReactNode) => <Suspense fallback={<div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div>}>{node}</Suspense>;
+// Coded design laboratory for the landing redesign (STANDARD §7.2). The plate slots it renders
+// are unfilled placeholders, and an unfinished slot must never be able to reach a visitor — so
+// the import itself is behind the dev flag, not just the route. With DEV false this collapses to
+// `null`, the dynamic import is unreachable, and neither the component nor its stylesheet is
+// emitted into the production build.
+const PlateLab = import.meta.env.DEV
+  ? lazy(() => import('./screens/PlateLab').then((m) => ({ default: m.PlateLab })))
+  : null;
 import { Projects } from './screens/Projects';
 import { Dashboard } from './screens/Dashboard';
 import { ProjectHub } from './screens/ProjectHub';
@@ -42,12 +51,14 @@ import { Ceremony } from './screens/Ceremony';
 import { Feed } from './screens/Feed';
 import { Review } from './screens/Review';
 import { AdminWorkspace } from './screens/AdminWorkspace';
+import { AdminPartnerRequests } from './screens/AdminPartnerRequests';
 import { Doc } from './screens/Doc';
+import { Blog, BlogPost } from './screens/Blog';
 import { Pricing } from './screens/Pricing';
+import { RequestDemo } from './screens/RequestDemo';
 import { Stub } from './screens/Stub';
 import aboutMd from './content/about.md?raw';
 import featuresMd from './content/features.md?raw';
-import blogMd from './content/blog.md?raw';
 import privacyMd from './content/privacy.md?raw';
 import cookiesMd from './content/cookies.md?raw';
 import termsMd from './content/terms.md?raw';
@@ -92,6 +103,10 @@ export function App() {
       {/* Admin workspace hub (noema-011): links the review queue + read-only revenue/COGS
           cards. me.admin-gated client-side; every report re-gates server-side regardless. */}
       <Route path="/admin" element={<AdminWorkspace />} />
+      {/* B2B partner-program intake review (partner-embed-07): the admin-only queue for
+          /v1/admin/partner-requests, linked from the admin workspace hub the same way
+          /admin/review is. */}
+      <Route path="/admin/partner-requests" element={<AdminPartnerRequests />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:id" element={<ProjectHub />} />
       <Route path="/run" element={<Run />} />
@@ -105,16 +120,22 @@ export function App() {
       <Route path="/account/:section" element={<AccountSettings />} />
       <Route path="/preferences" element={<Preferences />} />
       <Route path="/funding" element={<Funding />} />
+      <Route path="/partner" element={<Partner />} />
       <Route path="/studio" element={<Studio />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/landing" element={<Landing />} />
+      {PlateLab && <Route path="/lab/landing" element={lazyEl(<PlateLab />)} />}
       <Route path="/ceremony" element={<Ceremony />} />
       {/* Fiat auth — sign-in / create lives inline in Door A (/onboard). No email, so
           no verify/reset token pages; recovery is via backup channels bound in the profile. */}
       <Route path="/about" element={<Doc md={aboutMd} />} />
       <Route path="/features" element={<Doc md={featuresMd} />} />
       <Route path="/pricing" element={<Pricing />} />
-      <Route path="/blog" element={<Doc md={blogMd} />} />
+      {/* Public "become a B2B partner" intake (partner-embed-07) — mirrors /pricing: no auth
+          check, public route. Posts to /v1/partner-requests (partnerRequestRouter.ts). */}
+      <Route path="/partners" element={<RequestDemo />} />
+      <Route path="/blog" element={<Blog />} />
+      <Route path="/blog/:slug" element={<BlogPost />} />
       <Route path="/legal/privacy" element={<Doc md={privacyMd} />} />
       <Route path="/legal/cookies" element={<Doc md={cookiesMd} />} />
       <Route path="/legal/terms" element={<Doc md={termsMd} />} />

@@ -3,6 +3,7 @@ import type { Essentia } from '../types/essendi.js'
 import type { Fundamentum, Fundamentorum } from '../types/fundamentum.js'
 import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
+import { podDiskGbFor, DEFAULT_POD_DISK_GB } from './podDisk.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
 import { importSecretProviderForUrl } from './modelImportResolver.js'
@@ -97,6 +98,57 @@ export interface CompiledSpecBase {
 
 /** ComfyUI graph spec — the original shape (key-set unchanged: hash-stable). */
 export interface ComfyUICompiledSpec extends CompiledSpecBase {
+  /**
+   * Pinned upstream ComfyUI ref, forwarded from `Fundamentum.comfyRef` (noema-372).
+   *
+   * Until now the Fundamentum could DECLARE a ref and nothing carried it to the pod, so
+   * `_bootstrapComfyUI` always fell back to `DEFAULT_COMFYUI_REF`. Harmless while every
+   * substrate wanted that same v0.26.0; fatal for one that does not — a MiniMax H3 pod would
+   * boot healthy with no H3 nodes in it. Emitted only when the fundament declares it, so a
+   * substrate that does not stays byte-identical (the `customNodes`/`mediaInputs` grain).
+   */
+  comfyRef?: string
+  /**
+   * Writable pod disk in GB, DERIVED from this flow's resolved weight manifest (noema-372).
+   *
+   * Emitted only when the flow needs more than `DEFAULT_POD_DISK_GB`, so every substrate that
+   * already fits keeps a byte-identical spec. Without it a large flow provisions the flat
+   * default, fills the disk mid-fetch, and reports a "model download failed" that names the
+   * mirror rather than the disk.
+   */
+  diskGb?: number
+  /**
+   * Substrate bootstrap commands, forwarded from `Fundamentum.install` (noema-372). Run on the
+   * pod BEFORE the ComfyUI clone, so they can prepare the interpreter the bootstrap's own
+   * `pip install` then uses. Distinct from `ScriptCompiledSpec.script.install`, which installs a
+   * modelcard repo's deps.
+   */
+  install?: string[]
+  /**
+   * Substrate readiness budget in ms, forwarded from `Fundamentum.readyTimeoutMs` (noema-392).
+   *
+   * Bounds BOTH ends of the same wait: SecurePodClient's `/health` poll and, via the launch
+   * line's `COMFY_READY_TIMEOUT`, comfyrunner's own wait for ComfyUI to answer `/system_stats`.
+   * They must move together — comfyrunner does not serve `/health` at all until ComfyUI is up
+   * and `sys.exit(1)`s when its own budget lapses, so lengthening only the client half buys
+   * nothing but a longer wait on a process that has already quit.
+   *
+   * Emitted only when the fundament declares it, so a substrate that does not stays
+   * byte-identical (the `comfyRef`/`install` grain).
+   */
+  readyTimeoutMs?: number
+  /**
+   * Per-job execution budget in ms, forwarded from `Fundamentum.jobTimeoutMs` (noema-392).
+   *
+   * Reaches the pod as `JOB_TIMEOUT` on the comfyrunner launch line, where until now only
+   * `RUNPOD_POD_ID` and `COMFYUI_DIR` travelled — so comfyrunner's env-overridable default of
+   * 900 s was in practice a hard constant for every substrate. It killed `minimax-h3-fl2v`
+   * (the first fl2v run) at `executionMs: 898405`, after the pod, the bootstrap and 56 GB of weights
+   * had all been paid for.
+   *
+   * Emitted only when the fundament declares it. Hash-stable for every substrate that does not.
+   */
+  jobTimeoutMs?: number
   workflow: {
     templateId: string
     templateVersion: string
@@ -395,6 +447,14 @@ export class Compiler {
     const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs], ownerKey)
     const models = [...baseWeights, ...extraModels].sort(byRoleThenId)
 
+    // ── Pod disk ───────────────────────────────────────────────────────────
+    // Sized from what this run will actually FETCH, base weights and per-run LoRAs
+    // alike — they land on the same disk. `records` already holds every base weight's
+    // Intella; a LoRA whose size we cannot see contributes 0, which is safe here
+    // because LoRAs are ~2 GB against a 15 GB headroom.
+    const weightGb = models.reduce((sum, m) => sum + (records.get(m.id)?.sizeGb ?? 0), 0)
+    const diskGb = podDiskGbFor(weightGb)
+
     const spec: ComfyUICompiledSpec = {
       image,
       models,
@@ -407,6 +467,21 @@ export class Compiler {
       seed,
       sourceTool: { id: essentia.id, versio: essentia.versio },
       runtime: fundamentum.runtime ?? 'ComfyUI',
+      ...(fundamentum.comfyRef ? { comfyRef: fundamentum.comfyRef } : {}),
+      ...(diskGb > DEFAULT_POD_DISK_GB ? { diskGb } : {}),
+      ...(fundamentum.install && fundamentum.install.length > 0
+        ? { install: fundamentum.install }
+        : {}),
+      // Timeout budgets (noema-392). Conditional on a positive declaration for the same reason
+      // comfyRef/install are: an absent key keeps every existing substrate's spec — and its
+      // content hash — byte-identical. A non-positive value is treated as no declaration rather
+      // than emitted, so a typo cannot ship a pod that times out instantly.
+      ...(fundamentum.readyTimeoutMs && fundamentum.readyTimeoutMs > 0
+        ? { readyTimeoutMs: fundamentum.readyTimeoutMs }
+        : {}),
+      ...(fundamentum.jobTimeoutMs && fundamentum.jobTimeoutMs > 0
+        ? { jobTimeoutMs: fundamentum.jobTimeoutMs }
+        : {}),
       ...(template.customNodes && template.customNodes.length > 0
         ? { customNodes: template.customNodes }
         : {}),

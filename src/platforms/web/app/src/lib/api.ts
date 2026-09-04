@@ -2,7 +2,7 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
-import type { Editio, FeedFilter, FeedItem, PublishRequest } from './editio';
+import type { Editio, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
 
 // Querela — an in-app report (bug/feature/feedback), noema-100's backend contract
 // (src/types/Querela.ts). Mirrored here (not imported) — the web app doesn't import
@@ -485,6 +485,43 @@ export const api = {
   // param (query params leak into access logs/history).
   streamRun: (id: string) => sseStream(`/v1/runs/${id}/stream`, readHeaders()),
   meStatus: () => fetch('/v1/me/status', { headers: readHeaders() }).then(j<MeStatus>),
+  // GET /v1/me/partner — the caller's B2B partner record, if any. A "partner" is just an
+  // ordinary account a platform admin has approved (no on-chain agent/treasury). Uses `jApi`
+  // (not `j`) so a 404 (no/revoked partner) surfaces as a typed `ApiRequestError` the Partner
+  // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
+  mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
+  // POST /v1/me/partner/api-key — self-serve issue-or-rotate, callable ONLY by the partner
+  // themselves (never returned from the admin approval route — see adminDecidePartnerRequest's
+  // comment below for why). Each call retires any key this same flow issued previously and
+  // returns a fresh one; the response is the ONLY time the raw key is ever retrievable.
+  rotatePartnerApiKey: () => fetch('/v1/me/partner/api-key', { method: 'POST', headers: authHeaders() }).then(jApi<{ apiKey: string }>),
+
+  // POST /v1/partner-requests — the public "become a B2B partner" intake (partnerRequestRouter.ts).
+  // Public, anon-capable: uses the same authHeaders() every other identity-attach write in this
+  // app uses (bearer if signed in, else the anon commitment) — the backend opportunistically
+  // resolves the caller's animaId when a valid session is present and swallows any resolution
+  // failure otherwise, so this call needs no special-casing for logged-out vs. logged-in.
+  requestPartnership: (body: { contactEmail: string; useCase: string; nomen?: string; org?: string; notes?: string }) =>
+    fetch('/v1/partner-requests', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(jApi<{ id: string }>),
+
+  // ADMIN — GET/PATCH /v1/admin/partner-requests (partnerAdminRouter.ts), platform-admin only
+  // server-side (client gate is cosmetic, same convention as every other admin surface here).
+  // `status` narrows the list; omit for every request regardless of status.
+  adminListPartnerRequests: (status?: PartnerRequestStatus) =>
+    fetch(`/v1/admin/partner-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`, { headers: readHeaders() })
+      .then(jApi<{ requests: PartnerRequest[] }>),
+  // Approving a request with no animaId only flips its status — no Partner record. Approving
+  // one that carries an animaId provisions a Partner record ONLY — never an API key. The admin
+  // clicking Approve is frequently not the partner, so a key never appears in this response;
+  // the partner mints their own, self-serve, via rotatePartnerApiKey() above once they can see
+  // they're approved.
+  adminDecidePartnerRequest: (id: string, status: 'approved' | 'declined') =>
+    fetch(`/v1/admin/partner-requests/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status }),
+    }).then(jApi<{ request: PartnerRequest; partner?: Partner }>),
 
   // ── Concierge (colloquia, noema-095) ──────────────────────────────────────
   // Same auth pattern as createRun (Decision record Q4, noema-099): an active
@@ -668,6 +705,12 @@ export const api = {
   // approve/reject/confirm-csam are PLATFORM-ADMIN ONLY server-side (403 otherwise).
   listReviewQueue: () => fetch('/v1/editiones/review', { headers: readHeaders() })
     .then(j<{ editions: Editio[] }>),
+  // GET /v1/editiones/:id/preview — the media behind a held publication, for ANY artifact
+  // kind (not just an actum generation run) — resolves the same view the moderation gate
+  // used to make its hold decision. PLATFORM-ADMIN ONLY server-side (same gate as
+  // approve/reject/confirm-csam); a non-admin caller is refused.
+  getEditionPreview: (id: string) =>
+    fetch(`/v1/editiones/${id}/preview`, { headers: readHeaders() }).then(j<EditionPreview>),
   // Clear a moderation hold → the item re-settles and publishes.
   approveEdition: (id: string) =>
     fetch(`/v1/editiones/${id}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
@@ -728,13 +771,48 @@ export const api = {
     fetch(`/v1/data/datasets/${encodeURIComponent(id)}/media`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
     }).then(j<{ dataset: Dataset }>),
-  // One dataset by id. There is no per-id detail route — listFull + find IS the detail read
-  // (the pattern Datasets.tsx/Dataset.tsx already use); wrapped here so the caption/derive
-  // screens can re-read a dataset after a job writes to it without repeating the find.
+  // One dataset by id: list + find first (the caller's own datasets, cheap, and covers the
+  // common case in one round trip), falling back to the direct read
+  // (`GET /v1/data/datasets/:id`, noema-dataset-access-field) when the id isn't in that list —
+  // which is exactly the case for a dataset the caller may READ but does not own: a public one
+  // someone else made. `listDatasetsFull` stays owner+team scoped on purpose (mixing public
+  // rows into it would conflate "your shelf" with "the catalog"), so this fallback is the only
+  // way a public dataset's own id ever resolves here.
   getDatasetFull: (id: string) =>
     fetch('/v1/data/datasets/full', { headers: readHeaders() })
       .then(j<{ datasets: Dataset[] }>)
-      .then(({ datasets }) => datasets.find((d) => d.id === id) ?? null),
+      .then(({ datasets }) => datasets.find((d) => d.id === id) ?? api.getDataset(id)),
+  // The direct single-dataset read. Resolves for the owner, a team member, or anyone when the
+  // dataset's access is public; not_found otherwise (never forbidden — ids stay
+  // non-enumerable). Auth required, unlike `listPublicDatasets` below — reading ONE dataset by
+  // id still needs an identified caller, same as every other dataset route.
+  getDataset: (id: string): Promise<Dataset | null> =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}`, { headers: readHeaders() })
+      .then(j<{ dataset: Dataset }>)
+      .then(({ dataset }) => dataset)
+      .catch(() => null),
+  // Merge dataset `id` into an already-fetched list when it is missing from it — the fallback
+  // every list-then-find screen needs (Datasets.tsx via Dataset.tsx/Muse.tsx) for a dataset the
+  // caller may read but does not own: `listDatasetsFull` never contains it, so this is the one
+  // extra request that makes it resolvable anyway. A no-op when `id` is absent, already
+  // present, or unreadable by the caller (`getDataset` resolves null, not a thrown error).
+  withDatasetFallback: async (ds: Dataset[], id: string | undefined): Promise<Dataset[]> => {
+    if (!id || ds.some((d) => d.id === id)) return ds;
+    const found = await api.getDataset(id);
+    return found ? [...ds, found] : ds;
+  },
+  // The public dataset catalog — every dataset with access.kind 'public', scoped to nobody in
+  // particular. Public, no auth (mirrors listModels): browsing what the platform publishes
+  // does not require an account, though USING one (spawning a Muse session, appending media)
+  // still does.
+  listPublicDatasets: (opts: { cursor?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.cursor) params.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return fetch(`/v1/data/datasets/public${qs ? `?${qs}` : ''}`)
+      .then(j<{ datasets: Dataset[]; nextCursor?: string }>);
+  },
   // PATCH one caption inside one captionset. Captionsets are editable after generation; the
   // server recomputes that captionset's coverage from the captions present and returns the
   // whole dataset back.
@@ -751,6 +829,13 @@ export const api = {
   // of the four calls returns the WHOLE dataset back, which is what a caller re-renders from.
   // Writes, so they take `authHeaders()`: ownership is resolved from the caller server-side
   // and never from a parameter.
+  // Publish (kind: 'public') or unpublish (kind: 'private') a dataset the caller owns — makes
+  // it listed in GET /v1/data/datasets/public and readable/Muse-able by anyone, or takes it back
+  // out. Owner-only, like archive/restore below; a team member's attempt 404s the same way.
+  setDatasetAccess: (id: string, kind: 'public' | 'private') =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/access`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind }),
+    }).then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
   archiveDataset: (id: string) =>
     fetch(`/v1/data/datasets/${encodeURIComponent(id)}/archive`, { method: 'POST', headers: authHeaders() })
       .then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
@@ -1440,6 +1525,10 @@ export interface Dataset {
    *  list routes, so it arrives here only as the response to an archive — which is what keeps
    *  the undo reachable on the screen that did it. */
   archivum?: string;
+  /** Present with kind 'public' once published (setDatasetAccess) — listed in the catalog and
+   *  readable/Muse-able by anyone. Absent means owner/team-only, the behaviour every dataset
+   *  had before publishing existed. */
+  access?: { kind: 'public' | 'private' };
 }
 // The body `POST /v1/data/datasets/:id/media` takes — the same discriminated ingestion
 // shape as creation, minus the fields that only make sense when minting a set.
@@ -1650,6 +1739,40 @@ export interface MeStatus {
   studios: StudioEntry[];
   joinable: JoinableEntry[];
   takenAt: string;
+}
+
+// The caller's B2B partner record (GET /v1/me/partner) — mirrors the backend's `Partner`
+// (src/types/partner.ts) as a local interface, same convention as `MeStatus`/`SettledRun`
+// above (the web app doesn't import backend source). A "partner" is just an ordinary account
+// a platform admin has approved — no on-chain agent/treasury concept.
+export type PartnerStatus = 'active' | 'revoked';
+export interface Partner {
+  animaId: string;
+  status: PartnerStatus;
+  org?: string;
+  contactEmail?: string;
+  sourceRequestId: string;
+  natum: string;
+}
+
+// A B2B partner-program intake request (POST /v1/partner-requests, admin-reviewed via
+// GET/PATCH /v1/admin/partner-requests) — mirrors the backend's `PartnerRequest`
+// (src/types/partnerRequest.ts) as a local interface, same convention as `Partner` above.
+// `animaId` is present ONLY when the submitter had a resolvable session at submission time;
+// its absence means approval can only flip `status` — no Partner record or API key is minted.
+export type PartnerRequestStatus = 'pending' | 'approved' | 'declined';
+export interface PartnerRequest {
+  id: string;
+  nomen?: string;
+  org?: string;
+  contactEmail: string;
+  animaId?: string;
+  useCase: string;
+  notes?: string;
+  status: PartnerRequestStatus;
+  natum: string;
+  decidedAt?: string;
+  decidedBy?: string;
 }
 
 // A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.

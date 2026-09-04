@@ -47,6 +47,14 @@ export interface Legatus {
   payoutPolicy?: { mode: 'self-fund' | 'withdraw' | 'split'; withdrawAddress?: string }
   /** Opaque bearer that gates `POST /api/v1/sessions/:id/revoke`. */
   revokeToken: string
+  /**
+   * Per-partner CSP `frame-ancestors` allowlist for this agent's `/widget` embed
+   * (ADR-0011 §7). Unset (the common case) falls back to the platform-wide
+   * `WIDGET_FRAME_ANCESTORS` list, and then to `'self'` if that is unset too —
+   * see `widgetRouter.ts`. Not writable via any endpoint yet; set directly on the
+   * record until a dedicated write path exists.
+   */
+  frameAncestors?: string[]
   /** When the current delegated session expires (from the JWT `exp`). */
   sessionExpiresAt?: Date
   /**

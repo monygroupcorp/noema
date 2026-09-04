@@ -97,7 +97,27 @@ const RunSchema: JsonSchema = {
       description: 'Populated only when the run failed.',
       properties: {
         code: { type: 'string' },
-        message: { type: 'string' },
+        message: {
+          type: 'string',
+          description: 'The classified failure sentence — never raw internal text.',
+        },
+        stage: {
+          type: 'string',
+          enum: ['provision', 'ssh', 'bootstrap', 'download', 'execute'],
+          description:
+            "Where in the run's lifecycle it died. A closed enum carrying no free text, " +
+            'so it is present for every caller. Absent when the recorded cause does not ' +
+            'identify a stage — absent means the platform does not know, and the field ' +
+            'never guesses. Branch on this rather than on `message` or `detail`.',
+        },
+        detail: {
+          type: 'string',
+          description:
+            'OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id ' +
+            'only). An operator artefact — pod ids, elapsed milliseconds, provider response ' +
+            'bodies — provided so the payer can diagnose a run without a server log. ' +
+            'Unstable by design: never parse it.',
+        },
       },
       required: ['code', 'message'],
     },
@@ -529,6 +549,21 @@ const BindResponseSchema: JsonSchema = {
     modusId: { type: 'string', description: 'The flow it now resolves to.' },
   },
   required: ['verb', 'modusId'],
+}
+
+/** The response body for `GET /v1/me/partner` — a B2B Partner record. */
+const PartnerSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+  properties: {
+    animaId: { type: 'string', description: 'The partner Anima, same id GET /v1/me/status reports for.' },
+    status: { type: 'string', description: "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status." },
+    org: { type: 'string', description: 'Organization name, if given at request time.' },
+    contactEmail: { type: 'string', description: 'Contact email, if given at request time.' },
+    sourceRequestId: { type: 'string', description: 'The partner-request this record was provisioned from.' },
+    natum: { type: 'string', format: 'date-time', description: 'When this Partner record was created.' },
+  },
+  required: ['animaId', 'status', 'sourceRequestId', 'natum'],
 }
 
 /** The response body for `GET /v1/me/status`. */
@@ -1179,6 +1214,7 @@ const EditionSchema: JsonSchema = {
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
     status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
     reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'], description: 'Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path.' },
+    moderationNote: { type: 'string', description: "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
     externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
     owners: {
       type: 'array',
@@ -1204,6 +1240,50 @@ const EditionListEnvelopeSchema: JsonSchema = {
   type: 'object',
   properties: { editions: { type: 'array', items: EditionSchema } },
   required: ['editions'],
+}
+
+/** `GET /editiones/:id/moderation`'s response — the RAW moderation verdict, admin-only. */
+const EditionModerationSchema: JsonSchema = {
+  type: 'object',
+  description: "The moderation gate's raw verdict for one publication, platform-admin only.",
+  properties: {
+    id: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'] },
+    reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'] },
+    moderation: {
+      type: 'object',
+      nullable: true,
+      description: 'The recorded verdict, or null when this Editio was never held or rejected.',
+      properties: {
+        reason: { type: 'string', description: "The classifier's raw verdict text." },
+        hold: { type: 'boolean', description: 'True only when this verdict HELD (vs. terminally rejected).' },
+        scannedAt: { type: 'string', format: 'date-time' },
+      },
+      required: ['reason', 'scannedAt'],
+    },
+  },
+  required: ['id', 'status', 'moderation'],
+}
+
+/** The response of `GET /v1/editiones/:id/preview` — what a reviewer needs to see to
+ *  adjudicate a held publication, resolved server-side the same way the moderation gate
+ *  resolved it to make its hold decision. */
+const EditionPreviewSchema: JsonSchema = {
+  type: 'object',
+  description: 'The media behind a held publication, for a reviewer to inspect before adjudicating.',
+  properties: {
+    mediaUrls: { type: 'array', description: 'Every media url the moderation gate scanned for this artifact.', items: { type: 'string' } },
+    items: {
+      type: 'array',
+      description: 'Richer per-item metadata when the artifact output carries it (e.g. an intella sample prompt). Omitted when unavailable.',
+      items: {
+        type: 'object',
+        properties: { url: { type: 'string' }, prompt: { type: 'string' } },
+        required: ['url'],
+      },
+    },
+  },
+  required: ['mediaUrls'],
 }
 
 /** One entry in the public feed (`GET /v1/feed`). */
@@ -1442,6 +1522,14 @@ const DatasetSchema: JsonSchema = {
       description:
         'FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only.',
     },
+    access: {
+      type: 'object',
+      description:
+        "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+      properties: {
+        kind: { type: 'string', enum: ['public', 'private'] },
+      },
+    },
     name: { type: 'string' },
     modality: { type: 'string', enum: ['image', 'video', 'audio', '3d'] },
     custody: { type: 'string', enum: ['sealed', 'local', 'remote'] },
@@ -1534,6 +1622,15 @@ const AddDatasetMediaRequestSchema: JsonSchema = {
     actumIds: { type: 'array', items: { type: 'string' }, description: "Required when source === 'generation'." },
   },
   required: ['source'],
+}
+
+/** The request body for `POST /v1/data/datasets/:id/access`. */
+const SetDatasetAccessRequestSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['public', 'private'] },
+  },
+  required: ['kind'],
 }
 
 /** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
@@ -2096,6 +2193,13 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/me/partner',
+      summary: "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
+      auth: true,
+      response: PartnerSchema,
+    },
+    {
+      method: 'GET',
       path: '/me/status',
       summary: "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
       auth: true,
@@ -2178,6 +2282,32 @@ export const API_CONTRACT: ApiContract = {
       response: DatasetsListSchema,
     },
     {
+      method: 'GET',
+      path: '/data/datasets/public',
+      summary: 'The public dataset catalog — every dataset with access.kind === "public", scoped to nobody in particular. Public, no auth: browsing what the platform publishes does not require an account, though using one (spawning a Muse session, appending media) still does. Newest first, paginated identically to the caller-scoped list routes.',
+      auth: false,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..100; defaults to 20.',
+          schema: { type: 'integer' },
+        },
+      ],
+      response: DatasetsListSchema,
+    },
+    {
+      method: 'GET',
+      path: '/data/datasets/:id',
+      summary: 'Read one dataset the caller may reach — its owner, a member of the team it is shared with, or anyone when its access.kind is "public". A dataset the caller has no claim on is reported as not found, exactly as an id that never existed is.',
+      auth: true,
+      response: DatasetEnvelopeSchema,
+    },
+    {
       method: 'POST',
       path: '/data/datasets',
       summary: "Create a Dataset from either v1 ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media seeded from the caller's own completed Acta) — or with no media at all by omitting source, in which case media is added afterwards through POST /v1/data/datasets/:id/media. An empty dataset is created at version 1.0.0 with a count of 0; its first append records 1.1.0. A source naming neither path, a declared source with an empty media list, and media fields supplied without a source are each rejected with 400. An optional teamId shares the dataset with a Team (Sodalitas) the caller is a member of; a team they do not belong to is reported as not found.",
@@ -2208,6 +2338,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: SetCaptionRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/access',
+      summary: "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: SetDatasetAccessRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {
@@ -2592,11 +2730,25 @@ export const API_CONTRACT: ApiContract = {
       response: EditionEnvelopeSchema,
     },
     {
+      method: 'GET',
+      path: '/editiones/:id/moderation',
+      summary: "The moderation gate's raw verdict for one publication (why it was held or rejected), regardless of current status — the companion to `/editiones/review` for a terminal `rejected` item, which has no queue entry to inspect. Restricted to the platform administrator; the raw reason text is not surfaced to the publishing author.",
+      auth: true,
+      response: EditionModerationSchema,
+    },
+    {
       method: 'POST',
       path: '/editiones/:id/retract',
       summary: 'Retract a publication where the destination allows it (feed/bucket = revocable; mint = permanent → 403). Author-scoped.',
       auth: true,
       response: EditionEnvelopeSchema,
+    },
+    {
+      method: 'GET',
+      path: '/editiones/:id/preview',
+      summary: 'The media behind a held publication, for a reviewer to inspect before adjudicating (spec publish-review-visibility.md §2) — resolves the same view the moderation gate used to make its hold decision, for any artifact kind. Restricted to the platform administrator, same gate as approve/reject/confirm-csam.',
+      auth: true,
+      response: EditionPreviewSchema,
     },
     {
       method: 'POST',
@@ -2795,10 +2947,13 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.edition', httpStatus: 404 },
     { code: 'not_found.model', httpStatus: 404 },
     { code: 'not_found.adapter', httpStatus: 404 },
+    { code: 'not_found.partner', httpStatus: 404 },
     { code: 'not_found.run', httpStatus: 404 },
     { code: 'not_found.muse_session', httpStatus: 404 },
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
+    { code: 'not_found.partner_request', httpStatus: 404 },
+    { code: 'not_found.querela', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
     { code: 'economy.insufficient_signa', httpStatus: 402 },
     { code: 'economy.cap_too_low', httpStatus: 422 },
@@ -2812,6 +2967,9 @@ export const API_CONTRACT: ApiContract = {
     // Concurrent writes to the same muse session exhausted the retry budget. Retryable: the
     // stored session is intact, and the same call succeeds once contention clears.
     { code: 'conflict.muse_session', httpStatus: 409, retryable: true },
+    // A partner request PATCH targets a request that already has a decision. NOT retryable:
+    // an already-issued API key is show-once and never re-minted for the same decision.
+    { code: 'conflict.already_decided', httpStatus: 409, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     { code: 'secret.required', httpStatus: 422 },

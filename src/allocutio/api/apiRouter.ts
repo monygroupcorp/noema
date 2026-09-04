@@ -16,7 +16,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, RunOrder, Collection, Team, Edition, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
+import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
@@ -24,13 +24,15 @@ import type { RarityReport } from '../../crystal/rarityReport.js'
 import type { PackView } from '../../ledger/stripePacks.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
-import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
+import { credentialsFromHeaders, type Credentials, type ResolvedCaller } from './IdentityResolver.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
 import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
+import type { PartnerStore } from '../../types/partner.js'
+import { rotatePartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
 
 const log = makeLogger('api:router')
 
@@ -159,11 +161,13 @@ export interface ApiFacade {
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   listDatasets(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
+  listPublicDatasets(opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   getDataset(auctor: AuctorKey, id: string): Promise<import('../../types/dataset.js').Dataset>
   createDataset(auctor: AuctorKey, input: import('../../types/dataset.js').CreateDatasetInput): Promise<import('../../types/dataset.js').Dataset>
   addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
+  setDatasetAccess(auctor: AuctorKey, datasetId: string, kind: 'public' | 'private'): Promise<import('../../types/dataset.js').Dataset>
   archiveDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   restoreDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   archiveDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<import('../../types/dataset.js').Dataset>
@@ -190,6 +194,8 @@ export interface ApiFacade {
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
+  getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail>
+  previewHeldEdition(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').EditionPreview>
   approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition>
@@ -223,6 +229,13 @@ export interface ApiFacade {
 /** The slice of IdentityResolver this router needs. */
 export interface Identity {
   resolve(creds: Credentials): Promise<AuctorKey>
+  /**
+   * The same resolution, plus the limits the CREDENTIAL carries (a partner API key's per-run
+   * spend ceiling). Required, not optional: the spend-admitting route reads it, and an identity
+   * seam that could omit it would drop a ceiling silently — which is indistinguishable from a
+   * key having none, and is the one failure mode a spend cap cannot tolerate.
+   */
+  resolveCaller(creds: Credentials): Promise<ResolvedCaller>
 }
 
 /**
@@ -267,6 +280,16 @@ export function createApiRouter(deps: {
   anonPurseEnabled?: boolean
   /** Bursa store — used ONLY to resolve `owner` at the spend chokepoint for the gate above. */
   bursarium?: Bursarum
+  /** B2B partner directory (an approved Anima — see types/partner.ts). Backs `GET /v1/me/partner`
+   *  ONLY — this router never creates/mutates a Partner record (that is the admin approval
+   *  route's job, on a different surface entirely). Omitted → the route answers 503
+   *  `internal.unavailable`, never a silent 404 (a deployment with no store wired is not the
+   *  same fact as "this caller isn't a partner"). */
+  partners?: PartnerStore
+  /** Backs `POST /v1/me/partner/api-key` — self-serve issue/rotate, gated the same as
+   *  `GET /v1/me/partner` (must have an active Partner record first). Omitted → 503, same
+   *  reasoning as `partners` above. */
+  apiKeys?: MintPartnerApiKeyDeps
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -348,7 +371,7 @@ export function createApiRouter(deps: {
    *  and inspect `owner`: an OWNED purse (§7, identified funder) spends unchanged; an ownerless or
    *  unknown/nonexistent bursa is refused 503 (fail-closed — the dev key can forge these). When the
    *  flag is on, the short-circuit is unchanged (post-ceremony restore is a one-flag flip). */
-  const auth = async (req: Request): Promise<AuctorKey> => {
+  const authCaller = async (req: Request): Promise<ResolvedCaller> => {
     const seam = req as SeamRequest
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
     if (bursaToken) {
@@ -362,16 +385,19 @@ export function createApiRouter(deps: {
       // not hashed, not truncated. The caller stays unattributed on the log line.
       seam.__callerHash = undefined
       seam.__callerKind = 'purse'
-      return { bursaToken }
+      return { auctor: { bursaToken } }
     }
-    const auctor = await identity.resolve(
+    const caller = await identity.resolveCaller(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
     // The single place identity is resolved — stamp the keyed digest here so the error
     // seam can attribute a failure without ever seeing the raw id.
-    seam.__callerHash = 'animaId' in auctor ? hashCaller(auctor.animaId) : undefined
-    return auctor
+    seam.__callerHash = 'animaId' in caller.auctor ? hashCaller(caller.auctor.animaId) : undefined
+    return caller
   }
+
+  /** The identity-only view of `authCaller`, for every route that does not admit spend. */
+  const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
   /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
    *  spicyMode on (which required a recorded 18+ attestation to persist) may see `contentRating`-adult
@@ -391,13 +417,23 @@ export function createApiRouter(deps: {
     '/runs',
     wrap(async (req, res) => {
       const { modusId, verb, aditus, pinnedModels, computeStrategy, gpuClass, maxImpetus, studioId } = req.body ?? {}
-      const auctor = await auth(req)
+      // Spend admission, so this route resolves the FULL caller: a partner API key can carry its
+      // own per-run ceiling, and `invokeFlow` applies it as a floor under the body's `maxImpetus`.
+      // `keyMaxImpetusPerRun` is deliberately absent from the destructure above — it comes from
+      // the resolved credential and there is no body field that can set or raise it.
+      const { auctor, maxImpetusPerRun } = await authCaller(req)
       const by = 'bursaToken' in auctor ? auctor : undefined
       const run = await api.invokeFlow(
         auctor,
         { modusId, verb },
         aditus ?? {},
-        { pinnedModels, computeStrategy, gpuClass, ...(maxImpetus !== undefined ? { maxImpetus } : {}), ...(studioId ? { studioId } : {}), ...(by ? { by } : {}) },
+        {
+          pinnedModels, computeStrategy, gpuClass,
+          ...(maxImpetus !== undefined ? { maxImpetus } : {}),
+          ...(maxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun: maxImpetusPerRun } : {}),
+          ...(studioId ? { studioId } : {}),
+          ...(by ? { by } : {}),
+        },
       )
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
@@ -685,9 +721,26 @@ export function createApiRouter(deps: {
     res.json({ edition: await api.getEdition(await auth(req), String(req.params.id)) })
   }))
 
+  // GET /v1/editiones/:id/moderation — the moderation gate's RAW verdict for one
+  // publication (spec: moderation-reject-reason). PLATFORM-ADMIN ONLY. Reaches any
+  // Editio by id regardless of status — the companion to `/editiones/review` for a
+  // TERMINAL rejected item, which has no queue entry to inspect.
+  router.get('/editiones/:id/moderation', wrap(async (req, res) => {
+    res.json(await api.getEditionModeration(await auth(req), String(req.params.id)))
+  }))
+
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).
   router.post('/editiones/:id/retract', wrap(async (req, res) => {
     res.json({ edition: await api.retractEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/editiones/:id/preview — the media a reviewer needs to adjudicate a HELD
+  // publication (spec publish-review-visibility.md §2): resolves the SAME view the
+  // moderation gate used to make its hold decision, for ANY artifact kind — not just an
+  // `actum` generation run. PLATFORM-ADMIN ONLY, same gate as approve/reject/confirm-csam;
+  // never exposes preview urls to a non-admin caller, author included.
+  router.get('/editiones/:id/preview', wrap(async (req, res) => {
+    res.json(await api.previewHeldEdition(await auth(req), String(req.params.id)))
   }))
 
   // POST /v1/editiones/:id/approve — clear a moderation HOLD → the item re-settles and
@@ -975,6 +1028,38 @@ export function createApiRouter(deps: {
     }),
   )
 
+  // GET /v1/me/partner — the caller's B2B Partner record, if any. A "partner" is simply an
+  // ordinary Anima a platform admin has approved (types/partner.ts) — no on-chain agent/treasury
+  // lookup. This is the partner dashboard's access gate: 404 when the caller has no Partner
+  // record, or has one but it was revoked (indistinguishable from the caller's side — "you don't
+  // have partner access" either way); 503 when this deployment has no PartnerStore wired at all.
+  // Auth resolves FIRST, same as every other /me/* route, so an unauthenticated caller always
+  // gets 401 regardless of whether the store is configured.
+  router.get('/me/partner', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
+    if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    res.status(200).json(partner)
+  }))
+
+  // POST /v1/me/partner/api-key — self-serve issue-or-rotate. NOT reachable from the admin
+  // approval surface (partnerAdminRouter.ts) on purpose: the admin approving a request is
+  // frequently not the partner, so the raw key belongs here, in the hands of whoever can
+  // actually authenticate as the approved account, never in an admin's approval response.
+  // Each call retires every key this route previously issued (rotatePartnerApiKey — a real
+  // rotation, not an accumulation of live keys) and returns a fresh one, shown ONCE — this
+  // response is the only time it is ever retrievable; only its hash is stored afterward.
+  router.post('/me/partner/api-key', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    if (!deps.apiKeys) throw Errors.partnerDirectoryUnavailable()
+    const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
+    if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    const apiKey = await rotatePartnerApiKey(deps.apiKeys, (auctor as { animaId: string }).animaId)
+    res.status(200).json({ apiKey })
+  }))
+
   // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
   // settledAt, and a lifetime running total. Owner-scoped, cursor-paginated, newest first.
   // `?status=settled` is the only supported filter (completus-only — a refunded failed run
@@ -1025,6 +1110,30 @@ export function createApiRouter(deps: {
     res.json(await api.listDatasets(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
   }))
 
+  // GET /v1/data/datasets/public — the public dataset catalog: every `access.kind === 'public'`
+  // dataset, scoped to nobody in particular. PUBLIC, no auth — mirrors `GET /v1/models`'s
+  // catalog precedent, browsing what the platform publishes should not require an account.
+  // Registered BEFORE `GET /v1/data/datasets/:id` below so Express matches this literal path
+  // first; were the order reversed, `:id` would swallow `public` as an id.
+  router.get('/data/datasets/public', wrap(async (req, res) => {
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listPublicDatasets({ ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/data/datasets/:id — the single-dataset read `getDataset` has always backed with no
+  // route of its own; every screen instead fetched the caller's own full list and found the id
+  // client-side, which is fine for a dataset the caller owns but can never resolve one they
+  // don't (a public dataset someone else made). This is that missing route: owner, team member,
+  // or `access.kind === 'public'` — same three-way gate `getDataset` already resolves through.
+  // Still auth-required (unlike the catalog list above) — every OTHER dataset route is, and
+  // loosening that is a separate call, not a side effect of adding this one.
+  router.get('/data/datasets/:id', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    res.json({ dataset: await api.getDataset(auctor, String(req.params.id)) })
+  }))
+
   // POST /v1/data/datasets — create a Dataset via either v1 ingestion path (Q2): a
   // `source: 'upload'` body (media already dropped via `POST /storage/uploads/sign`) or a
   // `source: 'generation'` body (media seeded from the caller's own completed Acta) — or with
@@ -1071,6 +1180,22 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { caption?: unknown }
     const dataset = await api.setCaption(auctor, String(req.params.id), String(req.params.captionsetId), String(req.params.mediaId), body.caption)
     res.status(200).json({ dataset })
+  }))
+
+  // POST /v1/data/datasets/:id/access — publish or unpublish a dataset the caller OWNS.
+  // Owner-only, same reasoning as archive below: the team overlay adds readers and
+  // contributors, not a second principal who decides the set's public face. Body: { kind:
+  // 'public' | 'private' }. Making a set public grants READ only (GET /v1/data/datasets/public,
+  // GET /v1/data/datasets/:id, spawning a Muse session) — appending media, attaching or editing
+  // a captionset still require ownership or team membership regardless. Reversible in either
+  // direction; a stranger's dataset id 404s.
+  router.post('/data/datasets/:id/access', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const kind = (req.body ?? {}) as { kind?: unknown }
+    if (kind.kind !== 'public' && kind.kind !== 'private') {
+      throw Errors.inputMalformed("kind must be 'public' or 'private'")
+    }
+    res.status(200).json({ dataset: await api.setDatasetAccess(auctor, String(req.params.id), kind.kind) })
   }))
 
   // POST /v1/data/datasets/:id/archive — archive a dataset the caller OWNS. Owner-only, and

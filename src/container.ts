@@ -119,6 +119,10 @@ import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoQuerela } from './crystal/MongoQuerela.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
+import { MongoPartnerRequest } from './crystal/MongoPartnerRequest.js'
+import type { PartnerRequestStore } from './types/partnerRequest.js'
+import { MongoPartner } from './crystal/MongoPartner.js'
+import type { PartnerStore } from './types/partner.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
 import { CompositusCursor } from './crystal/CompositusCursor.js'
 import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
@@ -188,6 +192,10 @@ export interface Ring {
   dicta: DictumStore
   querelae: QuerelaStore
   memoriae: MemoriaStore
+  /** B2B partner program intake queue — see types/partnerRequest.ts. */
+  partnerRequests: PartnerRequestStore
+  /** Approved B2B partners (an ordinary Anima that has been approved) — see types/partner.ts. */
+  partners: PartnerStore
   fundamentorum: import('./types/fundamentum.js').Fundamentorum
   cursorum: Cursorum
   completor: IActumCompletor
@@ -374,6 +382,8 @@ export interface ContainerConfig {
   dictaCollection?: string
   querelaCollection?: string
   memoriaeCollection?: string
+  partnerRequestsCollection?: string
+  partnersCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
   /** Collection name for hospitia (identity-bearing hosting metadata) — default 'hospitia' */
@@ -509,6 +519,8 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const dicta = new MongoDictum(db.collection(config.dictaCollection ?? 'dicta'))
   const querelae = new MongoQuerela(db.collection(config.querelaCollection ?? 'querelae'))
   const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
+  const partnerRequests = new MongoPartnerRequest(db.collection(config.partnerRequestsCollection ?? 'partnerRequests'))
+  const partners = new MongoPartner(db.collection(config.partnersCollection ?? 'partners'))
 
   const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
   const materiae = config.materiae ?? new MongoMateria(materiaCol)
@@ -855,7 +867,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, datasets, museSessions, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
-    colloquia, dicta, querelae, memoriae,
+    colloquia, dicta, querelae, memoriae, partnerRequests, partners,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier, bursarium, ceremonia,
     materiae, hospitia, actumIndex, deployments,

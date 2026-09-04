@@ -1,0 +1,4 @@
+/* a run of statements sharing one held screen. They occupy the same space and take turns, so
+   the block costs one screen rather than one per sentence. */
+.lp-beats{position:relative;display:grid}
+.lp-beats > .lp-beat{grid-area:1 / 1;align-self:center;width:100%}

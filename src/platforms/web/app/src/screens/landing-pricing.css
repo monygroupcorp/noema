@@ -1,0 +1,32 @@
+/* the price block — the till, quoted. Same rule as the catalogue: every number is read, so the
+   only thing this stylesheet decides is how a ladder of four reads at a glance. */
+.lp-price{padding:var(--py-section) 0}
+.lp-price .lp-price-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-price h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;
+  font-weight:600;margin:0 0 var(--s4);max-width:18ch}
+.lp-price .lp-price-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;
+  max-width:52ch;margin:0}
+
+/* The ladder is a ladder and not four cards: the packs differ in one dimension, and four boxes
+   of equal weight would hide the only thing worth seeing, which is that the rate climbs. */
+.lp-price .lp-price-ladder{list-style:none;margin:var(--s9) 0 0;padding:0;display:grid;
+  grid-template-columns:repeat(4,1fr);gap:var(--s6)}
+.lp-price .lp-price-ladder li{display:grid;gap:var(--s2);align-content:start;
+  border-top:1px solid var(--hair);padding-top:var(--s5)}
+.lp-price .lp-price-ladder .usd{font-size:clamp(34px,4.6vw,60px);line-height:.95;
+  letter-spacing:-.045em;font-weight:600;color:var(--text)}
+.lp-price .lp-price-ladder .credits{color:var(--muted);font-size:var(--fs-base);line-height:1.4}
+.lp-price .lp-price-ladder .rate{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
+/* the best rate earns a hairline, not a badge — the ladder is the argument */
+.lp-price .lp-price-ladder li.is-best{border-top-color:var(--text)}
+
+.lp-price .lp-price-note{color:var(--muted);font-size:var(--fs-s);line-height:1.6;
+  max-width:48ch;margin:var(--s8) 0 0}
+.lp-price .lp-price-links{display:flex;gap:var(--s3);flex-wrap:wrap;margin-top:var(--s7)}
+
+@media(max-width:860px){
+  .lp-price .lp-price-ladder{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
+}
+@media(max-width:480px){
+  .lp-price .lp-price-ladder{grid-template-columns:1fr;gap:var(--s5)}
+}

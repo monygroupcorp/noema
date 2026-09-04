@@ -19,7 +19,7 @@ import express from 'express'
 import { packCatalog, packViews, PACKS, PACK_IDS } from '../../../../src/ledger/stripePacks.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/CrystalApi.js'
 import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
-import type { Credentials } from '../../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
 
 // The ratified public projection, cheapest → dearest. credits = impetus/10; studio_100 = best rate.
 const EXPECTED = [
@@ -55,6 +55,7 @@ function serve(): { url: string; close: () => Promise<void> } {
   const api = { listPacks: () => packViews() } as unknown as ApiFacade
   const identity: Identity = {
     resolve: async (_c: Credentials) => { throw new Error('auth must NOT be called for a public catalog route') },
+    resolveCaller: async (_c: Credentials): Promise<ResolvedCaller> => { throw new Error('auth must NOT be called for a public catalog route') },
   }
   const app = express()
   app.use(express.json())

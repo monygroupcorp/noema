@@ -116,7 +116,7 @@ class MemEditionum implements Editionum {
         ('animaId' in by ? 'animaId' in e.by && e.by.animaId === by.animaId
                          : 'commitment' in e.by && e.by.commitment === by.commitment)))
   }
-  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil'>>) {
+  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation'>>) {
     const e = { ...this.store.get(id)!, ...patch, mutatum: new Date() }
     this.store.set(id, e)
     return e

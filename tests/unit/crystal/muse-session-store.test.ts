@@ -47,7 +47,7 @@ import { spawnSession, recordPiece, setFragmentEnabled, setFragmentWeight, withS
 import type { Piece } from '../../../src/crystal/muse/session.js'
 import type { Dataset } from '../../../src/types/dataset.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
-import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
+import type { Credentials, ResolvedCaller } from '../../../src/allocutio/api/IdentityResolver.js'
 
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const DB = 'noemaplane_test'
@@ -113,6 +113,12 @@ const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: creds.apiKey }
     throw Errors.authMissing()
+  },
+  // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
+  // partner API key's per-run spend ceiling). These fakes mint no ceiling, so it is `resolve` plus
+  // an empty limit set — which is exactly the shape a key with no ceiling resolves to.
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds) }
   },
 }
 

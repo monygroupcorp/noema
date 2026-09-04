@@ -593,6 +593,15 @@ export const ESSENTIA_UPSCALE: Essentia = {
 // unets (high-noise → low-noise, KSamplerAdvanced split at step 10) share the umt5 text encoder
 // + Wan2.1 VAE (FUNDAMENTUM_WAN22_T2V_COMFYUI). Render-proven graph (wan-artifacts/wan22-t2v.api.json
 // rendered a real mp4 on this box). categoria 'video'.
+//
+// `frames` DELIBERATELY DECLARES NO CONSTRAINT (noema-396), on both wan22 flows. The port has the
+// same free-int shape H3's had, but H3's rule was known (17k+5, `n % 17 == 5`, corroborated by the
+// rig scripts and the node's own INPUT_TYPES) and Wan's is not: the only frame count anything here
+// has PROVEN is the default 33, and the latent node's own step is advisory — an off-step length is
+// floor-divided in latent space rather than refused, so a run that works today would start failing
+// if a guessed `step: 4` were declared. Declaring a constraint we have not measured trades a rare
+// wasted run for a class of refused legal ones, which is the worse trade. Measure the real range on
+// a pod, then declare it here.
 export const ESSENTIA_WAN22_T2V: Essentia = {
   id: 'wan22-t2v',
   nomen: 'Wan2.2 — text to video',
@@ -1054,6 +1063,267 @@ export const ESSENTIA_LTX_I2V: Essentia = {
   mutatum: new Date('2026-07-07'),
 }
 
+// =============================================================================
+// MiniMax H3 — three video+audio flows on ONE substrate (noema-372)
+//
+// All three sit on `minimax-h3-comfyui`, which carries the shared text encoder and
+// both VAEs. Each flow adds only its own DiT + baked turbo LoRA via `intellae`, so
+// co-hosted they pull the 26 GB encoder once, not three times.
+//
+// The turbo LoRA is a BAKED weight, not a user-selectable one: the graph names it in
+// `LoraLoaderModelOnly` at strength 1.0 and the 4-step schedule depends on it. It rides
+// the weight manifest and carries no `familia`, so the prompt-driven LoRA rail cannot
+// surface or stack it.
+//
+// USER LORAS. All three templates are `loraCapable`, on the `minimax-h3` familia the two
+// DiTs carry. The rail stacks ON TOP of the turbo LoRA — `MultiLoraLoader` takes the
+// turbo loader's OUTPUT as its model — so a user LoRA never displaces the 4-step schedule
+// the graph's `steps: 4` depends on. Nothing carries this familia yet, so the rail is a
+// no-op until an H3 LoRA exists: `triggerMap` returns empty, the extractor emits an empty
+// spec, and `MultiLoraLoader` passes the model through untouched. That the turbo LoRA
+// patches the int8-convrot quantized DiT at all is the evidence the rail can work on it.
+//
+// AUDIO. H3 is video+audio ("va"): `VAEDecodeAudio` feeds `CreateVideo`, which muxes the
+// voice track into the mp4 before `SaveVideo`. The exitus is therefore ONE `video`, same
+// as Wan — there is no separate audio artifact.
+//
+// GEOMETRY IS BAKED at the rig-proven 960x768. `frames` is the only geometry the caller
+// touches, and it is not a free int: legal H3 clip lengths are 17k+5, and the speech
+// budget is ~2.55 words/s — an overrun silently DROPS a sentence rather than speeding up.
+//
+// That rule is now DECLARED rather than described (noema-396): `{min: 5, step: 17}` on the
+// `frames` port, `step` being spacing measured from `min`, which is exactly the ComfyUI
+// `MiniMaxH3ImageToVideo` INPUT_TYPES declaration the constraint comes from. The run entry
+// point refuses an off-step value before anything is reserved, so `frames: 100` costs a 422
+// instead of a pod, a 56 GB weight pull and ~28 minutes of GPU time before failing at
+// execution. No `max`: nothing measured on the rig establishes one, and a guessed ceiling
+// would refuse clip lengths that work.
+// =============================================================================
+
+/**
+ * MiniMax H3 — text to video.
+ *
+ * The same `MiniMaxH3ImageToVideo` node as fl2v with NEITHER optional frame port wired,
+ * which is what makes t2v possible at all: `Comfy-Org/MiniMax-H3` publishes no t2v
+ * checkpoint, only fl2va and ref2va.
+ *
+ * UNPROVEN ON A POD. That the node runs with no frame conditioning is read from its
+ * schema (`first_frame`/`last_frame` both optional) and from the reference repo shipping
+ * an i2v graph that wires neither — it has never been executed. If a live run rejects it,
+ * t2v becomes a composite (an image front feeding fl2v) and is its own item; do not force
+ * it here.
+ */
+export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
+  id: 'minimax-h3-t2v',
+  nomen: 'MiniMax H3 — text to video',
+  descriptio: 'MiniMax H3 text-to-video with a synchronised audio track — a prompt in, a short mp4 with sound out. Pick it over Wan when you want speech or ambience in the clip; use wan22-t2v for silent video.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'minimax-h3-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  intellae: [
+    { id: 'intella.minimax-h3-fl2va-int8', role: 'unet' },
+    { id: 'intella.minimax-h3-fl2v-turbo-4step', role: 'lora' },
+  ],
+
+  aditus: {
+    prompt:     { type: 'text', required: true,  description: 'What the video should show and say. Dialogue is spoken aloud — budget ~2.55 words per second of clip.' },
+    frames:     { type: 'int',  required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
+    input_seed: { type: 'int',  required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video with audio (mp4)' },
+  },
+
+
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
+  },
+
+  workflowTemplate: 'minimax-h3-t2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 42, privateMode: false, vramGb: 48 },
+
+  natum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 — first-frame to video.
+ *
+ * `LoadImage` → `MiniMaxH3ImageToVideo.first_frame`. Note this node has NO audio input of
+ * any kind — not a voice reference, not a guide — so the speech it produces is
+ * unconditioned. Use ref2v when the voice matters.
+ *
+ * `last_frame` exists on the node and is deliberately not exposed in v1: an absent optional
+ * media port would leave its `LoadImage` holding a placeholder filename and fail at
+ * execution (the Compiler injects a destFilename only for ports that carry a value).
+ */
+export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
+  id: 'minimax-h3-fl2v',
+  nomen: 'MiniMax H3 — first frame to video',
+  descriptio: 'MiniMax H3 image-to-video with audio — animates a start frame into a short mp4 with sound. Pick it to bring a still to life with ambience; use minimax-h3-ref2v when a specific character or voice must carry through.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'minimax-h3-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  intellae: [
+    { id: 'intella.minimax-h3-fl2va-int8', role: 'unet' },
+    { id: 'intella.minimax-h3-fl2v-turbo-4step', role: 'lora' },
+  ],
+
+  aditus: {
+    prompt:      { type: 'text',  required: true,  description: 'What should happen in the clip. Dialogue is spoken aloud — budget ~2.55 words per second.' },
+    first_frame: { type: 'image', required: true,  description: 'The still the video opens on' },
+    frames:      { type: 'int',   required: false, default: 209, min: 5, step: 17, description: 'Clip length in frames at 24fps (209 = 8.7s).' },
+    input_seed:  { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video with audio (mp4)' },
+  },
+
+
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
+  },
+
+  workflowTemplate: 'minimax-h3-fl2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 42, privateMode: false, vramGb: 48 },
+
+  natum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-01'),
+}
+
+/**
+ * MiniMax H3 — reference to video.
+ *
+ * LENGTH IS NOT SHARED WITH THE OTHER TWO FLOWS. ref2va and fl2va are different checkpoints and
+ * they do not accept the same clip lengths. 209 frames runs fine on fl2va (t2v and fl2v both use
+ * it) and fails inside ComfyUI on ref2va with `shape '[21504, 5376]' is invalid for input of size
+ * 55090912` — an execution error, after the pod, the weights and the model load are all paid for.
+ * 124 is the length the rig proved ref2va at, and the length verified here on prod.
+ *
+ * No `maximum` is declared: the real ceiling is somewhere in (124, 209] and nobody has bisected it.
+ * Guessing one would refuse lengths that may work, which is the same mistake noema-396 declined to
+ * make on wan22. The default is the proven value, and the description says what is known.
+ *
+ * The interesting one: a reference image drives the character and a reference audio clip
+ * carries VOICE TIMBRE, so one pass produces the character, the motion, the speech and the
+ * ambience together, in sync.
+ *
+ * Both media ports are REQUIRED in v1. `ref_audio` is required because it is the point of
+ * the flow, and because an absent optional media port fails at execution (see fl2v's note).
+ * Multi-reference autogrow beyond index 0, `ref_video`, and `MiniMaxH3AddGuide` chaining are
+ * out of scope for v1.
+ *
+ * The prompt convention is the model's, not ours: reference the inputs as `<Picture 1>` and
+ * `<Audio 1>`, and tag the voice explicitly — "<Audio 1> is the voice-timbre reference for
+ * <Picture 1>" — or the timbre is not reliably carried.
+ */
+export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
+  id: 'minimax-h3-ref2v',
+  nomen: 'MiniMax H3 — reference to video',
+  descriptio: 'MiniMax H3 reference-to-video — a reference image and a voice clip produce a character speaking, in sync, in one pass. Pick it when a specific face or voice must carry the clip; use minimax-h3-fl2v to animate a still without a voice reference.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'video',
+
+  fundamentumId: 'minimax-h3-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  intellae: [
+    { id: 'intella.minimax-h3-ref2va-int8', role: 'unet' },
+    { id: 'intella.minimax-h3-ref2v-turbo-4step', role: 'lora' },
+  ],
+
+  aditus: {
+    prompt:     { type: 'text',  required: true,  description: 'The scene and the dialogue. Reference the inputs as <Picture 1> and <Audio 1>, and say "<Audio 1> is the voice-timbre reference for <Picture 1>" to carry the voice.' },
+    ref_image:  { type: 'image', required: true,  description: 'Reference image — the character or subject' },
+    ref_audio:  { type: 'audio', required: true,  description: 'Reference audio — the voice timbre to speak in' },
+    frames:     { type: 'int',   required: false, default: 124, min: 5, step: 17, description: 'Clip length in frames at 24fps (124 = 5.2s). Must be 5 or more, in steps of 17 from 5. ref2va is proven at 124; 209 — which fl2v runs happily — fails on this checkpoint with a tensor shape error.' },
+    input_seed: { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    video: { type: 'video', description: 'Generated video with the referenced voice (mp4)' },
+  },
+
+
+  // Cost curve, from the first cold run (the first cold run, 2026-09-02): a billed window of
+  // ~1428 s, of which 713 s was the 56 GB weight pull. `baseSeconds` is exactly what the field
+  // means — this flow's own download + load overhead — and it dominates: the sample itself is
+  // ~57 s of the total.
+  //
+  // ONE run is not a fit. It is here because the alternative is worse: on
+  // GENERIC_RESERVE_IMPETUS (900) this flow measured 871, a 3.3% margin, and an
+  // under-reservation does not merely mis-price — `ActumCompletor` throws `Cursor overcharge`
+  // and the run FAILS after the video exists. Refit once there are runs to fit from.
+  //
+  // No `perStepSeconds` or `perMegapixelSeconds`: steps are baked at 4 by the turbo LoRA and the
+  // geometry is baked at 960x768, so neither term has an input to multiply. `frames` does move
+  // sample time and has no term in `Pretium` at all — acceptable while the download dominates,
+  // and worth revisiting if the geometry is ever exposed.
+  pretium: {
+    baseSeconds: 1430,
+  },
+
+  workflowTemplate: 'minimax-h3-ref2v',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 42, privateMode: false, vramGb: 48 },
+
+  natum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-01'),
+}
+
 export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_FLUX_SCHNELL,
   ESSENTIA_RUNMAKE_SD15,
@@ -1078,4 +1348,7 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_LTX_I2V,
   ESSENTIA_WAN22_T2V,
   ESSENTIA_WAN22_I2V,
+  ESSENTIA_MINIMAX_H3_T2V,
+  ESSENTIA_MINIMAX_H3_FL2V,
+  ESSENTIA_MINIMAX_H3_REF2V,
 ]

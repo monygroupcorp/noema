@@ -60,7 +60,7 @@ import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledg
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import type {
-  Run, RunOrder, Collection, CollectionPiece, Team, Edition, FeedItem, Project, RunsPage,
+  Run, RunOrder, Collection, CollectionPiece, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage,
   ActivityKind, ActivityDoor, ActivityRow, ActivityPage,
 } from './types.js'
 
@@ -152,7 +152,8 @@ import type {
 } from '../../types/dataset.js'
 import type { Corporum } from '../../types/corpus.js'
 import { parseManifest } from '../../crystal/datasetManifest.js'
-import { checkOwnedAditus, type OwnedResourceLookups } from '../../execution/ownedResources.js'
+import { ownedAditusVerdict, type OwnedResourceStores } from '../../execution/ownedAditusGuard.js'
+import { findConstraintViolation } from '../../execution/portaConstraints.js'
 import { floorToEntries, isMuseSessionVersionConflict } from '../../types/museSession.js'
 import type { FloorEntry, FragmentIdentity, MuseSessions, StoredMuseSession } from '../../types/museSession.js'
 import { fragmentKey, isCategory, type Category, type Fragment } from '../../crystal/muse/taxonomy.js'
@@ -430,6 +431,21 @@ export interface PublishOpts {
   owners?: Array<{ animaId: string; weight: number }>
 }
 
+/** One item of a held editio's preview media — a sample url plus its prompt when known. */
+export interface EditionPreviewItem {
+  url: string
+  prompt?: string
+}
+
+/** What `previewHeldEdition` returns — the same view the moderation gate resolved to make
+ *  its hold decision, so a reviewer sees exactly what the gate saw. `items` is populated only
+ *  when the artifact's output carries per-item metadata worth showing (e.g. an intella's
+ *  sample prompts); `mediaUrls` alone is always present, even when `items` isn't. */
+export interface EditionPreview {
+  mediaUrls: string[]
+  items?: EditionPreviewItem[]
+}
+
 /** Inputs to import a model by URL (Civitai/HF/direct → a private Intella). */
 export interface ImportModelOpts {
   /** Civitai page/`?modelVersionId`, HuggingFace repo, or a direct `.safetensors`/`.ckpt` URL. */
@@ -461,6 +477,20 @@ export interface InvokeOpts {
   gpuClass?: GpuClass
   /** Hard spend cap (impetus). Admission refuses if the estimated reservation exceeds it. */
   maxImpetus?: bigint | string
+  /**
+   * A per-run spend ceiling carried by the CREDENTIAL the request authenticated with — an API
+   * key minted with `maxImpetusPerRun` — rather than asked for by the request.
+   *
+   * It binds as a FLOOR under `maxImpetus`: admission uses the MINIMUM of the two, so a caller
+   * can tighten its own run below the key's ceiling but can never raise it by sending a larger
+   * `maxImpetus`. That only holds because routers set this from the RESOLVED IDENTITY and never
+   * from a request body — the field is not part of the run-submit payload, and adding it there
+   * would hand the bearer the pen on their own limit.
+   *
+   * Absent for every credential that carries no ceiling, which is the shape every caller had
+   * before this existed: admission then behaves exactly as it always has.
+   */
+  keyMaxImpetusPerRun?: bigint
   /** Target an existing warm studio (a Modo session) instead of cold-provisioning a pod. */
   studioId?: string
   /**
@@ -730,6 +760,28 @@ export class CrystalApi {
       }
     }
 
+    // A value that violates the legality its port DECLARES is refused here (noema-396). A port may
+    // state `min`/`max`/`step` on an 'int' or 'float' (`Porta`); MiniMax H3's clip length is
+    // `{min: 5, step: 17}` because the model accepts 17k+5 frames and nothing else. Before this,
+    // `frames: 100` provisioned a pod, pulled 56 GB of weights over ~12 minutes and failed at
+    // execution — ~28 minutes and real GPU spend to reject an input that was illegal before the
+    // run started. Refused HERE, above the `Inceptio` literal and therefore above
+    // `dispatchInceptio`, so a refusal reserves no signa, creates no actum and provisions no pod.
+    //
+    // NOT the Compiler's job: it already carries too much flow-specific knowledge, and by the time
+    // it runs the caller is committed. NOT `validateAditus`'s either — that keeps its tolerant
+    // coercion semantics at every internal call site, where single ports are validated mid-draft
+    // and a blanket throw is the wrong shape. This is the same boundary, and the same "costs
+    // nothing" guarantee, as the undeclared-key refusal above and the owned-resource check below.
+    //
+    // Runs on the EFFECTIVE aditus so an account default that fills a constrained port is checked
+    // exactly like a cast-time one. A port declaring no constraint is untouched, which is why this
+    // is a strict no-op for every flow but the three that declare one.
+    if (resolvedModus?.aditus) {
+      const violation = findConstraintViolation(resolvedModus.aditus, effectiveAditus)
+      if (violation) throw Errors.aditusOutOfRange(violation.porta, violation.regula, violation.value)
+    }
+
     // ── Lever (b): spicy alt-model routing (noema-091) ──────────────────────────
     // When spicyMode is ON and the resolved modus has a mapped willing/uncensored OpenRouter model,
     // repoint `aditus.model` BEFORE it reaches ApiCursor's `aditus.model ?? spec.defaultModel` seam.
@@ -753,13 +805,35 @@ export class CrystalApi {
     } catch { /* fail-open: guard error → allow */ }
     if (!promptVerdict.ok) throw Errors.contentRefused(promptVerdict.reason)
 
-    // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds
-    // maxImpetus. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
+    // Admission spend cap — refuse before dispatch if the upper-bound estimate exceeds the
+    // effective cap. Estimate the EFFECTIVE aditus (post account-defaults) — the same inputs
     // that will run — so an affine bumping a cost driver (steps/count/resolution) is capped.
-    if (opts.maxImpetus !== undefined) {
+    //
+    // Two independent ceilings can apply and the TIGHTER of them always wins:
+    //   • `opts.maxImpetus`          — what this REQUEST asked to be capped at.
+    //   • `opts.keyMaxImpetusPerRun` — what the CREDENTIAL is capped at (a partner API key).
+    // Taking the minimum is what makes the credential's ceiling unbypassable: `min` can only
+    // ever tighten, so a caller sending a larger `maxImpetus` cannot lift the key's limit, and
+    // a caller sending a smaller one still gets the smaller one. With no credential ceiling
+    // the minimum IS the caller's cap and this is the check it has always been.
+    const callerCap = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : undefined
+    const keyCap = opts.keyMaxImpetusPerRun
+    const cap =
+      callerCap === undefined ? keyCap
+      : keyCap === undefined ? callerCap
+      : keyCap < callerCap ? keyCap
+      : callerCap
+    // The effective cap as a stored/reported string. A caller-supplied cap that is the binding
+    // one is echoed exactly as the caller wrote it, so neither the error body nor the standing
+    // order below shifts for any caller whose credential carries no ceiling.
+    const capAsWritten =
+      cap === undefined ? undefined
+      : cap === callerCap && opts.maxImpetus !== undefined ? String(opts.maxImpetus)
+      : cap.toString()
+    if (cap !== undefined) {
       const est = await this._estimate(modusId, effectiveAditus)
-      if (est > BigInt(opts.maxImpetus)) {
-        throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: String(opts.maxImpetus) })
+      if (est > cap) {
+        throw Errors.capTooLow({ estimated: est.toString(), maxImpetus: capAsWritten })
       }
     }
 
@@ -873,7 +947,7 @@ export class CrystalApi {
     // nowhere downstream (an Actum deliberately carries no identity, and no cap). The order
     // opens holding this attempt, and the runner decides from that attempt's OUTCOME whether
     // asking again is warranted, so nothing is ever re-run on a click alone.
-    const mandatum = await this._openTrainingOrder(modusId, effectiveAditus, inceptio.by, actum.id, opts)
+    const mandatum = await this._openTrainingOrder(modusId, effectiveAditus, inceptio.by, actum.id, opts, capAsWritten)
 
     const run = toRunDetail(actum)
     if (mandatum) run.order = toRunOrder(mandatum)
@@ -893,6 +967,14 @@ export class CrystalApi {
     by: Inceptio['by'],
     actumId: string,
     opts: InvokeOpts,
+    /**
+     * The cap admission actually applied to the launching run — already the minimum of the
+     * caller's `maxImpetus` and any ceiling on the credential. The order records THIS, not the
+     * raw request field: an order fires unattended hours later, past the credential that opened
+     * it, so a ceiling left out here would be a ceiling that stops binding after the first
+     * attempt. With no credential ceiling it IS the caller's `maxImpetus`, verbatim.
+     */
+    effectiveMaxImpetus: string | undefined,
   ): Promise<Mandatum | undefined> {
     const store = this.deps.mandata
     if (!store || modusId !== TRAINING_MODUS_ID || opts.mandatumId) return undefined
@@ -904,7 +986,7 @@ export class CrystalApi {
 
     const now = Date.now()
     const invocatio = {
-      ...(opts.maxImpetus !== undefined ? { maxImpetus: String(opts.maxImpetus) } : {}),
+      ...(effectiveMaxImpetus !== undefined ? { maxImpetus: effectiveMaxImpetus } : {}),
       ...(opts.computeStrategy ? { computeStrategy: opts.computeStrategy } : {}),
       ...(opts.gpuClass ? { gpuClass: opts.gpuClass } : {}),
     }
@@ -1246,6 +1328,11 @@ export class CrystalApi {
     if (!isDraft || opts.modusId !== undefined) {
       const modus = await this.deps.modorum.find(modusId)
       if (!modus) throw Errors.notFoundFlow(modusId)
+      // Resource scope comes from the CALLER, and this is where it has to be settled: the
+      // `aditusBase` stored here is spread into every piece `CollectioCursor` later dispatches,
+      // and those dispatches carry the collection's funder, not the caller who wrote this base.
+      // Checked once, at the write, rather than on every dispatch tick.
+      await this._assertOwnedAditus(auctor, modus, aditusBase)
       // Pin the provenance hash to the resolved flow version.
       provenance = provenanceHash({ modusId, modusVersio: modus.versio, tractus, aditusBase })
     }
@@ -1361,6 +1448,10 @@ export class CrystalApi {
     // Only a NEWLY-named flow is validated — an already-stored one keeps the pre-existing
     // lenient behaviour (an unresolvable modus simply pins an undefined version).
     if (patch.modusId !== undefined && !modus) throw Errors.notFoundFlow(patch.modusId)
+    // A flow change re-reads the SAME stored `aditusBase` through a different set of declared
+    // ports, so a value that named nothing under the old flow can become a reference under the
+    // new one. Re-checked against the caller making the change, for that reason.
+    if (patch.modusId !== undefined) await this._assertOwnedAditus(auctor, modus, c.aditusBase ?? {})
     const provenance = modusId
       ? provenanceHash({ modusId, modusVersio: modus?.versio, tractus, aditusBase: c.aditusBase })
       : ''
@@ -1787,6 +1878,62 @@ export class CrystalApi {
   }
 
   /**
+   * Admin-only raw moderation-verdict read (docs/spec/moderation-reject-reason.md §3(a)).
+   * `listHeldEditions` only surfaces items still `reviewOutcome:'pending'` — a TERMINAL
+   * `rejected` Editio has no queue entry to inspect, so a reviewer asking "why was X
+   * rejected" had nothing to look at. This reaches any Editio by id regardless of status,
+   * PLATFORM-ADMIN ONLY: `verdict.reason` is the classifier's raw text, which may describe
+   * detection internals not meant for the rejected author to read verbatim (the author-
+   * facing surface is the generic `Edition.moderationNote` from `toEdition`, not this).
+   * `moderation` is null when the Editio was never held or rejected by the gate.
+   */
+  async getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e) throw Errors.notFoundEdition(id)
+    return {
+      id: e.id,
+      status: e.status,
+      ...(e.reviewOutcome !== undefined ? { reviewOutcome: e.reviewOutcome } : {}),
+      moderation: e.moderation ?? null,
+    }
+  }
+
+  /**
+   * PREVIEW a held publication's media (docs/spec/publish-review-visibility.md §2): resolves
+   * the SAME view the moderation gate itself used to make its hold decision —
+   * `_artifactOutput` → `allMediaUrls` — for ANY artifact kind the editio references, not just
+   * an `actum` generation run. This is what closes the "reviewer adjudicates a model hold
+   * blind" gap: an `intella` promotion's sample images are otherwise invisible on this screen.
+   * PLATFORM-ADMIN ONLY — the SAME gate `approveHeldEdition`/`rejectHeldEdition` use, so a
+   * held item's preview urls are never exposed to a non-admin caller (the author included).
+   * Only a `reviewOutcome:'pending'` Editio has a preview; anything else 404s, same contract
+   * as approve/reject.
+   */
+  async previewHeldEdition(auctor: AuctorKey, id: string): Promise<EditionPreview> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    if (!editiones) throw Errors.notFoundEdition(id)
+    const e = await editiones.find(id)
+    if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
+    const output = await this._artifactOutput(e.artifactRef)
+    const mediaUrls = allMediaUrls(output)
+    // Richer per-item metadata when the output carries it (an intella's `samples[]` — see
+    // `_artifactOutput`'s `intella` branch, each entry `{ url, pathInRepo, prompt? }`).
+    // Kind-agnostic on purpose: any future artifact output shaped as `samples: {url,prompt?}[]`
+    // gets the same richer preview for free, no new branch needed here.
+    const samples = output?.samples
+    const items = Array.isArray(samples)
+      ? samples
+          .filter((s): s is { url: string; prompt?: string } => !!s && typeof s === 'object' && typeof (s as { url?: unknown }).url === 'string')
+          .map((s) => ({ url: s.url, ...(s.prompt ? { prompt: s.prompt } : {}) }))
+      : undefined
+    return { mediaUrls, ...(items && items.length > 0 ? { items } : {}) }
+  }
+
+  /**
    * APPROVE a held publication (spec §4) → clears the hold (`reviewOutcome:'approved'`);
    * the worker re-settles it with the gate BYPASSED, so it publishes. PLATFORM-ADMIN
    * ONLY — an author must never clear their own possibly-CSAM hold (that would defeat
@@ -1934,14 +2081,25 @@ export class CrystalApi {
       }
 
       if (!verdict.ok) {
+        // Persist the gate's verdict on the Editio itself — HOLD is not actually better
+        // off than REJECT here (docs/spec/moderation-reject-reason.md §1): neither branch
+        // used to write `verdict.reason` anywhere, so a rejected item had NO recoverable
+        // signal for why. Written on BOTH branches, alongside the existing status write.
+        const moderation = {
+          reason: verdict.reason,
+          ...(verdict.hold ? { hold: true } : {}),
+          scannedAt: new Date().toISOString(),
+        }
         if (verdict.hold) {
           // HOLD for human review: NOT a reject, NOT a report. Stays `pending`, but the
           // worker's claim skips reviewOutcome:'pending' so it won't re-scan — it waits
           // for an admin to approve (→ re-settle, gate bypassed) or reject.
-          await editiones.update(editioId, { reviewOutcome: 'pending' })
+          log.warn('publication HELD by moderation gate', { editioId: e.id, artifactRef: e.artifactRef, reason: verdict.reason, hold: true })
+          await editiones.update(editioId, { reviewOutcome: 'pending', moderation })
           return
         }
-        await editiones.update(editioId, { status: 'rejected' })
+        log.warn('publication REJECTED by moderation gate', { editioId: e.id, artifactRef: e.artifactRef, reason: verdict.reason, hold: false })
+        await editiones.update(editioId, { status: 'rejected', moderation })
         return
       }
     }
@@ -2477,7 +2635,30 @@ export class CrystalApi {
   }
 
   /**
-   * May this caller reach this Dataset — the owner, or a member of the team it is shared with?
+   * The public dataset catalog — every dataset `access.kind === 'public'` names, scoped to
+   * nobody in particular. Public, NO AUTH: mirrors `listModels`'s catalog precedent — browsing
+   * what the platform publishes should not gate on having an account, even though USING one
+   * still does (spawning a Muse session, appending media, everything else on the dataset
+   * surface stays authenticated through `getDataset`/`_contributableDataset`).
+   *
+   * Falls back to an empty page when the wired store has not implemented `listPublic` — the
+   * same fail-closed convention `findOwned`'s absence follows — rather than throwing, so a
+   * deployment mid-upgrade shows an empty catalog instead of a 500.
+   */
+  async listPublicDatasets(opts: { cursor?: string; limit?: number } = {}): Promise<{ datasets: Dataset[]; nextCursor?: string }> {
+    const store = this._datasetsStore()
+    if (!store.listPublic) return { datasets: [] }
+    const { entries, nextCursor } = await store.listPublic(opts)
+    const datasets = await Promise.all(entries.map((d) => this._resolveDatasetMedia(d)))
+    return { datasets, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  /**
+   * May this caller CONTRIBUTE to this Dataset — the owner, or a member of the team it is
+   * shared with? Deliberately narrower than "may read": `access.kind === 'public'` is NOT an
+   * arm here. Publishing a dataset makes it usable and viewable by anyone; it does not open it
+   * to a stranger appending media or editing captions onto a set someone else curated. See
+   * `getDataset`'s docstring for the read/contribute split this predicate is one half of.
    *
    * `Collectio`'s `_ownsCollection` verbatim in shape: the direct owner, then the `Sodalitas`
    * overlay resolved through the team store. Absent `sodalitasId`, absent team store, or an
@@ -2490,6 +2671,21 @@ export class CrystalApi {
     if (d.sodalitasId === undefined) return false
     const team = await this.deps.sodalitatum?.find(d.sodalitasId)
     return team?.membra.includes(auctor.animaId) ?? false
+  }
+
+  /** Resolve a Dataset the caller may CONTRIBUTE to — `_ownsDataset` alone, never widened by
+   *  `access: 'public'`. `addDatasetMedia`/`addCaptionset`/`setCaption` resolve through THIS,
+   *  not `getDataset`, exactly because `getDataset` now also admits a public read: were they to
+   *  share that gate, publishing a dataset would silently open it to anyone's writes. Returns
+   *  the raw record (unresolved private-media markers) — every caller here reads only `.id`,
+   *  `.media` (id membership) or `.captionsets`, never a URL, so no marker needs resolving. */
+  private async _contributableDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
+    this._datasetOwner(auctor)
+    const d = await this._datasetsStore().find(id)
+    if (!d || !(await this._ownsDataset(auctor, d))) {
+      throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
+    }
+    return d
   }
 
   /**
@@ -2520,22 +2716,35 @@ export class CrystalApi {
     return { ...d, media }
   }
 
-  /** Resolve a Dataset the caller may reach — theirs, or shared with a team they belong to —
-   *  or 404 (a caller with no claim on it gets not_found, not forbidden, so ids stay
-   *  non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/`_ownedCollection`).
+  /** Resolve a Dataset the caller may READ — theirs, shared with a team they belong to, or
+   *  `access.kind === 'public'` — or 404 (a caller with no claim on it gets not_found, not
+   *  forbidden, so ids stay non-enumerable — mirrors `_ownedTabula`/`_ownedProject`/
+   *  `_ownedCollection`).
    *
-   *  This is the READ gate and the CONTRIBUTE gate: every additive write (append media, attach
-   *  or edit a captionset) resolves through it, so a member works on the shared set. The
-   *  DESTRUCTIVE verbs do not — archive/restore of the dataset and of one media item re-check
-   *  `_ownedDatasetByOwner`, the same way `extendCollection` re-checks `_isFunder` on the one
-   *  verb a team member must not perform on the principal's behalf.
+   *  NO IDENTITY REQUIREMENT UP FRONT, unlike every other dataset seam — deliberately, since
+   *  2026-09-02: rth's ruling is that an anonymous visitor may sit at a public dataset's Muse
+   *  session (see it, its captions, its decomposed fragments) and configure it, with no account
+   *  at all. `_ownsDataset` already resolves `false` rather than throwing for a caller with no
+   *  `animaId`, so the public arm below is the only way an anonymous caller ever succeeds here —
+   *  a private dataset stays exactly as closed to them as it always was.
+   *
+   *  THIS IS THE READ GATE ONLY, no longer the contribute one: `spawnMuseSession`,
+   *  `_motherPool` and `promoteMuseSession` resolve a mother dataset through here on purpose
+   *  (starting a Muse session, or reading a mother's name, is a read), but the three additive
+   *  writes — append media, attach or edit a captionset — resolve through
+   *  `_contributableDataset` instead, which does NOT admit `public`. Splitting these was the
+   *  point of adding `access`: without it, widening this gate for public reads would have
+   *  silently opened every public dataset to a stranger's writes too. The DESTRUCTIVE verbs sit
+   *  apart from both — archive/restore re-check `_ownedDatasetByOwner`, the same way
+   *  `extendCollection` re-checks `_isFunder` on the one verb a team member must not perform on
+   *  the principal's behalf.
    *
    *  Private media is resolved into short-lived links AFTER the gate above, exactly as
    *  `getRun` presigns a run's exitus after its ownership check. */
   async getDataset(auctor: AuctorKey, id: string): Promise<Dataset> {
-    this._datasetOwner(auctor)
     const d = await this._datasetsStore().find(id)
-    if (!d || !(await this._ownsDataset(auctor, d))) {
+    const readable = d !== null && (d.access?.kind === 'public' || (await this._ownsDataset(auctor, d)))
+    if (!d || !readable) {
       throw new ApiError('not_found.dataset', `Dataset '${id}' not found`, 404)
     }
     return this._resolveDatasetMedia(d)
@@ -2690,11 +2899,13 @@ export class CrystalApi {
    * consequences for caption maps, for fragments already decomposed off an item, and for the
    * provenance of a model trained from the dataset, and it is a separate decision.
    *
-   * Access resolves through `getDataset` — the same seam `addCaptionset` uses — so the caller
-   * comes from the authentication and never from a request parameter; a dataset the caller has
-   * no claim on reports as not found, exactly as an id that never existed does. THIS IS THE
-   * CONTRIBUTION SEAM: the dataset's owner, or a member of the `Sodalitas` it is shared with,
-   * may append. What a member appends is still their OWN work — `_mintMedia` keeps requiring
+   * Access resolves through `_contributableDataset` — the same seam `addCaptionset` uses, never
+   * `getDataset` (which also admits a public read) — so the caller comes from the
+   * authentication and never from a request parameter; a dataset the caller has no claim on
+   * reports as not found, exactly as an id that never existed does. THIS IS THE CONTRIBUTION
+   * SEAM: the dataset's owner, or a member of the `Sodalitas` it is shared with, may append. A
+   * public reader may not — publishing a dataset does not open it to a stranger's uploads. What
+   * a member appends is still their OWN work — `_mintMedia` keeps requiring
    * every named Actum to be the caller's own and `completus`, which the team overlay does not
    * touch. Each item is stamped with the contributor's animaId (`DatasetMediaItem.addedBy`).
    *
@@ -2702,7 +2913,7 @@ export class CrystalApi {
    * through the same path; a body matching neither shape is a 400.
    */
   async addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
 
     const body = (input ?? {}) as Partial<IngestMediaInput>
     if (body.source !== 'upload' && body.source !== 'generation') {
@@ -2721,12 +2932,12 @@ export class CrystalApi {
    *  so a re-run of the same caption pass replaces its previous result instead of accumulating
    *  duplicates.
    *
-   *  Access resolves through `getDataset` — one place decides what "the caller may reach
-   *  this" means, and a stranger gets `not_found`, never `forbidden`. Caption keys must
-   *  be media ids actually on the dataset: a key bound to nothing would still count
-   *  toward coverage. `coverage` is derived here, never taken from the body. */
+   *  Access resolves through `_contributableDataset` — never `getDataset`, which also admits a
+   *  public read now; a stranger gets `not_found`, never `forbidden`, same as before `access`
+   *  existed. Caption keys must be media ids actually on the dataset: a key bound to nothing
+   *  would still count toward coverage. `coverage` is derived here, never taken from the body. */
   async addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
     const body = (input ?? {}) as Partial<Captionset>
 
     const id = typeof body.id === 'string' ? body.id.trim() : ''
@@ -2750,11 +2961,12 @@ export class CrystalApi {
     return this._resolveDatasetMedia(updated)
   }
 
-  /** Edit one caption of one captionset on a Dataset the caller may reach (a captionset is
-   *  editable after generation). Same access resolution as `addCaptionset` — owner or team
-   *  member; the captionset must already exist and the media id must be on the dataset. */
+  /** Edit one caption of one captionset on a Dataset the caller may CONTRIBUTE to (a captionset
+   *  is editable after generation). Same access resolution as `addCaptionset` — owner or team
+   *  member, never a public reader; the captionset must already exist and the media id must be
+   *  on the dataset. */
   async setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<Dataset> {
-    const d = await this.getDataset(auctor, datasetId)
+    const d = await this._contributableDataset(auctor, datasetId)
 
     if (typeof caption !== 'string' || !caption.trim()) throw Errors.inputMalformed('caption must be a non-empty string')
     if (!d.media.some((m) => m.id === mediaId)) {
@@ -2788,6 +3000,24 @@ export class CrystalApi {
   async archiveDataset(auctor: AuctorKey, datasetId: string): Promise<Dataset> {
     const d = await this._ownedDatasetByOwner(auctor, datasetId)
     const updated = await this._datasetsStore().archiveDataset(d.id)
+    if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
+    return this._resolveDatasetMedia(updated)
+  }
+
+  /**
+   * Publish (or unpublish) a Dataset — set `access.kind` to `'public'` or back to `'private'`.
+   * OWNER-ONLY, same reasoning as `archiveDataset`: this is a decision about the set's whole
+   * public face, not additive work a team member contributes, so it resolves through
+   * `_ownedDatasetByOwner` rather than `getDataset`/`_contributableDataset`. Reversible in
+   * either direction — `'private'` is a real write here, not an absence, so an owner can always
+   * take a set back out of the catalog. Nothing here spends, and nothing here checks whether
+   * the set has captions or fragments yet: an owner may publish an empty board, and the Muse
+   * screen's own roll button (disabled at zero live fragments) is where that becomes visible,
+   * not a refusal here.
+   */
+  async setDatasetAccess(auctor: AuctorKey, datasetId: string, kind: 'public' | 'private'): Promise<Dataset> {
+    const d = await this._ownedDatasetByOwner(auctor, datasetId)
+    const updated = await this._datasetsStore().setAccess(d.id, kind)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
     return this._resolveDatasetMedia(updated)
   }
@@ -2874,10 +3104,51 @@ export class CrystalApi {
     return store
   }
 
-  /** Muse sessions are animaId-keyed like datasets — an anonymous caller cannot own one. */
+  /**
+   * The key a Muse session is scoped/matched against — an identified account's `animaId`, or
+   * (unlike `_datasetOwner`) an anonymous caller's `commitment`. Sessions off a PUBLIC dataset
+   * are meant to be sat at and configured with no account at all — see the dataset gate
+   * `spawnMuseSession` resolves through (`getDataset`, which already admits `access.kind ===
+   * 'public'`); a session can only ever be SPAWNED off a dataset the caller may read, so
+   * widening this to commitment never opens a session on a private dataset to a stranger.
+   *
+   * `commitment` is a stable per-browser value (`localStorage`, noema-commitment) rather than a
+   * one-shot credential, which is what makes "resume the session I was just configuring" work
+   * for a returning anonymous visitor: the SAME commitment matches `stored.owner` on the next
+   * request. A different anonymous visitor's different commitment does not, so one stranger's
+   * anonymous session stays as closed to another as an owner's does.
+   *
+   * `{ bursaToken }` (the third `AuctorKey` arm, a spend-only bearer credential the client never
+   * sends on a read) falls through to the same refusal `_datasetOwner` gives it — deliberately
+   * not treated as a stable identity to scope a resumable session against.
+   *
+   * DELIBERATELY NOT a green light for keeping, recording, steering or promoting — those
+   * verbs go THROUGH this resolver (via `_museSession`/`_mutateMuseSession`) but are each
+   * additionally gated by `_requireAccount`, rth's product ruling (2026-09-02): an anonymous
+   * visitor may sit at a public dataset's Muse session and configure it — lock, vary, enable or
+   * weight a fragment — but the account (and top-up) modal intercepts before anything actually
+   * spends or persists past the session's own working state. Firing a roll itself is gated
+   * client-side, at the fire button, not here — `createRun` is the generic run route every
+   * anonymous chat/generation already fires through, and narrowing IT for Muse specifically
+   * would need its own aditus-level change this item does not make.
+   */
   private _museSessionOwner(auctor: AuctorKey): string {
     if ('animaId' in auctor) return auctor.animaId
-    throw Errors.authForbidden('Muse sessions require an identified account')
+    if ('commitment' in auctor) return auctor.commitment
+    throw Errors.authForbidden('Muse sessions require an identified account or an anonymous commitment')
+  }
+
+  /**
+   * Require a real, identified account — the far side of `_museSessionOwner`'s configure-freely
+   * boundary. Called FIRST, before any other work, by every Muse verb that goes beyond sitting
+   * at a session and configuring it: `keepMuseRoll`, `recordMusePiece`, `updateMusePiece`,
+   * `saveMusePiece`, `steerMuseSession`, `promoteMuseSession`. Spawning, resuming, reading and
+   * configuring a session (fragment enable/weight, run setup) do NOT call this — the whole point of
+   * the split. A caller refused here still has a real, usable session; they only lose the verbs
+   * gated here until they have an account.
+   */
+  private _requireAccount(auctor: AuctorKey): void {
+    if (!('animaId' in auctor)) throw Errors.authForbidden('this action requires an identified account')
   }
 
   /** The wire projection of a stored session — the floor as an entry array, never a Map. */
@@ -3235,6 +3506,7 @@ export class CrystalApi {
    * in the body is a scope value, and a stranger's session is reported as not found.
    */
   async keepMuseRoll(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { prompt?: unknown; paid?: unknown }
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
     if (!prompt) throw Errors.inputMalformed('prompt is required')
@@ -3250,6 +3522,7 @@ export class CrystalApi {
    * stored, because its lineage could never be resolved afterwards.
    */
   async recordMusePiece(auctor: AuctorKey, id: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as {
       runId?: unknown
       rollIndex?: unknown
@@ -3312,6 +3585,7 @@ export class CrystalApi {
    * not hold is reported as not found rather than recorded.
    */
   async updateMusePiece(auctor: AuctorKey, id: string, runId: string, input: unknown): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { reaction?: unknown; dismissed?: unknown }
     const run = typeof runId === 'string' ? runId.trim() : ''
     if (!run) throw Errors.inputMalformed('runId is required')
@@ -3387,6 +3661,7 @@ export class CrystalApi {
    * session claiming a save that did not happen.
    */
   async saveMusePiece(auctor: AuctorKey, id: string, runId: string): Promise<MuseSessionView> {
+    this._requireAccount(auctor)
     const run = typeof runId === 'string' ? runId.trim() : ''
     if (!run) throw Errors.inputMalformed('runId is required')
 
@@ -3459,6 +3734,7 @@ export class CrystalApi {
    * `nomen`, which is a label. There is no scope value a caller could send.
    */
   async promoteMuseSession(auctor: AuctorKey, id: string, input?: unknown): Promise<Collection> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { nomen?: unknown }
     const asked = typeof body.nomen === 'string' ? body.nomen.trim() : ''
 
@@ -3520,6 +3796,7 @@ export class CrystalApi {
    * settled at its real token cost.
    */
   async steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<SteerProposalView> {
+    this._requireAccount(auctor)
     const body = (input ?? {}) as { instruction?: unknown }
     const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : ''
     if (!instruction) throw Errors.inputMalformed('instruction is required')
@@ -3673,29 +3950,22 @@ export class CrystalApi {
     modus: Modus | null,
     values: Record<string, unknown>,
   ): Promise<void> {
-    const aditus = modus?.aditus
-    if (!aditus) return
-    if (!Object.values(aditus).some(porta => porta.owned !== undefined)) return
-
-    const owner = 'animaId' in auctor ? auctor.animaId : undefined
-    const datasets = this.deps.datasets
-    const corpora = this.deps.corpora
-
-    // Resolved once, here, only when there is a dataset seam that can use it — the teams of the
-    // caller doing the dispatching, never of anyone the aditus names.
-    const canResolveDataset = Boolean(owner && datasets?.findOwned)
-    const sodalitasIds = canResolveDataset ? await this._callerTeamIds(auctor) : []
-
-    const lookups: OwnedResourceLookups = {
-      inline: raw => parseManifest(raw) !== null,
-      ...(owner && datasets?.findOwned
-        ? { dataset: (id: string) => datasets.findOwned!(id, owner, sodalitasIds) }
-        : {}),
-      ...(owner && corpora ? { corpus: (id: string) => corpora.findOwned(id, owner) } : {}),
-    }
-
-    const verdict = await checkOwnedAditus(aditus, values, lookups)
+    const verdict = await ownedAditusVerdict(this._ownedResourceStores(), auctor, modus, values)
     if (!verdict.ok) throw Errors.invalidAditus({ field: verdict.field })
+  }
+
+  /**
+   * The stores an owned reference resolves through, in the shape the shared guard takes. Named
+   * once here because three entry points need the same set: the run route, and the two collection
+   * writes that fix what a later dispatch will name.
+   */
+  private _ownedResourceStores(): OwnedResourceStores {
+    return {
+      ...(this.deps.datasets ? { datasets: this.deps.datasets } : {}),
+      ...(this.deps.corpora ? { corpora: this.deps.corpora } : {}),
+      ...(this.deps.sodalitatum ? { sodalitatum: this.deps.sodalitatum } : {}),
+      inline: raw => parseManifest(raw) !== null,
+    }
   }
 
   /** Binding a run asks the LIVENESS question, so this keeps `getStudio`'s default (live-only)
@@ -4167,8 +4437,14 @@ export class CrystalApi {
    * import, a misclassification, or a model we've cleared by taking out a commercial license.
    * Two modes: an explicit clearance ({ license, commercialUse }) — the operator's decision, e.g.
    * marking an SD3 model `'yes'` once we hold the Stability license — or `reclassify:true`, which
-   * re-derives the verdict from the model's recorded base string (`provenance.base`) via the same
-   * classifier (bulk-fix models imported before license classification existed). Platform-admin only.
+   * re-derives the verdict from the model's recorded base string (`baseModel` > `provenance.base` >
+   * `nomen` > `familia`) via the same classifier (bulk-fix models imported before license
+   * classification existed). Platform-admin only.
+   *
+   * `reclassify` never downgrades: if the freshly computed verdict is `'unknown'` but the record
+   * already carries a real (non-'unknown') `license` — from a prior correct classification, or a
+   * manual clearance applied through a different route — the stored value is left alone and the
+   * unchanged record is returned, rather than silently overwritten back to `'unknown'`.
    */
   async setModelLicense(auctor: AuctorKey, id: string, opts: SetModelLicenseOpts): Promise<ModelCard> {
     this._assertPlatformAdmin(auctor)
@@ -4178,9 +4454,20 @@ export class CrystalApi {
     if (opts.reclassify) {
       const m = await registry.find(id)
       if (!m) throw Errors.notFoundModel(id)
-      // Re-derive from the model's recorded base via the shared classifier (provenance.base > nomen
-      // > familia) — the SAME path the backfill sweep runs, so admin + sweep never disagree.
+      // Re-derive from the model's recorded base via the shared classifier (baseModel >
+      // provenance.base > nomen > familia) — the SAME path the backfill sweep runs, so admin +
+      // sweep never disagree.
       ;({ license, commercialUse } = classifyModelLicense(m))
+      // Guard: reclassify must never DOWNGRADE an already-classified record. If the classifier
+      // still can't place the base (fresh verdict 'unknown') but the record already carries a real
+      // license — whether from a prior correct classification, or a manual admin override applied
+      // through a different route (e.g. a direct clearance the classifier itself couldn't derive) —
+      // there was never a better answer to fall back to, so leave the stored value untouched rather
+      // than silently overwrite it with 'unknown'. (Observed in production: a manually-cleared
+      // model's correct license was wiped back to 'unknown' by a reclassify click.)
+      if (license === 'unknown' && m.license !== undefined && m.license !== 'unknown') {
+        return toModelCardFromIntella(m)
+      }
     }
     if (license === undefined && commercialUse === undefined) {
       throw Errors.inputMalformed('provide license and/or commercialUse, or reclassify:true')

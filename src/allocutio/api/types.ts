@@ -9,6 +9,9 @@
 // =============================================================================
 
 import type { ModelRef } from '../../types/actum.js'
+import type { FailureStage } from '../../lib/retryVerdict.js'
+
+export type { FailureStage }
 
 /** Public run status — the externalised projection of ActumStatus. */
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed'
@@ -26,7 +29,28 @@ export interface Run {
   /** The outputs produced by the run — present only when available. */
   exitus?: Record<string, unknown>
   /** Populated only when the run failed. */
-  failure?: { code: string; message: string }
+  failure?: {
+    code: string
+    /** The classified sentence — never raw internal text. Safe for any caller. */
+    message: string
+    /**
+     * Where in the run's lifecycle it died: `provision` → `ssh` → `bootstrap` →
+     * `download` → `execute`. A closed enum carrying no free text — no pod ids, no
+     * paths, no stack frames — so it is shown to EVERY caller, not just the owner.
+     * ABSENT when the recorded cause does not say where (an expired run can have died
+     * anywhere): absent means "the platform does not know", never "nothing to report".
+     */
+    stage?: FailureStage
+    /**
+     * OWNER-SCOPED: the recorded internal failure text, verbatim. Present only on the
+     * owner-scoped projection (`toRunDetail`, i.e. `GET /v1/runs/:id`), never on the
+     * plain one. This is an OPERATOR ARTEFACT — pod ids, elapsed milliseconds, provider
+     * response bodies — and it is not, and must not become, user-facing copy; it exists
+     * so the person paying for a run can tell a full disk from a dead sshd without a
+     * server log. Unstable by design: never parse it, branch on `stage` instead.
+     */
+    detail?: string
+  }
   /** impetus cost, serialised as a string (bigint → string). */
   cost?: string
   /** When the run started, as an ISO-8601 string. */
@@ -325,6 +349,11 @@ export interface Edition {
    *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
    *  on the normal path. */
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
+  /** Present when the moderation gate HELD or REJECTED this publication. A generic,
+   *  author-safe message — NEVER the classifier's raw verdict text (which may describe
+   *  detection internals). A platform admin sees the raw reason via
+   *  `GET /v1/editiones/:id/moderation` instead. Absent when never flagged. */
+  moderationNote?: string
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   /** Rights split snapshot (animaId → weight), when team-owned. */
@@ -333,6 +362,21 @@ export interface Edition {
   license?: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * EditionModerationDetail — `GET /v1/editiones/:id/moderation`'s response (spec:
+ * moderation-reject-reason). PLATFORM-ADMIN ONLY: carries the moderation gate's RAW
+ * verdict, unlike `Edition.moderationNote`'s generic author-facing form. Reaches any
+ * Editio by id regardless of status — the companion to the review queue for a
+ * TERMINAL `rejected` item, which has no queue entry of its own to inspect.
+ */
+export interface EditionModerationDetail {
+  id: string
+  status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
+  reviewOutcome?: 'pending' | 'approved' | 'rejected'
+  /** The recorded verdict, or null when this Editio was never held or rejected. */
+  moderation: { reason: string; hold?: boolean; scannedAt: string } | null
 }
 
 /**

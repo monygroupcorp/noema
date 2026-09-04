@@ -4,7 +4,7 @@ import type { Intella, IntellaSource } from '../types/intelligendi.js'
 import type { Uploader, ObjectStore } from './R2Uploader.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { AitkOutcome } from './aitoolkitRunnerClient.js'
-import { buildAitkConfig, canonicalFamilia, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
+import { buildAitkConfig, canonicalFamilia, resolveBasePreset, DEFAULT_SAMPLE_PROMPTS, parseSamplePrompts } from './aitkConfig.js'
 import { classifyBaseModel, licenseCommercial, licenseNote } from './modelLicense.js'
 import { parseManifest } from './datasetManifest.js'
 
@@ -97,10 +97,26 @@ export function makeTrainingFinalizer(
     const familia = canonicalFamilia(explicitFamilia || String(a.baseModel ?? ''))
     const nomen = (typeof a.name === 'string' && a.name.trim()) || trigger || jobId
 
+    // Base descriptor (docs/spec/model-base-provenance.md): `a.baseModel` is a short preset ALIAS
+    // ('klein-4b'), not a descriptive string — `classifyBaseModel`'s matchers need the real HF
+    // identifier ('black-forest-labs/FLUX.2-klein-base-4B') to recognise it at all. Resolve the
+    // alias to its preset descriptor when it names a trainable preset (the standard local-training
+    // path — `buildAitkConfig` already resolved this same alias to LAUNCH the job, so this repeat
+    // resolution only ever fails for a value that was never a preset key to begin with). Anything
+    // else (a full descriptive string already, or unresolvable) falls back to the raw value —
+    // matching the classifier's pre-existing behaviour for those inputs.
+    let baseDescriptor: string
+    try {
+      baseDescriptor = resolveBasePreset(String(a.baseModel ?? '')).nameOrPath
+    } catch {
+      baseDescriptor = String(a.baseModel ?? '')
+    }
+
     // License (SEPARATE axis from familia) — a trained LoRA inherits its BASE's license, so it's
-    // classified from `baseModel`. Recorded on the Intella (gate) AND surfaced on the exitus receipt
-    // so the owner is told at completion whether the model is commercially listable (training UX).
-    const { license } = classifyBaseModel(String(a.baseModel ?? ''))
+    // classified from the resolved base descriptor. Recorded on the Intella (gate) AND surfaced on
+    // the exitus receipt so the owner is told at completion whether the model is commercially
+    // listable (training UX).
+    const { license } = classifyBaseModel(baseDescriptor)
     const commercialUse = licenseCommercial(license)
 
     // Model-card enrichment (optional aditus): the requested step count, a human description,
@@ -164,6 +180,12 @@ export function makeTrainingFinalizer(
       // so the publish gate enforces it uniformly with imports (modelLicense.ts). Fail-closed.
       license,
       commercialUse,
+      // The classifier-usable base descriptor this license was derived from (Option A,
+      // docs/spec/model-base-provenance.md) — always set alongside `license` from the SAME
+      // `baseDescriptor`, so a later reclassify (or the backfill sweep) reads a value consistent
+      // with what was actually recorded here. Omitted when there was no baseModel at all to derive
+      // one from (the archival/owner-less-familia path above).
+      ...(baseDescriptor ? { baseModel: baseDescriptor } : {}),
       ...(typeof a.baseIntellaId === 'string' ? { baseIntellaId: a.baseIntellaId } : {}),
       ...(trigger ? { trigger } : {}),
       slug,

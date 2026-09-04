@@ -101,6 +101,15 @@ export interface ResolvedImport {
   familia: string
   /** License id of the imported artifact (base license folded with the origin's own). Display + audit. */
   license: string
+  /**
+   * The descriptive base string this import was classified from (e.g. the Civitai
+   * `version.baseModel`, the HF `base_model`/tag-list/repo string, or a direct file's parsed
+   * filename stem) — the SAME string `requireBase()`/`classifyBaseModel` derived `familia`/
+   * `license` from. Mirrors `Intella.baseModel` (docs/spec/model-base-provenance.md §3): every
+   * genus gets one classifier-usable field, not "trained LoRAs use `baseModel`, imports fall back
+   * to `nomen`."
+   */
+  baseModel: string
   /** Catalog-eligibility verdict (fail-closed). Only 'yes' may be promoted to the public catalog. */
   commercialUse: CommercialVerdict
   nomen: string
@@ -191,7 +200,8 @@ async function resolveCivitai(url: string, json: JsonFetcher): Promise<ResolvedI
   if (!file?.downloadUrl) throw new ModelImportError('no .safetensors/.ckpt file found on the Civitai version')
   const downloadUrl = String(file.downloadUrl)
 
-  const { familia, license: baseLicense } = requireBase(String(version.baseModel ?? ''))
+  const baseModelStr = String(version.baseModel ?? '')
+  const { familia, license: baseLicense } = requireBase(baseModelStr)
   // Commercial verdict = the base license folded with Civitai's OWN per-model permission (a LoRA
   // whose uploader forbids commercial use can't out-license itself — most-restrictive wins).
   const commercialUse = combineCommercial(licenseCommercial(baseLicense), civitaiCommercial(data))
@@ -212,12 +222,13 @@ async function resolveCivitai(url: string, json: JsonFetcher): Promise<ResolvedI
     commercialUse,
     nomen,
     slug,
+    baseModel: baseModelStr,
     ...(trigger ? { trigger } : {}),
     dest: destFor(genus, slug, filename),
     ...(description ? { description } : {}),
     ...(tags ? { tags } : {}),
     ...(previewUrl ? { samples: [{ url: previewUrl }] } : {}),
-    provenance: { repo: `civitai:${modelId}`, base: String(version.baseModel ?? '') },
+    provenance: { repo: `civitai:${modelId}`, base: baseModelStr },
     origin: {
       provenance: 'civitai',
       uri: downloadUrl,
@@ -269,7 +280,8 @@ async function resolveHuggingFace(url: string, json: JsonFetcher): Promise<Resol
   // A HF repo declaring a base_model (or tagged lora) is an adapter; otherwise a full model.
   const genus: 'lora' | 'model' = baseModel || tagList.some((t) => t.toLowerCase().includes('lora')) ? 'lora' : 'model'
   // Family: the declared base_model, else a family tag (flux/sdxl/sd15), else the repo name.
-  const { familia, license: baseLicense } = requireBase(baseModel || tagList.join(' ') || repo)
+  const baseModelStr = baseModel || tagList.join(' ') || repo
+  const { familia, license: baseLicense } = requireBase(baseModelStr)
   // The repo's OWN `cardData.license` is authoritative for the artifact and may be stricter than the
   // base (e.g. a cc-by-nc LoRA on an apache base) — fold, most-restrictive wins. Prefer the repo's
   // stated license id for display when known; keep the base id otherwise.
@@ -292,6 +304,7 @@ async function resolveHuggingFace(url: string, json: JsonFetcher): Promise<Resol
     commercialUse,
     nomen,
     slug,
+    baseModel: baseModelStr,
     ...(trigger ? { trigger } : {}),
     dest: destFor(genus, slug, filename),
     ...(description ? { description } : {}),
@@ -332,6 +345,7 @@ function resolveDirect(url: string, hint: ImportHint): ResolvedImport {
     commercialUse,
     nomen: stem || slug,
     slug,
+    baseModel: stem,
     dest: destFor(genus, slug, filename),
     origin: { provenance: 'custom', uri: url, format: formatOf(filename) },
     downloadUrl: url,

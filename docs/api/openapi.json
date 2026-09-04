@@ -65,7 +65,23 @@
                               "type": "string"
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "The classified failure sentence — never raw internal text."
+                            },
+                            "stage": {
+                              "type": "string",
+                              "enum": [
+                                "provision",
+                                "ssh",
+                                "bootstrap",
+                                "download",
+                                "execute"
+                              ],
+                              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+                            },
+                            "detail": {
+                              "type": "string",
+                              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
                             }
                           },
                           "required": [
@@ -274,7 +290,23 @@
                               "type": "string"
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "The classified failure sentence — never raw internal text."
+                            },
+                            "stage": {
+                              "type": "string",
+                              "enum": [
+                                "provision",
+                                "ssh",
+                                "bootstrap",
+                                "download",
+                                "execute"
+                              ],
+                              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+                            },
+                            "detail": {
+                              "type": "string",
+                              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
                             }
                           },
                           "required": [
@@ -405,7 +437,23 @@
                               "type": "string"
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "The classified failure sentence — never raw internal text."
+                            },
+                            "stage": {
+                              "type": "string",
+                              "enum": [
+                                "provision",
+                                "ssh",
+                                "bootstrap",
+                                "download",
+                                "execute"
+                              ],
+                              "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+                            },
+                            "detail": {
+                              "type": "string",
+                              "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
                             }
                           },
                           "required": [
@@ -2448,6 +2496,75 @@
         }
       }
     },
+    "/me/partner": {
+      "get": {
+        "summary": "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's approved B2B partner record — an ordinary Anima a platform admin has approved. No on-chain agent/treasury concept.",
+                  "properties": {
+                    "animaId": {
+                      "type": "string",
+                      "description": "The partner Anima, same id GET /v1/me/status reports for."
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "'active' or 'revoked'. A revoked partner 404s here rather than being returned with this status."
+                    },
+                    "org": {
+                      "type": "string",
+                      "description": "Organization name, if given at request time."
+                    },
+                    "contactEmail": {
+                      "type": "string",
+                      "description": "Contact email, if given at request time."
+                    },
+                    "sourceRequestId": {
+                      "type": "string",
+                      "description": "The partner-request this record was provisioned from."
+                    },
+                    "natum": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When this Partner record was created."
+                    }
+                  },
+                  "required": [
+                    "animaId",
+                    "status",
+                    "sourceRequestId",
+                    "natum"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/me/status": {
       "get": {
         "summary": "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
@@ -2934,6 +3051,19 @@
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
                         },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -3195,6 +3325,19 @@
                             "type": "string",
                             "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
                           },
+                          "access": {
+                            "type": "object",
+                            "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "public",
+                                  "private"
+                                ]
+                              }
+                            }
+                          },
                           "name": {
                             "type": "string"
                           },
@@ -3381,6 +3524,452 @@
         ]
       }
     },
+    "/data/datasets/public": {
+      "get": {
+        "summary": "The public dataset catalog — every dataset with access.kind === \"public\", scoped to nobody in particular. Public, no auth: browsing what the platform publishes does not require an account, though using one (spawning a Muse session, appending media) still does. Newest first, paginated identically to the caller-scoped list routes.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "string",
+                            "description": "FK -> Anima, the owning identity."
+                          },
+                          "sodalitasId": {
+                            "type": "string",
+                            "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                          },
+                          "access": {
+                            "type": "object",
+                            "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "public",
+                                  "private"
+                                ]
+                              }
+                            }
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "modality": {
+                            "type": "string",
+                            "enum": [
+                              "image",
+                              "video",
+                              "audio",
+                              "3d"
+                            ]
+                          },
+                          "custody": {
+                            "type": "string",
+                            "enum": [
+                              "sealed",
+                              "local",
+                              "remote"
+                            ]
+                          },
+                          "media": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string",
+                                  "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "upload",
+                                    "generation"
+                                  ]
+                                },
+                                "actumId": {
+                                  "type": "string",
+                                  "description": "FK -> Actum. Present iff source === 'generation'."
+                                },
+                                "addedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "addedBy": {
+                                  "type": "string",
+                                  "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "url",
+                                "source",
+                                "addedAt"
+                              ]
+                            }
+                          },
+                          "captionsets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "method": {
+                                  "type": "string",
+                                  "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                                },
+                                "coverage": {
+                                  "type": "string",
+                                  "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+                                },
+                                "captions": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "method",
+                                "coverage"
+                              ]
+                            }
+                          },
+                          "versions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "v": {
+                                  "type": "string"
+                                },
+                                "count": {
+                                  "type": "number"
+                                },
+                                "when": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "required": [
+                                "v",
+                                "count",
+                                "when"
+                              ]
+                            }
+                          },
+                          "natum": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "mutatum": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "owner",
+                          "name",
+                          "modality",
+                          "custody",
+                          "media",
+                          "captionsets",
+                          "versions",
+                          "natum",
+                          "mutatum"
+                        ]
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "description": "Opaque cursor for the next page; absent on the last page."
+                    }
+                  },
+                  "required": [
+                    "datasets"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to 1..100; defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/data/datasets/{id}": {
+      "get": {
+        "summary": "Read one dataset the caller may reach — its owner, a member of the team it is shared with, or anyone when its access.kind is \"public\". A dataset the caller has no claim on is reported as not found, exactly as an id that never existed is.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dataset": {
+                      "type": "object",
+                      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string",
+                          "description": "FK -> Anima, the owning identity."
+                        },
+                        "sodalitasId": {
+                          "type": "string",
+                          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "modality": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "video",
+                            "audio",
+                            "3d"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "sealed",
+                            "local",
+                            "remote"
+                          ]
+                        },
+                        "media": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "upload",
+                                  "generation"
+                                ]
+                              },
+                              "actumId": {
+                                "type": "string",
+                                "description": "FK -> Actum. Present iff source === 'generation'."
+                              },
+                              "addedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "addedBy": {
+                                "type": "string",
+                                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "url",
+                              "source",
+                              "addedAt"
+                            ]
+                          }
+                        },
+                        "captionsets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                              },
+                              "coverage": {
+                                "type": "string",
+                                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+                              },
+                              "captions": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "method",
+                              "coverage"
+                            ]
+                          }
+                        },
+                        "versions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "v": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "number"
+                              },
+                              "when": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "v",
+                              "count",
+                              "when"
+                            ]
+                          }
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "owner",
+                        "name",
+                        "modality",
+                        "custody",
+                        "media",
+                        "captionsets",
+                        "versions",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "dataset"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/data/datasets/{id}/media": {
       "post": {
         "summary": "Contribute media to a dataset the caller owns OR is a team member of, via either ingestion path — 'upload' (media already dropped via POST /storage/uploads/sign) or 'generation' (media resolved from the caller's own completed Acta). A member contributes their own generations: every named Actum must still be the caller's own and completed, which team sharing does not change. Each item records addedBy, the contributor's Anima id. Append-only: nothing is replaced, reordered or removed. The response carries the dataset with its new media, a new version entry whose count is the media count after the append, and every captionset's coverage recomputed against the new media count. A body matching neither ingestion shape is rejected with 400. A dataset the caller neither owns nor shares is reported as not found.",
@@ -3414,6 +4003,19 @@
                         "sodalitasId": {
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
                         },
                         "name": {
                           "type": "string"
@@ -3657,6 +4259,19 @@
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
                         },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -3898,6 +4513,19 @@
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
                         },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -4105,6 +4733,246 @@
         }
       }
     },
+    "/data/datasets/{id}/access": {
+      "post": {
+        "summary": "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dataset": {
+                      "type": "object",
+                      "description": "A training dataset: media + captionsets + versions. The training-data primitive.",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string",
+                          "description": "FK -> Anima, the owning identity."
+                        },
+                        "sodalitasId": {
+                          "type": "string",
+                          "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "modality": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "video",
+                            "audio",
+                            "3d"
+                          ]
+                        },
+                        "custody": {
+                          "type": "string",
+                          "enum": [
+                            "sealed",
+                            "local",
+                            "remote"
+                          ]
+                        },
+                        "media": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "Fetchable URL for this media item. Media produced by a run with private outputs is stored as a durable reference and resolved on every read into a short-lived presigned link, so this field is always fetchable and never needs presigning by the caller. Treat it as expiring: re-read the dataset rather than persisting the link."
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "upload",
+                                  "generation"
+                                ]
+                              },
+                              "actumId": {
+                                "type": "string",
+                                "description": "FK -> Actum. Present iff source === 'generation'."
+                              },
+                              "addedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "addedBy": {
+                                "type": "string",
+                                "description": "FK -> Anima. Who added this item — the contributor. Resolved from the authenticated caller at ingestion, never from the request body. Absent on items written before attribution was recorded."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "url",
+                              "source",
+                              "addedAt"
+                            ]
+                          }
+                        },
+                        "captionsets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "How the captions were produced, e.g. 'Florence-2', 'WD14', 'manual'."
+                              },
+                              "coverage": {
+                                "type": "string",
+                                "description": "How much of the media this pass covers, e.g. \"12/12\". Derived server-side from the captions present over the media count; a coverage supplied by the caller is ignored."
+                              },
+                              "captions": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "description": "Caption text per media item, keyed by media id (never by position — media is append-only). Sparse: a media item with no caption in this pass has no key. Absent on captionsets written before this field existed."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "method",
+                              "coverage"
+                            ]
+                          }
+                        },
+                        "versions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "v": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "number"
+                              },
+                              "when": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "v",
+                              "count",
+                              "when"
+                            ]
+                          }
+                        },
+                        "natum": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "mutatum": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "owner",
+                        "name",
+                        "modality",
+                        "custody",
+                        "media",
+                        "captionsets",
+                        "versions",
+                        "natum",
+                        "mutatum"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "dataset"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "private"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/data/datasets/{id}/archive": {
       "post": {
         "summary": "Archive a dataset the caller owns. Owner-only: a team member reads and contributes, but retiring the set stays with its owner. It leaves both dataset list routes and every picker built on them. It is not erased: references into it keep resolving, so a Muse session naming it as a mother dataset and a past run naming its media both continue to work. Reversible via POST /v1/data/datasets/:id/restore. Idempotent. A dataset the caller does not own is reported as not found.",
@@ -4138,6 +5006,19 @@
                         "sodalitasId": {
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
                         },
                         "name": {
                           "type": "string"
@@ -4344,6 +5225,19 @@
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
                         },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -4548,6 +5442,19 @@
                         "sodalitasId": {
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
                         },
                         "name": {
                           "type": "string"
@@ -4761,6 +5668,19 @@
                         "sodalitasId": {
                           "type": "string",
                           "description": "FK -> Sodalitas (the Team this dataset is shared with, set as teamId at creation). Every member may read it and contribute to it — append media, attach or edit captionsets. An overlay, not a second owner: archiving and restoring the dataset or one of its media items stay with owner. Absent means owner-only."
+                        },
+                        "access": {
+                          "type": "object",
+                          "description": "Single-axis access. { kind: 'public' } makes the dataset readable and usable (e.g. as a Muse session's mother) by anyone — see GET /v1/data/datasets/public. It is a READ grant only: appending media, attaching or editing a captionset still require ownership or team membership regardless of access. Absent means owner-only (plus sodalitasId's team, if set).",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "public",
+                                "private"
+                              ]
+                            }
+                          }
                         },
                         "name": {
                           "type": "string"
@@ -12891,6 +13811,10 @@
                           ],
                           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
                         },
+                        "moderationNote": {
+                          "type": "string",
+                          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+                        },
                         "externalRef": {
                           "type": "string",
                           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -13139,6 +14063,10 @@
                             ],
                             "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
                           },
+                          "moderationNote": {
+                            "type": "string",
+                            "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+                          },
                           "externalRef": {
                             "type": "string",
                             "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -13297,6 +14225,10 @@
                           ],
                           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
                         },
+                        "moderationNote": {
+                          "type": "string",
+                          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+                        },
                         "externalRef": {
                           "type": "string",
                           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -13346,6 +14278,103 @@
                   },
                   "required": [
                     "edition"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/editiones/{id}/moderation": {
+      "get": {
+        "summary": "The moderation gate's raw verdict for one publication (why it was held or rejected), regardless of current status — the companion to `/editiones/review` for a terminal `rejected` item, which has no queue entry to inspect. Restricted to the platform administrator; the raw reason text is not surfaced to the publishing author.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The moderation gate's raw verdict for one publication, platform-admin only.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "published",
+                        "rejected",
+                        "failed",
+                        "retracted"
+                      ]
+                    },
+                    "reviewOutcome": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "moderation": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "The recorded verdict, or null when this Editio was never held or rejected.",
+                      "properties": {
+                        "reason": {
+                          "type": "string",
+                          "description": "The classifier's raw verdict text."
+                        },
+                        "hold": {
+                          "type": "boolean",
+                          "description": "True only when this verdict HELD (vs. terminally rejected)."
+                        },
+                        "scannedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "scannedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                    "moderation"
                   ]
                 }
               }
@@ -13464,6 +14493,10 @@
                           ],
                           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
                         },
+                        "moderationNote": {
+                          "type": "string",
+                          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+                        },
                         "externalRef": {
                           "type": "string",
                           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -13513,6 +14546,82 @@
                   },
                   "required": [
                     "edition"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/editiones/{id}/preview": {
+      "get": {
+        "summary": "The media behind a held publication, for a reviewer to inspect before adjudicating (spec publish-review-visibility.md §2) — resolves the same view the moderation gate used to make its hold decision, for any artifact kind. Restricted to the platform administrator, same gate as approve/reject/confirm-csam.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The media behind a held publication, for a reviewer to inspect before adjudicating.",
+                  "properties": {
+                    "mediaUrls": {
+                      "type": "array",
+                      "description": "Every media url the moderation gate scanned for this artifact.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "description": "Richer per-item metadata when the artifact output carries it (e.g. an intella sample prompt). Omitted when unavailable.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "prompt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "mediaUrls"
                   ]
                 }
               }
@@ -13630,6 +14739,10 @@
                             "rejected"
                           ],
                           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+                        },
+                        "moderationNote": {
+                          "type": "string",
+                          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
                         },
                         "externalRef": {
                           "type": "string",
@@ -13797,6 +14910,10 @@
                             "rejected"
                           ],
                           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+                        },
+                        "moderationNote": {
+                          "type": "string",
+                          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
                         },
                         "externalRef": {
                           "type": "string",
@@ -16450,7 +17567,23 @@
                 "type": "string"
               },
               "message": {
-                "type": "string"
+                "type": "string",
+                "description": "The classified failure sentence — never raw internal text."
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "provision",
+                  "ssh",
+                  "bootstrap",
+                  "download",
+                  "execute"
+                ],
+                "description": "Where in the run's lifecycle it died. A closed enum carrying no free text, so it is present for every caller. Absent when the recorded cause does not identify a stage — absent means the platform does not know, and the field never guesses. Branch on this rather than on `message` or `detail`."
+              },
+              "detail": {
+                "type": "string",
+                "description": "OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id only). An operator artefact — pod ids, elapsed milliseconds, provider response bodies — provided so the payer can diagnose a run without a server log. Unstable by design: never parse it."
               }
             },
             "required": [
@@ -16601,6 +17734,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.partner",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.run",
       "httpStatus": 404
     },
@@ -16614,6 +17751,14 @@
     },
     {
       "code": "not_found.dataset",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.partner_request",
+      "httpStatus": 404
+    },
+    {
+      "code": "not_found.querela",
       "httpStatus": 404
     },
     {
@@ -16646,6 +17791,11 @@
       "code": "conflict.muse_session",
       "httpStatus": 409,
       "retryable": true
+    },
+    {
+      "code": "conflict.already_decided",
+      "httpStatus": 409,
+      "retryable": false
     },
     {
       "code": "license.restricted",

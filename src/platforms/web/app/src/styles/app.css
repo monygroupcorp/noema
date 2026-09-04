@@ -53,6 +53,12 @@
 .exec-tee,
 .exec-local{  --accent:#6a7079; --accent-soft:#9298a0; --accent-bg:rgba(106,112,121,.12); }  /* private execution — near-neutral grey, the signal fades */
 
+/* Headings take the display role. The design system has carried a --font-display token and a
+   .ds-h1..h4 ramp all along, and nothing in this app ever used them: headings are bare elements
+   styled here with size and weight and no family at all, so they have been inheriting the body
+   grotesque. One rule wires the role up; the token decides what it is. */
+h1,h2,h3,h4{font-family:var(--font-display);font-optical-sizing:auto}
+
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-sans);
@@ -1181,7 +1187,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ex-baseuri{display:block;padding:8px 10px;border:1px solid var(--hair);border-radius:8px;background:var(--panel);font-family:var(--font-mono);font-size:12px;word-break:break-all;user-select:all}
 .ex-hosted code{font-family:var(--font-mono)}
 .ex-consent{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text);cursor:pointer}
-.btn.lg{padding:13px 22px;font-size:14px;border-radius:11px;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2}
+.btn.lg{padding:13px 22px;font-size:14px;border-radius:11px;display:inline-flex;flex-direction:row;align-items:center;gap:8px;line-height:1.2}
+/* the stacked variant — a label over a sub-label — is what the column direction was written for.
+   Applied to every .btn.lg it also stacked the trailing icons the marketing CTAs pass, so the
+   landing page's primary action rendered as two lines with the arrow orphaned underneath it. */
+.btn.lg:has(.ex-btn-sub){flex-direction:column;gap:1px}
 .btn.good{background:var(--good);border:1px solid var(--good);color:#06241b}
 .btn.lg .ex-btn-sub{font-size:10px;font-weight:400;opacity:.8;font-family:var(--font-mono)}
 

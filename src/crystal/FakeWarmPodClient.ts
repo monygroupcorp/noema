@@ -99,9 +99,13 @@ export class FakeWarmPodClient implements RunPodClient, ModelInstallClient {
       }
     } finally {
       // Re-arm the idle deadline so the reaper gives this pod a fresh warm window.
+      // Extend only, never shorten — same rule as the real client, so fake mode
+      // reproduces the live behaviour of a host-set window surviving a job.
+      const floor = new Date(Date.now() + warmTtlMs)
+      const stored = (await this.materiae.findById(this.materia.id).catch(() => null))?.warmUntil
       await this.materiae.update(this.materia.id, {
         status: 'idle',
-        warmUntil: new Date(Date.now() + warmTtlMs),
+        warmUntil: stored && stored > floor ? stored : floor,
       }).catch(() => {})
     }
   }

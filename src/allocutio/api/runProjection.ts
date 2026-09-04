@@ -16,6 +16,7 @@ import type { ActumIndex } from '../../types/actumIndex.js'
 import type { Mandatum } from '../../types/mandatum.js'
 import { IMPETUS_USD_RATE } from '../../ledger/rates.js'
 import { classifyError } from '../../lib/classifyError.js'
+import { failureStage } from '../../lib/retryVerdict.js'
 import type { Run, RunOrder, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun } from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
@@ -45,13 +46,21 @@ export function toRun(actum: Actum): Run {
   if (actum.exitus !== undefined) run.exitus = actum.exitus
 
   if (actum.status === 'fractus') {
+    const raw = actum.error ?? 'run failed'
+    const stage = failureStage(raw)
     run.failure = {
       code: 'run.execution_error',
       // Classified copy, not the raw internal text. The stored `error` is an operator
       // artefact — pod ids, elapsed milliseconds, the recovery the platform was already
       // attempting — and it reads as a stack trace wherever it is surfaced. `classifyError`
       // is the same mapping the chat surfaces use, so one failure says one thing everywhere.
-      message: classifyError(actum.error ?? 'run failed'),
+      message: classifyError(raw),
+      // …but "not the raw text" was never a reason to say NOTHING structural. `stage` is a
+      // closed enum read off the same failure-mode table that decides retryability: it names
+      // WHERE the run died and carries no free text at all, so it leaks nothing and goes to
+      // every caller. It is absent when the recorded cause does not identify a stage — the
+      // field never guesses. (noema-390; the raw text itself is owner-only, see toRunDetail.)
+      ...(stage !== undefined ? { stage } : {}),
     }
   }
 
@@ -70,6 +79,7 @@ export function toRun(actum: Actum): Run {
  *                seed sentinel if that's what was stored) — present only when populated.
  *   pinnedModels the models pinned at cast time — present only when populated.
  *   modusVersion the cast-time modus version (Actum's internal `modusVersiono`), plain-named.
+ *   failure.detail  the recorded internal failure text, VERBATIM — see below.
  * `toRun()` itself is unchanged by this function's existence — this is a separate,
  * structurally owner-only projection, not a flag on `toRun`.
  * Pure.
@@ -80,6 +90,17 @@ export function toRunDetail(actum: Actum): Run {
   if (actum.aditus !== undefined) run.aditus = actum.aditus
   if (actum.pinnedModels !== undefined) run.pinnedModels = actum.pinnedModels
   if (actum.modusVersiono !== undefined) run.modusVersion = actum.modusVersiono
+
+  // The raw failure text, for the one party entitled to it: the payer. It is an operator
+  // artefact and stays out of `toRun` — a stranger, and every non-owner surface, still gets
+  // the classified sentence and nothing else. But the owner of a run that burned twenty
+  // minutes and real pod time should not have to infer a full disk from "Something went
+  // wrong", and this projection is already the owner-only seam (`aditus`, `pinnedModels`),
+  // reached only after `getRun`'s ownership check. Echoed verbatim, like `aditus`: no
+  // truncation, because the cause is as often in the tail as the head. (noema-390)
+  if (run.failure && actum.error !== undefined) {
+    run.failure = { ...run.failure, detail: actum.error }
+  }
 
   return run
 }
@@ -198,6 +219,10 @@ export function toEdition(e: Editio): Edition {
     updatedAt: e.mutatum.toISOString(),
   }
   if (e.reviewOutcome !== undefined) out.reviewOutcome = e.reviewOutcome
+  // Generic, author-safe note only — the raw classifier text (`e.moderation.reason`)
+  // stays admin-only (`CrystalApi.getEditionModeration`), never reaches this public
+  // projection (docs/spec/moderation-reject-reason.md §3(a) privacy note).
+  if (e.moderation !== undefined) out.moderationNote = 'Flagged by automated review.'
   if (e.externalRef !== undefined) out.externalRef = e.externalRef
   if (e.owners !== undefined) out.owners = e.owners
   if (e.license !== undefined) out.license = e.license

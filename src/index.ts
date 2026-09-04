@@ -9,6 +9,7 @@ import { MongoFlowContextStore } from './flow/MongoFlowContextStore.js'
 import { FlowRouter } from './flow/FlowRouter.js'
 import type { StepCallback, ResolutionCallback } from './flow/FlowRouter.js'
 import { ExecuteFlow } from './flow/flows/ExecuteFlow.js'
+import { parseManifest } from './crystal/datasetManifest.js'
 import { TelegramAllocutio } from './allocutio/telegram/TelegramAllocutio.js'
 import type { RouterDeps, IdentityResolver } from './allocutio/telegram/TelegramAllocutio.js'
 import { makeTelegramSender } from './allocutio/telegram/TelegramSenderAdapter.js'
@@ -21,17 +22,22 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
+import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
+import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
+import { createQuerelaAdminRouter } from './api/querela/querelaAdminRouter.js'
 import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
 import { mountCeremony } from './api/arcanum/mountCeremony.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
-import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId } from './allocutio/api/apiAcceptors.js'
+import { makeCredentialAcceptors, resolveOrCreateAnima, federatedExternusId, type ApiKeyAccount } from './allocutio/api/apiAcceptors.js'
 import { AgentJwtVerifier, parseJwksOverride } from './allocutio/api/AgentJwtVerifier.js'
 import { AgentProvisioner } from './crystal/AgentProvisioner.js'
 import { createAgentCompatRouter } from './allocutio/api/agentCompatRouter.js'
 import { createStorageRouter } from './allocutio/api/storageRouter.js'
 import { createTreasuryAdminRouter } from './api/internal/treasuryAdminRouter.js'
+import { createModelAdminRouter } from './api/internal/modelAdminRouter.js'
 import { createDepositsAdminRouter } from './api/internal/depositsAdminRouter.js'
 import { alchemyRpc, runBootReconcile, resolveReconcileIntervalMs, startReconcileTimer } from './crystal/DepositReconciler.js'
 import { MongoScanCursor } from './crystal/MongoScanCursor.js'
@@ -725,6 +731,16 @@ async function main(): Promise<void> {
     inceptor: ring.inceptor,
     actumIndex: ring.actumIndex,
     compositusCursor: ring.compositusCursor,
+    // `/run` casts any canonical atomic modus, three of which take the id of a stored,
+    // owner-bearing record. Wired for the same reason the REST run route is: the flow resolves
+    // that reference for the casting identity, and a store it cannot reach is a reference it
+    // has to refuse.
+    ownedResources: {
+      datasets: ring.datasets,
+      corpora: ring.corpora,
+      sodalitatum: ring.sodalitates,
+      inline: raw => parseManifest(raw) !== null,
+    },
   })
   router.register(executeFlow)
 
@@ -1068,20 +1084,15 @@ async function main(): Promise<void> {
   // JWT (env secret) + API-key (read-only users lookup) + anon {commitment} are live; web3
   // needs a nonce-challenge endpoint (deferred). All verification is defensive — any failure
   // degrades to auth.invalid, never a crash or a write. Real auth is validated on staging.
-  const verifyApiKeyToAccountId = async (apiKey: string): Promise<string | null> => {
-    try {
-      if (!apiKey.startsWith('ms2_') || apiKey.length < 12) return null
-      const prefix = apiKey.slice(0, 12)
-      const user = await mongo.db(DB_NAME).collection('users').findOne({ 'apiKeys.keyPrefix': prefix })
-      if (!user) return null
-      const hash = createHash('sha256').update(apiKey).digest('hex')
-      const keys = (user.apiKeys ?? []) as Array<{ keyPrefix?: string; keyHash?: string; status?: string }>
-      const match = keys.find(k => k.keyPrefix === prefix && k.keyHash === hash && k.status !== 'inactive')
-      return match ? String(user._id) : null
-    } catch {
-      return null
-    }
-  }
+  //
+  // `users.apiKeys[]` entries may carry an OPTIONAL `maxImpetusPerRun` (a stringified bigint —
+  // string so a value beyond Number.MAX_SAFE_INTEGER survives the round trip): a per-run spend
+  // ceiling minted onto the key itself, used for partner keys. `verifyApiKeyToAccountIdCore`
+  // (crystal/apiKeys.ts) passes it through raw; parsing/enforcement lives in `apiAcceptors`
+  // (hermetic, and an unreadable value refuses the key there rather than degrading to "no
+  // ceiling"). A key without the field is unchanged in every respect.
+  const usersCol = mongo.db(DB_NAME).collection('users')
+  const verifyApiKeyToAccountId = (apiKey: string): Promise<ApiKeyAccount | null> => verifyApiKeyToAccountIdCore(usersCol, apiKey)
   const apiResolver = new ApiIdentityResolver(makeCredentialAcceptors({
     personae: ring.personae,
     animae: ring.animae,
@@ -1101,6 +1112,27 @@ async function main(): Promise<void> {
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
   app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+  // Admin read + triage of those reports (list across all owners, close). Platform-admin
+  // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
+  // than shared via the CrystalApi facade.
+  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({ querelae: ring.querelae, identity: apiResolver }))
+
+  // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
+  // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution
+  // failure is never fatal — see partnerRequestRouter.ts's header). Mirrors querelaRouter's
+  // shape (own hand-rolled counted-window rate limit, no CrystalApi facade).
+  app.use('/v1/partner-requests', express.json(), createPartnerRequestRouter({
+    partnerRequests: ring.partnerRequests,
+    identity: apiResolver,
+  }))
+  // Admin review + approval-provisioning of those requests. Platform-admin only — see
+  // partnerAdminRouter.ts's header for why the gate is reproduced there rather than
+  // imported from CrystalApi, mirroring querelaAdminRouter.ts's precedent.
+  app.use('/v1/admin/partner-requests', express.json(), createPartnerAdminRouter({
+    partnerRequests: ring.partnerRequests,
+    partners: ring.partners,
+    identity: apiResolver,
+  }))
 
   // ── CAMEL agent onboarding (ADR-0011 phase 3) ─────────────────────────────────
   // Treasury config is injected (not a stored noun): prod has exactly one treasury.
@@ -1264,6 +1296,8 @@ async function main(): Promise<void> {
     erasureEnabled,
     anonPurseEnabled,
     bursarium: ring.bursarium,
+    partners: ring.partners,
+    apiKeys: { personae: ring.personae, usersCol },
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
   }))
@@ -1333,8 +1367,10 @@ async function main(): Promise<void> {
 
   // /widget — the Noema embed surface (ADR-0011 §7): the SDK + chrome-less,
   // themed per-agent & gallery views, composed from the public feed + owner appearance.
-  // Framing is a per-partner CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-sep)
-  // replacing the legacy `frame-ancestors *`; default 'self' (same-origin only).
+  // Framing resolves PER AGENT: a `Legatus.frameAncestors` (once a partner has one set)
+  // wins; otherwise the platform-wide CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-
+  // sep) applies unchanged; with neither set, the router's own default ('self') applies —
+  // replacing the legacy `frame-ancestors *`.
   const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
     .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
   app.use('/widget', createWidgetRouter({
@@ -1345,7 +1381,7 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
-    frameAncestors: widgetFrameAncestors,
+    frameAncestors: (legatus) => (legatus?.frameAncestors?.length ? legatus.frameAncestors : widgetFrameAncestors),
   }))
 
   // Owned purses (§7) — the crystal-core "delegation": an identified account mints a
@@ -1585,6 +1621,13 @@ async function main(): Promise<void> {
     legati: ring.legati,
     animae: ring.animae,
     treasury: camelTreasury,
+    ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
+  }))
+  // Model license clearance/backfill — reaches CrystalApi.setModelLicense's underlying store
+  // logic without needing the caller's session to resolve to PLATFORM_ANIMA_ID (which, at its
+  // documented default, is a phantom identity no session can ever be — see the router's header).
+  app.use('/internal/v1', express.json(), createModelAdminRouter({
+    intellarum: intellae,
     ...(INTERNAL_SECRET ? { secret: INTERNAL_SECRET } : {}),
   }))
 

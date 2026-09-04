@@ -7,15 +7,20 @@
 // sampled few, because the cost of a wrong row is either an order that gives up on a
 // failure a fresh machine would have fixed, or one that keeps re-running work that
 // already ran. Two rows carry that risk most directly and are called out below: the
-// ip-less host and the silent pod both fall to generic "something went wrong" copy in
-// `classifyError`, so nothing else in the system distinguishes them.
+// ip-less host and the silent pod are the two whose recorded text names no condition a
+// reader would recognise, so this table is what stands between them and a request that
+// gives up.
+//
+// The rows also carry a `stage` (noema-390) — WHERE the run died — read by
+// `classifyError` and published as `Run.failure.stage`. Verdict and stage are asserted
+// off the SAME rows here, because they are one table with two readers.
 // =============================================================================
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  INFRA_RETRY_PATTERNS, QUIT_PATTERNS, failureText, retryVerdict,
+  FAILURE_MODES, INFRA_RETRY_PATTERNS, QUIT_PATTERNS, failureStage, failureText, retryVerdict,
 } from '../../../src/lib/retryVerdict.js'
 import { EXPIRED_ERROR, SILENT_POD_ERROR } from '../../../src/crystal/expiryReaper.js'
 
@@ -51,6 +56,12 @@ const QUIT_CASES: Array<[string, string]> = [
   ['job failed on the pod', 'comfyrunner job failed: exit code 1'],
   ['execution error in the trainer', 'execution failed: cuDNN error CUDNN_STATUS_EXECUTION_FAILED'],
   ['out of memory', 'CUDA out of memory'],
+  // noema-390: three modes the table had no row for until the MiniMax H3 bring-up. Each
+  // already got 'quit' as the unmatched default, so naming them changes no verdict — see
+  // the parity test below.
+  ['model download failed on a full disk', 'model download failed: wget https://…/model.safetensors returned non-zero exit status 3'],
+  ['launch never reached a reachable host', 'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host — abandoned pod-a, pod-b'],
+  ['bootstrap budget exhausted', 'Pod pod-xyz provisioning budget of 900000ms exhausted — bootstrap stopped before command: pip install -r requirements.txt'],
 ]
 
 for (const [name, message] of QUIT_CASES) {
@@ -103,4 +114,86 @@ test('every table row is reachable — no row matches nothing, and none is a dup
       `quit row '${row.nomen}' has no asserted case`,
     )
   }
+})
+
+// =============================================================================
+// noema-390 — the stage half of the same table
+// =============================================================================
+
+const STAGE_CASES: Array<[string, string, string | undefined]> = [
+  ['provision failed', 'RunPod pod provision failed: no capacity for the requested GPU class', 'provision'],
+  ['ip-less host', 'Pod pod-abc abandoned after 128476ms as an ip-less host', 'provision'],
+  ['ssh not ready', 'Pod pod-3 SSH not ready within 300000ms', 'ssh'],
+  ['launch exhausted without a reachable host', 'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host', 'ssh'],
+  ['runtime never came up', 'comfyrunner did not become ready within 900000ms', 'bootstrap'],
+  ['bootstrap budget exhausted', 'Pod p provisioning budget of 900000ms exhausted — bootstrap stopped before command: pip install x', 'bootstrap'],
+  ['silent pod', SILENT_POD_ERROR, 'bootstrap'],
+  ['full disk during the weight download', 'model download failed: wget returned non-zero exit status 3', 'download'],
+  ['throttled', 'download throttled to 3.1 MB/s (min 12)', 'download'],
+  ['job failed on the pod', 'comfyrunner job failed: exit code 1', 'execute'],
+  // The two honest blanks: the outer deadline elapsing says WHEN, never WHERE, and an
+  // unrecognised failure is exactly that.
+  ['actum expired', EXPIRED_ERROR, undefined],
+  ['unrecognised', 'a brand new failure nobody has classified', undefined],
+]
+
+for (const [name, message, stage] of STAGE_CASES) {
+  test(`failureStage: ${name} → ${stage ?? 'no stage'}`, () => {
+    assert.equal(failureStage(new Error(message)), stage, message)
+    assert.equal(failureStage(message), stage, 'the bare recorded string reads the same as the Error')
+  })
+}
+
+test('the typed ip-less marker carries a stage too, even when the message says nothing', () => {
+  assert.equal(failureStage(Object.assign(new Error('bail'), { iplessHost: true })), 'provision')
+})
+
+test('naming the three new modes changed NO verdict — they get the default they already had', () => {
+  // The rows added for noema-390 are appended at the END of the table and every one carries
+  // verdict 'quit', which is exactly what an unmatched string returns. This asserts the
+  // property rather than trusting the placement: for each new row, the verdict equals the
+  // verdict the same text would have had with that row absent — 'quit', by default.
+  const NEW_ROWS = ['model-download-failed', 'ssh-exhausted', 'bootstrap-budget']
+  for (const nomen of NEW_ROWS) {
+    const row = FAILURE_MODES.find(r => r.nomen === nomen)
+    assert.ok(row, `row '${nomen}' is missing`)
+    assert.equal(row?.verdict, 'quit',
+      `'${nomen}' must keep the default verdict — whether it SHOULD be retried is noema-391's call, not this table's to change silently`)
+  }
+  // And nothing earlier in the table was reordered: the quit answers still precede the
+  // infra ones, which is what keeps a trainer timeout from reading as a provisioning fault.
+  const firstInfra = FAILURE_MODES.findIndex(r => r.verdict === 'infra-retry')
+  const lastOriginalQuit = FAILURE_MODES.findIndex(r => r.nomen === 'execution-error')
+  assert.ok(lastOriginalQuit >= 0 && lastOriginalQuit < firstInfra,
+    'the original quit rows must still be consulted before the infra rows')
+})
+
+test('every stage a row declares is one of the five published values', () => {
+  // `Run.failure.stage` is public API. A row inventing a sixth value would ship it.
+  const PUBLISHED = new Set(['provision', 'ssh', 'bootstrap', 'download', 'execute'])
+  for (const row of FAILURE_MODES) {
+    if (row.stage !== undefined) {
+      assert.ok(PUBLISHED.has(row.stage), `row '${row.nomen}' declares unpublished stage '${row.stage}'`)
+    }
+  }
+})
+
+test('every stage row is exercised, and every published stage is reachable', () => {
+  // The sibling of the reachability guard above, for the stage half: a row whose stage
+  // nothing asserts is an unverified claim, and a stage no row can produce is dead API.
+  for (const row of FAILURE_MODES) {
+    if (row.stage === undefined) continue
+    assert.ok(
+      STAGE_CASES.some(([, message, stage]) => stage === row.stage && row.pattern.test(message)),
+      `row '${row.nomen}' (stage '${row.stage}') has no asserted case`,
+    )
+  }
+  const produced = new Set(FAILURE_MODES.map(r => r.stage).filter(Boolean))
+  assert.deepEqual([...produced].sort(), ['bootstrap', 'download', 'execute', 'provision', 'ssh'])
+})
+
+test('the derived views are the table, partitioned — no row is lost or duplicated', () => {
+  assert.equal(INFRA_RETRY_PATTERNS.length + QUIT_PATTERNS.length, FAILURE_MODES.length)
+  const names = FAILURE_MODES.map(r => r.nomen)
+  assert.equal(new Set(names).size, names.length, 'two rows share a name')
 })

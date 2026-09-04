@@ -4,7 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
 import { useSession } from '../state/session';
-import type { Editio } from '../lib/editio';
+import type { Editio, EditionPreviewItem } from '../lib/editio';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 
 // Feed-review — the moderation held-queue (publishing spec §4). The moderation gate HOLDS
@@ -118,12 +118,19 @@ function ReviewRow({ editio, admin, onDone, onError }: {
 }) {
   const [busy, setBusy] = useState<null | 'approve' | 'reject' | 'csam'>(null);
   const [confirmCsam, setConfirmCsam] = useState(false);
-  const [preview, setPreview] = useState<{ url: string; kind: string } | { text: string } | 'none' | null>(null);
+  const [preview, setPreview] = useState<
+    { url: string; kind: string } | { text: string } | { gallery: EditionPreviewItem[] } | 'none' | null
+  >(null);
   const [revealing, setRevealing] = useState(false);
 
-  // Reveal the held content on demand — fetch the referenced artifact's output. Actum artifacts
-  // resolve via the run endpoint; anything else (or a scope/permission miss) falls back to "no
-  // inline preview" so the reviewer can still act on the metadata + external handle.
+  // Reveal the held content on demand. An `actum` (a generation run) resolves via the run
+  // endpoint, same as always. Any OTHER kind — an `intella` model promotion is the case
+  // MODERATION_MANUAL_REVIEW routes through here routinely, and this stays kind-agnostic so
+  // a future `collectio` hold needs no new branch — goes through the admin-only preview
+  // route, which resolves the SAME media the moderation gate itself scanned to make its hold
+  // decision (up to 8 sample images for a model, so a multi-image gallery, not a single url).
+  // A scope/permission miss or empty result falls back to "no inline preview" so the reviewer
+  // can still act on the metadata + external handle.
   async function reveal() {
     if (revealing || preview) return;
     setRevealing(true);
@@ -134,6 +141,10 @@ function ReviewRow({ editio, admin, onDone, onError }: {
         if (media) { setPreview(media); return; }
         const text = textFromOutput(run.exitus);
         if (text) { setPreview({ text }); return; }
+      } else {
+        const p = await api.getEditionPreview(editio.id);
+        const gallery = p.items?.length ? p.items : p.mediaUrls.map((url) => ({ url }));
+        if (gallery.length > 0) { setPreview({ gallery }); return; }
       }
       setPreview('none');
     } catch { setPreview('none'); }
@@ -173,6 +184,21 @@ function ReviewRow({ editio, admin, onDone, onError }: {
           <div className="sub">No inline preview available. {editio.externalRef && <>Handle: <code className="mono">{editio.externalRef}</code></>}</div>
         ) : 'text' in preview ? (
           <div className="sidecard"><p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{preview.text}</p></div>
+        ) : 'gallery' in preview ? (
+          // A model hold can carry up to 8 sample images — a scrollable thumbnail row rather
+          // than the single-image shape below. Kept plain; this exists so a reviewer sees
+          // SOMETHING instead of nothing, not to be polished.
+          <div style={{ display: 'flex', gap: 'var(--s2)', overflowX: 'auto', maxWidth: 480, paddingBottom: 'var(--s2)' }}>
+            {preview.gallery.map((item, i) => (
+              <img
+                key={item.url + i}
+                src={item.url}
+                alt={item.prompt ?? ''}
+                title={item.prompt}
+                style={{ height: 120, width: 120, objectFit: 'cover', borderRadius: 'var(--r2)', flex: '0 0 auto' }}
+              />
+            ))}
+          </div>
         ) : (
           <div style={{ maxWidth: 360 }}>
             {preview.kind === 'image' && <img src={preview.url} alt="" style={{ maxWidth: '100%', borderRadius: 'var(--r2)' }} />}

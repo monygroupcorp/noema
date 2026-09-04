@@ -1,0 +1,278 @@
+/* the landing page — the public marketing surface.
+   Every selector here is namespaced under `.lp`. The generic names this page wants — .anon,
+   .stage, .deck, .cat, .how, .pay — already exist in app.css and landing.css and are used by
+   seven other screens, so an unnamespaced rule here would reach into Account, Keyring, Card,
+   Space and the concierge thread. */
+/* the design lab — a dev-only surface for judging the landing page's image mechanism.
+   The bar is an instrument; everything under .lp is the candidate page being judged. */
+/* ── the candidate ─────────────────────────────────────────────────────────────────────── */
+/* The app sets `fund-bearer` / `exec-*` on <html> to step the accent back as the user moves
+   toward anonymity — a signal about *their* session. On a marketing page there is no session to
+   signal, so the page inherited a desaturated slate accent and rendered its primary CTA looking
+   disabled. noema-signature.css says this in its own words: apply the trust fade to the signals,
+   never to a whole surface, because a faded CTA reads as a dead one. The marketing surface takes
+   the accent back. */
+.lp{--nav-h:70px;padding-bottom:var(--s10);
+  --accent:var(--color-accent);
+  --accent-soft:var(--color-accent-hover);
+  --accent-bg:var(--color-accent-subtle)}
+.lp-cand-nav{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--s4) var(--px-section);height:var(--nav-h)}
+.lp-cand-nav .right{display:flex;align-items:center;gap:var(--s3)}
+
+/* the hero owns the first screen and shares it with nothing. Everything below begins after a
+   deliberate scroll, which is what makes the deck's arrival an event rather than a continuation. */
+.lp-cand-hero{position:relative;max-width:1080px;margin:0 auto;
+  min-height:calc(100svh - var(--nav-h));min-height:calc(100vh - var(--nav-h));
+  padding:var(--s9) var(--px-section) var(--s10);text-align:center;
+  display:grid;align-content:center;justify-content:stretch}
+.lp-cand-hero h1{font-size:clamp(34px,6vw,74px);line-height:var(--hero-leading,1.12);
+  letter-spacing:-.04em;font-weight:600;margin:0;color:var(--text)}
+/* The display face is a single token on the marketing surface, so the page's voice can change
+   without touching the app's. Every heading that carries the argument reads from it.
+   Fraunces is the default: a display serif, set light and large, on a ground where the whole
+   category ships a neutral geometric sans. */
+/* Three roles, three faces, the way a publication is set: a serif that carries the voice, a
+   grotesque that carries the reading, and a mono that carries the instruments — every number,
+   label, eyebrow and readout on the page. Venice runs the identical structure (Canela / Aeonik /
+   Aeonik Fono); the mono half is the one most pages forget. */
+.lp{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em;
+  --font-label:var(--font-mono)}
+.lp .mono,.lp .lp-cat-brag dd,.lp .lp-modes-index,.lp .lp-cat-chips li .mono{
+  font-family:var(--font-label)}
+/* body text under a display serif wants a touch more room than UI copy does */
+.lp .lp-beat p,.lp .lp-cand-hero p,.lp .lp-cat-sub,.lp .lp-modes-head p,
+.lp .lp-pay-sub,.lp .lp-how-sub{line-height:1.65}
+.lp-face-geist{--font-display:var(--font-sans);--display-weight:600;--display-track:-.04em}
+.lp-face-instrument{--font-display:"Instrument Serif",Georgia,serif;--display-weight:400;--display-track:-.015em}
+.lp-face-newsreader{--font-display:"Newsreader",Georgia,serif;--display-weight:500;--display-track:-.02em}
+.lp-face-fraunces{--font-display:"Fraunces",Georgia,serif;--display-weight:400;--display-track:-.022em}
+.lp-face-martian{--font-display:var(--font-marquee)}
+/* A display serif is set light and large, the way Venice sets Canela — a serif at 600 weight is
+   a headline shouting, and the whole reason to reach for one is that it does not have to.
+   `font-optical-sizing` lets the variable face bring its high-contrast cut to the big sizes and
+   its sturdy one to the small, which is the entire argument for a variable serif. */
+.lp-cand-hero h1,.lp .lp-beat h2,.lp .lp-modes-head h2,.lp .lp-pay h2,.lp .open h2,
+.lp .lp-mint h2,.lp .lp-how h2,.lp .lp-anon h2,.lp .lp-cand-end h2,.lp .lp-cat h2,
+.lp .lp-cat-brag dt{
+  font-weight:var(--display-weight);letter-spacing:var(--display-track);
+  font-optical-sizing:auto}
+/* a serif reads smaller than a grotesque at the same size — the hero takes the size back */
+.lp-cand-hero h1{font-size:clamp(38px,6.6vw,84px)}
+.lp-face-geist .lp-cand-hero h1{font-size:clamp(34px,6vw,74px)}
+.lp-cand-hero h1,.lp .lp-beat h2,.lp .lp-cat-brag dt,.lp .lp-modes-head h2,
+.lp .lp-pay h2,.lp .open h2,.lp .lp-mint h2,.lp .lp-how h2,.lp .lp-anon h2,
+.lp .lp-cand-end h2,.lp .lp-cat h2{font-family:var(--font-display)}
+/* the marquee register is uppercase and much wider — it needs its own size to fit the same box */
+.lp-face-martian .lp-cand-hero h1{font-weight:800;text-transform:uppercase;
+  font-size:clamp(22px,3.6vw,44px);letter-spacing:-.01em}
+.lp-cand-hero h1 .dim{color:var(--muted)}
+.lp-cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
+.lp-cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
+.lp-cand-hero .lp-cand-cta{display:block;margin-top:var(--s7)}
+/* app.css:1184 sets `.btn.lg{flex-direction:column}` — written for a stacked label/sub-label,
+   but the landing CTAs pass a trailing icon, so the arrow lands under the words. Corrected
+   locally here; the shared rule is a live defect on `/` and is not this file's to change. */
+.lp .btn.lg{flex-direction:row;gap:var(--s2)}
+
+/* the coda run is the quieter second pass — inset and shorter, so it returns without repeating */
+.lp-deck-coda{max-width:1180px;margin:0 auto;border-radius:var(--r-lg)}
+
+/* a held beat — one statement, alone on the screen, for as long as the reader stays with it.
+   Three small cards in a row say the same words and none of them land. */
+.lp-beat{max-width:760px;margin:0 auto;padding:0 var(--px-section);text-align:center}
+/* a beat that sits hard left or hard right. Three centred statements in a row read as a
+   template; where a beat sits is doing as much work as what it says.
+   `.lp-beat` centres itself with `margin: 0 auto`, and an auto margin on a grid item makes it
+   shrink-to-fit and re-centre — so an aligned beat has to drop the margin on the side it is
+   pinning to, not just change `text-align`. */
+.lp-beat.lp-beat-left,.lp-beat.lp-beat-right{max-width:none;width:auto}
+.lp-beat.lp-beat-left{margin-left:0;margin-right:auto;text-align:left}
+.lp-beat.lp-beat-right{margin-left:auto;margin-right:0;text-align:right}
+.lp-beat.lp-beat-left h2,.lp-beat.lp-beat-right h2{max-width:18ch}
+.lp-beat.lp-beat-left p{max-width:38ch;margin-left:0;margin-right:0}
+.lp-beat.lp-beat-right p{max-width:38ch;margin-left:auto;margin-right:0}
+.lp-beat .lp-beat-n{display:block;color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.18em;
+  margin-bottom:var(--s6)}
+.lp-beat h2{font-size:clamp(30px,4.6vw,58px);line-height:1.06;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s5)}
+.lp-beat p{color:var(--muted);font-size:clamp(15px,1.6vw,19px);line-height:1.55;max-width:520px;
+  margin:0 auto}
+.lp-beat .lp-beat-cta{display:block;margin-top:var(--s8)}
+.lp-face-martian .lp-beat h2{font-weight:800;text-transform:uppercase;
+  font-size:clamp(19px,2.6vw,32px);letter-spacing:-.01em}
+
+/* ── theming ────────────────────────────────────────────────────────────────────────────────
+   Everything here is scoped to `.lp`, never to the design system, because these tokens are
+   shared with the running app. The marketing surface gets to develop its own register first; if
+   the direction proves out it propagates inward, not the other way round.
+
+   `editorial` is the register the serif asks for: ink rather than screen-white, hairlines rather
+   than boxes, corners that read as print rather than as software, and an accent spent rarely.
+   ──────────────────────────────────────────────────────────────────────────────────────────── */
+.lp-theme-editorial{
+  /* Ink, not UI white. #e7eaef is a cool screen grey tuned for small sans; a display serif at
+     weight 400 wants a warmer, slightly softer note or it reads clinical. */
+  --ink:#f2efe9;
+  --ink-quiet:#a09a92;
+  /* Print corners. The app rounds generously because it is full of controls; a page of type and
+     photographs is not, and 14px radii on an editorial layout read as software. */
+  --r-lg:3px; --r:2px; --r-sm:2px; --r-pill:999px;
+  --hair:#1e1d1b;
+  --text:var(--ink);
+  --muted:var(--ink-quiet);
+}
+.lp-theme-editorial .lp-cand-hero h1,
+.lp-theme-editorial .lp-beat h2,
+.lp-theme-editorial .lp-cat-brag dt,
+.lp-theme-editorial .lp-modes-head h2,
+.lp-theme-editorial .lp-cat h2,
+.lp-theme-editorial .lp-pay h2,
+.lp-theme-editorial .open h2,
+.lp-theme-editorial .lp-mint h2,
+.lp-theme-editorial .lp-how h2,
+.lp-theme-editorial .lp-anon h2,
+.lp-theme-editorial .lp-cand-end h2{color:var(--ink)}
+/* the primary action stops being a rounded software button and becomes a printed one */
+.lp-theme-editorial .btn{border-radius:2px}
+.lp-theme-editorial .btn-ghost{border-radius:2px}
+
+/* ── accent discipline ──────────────────────────────────────────────────────────────────────
+   Blue was doing buttons, rules, bars, chips and the index at once, and an accent that appears
+   everywhere is not an accent. Three colours, three jobs: ink is the voice, blue is data and
+   instruments, amber is the economy. The CTA leaves the accent and takes the ink.
+   ──────────────────────────────────────────────────────────────────────────────────────────── */
+.lp-cta-ink .btn{background:var(--ink,var(--text));color:var(--bg);border:1px solid transparent}
+.lp-cta-ink .btn:hover{filter:none;background:#fff}
+.lp-cta-outline .btn{background:transparent;color:var(--text);
+  border:1px solid color-mix(in srgb,var(--text) 34%,transparent)}
+.lp-cta-outline .btn:hover{filter:none;border-color:var(--text)}
+/* the hero's rule is punctuation, not a readout — it stops spending the data colour */
+.lp-cta-ink .lp-cand-hero .noema-rule,
+.lp-cta-outline .lp-cand-hero .noema-rule{background:var(--text);opacity:.28}
+.lp-theme-editorial .lp-deck-card{border-radius:3px}
+.lp-theme-editorial .mode-shot{border-radius:0}
+
+/* the closing door — a CTA in normal flow, not a held argument */
+.lp-cand-end{padding:var(--py-section) 0}
+.lp-cand-end .lp-cand-end-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;
+  max-width:38ch;margin:0 auto var(--s7)}
+
+/* `pass` mode has no stages, so the beats need their own rhythm in normal flow */
+.lp-cand-flow{padding:var(--py-section) 0}
+
+/* nav as a capability map — the competitors' nav names jobs; ours named two settings pages */
+.lp-cand-nav .lp-cand-navlinks{display:flex;align-items:center;gap:var(--s6)}
+.lp-cand-nav .lp-cand-navlinks a{color:var(--muted);font-size:var(--fs-base);text-decoration:none}
+.lp-cand-nav .lp-cand-navlinks a:hover{color:var(--text)}
+.lp-cand-hero .lp-cand-cta{display:flex;align-items:center;justify-content:center;gap:var(--s3);flex-wrap:wrap}
+/* the only thing in the hero that is not the message: a hairline that draws itself downward,
+   once a cycle, so the screen admits there is something under it without saying "scroll". */
+.lp-cand-hero .lp-cand-more{position:absolute;left:50%;bottom:var(--s9);width:1px;height:56px;
+  transform:translateX(-50%);overflow:hidden}
+.lp-cand-hero .lp-cand-more::after{content:"";position:absolute;inset:0;background:var(--accent);
+  opacity:.5}
+@media (prefers-reduced-motion: no-preference){
+  .lp-cand-hero .lp-cand-more::after{animation:cand-draw 2.8s var(--ease) infinite}
+}
+@keyframes cand-draw{
+  0%{transform:translateY(-100%)}
+  55%,100%{transform:translateY(100%)}
+}
+
+/* how it works — the sequence as a designed object, not three narrated boxes */
+.lp-how{padding:var(--py-section) 0}
+.lp-how .lp-how-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-how h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0 0 var(--s4);max-width:16ch}
+.lp-how .lp-how-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);margin:0}
+.lp-how .lp-how-steps{list-style:none;margin:var(--s10) 0 0;padding:0;display:grid;
+  grid-template-columns:repeat(4,1fr);gap:var(--s7)}
+.lp-how .lp-how-steps li{border-top:1px solid var(--hair);padding-top:var(--s5)}
+.lp-how .lp-how-steps .mono{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.16em}
+.lp-how .lp-how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
+.lp-how .lp-how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
+
+/* ready for market — the block that breaks the page's centred rhythm, and the one that shows
+   machinery instead of describing it. A visitor who reads the two lines of baseURI knows more
+   about what this does than three paragraphs would tell them. */
+.lp-mint{padding:var(--py-section) 0}
+.lp-mint .lp-mint-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);
+  display:grid;grid-template-columns:1fr 1fr;gap:var(--s10);align-items:start}
+.lp-mint h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s5);max-width:14ch}
+.lp-mint .lp-mint-copy > p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0}
+.lp-mint .lp-mint-list{list-style:none;margin:var(--s8) 0 0;padding:0;display:grid;gap:var(--s5)}
+.lp-mint .lp-mint-list li{border-top:1px solid var(--hair);padding-top:var(--s4)}
+.lp-mint .lp-mint-list .t{display:block;color:var(--text);font-size:var(--fs-md)}
+.lp-mint .lp-mint-list .d{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.55;margin-top:var(--s2)}
+
+.lp-mint .lp-mint-code{border:1px solid var(--hair);border-radius:var(--r-lg);background:var(--panel);
+  overflow:hidden}
+.lp-mint .lp-mint-code-h{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;
+  padding:var(--s4) var(--s6);border-bottom:1px solid var(--hair)}
+.lp-mint .lp-mint-code pre{margin:0;padding:var(--s7) var(--s6);overflow-x:auto}
+.lp-mint .lp-mint-code pre:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.lp-mint .lp-mint-code code{color:var(--accent-soft);font-size:var(--fs-s);line-height:1.9;white-space:pre}
+.lp-mint .lp-mint-code-f{color:var(--faint);font-size:var(--fs-xs);line-height:1.6;padding:var(--s5) var(--s6);
+  border-top:1px solid var(--hair);background:var(--bg)}
+
+/* royalties — the sentence neither benchmark can say, bound to the rates that pay it */
+/* The economy palette, not a new one: app.css assigns gold/amber to credits and royalties, so
+   the block about royalties is the one place on this page that is allowed to be warm. It is
+   also the page's only chromatic event, which is what makes it read as a decision. */
+.lp-pay{padding:var(--py-section) 0;
+  background:radial-gradient(120% 100% at 15% 50%, var(--amber-bg) 0%, transparent 68%);
+  border-top:1px solid color-mix(in srgb,var(--amber) 18%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--amber) 18%,transparent)}
+.lp-pay .lp-pay-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section)}
+.lp-pay h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:0 0 var(--s4);max-width:18ch;color:var(--gold)}
+.lp-pay .lp-pay-sub{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;max-width:46ch;margin:0}
+.lp-pay .lp-pay-split{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s7);margin:var(--s10) 0 0}
+.lp-pay .lp-pay-split > div{border-top:1px solid color-mix(in srgb,var(--amber) 28%,transparent);
+  padding-top:var(--s5)}
+.lp-pay .lp-pay-split dt{font-size:clamp(40px,5.4vw,76px);line-height:1;letter-spacing:-.045em;
+  font-weight:600;color:var(--amber)}
+.lp-pay .lp-pay-split dd{margin:var(--s5) 0 0}
+.lp-pay .lp-pay-split .who{display:block;color:var(--text);font-size:var(--fs-md);line-height:1.45}
+.lp-pay .lp-pay-split .sub{display:block;color:var(--faint);font-size:var(--fs-s);line-height:1.5;margin-top:var(--s2)}
+
+/* anonymity — the block that sits where a competitor puts SOC 2 */
+.lp-anon{padding:var(--py-section) 0}
+.lp-anon .lp-anon-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);max-width:720px;text-align:center}
+.lp-anon .lp-anon-tag{display:inline-flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);
+  letter-spacing:.14em;text-transform:uppercase;color:var(--accent-soft);
+  border:1px solid var(--hair);border-radius:var(--r-pill);padding:var(--s1) var(--s4)}
+.lp-anon .lp-anon-tag svg.lucide{width:13px;height:13px}
+.lp-anon h2{font-size:clamp(26px,3.4vw,44px);line-height:1.08;letter-spacing:-.035em;font-weight:600;
+  margin:var(--s6) 0 var(--s5)}
+.lp-anon p{color:var(--muted);font-size:clamp(14px,1.4vw,17px);line-height:1.6;margin:0 auto;max-width:52ch}
+.lp-anon .lp-anon-links{display:flex;gap:var(--s3);justify-content:center;flex-wrap:wrap;margin-top:var(--s7)}
+
+/* the marked gaps — where the page has nothing honest to put yet */
+.lp-gaps{padding:var(--py-section) 0}
+.lp-gaps .lp-gaps-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+  grid-template-columns:1fr 1fr;gap:var(--s6)}
+.lp-gaps .gap{border:1px dashed var(--faint);border-radius:var(--r-lg);padding:var(--s7);min-height:180px}
+.lp-gaps .gap-label{display:block;color:var(--muted);font-size:var(--fs-xs);letter-spacing:.06em;
+  margin-bottom:var(--s4)}
+.lp-gaps .gap p{color:var(--faint);font-size:var(--fs-s);line-height:1.6;margin:0}
+
+/* footer as a capability index — the cheapest information density on the page */
+.lp-cand-foot{border-top:1px solid var(--hair);padding:var(--s10) 0 var(--s9)}
+.lp-cand-foot .lp-cand-foot-in{max-width:1080px;margin:0 auto;padding:0 var(--px-section);display:grid;
+  grid-template-columns:1.4fr repeat(4,1fr);gap:var(--s7)}
+.lp-cand-foot h3{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;
+  font-weight:400;margin:0 0 var(--s4)}
+.lp-cand-foot ul{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
+.lp-cand-foot a{color:var(--muted);font-size:var(--fs-s);text-decoration:none}
+.lp-cand-foot a:hover{color:var(--text)}
+
+@media(max-width:860px){
+  .lp-cand-nav .lp-cand-navlinks{display:none}
+  .lp-how .lp-how-steps{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+  .lp-pay .lp-pay-split{grid-template-columns:1fr;gap:var(--s6)}
+  .lp-mint .lp-mint-in{grid-template-columns:1fr;gap:var(--s8)}
+  .lp-gaps .lp-gaps-in{grid-template-columns:1fr}
+  .lp-cand-foot .lp-cand-foot-in{grid-template-columns:repeat(2,1fr);gap:var(--s7)}
+}

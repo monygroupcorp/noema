@@ -56,6 +56,20 @@ export const Errors = {
   inputMalformed: (message = 'Malformed request body') => new ApiError('input.malformed', message, 400),
   invalidAditus: (details?: Record<string, unknown>) =>
     new ApiError('input.invalid_aditus', 'Inputs do not match the flow schema', 422, { details }),
+  /**
+   * A value that violates the legality its port DECLARES (`Porta.min/max/step`, noema-396) — as
+   * distinct from a key the flow does not declare at all. Same code, because both are the same
+   * fact ("these inputs do not match this flow's schema") and codes are append-only; the message
+   * is the one that differs, because the whole point is that the caller is told the rule instead
+   * of discovering it 28 minutes into a paid run.
+   */
+  aditusOutOfRange: (porta: string, regula: string, value?: number) =>
+    new ApiError(
+      'input.invalid_aditus',
+      `Input '${porta}' must be ${regula}${value !== undefined ? ` — got ${value}` : ''}`,
+      422,
+      { details: { porta, regula, ...(value !== undefined ? { value } : {}) } },
+    ),
   notFoundFlow: (id: string) => new ApiError('not_found.flow', `Flow '${id}' not found`, 404),
   notFoundFundamentum: (id: string) => new ApiError('not_found.fundamentum', `Fundamentum '${id}' not found`, 404),
   notFoundStudio: (id: string) => new ApiError('not_found.studio', `Studio '${id}' not found`, 404),
@@ -99,6 +113,16 @@ export const Errors = {
   secretRequired: (provider: string, message?: string) =>
     new ApiError('secret.required', message ?? `Connect a ${provider} token to import this gated model`, 422, { details: { provider } }),
   notFoundAdapter: (key: string) => new ApiError('not_found.adapter', `Publication destination '${key}' is not available`, 404),
+  notFoundPartnerRequest: (id: string) => new ApiError('not_found.partner_request', `Partner request '${id}' not found`, 404),
+  /** A partner request PATCH targets a request that already has a decision (approved/declined).
+   *  Refused rather than re-run — re-approving would risk minting a SECOND API key for the
+   *  same request, and an already-issued key is never re-shown (show-once). */
+  conflictAlreadyDecided: (id: string, status: string) =>
+    new ApiError('conflict.already_decided', `Partner request '${id}' was already ${status}`, 409),
+  /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
+   *  both look identical from the caller's side: "you don't have partner access". */
+  notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),
+  notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
   insufficientSigna: (details?: Record<string, unknown>) =>
     new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
   capTooLow: (details?: Record<string, unknown>) =>
@@ -112,6 +136,9 @@ export const Errors = {
   reportUnavailable: () => new ApiError('internal.unavailable', 'The revenue report is not available on this deployment (no revenue book configured)', 503, { retryable: true }),
   /** The fiat (Stripe) funding rail is not configured on this deployment (missing keys / stores). */
   paymentsUnavailable: () => new ApiError('internal.unavailable', 'Fiat payments are not available on this deployment (Stripe is not configured)', 503, { retryable: true }),
+  /** No `PartnerStore` wired into this deployment's router — distinct from `notFoundPartner`
+   *  (the store IS wired and simply has no record for this caller). */
+  partnerDirectoryUnavailable: () => new ApiError('internal.unavailable', 'The partner directory is not available on this deployment', 503, { retryable: true }),
   priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
   /** Account erasure is globally disabled on this deployment (feature flag off). Only reachable
    *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */
