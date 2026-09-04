@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type FlowSummary, type ModelCard } from '../lib/api';
+import { api, type FlowSummary, type ModelCard, type Pack } from '../lib/api';
 
 // The landing page's breadth claim is not written down anywhere. It is read from the same
 // catalogue the product runs on, so it cannot drift from what noema actually carries and it
@@ -22,10 +22,32 @@ export interface CatalogSummary {
   kinds: Tally[];
   /** Low-rank adaptations specifically — the trained identities. */
   loras: number;
+  /** The model families the platform runs, alphabetical. The roster — what a competitor would
+   *  put up as a wall of borrowed logos, and what we can state as fact instead. */
+  families: string[];
   /** What those identities were trained on, commonest base first. Aggregate rather than a list
    *  of names: it answers what people actually build on here, and it does not put a stranger's
    *  slug on the front page. */
   bases: Tally[];
+}
+
+/**
+ * The family a model belongs to, from its own name.
+ *
+ * The catalogue stores what it runs, precisely: `Wan2.2 T2V — high-noise unet (14B, fp8 scaled)`.
+ * A roster wants the family, once — `Wan` — not four quantisations of it. So the name is cut at
+ * its first qualifier, reduced to its leading token, and stripped of a trailing version.
+ *
+ * It is approximate on purpose, and it is derived rather than listed: a hand-kept roster is a
+ * second place the truth lives, and it goes stale the first time someone adds a model.
+ */
+export function modelFamily(nomen: string): string {
+  const head = nomen.split(/\s+—\s+| \(/)[0].trim();
+  if (/^Stable Diffusion/i.test(head)) return 'Stable Diffusion';
+  const first = head.split(/\s+/)[0] ?? '';
+  // `FLUX.2` and `Wan2.2` are the same families as `FLUX.1` and `Wan`; `Z-Image` and `Qwen3-VL`
+  // carry no trailing version and are left whole.
+  return first.replace(/[\d.]+$/, '') || first;
 }
 
 function tally(values: Array<string | null | undefined>): Tally[] {
@@ -52,6 +74,11 @@ export function summariseCatalog(flows: FlowSummary[], models: ModelCard[]): Cat
     modalities: tally(flows.map((f) => asText(f.categoria))),
     models: models.length,
     kinds,
+    families: [
+      ...new Set(models.filter((m) => m.genus === 'model' && m.nomen).map((m) => modelFamily(m.nomen))),
+    ]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
     loras: kinds.find((k) => k.key === 'lora')?.count ?? 0,
     bases: tally(loras.map((m) => m.basis)),
   };
@@ -75,6 +102,23 @@ export function summariseApi(doc: unknown): ApiSummary | null {
   return { endpoints: keys.length, mcp: keys.some((k) => k === '/mcp' || k.startsWith('/mcp/')) };
 }
 
+/** What a credit pack costs, and what it buys. Read from the same catalogue the checkout
+ *  charges against, so the landing page cannot quote a price the till does not honour.
+ *
+ *  `creditsPerUsd` is derived here rather than served: it is the only number on the block that
+ *  answers "is a bigger pack better", and deriving it means it cannot disagree with the pair it
+ *  came from. */
+export interface PackRate extends Pack {
+  creditsPerUsd: number;
+}
+
+export function ratePacks(packs: Pack[]): PackRate[] {
+  return packs
+    .filter((p) => p.usd > 0 && p.credits > 0)
+    .map((p) => ({ ...p, creditsPerUsd: p.credits / p.usd }))
+    .sort((a, b) => a.usd - b.usd);
+}
+
 export type CatalogState = 'loading' | 'ready' | 'error';
 
 export interface LandingCatalog {
@@ -85,6 +129,9 @@ export interface LandingCatalog {
   /** null until it loads, and null for good if it cannot be read — the API block simply does
    *  not render rather than claiming a shape of contract it did not see. */
   api: ApiSummary | null;
+  /** The sellable credit packs, cheapest first. Empty until they load, and empty for good if
+   *  they cannot be read — the pricing block renders nothing rather than a guessed price. */
+  packs: PackRate[];
 }
 
 /**
@@ -100,6 +147,7 @@ export function useLandingCatalog(): LandingCatalog {
   const [models, setModels] = useState<ModelCard[]>([]);
   // named for the summary, not `api` — that is the client this module already imports
   const [contract, setContract] = useState<ApiSummary | null>(null);
+  const [packs, setPacks] = useState<PackRate[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -109,6 +157,21 @@ export function useLandingCatalog(): LandingCatalog {
       .then((r) => (r.ok ? r.json() : null))
       .then((doc) => {
         if (live) setContract(summariseApi(doc));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Packs are fetched on their own for the same reason the contract is: an unreachable till
+  // costs the pricing block and nothing else.
+  useEffect(() => {
+    let live = true;
+    api
+      .listPacks()
+      .then((p) => {
+        if (live) setPacks(ratePacks(p ?? []));
       })
       .catch(() => {});
     return () => {
@@ -139,5 +202,6 @@ export function useLandingCatalog(): LandingCatalog {
     flows,
     models,
     api: contract,
+    packs,
   };
 }

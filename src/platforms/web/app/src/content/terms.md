@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-11
 **Status:** DRAFT for counsel review. **Not legal advice.** Do not publish without review by
-a qualified attorney. Derived from `docs/legal/compliance-landscape.md`.
+a qualified attorney.
 
 This template encodes the protections the compliance landscape demands. Bracketed
 `[PLACEHOLDERS]` need entity/jurisdiction decisions.
@@ -11,7 +11,7 @@ This template encodes the protections the compliance landscape demands. Brackete
 
 ## 1. The Service
 
-[ENTITY] ("we", "us") provides access to rented GPU compute for running AI models
+MONY GROUP LLC ("we", "us") provides access to rented GPU compute for running AI models
 ("Service"). Two usage modes:
 
 - **Catalog mode** — you select from models we provide and pay per use ("Credits").
@@ -52,7 +52,7 @@ not log private-session content beyond what these controls require.
   commercial use, and only offer models so licensed. Some models carry **use-based
   restrictions** (e.g., OpenRAIL-M, Meta Llama Community License); by using them you agree to
   comply with those upstream restrictions, which **flow down** to you as a condition of use.
-  The applicable restrictions are listed at [MODEL_LICENSE_PAGE_URL].
+  The applicable restrictions are those of the upstream model's own licence, which travels with the weights; we do not publish a consolidated list of them today.
 - **BYO mode:** you represent and warrant that you hold all rights necessary to use the
   weights you supply, and you indemnify us against any claim arising from your model. We do
   not review or license your supplied weights.
@@ -100,8 +100,8 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 
 ## 10. Governing law & changes
 
-Governed by the laws of [JURISDICTION]. We may update these terms; continued use constitutes
-acceptance. Material changes will be notified via [CHANNEL].
+Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
+acceptance. Material changes will be notified by in-app notice.
 
 ---
 

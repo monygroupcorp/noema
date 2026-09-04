@@ -294,7 +294,7 @@ export const FUNDAMENTUM_UPSCALE_COMFYUI: Fundamentum = {
  * IMAGE: a RunPod SSH-ready base (the same `runpod/pytorch` ComfyUI uses), NOT a prebuilt
  * `vllm/vllm-openai` image. SecurePodClient bootstraps every pod over SSH; the bare vLLM serving
  * image ships no sshd, so `_waitForSshd` fails ("sshd did not become ready") — verified live
- * 2026-06-11 (run cede4cce, 3/3 attempts). The bootstrap `pip install vllm` brings vLLM onto the
+ * 2026-06-11 (3/3 attempts). The bootstrap `pip install vllm` brings vLLM onto the
  * SSH-capable base instead. (Live-iterate the CUDA/torch tag if vLLM needs a newer one.)
  */
 export const FUNDAMENTUM_QWEN_VL_VLLM: Fundamentum = {
@@ -548,9 +548,44 @@ export const FUNDAMENTUM_MINIMAX_H3_COMFYUI: Fundamentum = {
     { id: 'intella.minimax-h3-audio-vae',        role: 'audio_vae' },
   ],
   vramGb: 48,
+
+  // ── Timeout budgets (noema-392) ────────────────────────────────────────────
+  // Both are DECLARED because both platform defaults were fitted to image flows and this is the
+  // first substrate that does not fit them. The numbers below are derived from the only two H3
+  // runs there are, not chosen for roundness.
+  //
+  // JOB — 2400 s (40 min), against a 900 s platform default.
+  //   Measured: t2v (the first successful t2v run) executed in 768 s of the 900 s budget — 85%, which is luck
+  //   rather than headroom. fl2v (the first fl2v run) blew through it at executionMs 898405; how far
+  //   past is unknown, because the timeout is the only thing that reported.
+  //   Composition: t2v's own pretium note puts the sample at ~57 s, so ~700 s of that 768 is
+  //   MODEL LOAD — 48 GB of weights pushed through a 24 GB card with offloading. t2v and fl2v
+  //   load the IDENTICAL five weights (same fl2va DiT, same encoder, same VAEs); fl2v adds one
+  //   first-frame encode. So the ≥130 s that separates them is not extra work, it is variance in
+  //   the load itself — pod-to-pod disk and PCIe throughput. Two runs cannot bound that tail.
+  //   Sizing: 3× the one measured success (768 × 3 = 2304 → 2400). Concretely it survives a
+  //   model load that doubles to ~1400 s and still leaves ~1000 s for the sample — an order of
+  //   magnitude more than the ~57 s observed, which is the margin ref2v needs, carrying the same
+  //   load plus two media conditioners.
+  //   Bounded above by two things this must not break: Crystal's SSE deadline (45 min, so the
+  //   POD is the side that times out and reports) and the actum's `expirat`
+  //   (PROVISION_BUDGET_MS 45 min + maxJobSeconds 30 min = 75 min, against a worst case here of
+  //   226 s provision + 713 s download + 2400 s job ≈ 56 min).
+  //
+  // READY — 900 s (15 min), against a 300 s platform default.
+  //   Measured: this same pod reached ready in ~26 s on one run and missed 300 s on the next
+  //   (that run's first attempt), which cost a whole second pod and a repeat 56 GB weight pull.
+  //   Variance again, not a reliably slow substrate — what happens inside the window is
+  //   comfy-kitchen's CUDA backend enumeration plus comfy-aimdo, neither of which a flux pod
+  //   loads at all. Same 3× discipline as the job budget, over a default that is itself ~11× the
+  //   good boot. A genuinely dead H3 pod is now caught in 15 min instead of 5; that is the price
+  //   of not paying for a second pod on a slow one.
+  readyTimeoutMs: 900_000,
+  jobTimeoutMs: 2_400_000,
+
   canonica: true,
   natum: new Date('2026-09-01'),
-  mutatum: new Date('2026-09-01'),
+  mutatum: new Date('2026-09-02'),
 }
 
 /** All canonical fundamenta — seeded on boot (parity with CANONICAL_ESSENTIAE). */

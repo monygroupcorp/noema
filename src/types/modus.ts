@@ -90,6 +90,38 @@ export interface Porta {
    *  a caller may pass an id not in the list, e.g. a brand-new upstream model). */
   optiones?: Array<{ value: string; label: string }>
   /**
+   * NUMERIC LEGALITY (noema-396) — the legal values of an 'int' / 'float' port, declared rather
+   * than described. Before these existed a port with a legality rule could only state it in the
+   * `description` and hope: MiniMax H3 accepts clip lengths of 17k+5 frames and nothing else, so
+   * `frames: 100` provisioned a pod, pulled 56 GB of weights and failed at execution — ~28 minutes
+   * and real GPU spend to reject an input that was illegal before the run started. Declared here,
+   * the run entry point refuses it before anything is reserved (`portaConstraints.ts`), and the
+   * published per-flow JSON-Schema carries it so a caller sees the rule before calling.
+   *
+   *   `min`  — the smallest legal value (inclusive).
+   *   `max`  — the largest legal value (inclusive).
+   *   `step` — the spacing between legal values, measured FROM `min` (from 0 when `min` is unset).
+   *            This is the ComfyUI INPUT_TYPES sense of the word, which is where these rules come
+   *            from, and it is what lets `{min: 5, step: 17}` state "17k+5" exactly. Note it is
+   *            NOT JSON Schema's `multipleOf` unless `min` is itself a multiple of `step`.
+   *
+   * Deliberately only three scalars. An enumerated set is ALREADY expressible (`optiones`) and is
+   * deliberately advisory there — a caller may pass an id the list does not carry, e.g. a
+   * brand-new upstream model — so promoting it to a validator would break that on every port that
+   * uses it. A named-predicate registry was considered and rejected: it reintroduces flow-specific
+   * code, and no second flow demands one.
+   *
+   * Meaningful on 'int' and 'float' ports only; a constraint on any other type is refused by the
+   * catalog guard rather than silently ignored. Absent → the port is unconstrained and behaves
+   * exactly as it did before this field existed.
+   *
+   * Definitional, like `owned`: it is part of the modus's contract about what its inputs MEAN, so
+   * it rides the `contentHash` with the rest of `aditus`.
+   */
+  min?: number
+  max?: number
+  step?: number
+  /**
    * Declares that this (aditus) port names a stored, owner-bearing resource — see `OwnedRef`.
    * Present → the run entry point resolves the value against the declared store, scoped to the
    * calling anima, and refuses the run before anything is reserved or dispatched when the

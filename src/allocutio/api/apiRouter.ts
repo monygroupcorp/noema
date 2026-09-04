@@ -32,6 +32,7 @@ import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
 import type { PartnerStore } from '../../types/partner.js'
+import { rotatePartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
 
 const log = makeLogger('api:router')
 
@@ -166,6 +167,7 @@ export interface ApiFacade {
   addDatasetMedia(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   addCaptionset(auctor: AuctorKey, datasetId: string, input: unknown): Promise<import('../../types/dataset.js').Dataset>
   setCaption(auctor: AuctorKey, datasetId: string, captionsetId: string, mediaId: string, caption: unknown): Promise<import('../../types/dataset.js').Dataset>
+  setDatasetAccess(auctor: AuctorKey, datasetId: string, kind: 'public' | 'private'): Promise<import('../../types/dataset.js').Dataset>
   archiveDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   restoreDataset(auctor: AuctorKey, datasetId: string): Promise<import('../../types/dataset.js').Dataset>
   archiveDatasetMedia(auctor: AuctorKey, datasetId: string, mediaId: string): Promise<import('../../types/dataset.js').Dataset>
@@ -282,6 +284,10 @@ export function createApiRouter(deps: {
    *  `internal.unavailable`, never a silent 404 (a deployment with no store wired is not the
    *  same fact as "this caller isn't a partner"). */
   partners?: PartnerStore
+  /** Backs `POST /v1/me/partner/api-key` — self-serve issue/rotate, gated the same as
+   *  `GET /v1/me/partner` (must have an active Partner record first). Omitted → 503, same
+   *  reasoning as `partners` above. */
+  apiKeys?: MintPartnerApiKeyDeps
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -1018,6 +1024,23 @@ export function createApiRouter(deps: {
     res.status(200).json(partner)
   }))
 
+  // POST /v1/me/partner/api-key — self-serve issue-or-rotate. NOT reachable from the admin
+  // approval surface (partnerAdminRouter.ts) on purpose: the admin approving a request is
+  // frequently not the partner, so the raw key belongs here, in the hands of whoever can
+  // actually authenticate as the approved account, never in an admin's approval response.
+  // Each call retires every key this route previously issued (rotatePartnerApiKey — a real
+  // rotation, not an accumulation of live keys) and returns a fresh one, shown ONCE — this
+  // response is the only time it is ever retrievable; only its hash is stored afterward.
+  router.post('/me/partner/api-key', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    if (!deps.apiKeys) throw Errors.partnerDirectoryUnavailable()
+    const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
+    if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    const apiKey = await rotatePartnerApiKey(deps.apiKeys, (auctor as { animaId: string }).animaId)
+    res.status(200).json({ apiKey })
+  }))
+
   // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
   // settledAt, and a lifetime running total. Owner-scoped, cursor-paginated, newest first.
   // `?status=settled` is the only supported filter (completus-only — a refunded failed run
@@ -1138,6 +1161,22 @@ export function createApiRouter(deps: {
     const body = (req.body ?? {}) as { caption?: unknown }
     const dataset = await api.setCaption(auctor, String(req.params.id), String(req.params.captionsetId), String(req.params.mediaId), body.caption)
     res.status(200).json({ dataset })
+  }))
+
+  // POST /v1/data/datasets/:id/access — publish or unpublish a dataset the caller OWNS.
+  // Owner-only, same reasoning as archive below: the team overlay adds readers and
+  // contributors, not a second principal who decides the set's public face. Body: { kind:
+  // 'public' | 'private' }. Making a set public grants READ only (GET /v1/data/datasets/public,
+  // GET /v1/data/datasets/:id, spawning a Muse session) — appending media, attaching or editing
+  // a captionset still require ownership or team membership regardless. Reversible in either
+  // direction; a stranger's dataset id 404s.
+  router.post('/data/datasets/:id/access', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const kind = (req.body ?? {}) as { kind?: unknown }
+    if (kind.kind !== 'public' && kind.kind !== 'private') {
+      throw Errors.inputMalformed("kind must be 'public' or 'private'")
+    }
+    res.status(200).json({ dataset: await api.setDatasetAccess(auctor, String(req.params.id), kind.kind) })
   }))
 
   // POST /v1/data/datasets/:id/archive — archive a dataset the caller OWNS. Owner-only, and

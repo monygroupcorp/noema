@@ -202,8 +202,94 @@ test('the compiled spec asks for a disk that fits 56 GB of weights', async () =>
   assert.equal(typeof disk, typeof podDiskGbFor(0) === 'number' ? 'undefined' : 'number',
     'small manifests keep the default and emit nothing')
 
-  // …and with real sizes it must exceed the flat default that broke run 5effbe17.
+  // …and with real sizes it must exceed the flat default that broke the first H3 run to reach the weight fetch.
   const real = podDiskGbFor(56)
   assert.ok(real > DEFAULT_POD_DISK_GB, '56 GB of weights must not ride the 40 GB default')
   assert.ok(real >= 56 + POD_DISK_HEADROOM_GB, 'and must leave working room on top')
+})
+
+// ── Timeout budgets (noema-392) ───────────────────────────────────────────────
+// `minimax-h3-fl2v` (the first fl2v run) died on `job … timed out after 900s waiting for ComfyUI`
+// with executionMs 898405 — after the pod, the bootstrap and 56 GB of weights had all been paid
+// for. comfyrunner's JOB_TIMEOUT was env-overridable and nothing overrode it. These pin the
+// declaration reaching the spec, and the absent-declaration case staying byte-identical.
+
+test('every H3 flow forwards the fundament timeout budgets onto the spec', async () => {
+  for (const essentia of [ESSENTIA_MINIMAX_H3_T2V, ESSENTIA_MINIMAX_H3_FL2V, ESSENTIA_MINIMAX_H3_REF2V]) {
+    const { spec } = await makeCompiler().compile(essentia, {
+      prompt: 'x', first_frame: 'https://r2.example/a.png',
+      ref_image: 'https://r2.example/a.png', ref_audio: 'https://r2.example/a.wav',
+    })
+    const comfy = asComfyUI(spec) as { jobTimeoutMs?: number; readyTimeoutMs?: number }
+    assert.equal(comfy.jobTimeoutMs, FUNDAMENTUM_MINIMAX_H3_COMFYUI.jobTimeoutMs,
+      `${essentia.id} must carry the substrate job budget`)
+    assert.equal(comfy.readyTimeoutMs, FUNDAMENTUM_MINIMAX_H3_COMFYUI.readyTimeoutMs,
+      `${essentia.id} must carry the substrate readiness budget`)
+  }
+})
+
+test('the H3 job budget clears the 900s that killed fl2v, with room for load variance', () => {
+  const jobMs = FUNDAMENTUM_MINIMAX_H3_COMFYUI.jobTimeoutMs!
+  // The confirmed failure. Anything at or under this ships the same broken run again.
+  assert.ok(jobMs > 900_000, 'must exceed the 900s default that fl2v breached')
+  // t2v's one measured success was 768s, ~700s of it model load. Two runs cannot bound the tail
+  // of that load, so the budget is a MULTIPLE of the measurement, not the measurement plus a
+  // little. If this ever drops below 3x, the sizing argument in the fundament no longer holds.
+  assert.ok(jobMs >= 3 * 768_000, 'must be at least 3x the one measured successful execution')
+  // …and bounded above by the actum's own expirat: PROVISION_BUDGET_MS (45 min) +
+  // maxJobSeconds (30 min default) = 75 min of wall clock, against which this run also spends
+  // ~226s provisioning and ~713s pulling weights. A job budget past that is reaped mid-run.
+  assert.ok(jobMs + 226_000 + 713_000 < 75 * 60_000,
+    'provision + download + job must fit inside the actum terminus')
+})
+
+test('the H3 readiness budget exceeds the platform default it missed', () => {
+  const readyMs = FUNDAMENTUM_MINIMAX_H3_COMFYUI.readyTimeoutMs!
+  // The first t2v run's first attempt missed the 5-minute default and cost a whole second pod.
+  assert.ok(readyMs > 5 * 60_000, 'must exceed the 5 min default that cost the first t2v run a pod')
+  // But not unbounded: a genuinely dead pod still has to be given up on.
+  assert.ok(readyMs <= 30 * 60_000, 'a dead pod must still be abandoned inside half an hour')
+})
+
+test('a substrate declaring no budgets produces a spec with neither key (hash stability)', async () => {
+  // The keys must be ABSENT, not zero, not null. This is what keeps every pre-existing ComfyUI
+  // flow's compiled spec — and the content hash stored on its Actum/Deploymentum — unchanged.
+  const bare = {
+    ...FUNDAMENTUM_MINIMAX_H3_COMFYUI,
+    id: 'bare-budget-fund',
+    readyTimeoutMs: undefined,
+    jobTimeoutMs: undefined,
+  }
+  const compiler = new Compiler(
+    new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, makeH3Intellarum(),
+    new MemoryFundamentorum([bare]),
+  )
+  const { spec, hash } = await compiler.compile(
+    { ...ESSENTIA_MINIMAX_H3_T2V, fundamentumId: 'bare-budget-fund' },
+    { prompt: 'x' },
+  )
+  assert.ok(!('readyTimeoutMs' in (spec as object)), 'no readyTimeoutMs key when none is declared')
+  assert.ok(!('jobTimeoutMs' in (spec as object)), 'no jobTimeoutMs key when none is declared')
+
+  // And the hash is the hash of that same key-set — recompiling a substrate that declares
+  // nothing is stable across this change.
+  const again = await compiler.compile(
+    { ...ESSENTIA_MINIMAX_H3_T2V, fundamentumId: 'bare-budget-fund' },
+    { prompt: 'x' },
+  )
+  assert.equal(again.hash, hash, 'a substrate declaring no budgets hashes identically')
+})
+
+test('a zero or negative budget is treated as no declaration, never as an instant timeout', async () => {
+  const typo = { ...FUNDAMENTUM_MINIMAX_H3_COMFYUI, id: 'typo-fund', readyTimeoutMs: 0, jobTimeoutMs: -1 }
+  const compiler = new Compiler(
+    new WorkflowTemplateRegistry(REAL_WORKFLOWS), () => 42, makeH3Intellarum(),
+    new MemoryFundamentorum([typo]),
+  )
+  const { spec } = await compiler.compile(
+    { ...ESSENTIA_MINIMAX_H3_T2V, fundamentumId: 'typo-fund' },
+    { prompt: 'x' },
+  )
+  assert.ok(!('readyTimeoutMs' in (spec as object)), 'a 0 budget must not reach the pod')
+  assert.ok(!('jobTimeoutMs' in (spec as object)), 'a negative budget must not reach the pod')
 })

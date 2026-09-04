@@ -16,6 +16,10 @@ import {
 import { useRunStream } from '../lib/runStream';
 import { AddImages } from '../components/AddImages';
 import { RunStageline, Stageline } from '../components/RunStageline';
+import { AccountModal } from './AccountModal';
+import { BuyCreditsModal } from './BuyCreditsModal';
+import { getSession } from '../lib/api';
+import { fragmentKey } from '../../../../../crystal/muse/taxonomy.js';
 import {
   canFireDecompose,
   canOfferDecompose,
@@ -547,6 +551,55 @@ export function Muse() {
   const [promoting, setPromoting] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
 
+  // ── The execution gate (rth's ruling, 2026-09-02) ──────────────────────────
+  // An anonymous visitor may sit at a public dataset's session and configure it freely — the
+  // backend already admits that. Firing spends, so it is where the account modal intercepts,
+  // and a top-up modal follows it. `accountGateOpen` also doubles as "resume the fire once
+  // signed in" isn't attempted automatically — a fresh click is simpler and never risks an
+  // unwanted charge landing the moment a modal closes.
+  const [accountGateOpen, setAccountGateOpen] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [accountGateError, setAccountGateError] = useState<string | null>(null);
+
+  /** True once execution is actually allowed — a real account exists. Configuring the session
+   *  (locking, varying, weighting a fragment) never checks this; only firing does. */
+  function hasAccount(): boolean {
+    return getSession() !== null;
+  }
+
+  /**
+   * The modal closes with a real account now active. The OLD anonymous session is left exactly
+   * as it was — deliberately: Onboard.tsx's own sign-in note says anonymous work does not move
+   * into an account, and a claim mechanism would contradict that. Instead, a FRESH session is
+   * spawned under the new account and every floor override the caller had set (which fragments
+   * were disabled, and any non-default weight) is replayed onto it — same visible garden, a
+   * different underlying record. Locks and the vary tree are never touched: they are this
+   * screen's own client-only state and already survive the modal without any code caring.
+   */
+  async function onAccountCreated() {
+    setAccountGateOpen(false);
+    if (id && session) {
+      try {
+        const before = session;
+        const respawned = (await api.spawnMuseSession(id)).session;
+        const byKey = new Map(flat.map((f) => [fragmentKey(f), f]));
+        for (const entry of before.floor) {
+          const frag = byKey.get(entry.key);
+          if (!frag) continue; // the fragment left the mother's pool since — nothing to replay
+          const identity = { category: frag.category, text: frag.text };
+          if (entry.enabled === false) await api.setMuseFragmentEnabled(respawned.id, identity, false);
+          if (entry.weight !== 1) await api.setMuseFragmentWeight(respawned.id, identity, entry.weight);
+        }
+        setSession((await api.getMuseSession(respawned.id)).session);
+      } catch (e) {
+        // The account exists either way — the top-up offer below still matters even if the
+        // replay half-failed, so this is surfaced, not thrown.
+        setAccountGateError(`signed in, but couldn't carry your setup over: ${errText(e)}`);
+      }
+    }
+    setTopUpOpen(true);
+  }
+
   // ── The steer keyboard and the consent sheet (noema-261) ──────────────────
   // The instruction, its price, the proposal it came back with, and the vetoes on that
   // proposal. THE PROPOSAL IS NOT PERSISTED — it lives for the length of the sheet, by
@@ -941,6 +994,7 @@ export function Muse() {
   // stream piece takes. Its price is the one on the launch control above — the flow's
   // reservation does not vary with the prompt, so there is nothing per-card to price.
   async function doFire(index: number, prompt: string, lineage: readonly Fragment[]) {
+    if (!hasAccount()) { setAccountGateOpen(true); return; }
     if (!modusId) return;
     if (!canFireOne(modusId, prompt, blockReason)) return;
     // BEFORE THE RUN, because the run spends. A lineage the session's floor cannot
@@ -1573,6 +1627,7 @@ export function Muse() {
   }
 
   async function launch() {
+    if (!hasAccount()) { setAccountGateOpen(true); return; }
     if (runningRef.current || blockLaunch) return;
     const gen = ++generationRef.current;
     runningRef.current = true;
@@ -2700,6 +2755,13 @@ export function Muse() {
             onClose={() => setFloorOpen(false)}
           />
         )}
+
+        {/* The execution gate (rth's ruling, 2026-09-02): browsing and configuring this
+            session needed no account; firing does. Closing without finishing either modal
+            leaves the session exactly as it was — nothing here is a point of no return. */}
+        <AccountModal open={accountGateOpen} onClose={() => setAccountGateOpen(false)} onSuccess={() => void onAccountCreated()} />
+        {accountGateError && <div className="sub mono">{accountGateError}</div>}
+        <BuyCreditsModal open={topUpOpen} onClose={() => setTopUpOpen(false)} />
       </div></div>
     </AppShell>
   );

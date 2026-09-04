@@ -490,6 +490,11 @@ export const api = {
   // (not `j`) so a 404 (no/revoked partner) surfaces as a typed `ApiRequestError` the Partner
   // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
   mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
+  // POST /v1/me/partner/api-key — self-serve issue-or-rotate, callable ONLY by the partner
+  // themselves (never returned from the admin approval route — see adminDecidePartnerRequest's
+  // comment below for why). Each call retires any key this same flow issued previously and
+  // returns a fresh one; the response is the ONLY time the raw key is ever retrievable.
+  rotatePartnerApiKey: () => fetch('/v1/me/partner/api-key', { method: 'POST', headers: authHeaders() }).then(jApi<{ apiKey: string }>),
 
   // POST /v1/partner-requests — the public "become a B2B partner" intake (partnerRequestRouter.ts).
   // Public, anon-capable: uses the same authHeaders() every other identity-attach write in this
@@ -506,15 +511,17 @@ export const api = {
   adminListPartnerRequests: (status?: PartnerRequestStatus) =>
     fetch(`/v1/admin/partner-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`, { headers: readHeaders() })
       .then(jApi<{ requests: PartnerRequest[] }>),
-  // Approving a request with no animaId only flips its status — no Partner record, no API key.
-  // Approving one that carries an animaId provisions both, and `apiKey` in the response is the
-  // ONLY time the raw key is ever shown — the caller must never persist it beyond page state.
+  // Approving a request with no animaId only flips its status — no Partner record. Approving
+  // one that carries an animaId provisions a Partner record ONLY — never an API key. The admin
+  // clicking Approve is frequently not the partner, so a key never appears in this response;
+  // the partner mints their own, self-serve, via rotatePartnerApiKey() above once they can see
+  // they're approved.
   adminDecidePartnerRequest: (id: string, status: 'approved' | 'declined') =>
     fetch(`/v1/admin/partner-requests/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ status }),
-    }).then(jApi<{ request: PartnerRequest; partner?: Partner; apiKey?: string }>),
+    }).then(jApi<{ request: PartnerRequest; partner?: Partner }>),
 
   // ── Concierge (colloquia, noema-095) ──────────────────────────────────────
   // Same auth pattern as createRun (Decision record Q4, noema-099): an active
@@ -816,6 +823,13 @@ export const api = {
   // of the four calls returns the WHOLE dataset back, which is what a caller re-renders from.
   // Writes, so they take `authHeaders()`: ownership is resolved from the caller server-side
   // and never from a parameter.
+  // Publish (kind: 'public') or unpublish (kind: 'private') a dataset the caller owns — makes
+  // it listed in GET /v1/data/datasets/public and readable/Muse-able by anyone, or takes it back
+  // out. Owner-only, like archive/restore below; a team member's attempt 404s the same way.
+  setDatasetAccess: (id: string, kind: 'public' | 'private') =>
+    fetch(`/v1/data/datasets/${encodeURIComponent(id)}/access`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind }),
+    }).then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
   archiveDataset: (id: string) =>
     fetch(`/v1/data/datasets/${encodeURIComponent(id)}/archive`, { method: 'POST', headers: authHeaders() })
       .then(j<{ dataset: Dataset }>).then(({ dataset }) => dataset),
@@ -1505,6 +1519,10 @@ export interface Dataset {
    *  list routes, so it arrives here only as the response to an archive — which is what keeps
    *  the undo reachable on the screen that did it. */
   archivum?: string;
+  /** Present with kind 'public' once published (setDatasetAccess) — listed in the catalog and
+   *  readable/Muse-able by anyone. Absent means owner/team-only, the behaviour every dataset
+   *  had before publishing existed. */
+  access?: { kind: 'public' | 'private' };
 }
 // The body `POST /v1/data/datasets/:id/media` takes — the same discriminated ingestion
 // shape as creation, minus the fields that only make sense when minting a set.

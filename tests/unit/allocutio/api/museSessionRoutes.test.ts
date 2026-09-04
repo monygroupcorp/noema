@@ -148,6 +148,15 @@ class MemoryDatasets implements Datasets {
     return updated
   }
 
+  // Same semantics as MongoDataset.setAccess: always written in the { kind } form, mutatum bumped.
+  async setAccess(datasetId: string, kind: 'public' | 'private'): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const updated: Dataset = { ...d, access: { kind }, mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+
   // ── Archive (noema-266) ──────────────────────────────────────────────────
   // Mirrors MongoDataset exactly: `list`/`listSummaries` exclude archived datasets and `find`
   // does not; archiving or restoring media recomputes every captionset's coverage through the
@@ -275,6 +284,7 @@ const noSpendSignorum = {
 const fakeIdentity: Identity = {
   async resolve(creds: Credentials): Promise<AuctorKey> {
     if (creds.apiKey) return { animaId: creds.apiKey }
+    if (creds.commitment) return { commitment: creds.commitment }
     throw Errors.authMissing()
   },
   // `Identity` also carries `resolveCaller` (identity + the limits the CREDENTIAL imposes, e.g. a
@@ -848,6 +858,98 @@ test('a stranger spawns a Muse session on a PUBLIC dataset, and is still refused
       method: 'POST', headers: stranger, body: { datasetId: closedMother.id },
     })
     assert.equal(closedSpawn.status, 404, 'an ordinary (non-public) dataset stays closed to a stranger')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a TRULY anonymous commitment caller sits at a public Muse session and configures it, resumes it later, and a different anonymous caller cannot see it', async () => {
+  // rth's ruling, 2026-09-02: no account needed to spawn a public-dataset session, resume it,
+  // or configure it (enable/weight a fragment). The commitment is a stable per-browser value,
+  // which is what makes "the SAME anonymous visitor comes back" and "a DIFFERENT one cannot see
+  // it" both provable without any account existing at all.
+  const datasets = new MemoryDatasets()
+  const openMother = await datasets.create({
+    owner: OWNER,
+    access: { kind: 'public' },
+    name: 'Open board',
+    modality: 'image',
+    custody: 'local',
+    media: [{
+      id: 'media-open', url: 'https://example.invalid/open.png', source: 'upload',
+      addedAt: new Date(), fragments: FRAGMENTS,
+    }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const visitor = { 'x-commitment': '0xvisitor-a' }
+    const someoneElse = { 'x-commitment': '0xvisitor-b' }
+
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: visitor, body: { datasetId: openMother.id },
+    })
+    assert.equal(spawned.status, 201, `a truly anonymous caller must be able to spawn: ${JSON.stringify(spawned.body)}`)
+    const sessionId: string = spawned.body.session.id
+
+    // Configure: enabling/disabling a fragment on the floor is not spend, and works anonymously.
+    const configured = await request(`${url}/v1/data/muse/sessions/${sessionId}/floor/enabled`, {
+      method: 'PATCH', headers: visitor, body: { category: FRAGMENTS[0].category, text: FRAGMENTS[0].text, enabled: false },
+    })
+    assert.equal(configured.status, 200, `configuring the floor must not require an account: ${JSON.stringify(configured.body)}`)
+
+    // Resume: the SAME commitment reads its own session back.
+    const resumed = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: visitor })
+    assert.equal(resumed.status, 200, 'the same anonymous visitor resumes the session they spawned')
+
+    // A DIFFERENT anonymous commitment cannot see it — not_found, same as a stranger's owned one.
+    const blocked = await request(`${url}/v1/data/muse/sessions/${sessionId}`, { headers: someoneElse })
+    assert.equal(blocked.status, 404, 'a different anonymous visitor is as closed out as any stranger')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('an anonymous commitment caller sitting at a real session is refused on every verb past configuration — keep, record, save, steer, promote', async () => {
+  // The other half of the same ruling: configure freely, but the account (and top-up) modal
+  // gates everything from here on. Proved against a session the SAME anonymous caller
+  // legitimately owns — this is not a "stranger" refusal, it is "you may sit here, but not yet
+  // do this."
+  const datasets = new MemoryDatasets()
+  const openMother = await datasets.create({
+    owner: OWNER,
+    access: { kind: 'public' },
+    name: 'Open board',
+    modality: 'image',
+    custody: 'local',
+    media: [{
+      id: 'media-open', url: 'https://example.invalid/open.png', source: 'upload',
+      addedAt: new Date(), fragments: FRAGMENTS,
+    }],
+    captionsets: [],
+    versions: [{ v: '1.0.0', count: 1, when: new Date() }],
+  })
+  const { server, url } = await createServer(datasets, new MemoryMuseSessions(), readOnlyActorum([]))
+  try {
+    const visitor = { 'x-commitment': '0xvisitor-c' }
+    const spawned = await request(`${url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: visitor, body: { datasetId: openMother.id },
+    })
+    assert.equal(spawned.status, 201)
+    const sessionId: string = spawned.body.session.id
+
+    const refusals: Array<[string, HttpResult]> = [
+      ['keep', await request(`${url}/v1/data/muse/sessions/${sessionId}/kept`, { method: 'POST', headers: visitor, body: { prompt: 'a prompt', paid: false } })],
+      ['record', await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces`, { method: 'POST', headers: visitor, body: { runId: 'run-1', rollIndex: 0, fragments: [] } })],
+      ['save', await request(`${url}/v1/data/muse/sessions/${sessionId}/pieces/run-1/save`, { method: 'POST', headers: visitor })],
+      ['steer', await request(`${url}/v1/data/muse/sessions/${sessionId}/steer`, { method: 'POST', headers: visitor, body: { instruction: 'more of this' } })],
+      ['promote', await request(`${url}/v1/data/muse/sessions/${sessionId}/promote`, { method: 'POST', headers: visitor, body: {} })],
+    ]
+    for (const [verb, res] of refusals) {
+      assert.equal(res.status, 403, `${verb}: an anonymous caller — even one who owns this exact session — is refused, not admitted`)
+      assert.equal(res.body.error.code, 'auth.forbidden', `${verb}: refused as a missing account, not as not_found`)
+    }
   } finally {
     await closeServer(server)
   }

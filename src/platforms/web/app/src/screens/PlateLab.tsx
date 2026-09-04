@@ -2,6 +2,18 @@ import { useState } from 'react';
 import { Landing, type LandingProps } from './Landing';
 import { DECK_FORMATS, PLATES, isPlaceholder, type PlateFormat } from './landingPlates';
 import './plate-lab.css';
+import './landing-page.css';
+
+/** Where the page still has nothing honest to put. Rendered as marked gaps rather than filled
+ *  with invented evidence — a fabricated testimonial is the one thing that cannot be walked
+ *  back once it ships. */
+const GAPS = [
+  {
+    id: 'proof',
+    label: 'proof slot — customers, ratings, named artists',
+    note: 'Competitors run logo bars, star ratings and artist stories here. We have none that are real. Stays empty until there are users to quote.',
+  },
+];
 
 const DISPLAY_FACES = ['fraunces', 'instrument', 'newsreader', 'geist', 'martian'] as const;
 const STAGGERS = [0, 18, 36];
@@ -92,6 +104,20 @@ export function PlateLab() {
         leading={leading}
         showPlaceholders
       />
+
+      {/* What the page cannot honestly say yet. Notes to ourselves about the holes in the
+          argument — they belong in the instrument, never on the front door, where they read as
+          an announcement that the product has no customers and has never taken a payment. */}
+      <section className="lp-gaps">
+        <div className="lp-gaps-in">
+          {GAPS.map((g) => (
+            <div key={g.id} className="gap">
+              <span className="gap-label mono">{g.label}</span>
+              <p>{g.note}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

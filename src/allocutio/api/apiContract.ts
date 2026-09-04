@@ -97,7 +97,27 @@ const RunSchema: JsonSchema = {
       description: 'Populated only when the run failed.',
       properties: {
         code: { type: 'string' },
-        message: { type: 'string' },
+        message: {
+          type: 'string',
+          description: 'The classified failure sentence — never raw internal text.',
+        },
+        stage: {
+          type: 'string',
+          enum: ['provision', 'ssh', 'bootstrap', 'download', 'execute'],
+          description:
+            "Where in the run's lifecycle it died. A closed enum carrying no free text, " +
+            'so it is present for every caller. Absent when the recorded cause does not ' +
+            'identify a stage — absent means the platform does not know, and the field ' +
+            'never guesses. Branch on this rather than on `message` or `detail`.',
+        },
+        detail: {
+          type: 'string',
+          description:
+            'OWNER-SCOPED: the recorded internal failure text, verbatim (GET /v1/runs/:id ' +
+            'only). An operator artefact — pod ids, elapsed milliseconds, provider response ' +
+            'bodies — provided so the payer can diagnose a run without a server log. ' +
+            'Unstable by design: never parse it.',
+        },
       },
       required: ['code', 'message'],
     },
@@ -1559,6 +1579,15 @@ const AddDatasetMediaRequestSchema: JsonSchema = {
   required: ['source'],
 }
 
+/** The request body for `POST /v1/data/datasets/:id/access`. */
+const SetDatasetAccessRequestSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['public', 'private'] },
+  },
+  required: ['kind'],
+}
+
 /** The `{ dataset }` envelope returned by `POST /v1/data/datasets`. */
 const DatasetEnvelopeSchema: JsonSchema = {
   type: 'object',
@@ -2264,6 +2293,14 @@ export const API_CONTRACT: ApiContract = {
       summary: "Edit one caption within one caption pass on a dataset the caller owns or is a team member of — captionsets are editable after generation. The media id must be a media item on the dataset; the captionset's coverage is recomputed from the captions present. A dataset the caller neither owns nor shares is reported as not found.",
       auth: true,
       request: SetCaptionRequestSchema,
+      response: DatasetEnvelopeSchema,
+    },
+    {
+      method: 'POST',
+      path: '/data/datasets/:id/access',
+      summary: "Publish or unpublish a dataset the caller owns. Owner-only, same as archive below. { kind: 'public' } grants READ only — anyone may then list it (GET /v1/data/datasets/public), read it directly, or spawn a Muse session on it; appending media, attaching or editing a captionset still require ownership or team membership. { kind: 'private' } reverses it. Reversible in either direction. A dataset the caller does not own is reported as not found.",
+      auth: true,
+      request: SetDatasetAccessRequestSchema,
       response: DatasetEnvelopeSchema,
     },
     {
