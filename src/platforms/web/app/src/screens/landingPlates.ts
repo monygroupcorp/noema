@@ -117,7 +117,7 @@ export const PLATES: PlateSlot[] = [
       'The card held longest, and the one the page opens its imagery on. Composed for a wide crop with the subject off-centre left, so it still reads while the right fifth is covered by the next card.',
     source: {
       src: '/landing/plate-deck-1.webp',
-      alt: 'A close crop of a green eye, framed by torn foliage and printed graphic edges.',
+      alt: 'A close crop of a green eye, framed by shattered crystal and printed graphic edges.',
       width: 1024,
       height: 439,
     },
@@ -131,7 +131,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'Arrives from behind the first card. Its left edge is seen before anything else of it, so the left edge has to be worth seeing.',
     source: {
       src: '/landing/plate-deck-2.webp',
-      alt: 'A white and yellow armoured mech with shoulder cannons, cut out against the page.',
+      alt: 'A white and yellow armoured mech with shoulder cannons, a small pilot at its centre, cut out against the page.',
       width: 1024,
       height: 439,
     },
@@ -145,7 +145,7 @@ export const PLATES: PlateSlot[] = [
     brief: 'The change of register at the middle of the run — drawn where the neighbours are photographed, same light, same grade.',
     source: {
       src: '/landing/plate-deck-3.webp',
-      alt: 'A hound with its head down, crossing a bare snow-streaked slope below dark trees.',
+      alt: 'A hound with its head down, nosing across a bare snow-streaked slope.',
       width: 1024,
       height: 439,
     },
