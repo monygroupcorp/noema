@@ -89,6 +89,18 @@ export function Rail() {
     return () => { live = false; };
   }, []);
 
+  // Partner nav appears only for an approved B2B partner — same shape as `admin` above, gated on
+  // the same authority the /partner screen itself uses (GET /v1/me/partner 404s for everyone
+  // else). This link is the ONLY way a partner finds their dashboard: approval happens in an
+  // admin queue they can't see, and this codebase sends no mail, so without it an approved
+  // partner has no way to learn they were approved or to issue their API key.
+  const [partner, setPartner] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.mePartner().then(() => { if (live) setPartner(true); }).catch(() => { /* not a partner */ });
+    return () => { live = false; };
+  }, []);
+
   // Mobile group dropup state — closes on any navigation (including back/forward).
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   useEffect(() => { setOpenGroup(null); }, [location.pathname]);
@@ -193,6 +205,11 @@ export function Rail() {
           <span className="ico"><Ic name="receipt-text" /></span> Activity
           {activityCount > 0 && <span className="badge accent" style={{ marginLeft: 'auto' }}>{activityCount}</span>}
         </NavLink>
+        {partner && (
+          <NavLink to="/partner" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+            <span className="ico"><Ic name="key-round" /></span> Partner
+          </NavLink>
+        )}
         <NavLink to="/account" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings
         </NavLink>
