@@ -42,6 +42,7 @@ import { createDepositsAdminRouter } from './api/internal/depositsAdminRouter.js
 import { alchemyRpc, runBootReconcile, resolveReconcileIntervalMs, startReconcileTimer } from './crystal/DepositReconciler.js'
 import { MongoScanCursor } from './crystal/MongoScanCursor.js'
 import { seedCamel, CAMEL_TREASURY } from './crystal/seeds/camel.js'
+import { seedPlatform, PLATFORM_ANIMA_ID } from './crystal/seeds/platform.js'
 import { createX402AgentRouter } from './allocutio/api/x402AgentRouter.js'
 import { DEFAULT_X402_CONFIG } from './crystal/x402Pricing.js'
 import { accruePayeePayout, agentCutMicro } from './crystal/accruePayeePayout.js'
@@ -691,6 +692,11 @@ async function main(): Promise<void> {
   await seedCamel({ issuers: ring.issuers, modorum: ring.modorum, db: mongo.db(DB_NAME) })
   log.info('Seeded CAMEL issuer + treasury + starter template')
 
+  // The platform's own treasury Anima — the ledger house account every skim/spend hook
+  // credits, and the identity the platform-admin gate compares against. Idempotent.
+  await seedPlatform({ db: mongo.db(DB_NAME) })
+  log.info(`Seeded platform treasury anima (${PLATFORM_ANIMA_ID})`)
+
   for (const intella of CANONICAL_INTELLAE) {
     await intellae.upsert(intella)
   }
@@ -1322,7 +1328,7 @@ async function main(): Promise<void> {
   const X402_PAY_TO = process.env.X402_PAY_TO
   const x402Config = { ...DEFAULT_X402_CONFIG, payTo: X402_PAY_TO ?? '0x0000000000000000000000000000000000000000' }
   const x402Enabled = process.env.X402_ENABLED === 'true' && !!X402_PAY_TO
-  const SYSTEM_AUCTOR = { animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' }
+  const SYSTEM_AUCTOR = { animaId: PLATFORM_ANIMA_ID }
   const cdpFacilitator = x402Enabled ? buildCdpX402Facilitator() : null
   if (x402Enabled && cdpFacilitator) log.info(`x402: CDP facilitator wired (${x402Config.network}, payTo ${x402Config.payTo})`)
   else if (x402Enabled) log.warn('x402: X402_ENABLED but CDP_API_KEY_ID/CDP_API_KEY_SECRET missing — payments fail closed (deny-stub)')
