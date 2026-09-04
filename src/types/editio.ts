@@ -71,6 +71,24 @@ export type EditioStatus = 'pending' | 'published' | 'rejected' | 'failed' | 're
 export type ReviewOutcome = 'pending' | 'approved' | 'rejected'
 
 /**
+ * EditioModeration — the `ModerationGate.scan()` verdict that HELD or REJECTED this
+ * publication, recorded on the Editio itself (docs/spec/moderation-reject-reason.md).
+ * Written on BOTH refusal branches of `_settlePublication` — a hold is not better off
+ * than a reject here; either way the gate's diagnostic now survives past the call that
+ * produced it. `reason` is the classifier's raw text — admin-only when surfaced (see
+ * `Edition.moderationNote` in `allocutio/api/types.ts` for the author-facing generic
+ * form). Absent when never flagged.
+ */
+export interface EditioModeration {
+  /** The gate's verdict.reason, verbatim. May describe detection internals. */
+  reason: string
+  /** True only when this verdict HELD (vs. terminally rejected). */
+  hold?: boolean
+  /** When the gate produced this verdict, ISO-8601. */
+  scannedAt: string
+}
+
+/**
  * Editio — one publication of one artifact to one destination under one policy.
  */
 export interface Editio {
@@ -110,6 +128,9 @@ export interface Editio {
   leasedUntil?: Date
   /** How many times a worker has claimed this for settling — capped (→ 'failed'). */
   attempts?: number
+  /** The moderation gate's verdict when it HELD or REJECTED this publication. Absent
+   *  on the normal (approved/never-gated) path. */
+  moderation?: EditioModeration
   /** "natum" = born — when the publish was requested. */
   natum: Date
   /** "mutatum" = changed — when the status/handle last changed. */
@@ -157,7 +178,7 @@ export interface Editionum {
    */
   listHeld(by?: Editio['by']): Promise<Editiones>
   create(input: Omit<Editio, 'id' | 'natum' | 'mutatum' | 'status'>): Promise<Editio>
-  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil'>>): Promise<Editio>
+  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation'>>): Promise<Editio>
   /**
    * Atomically claim one settle-able publication for a worker: the oldest `pending`
    * Editio with no live lease AND not awaiting review (`reviewOutcome !== 'pending'`),

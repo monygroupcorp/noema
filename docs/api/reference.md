@@ -11564,6 +11564,10 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
           ],
           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
+        "moderationNote": {
+          "type": "string",
+          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+        },
         "externalRef": {
           "type": "string",
           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -11702,6 +11706,10 @@ The human-review queue: publications the moderation gate HELD for review (spec �
             ],
             "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
           },
+          "moderationNote": {
+            "type": "string",
+            "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          },
           "externalRef": {
             "type": "string",
             "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -11839,6 +11847,10 @@ Fetch one publication (author-scoped). Poll it to watch a `pending` settle land 
           ],
           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
+        "moderationNote": {
+          "type": "string",
+          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+        },
         "externalRef": {
           "type": "string",
           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -11888,6 +11900,72 @@ Fetch one publication (author-scoped). Poll it to watch a `pending` settle land 
   },
   "required": [
     "edition"
+  ]
+}
+```
+
+### GET /v1/editiones/:id/moderation
+
+The moderation gate's raw verdict for one publication (why it was held or rejected), regardless of current status — the companion to `/editiones/review` for a terminal `rejected` item, which has no queue entry to inspect. Restricted to the platform administrator; the raw reason text is not surfaced to the publishing author.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The moderation gate's raw verdict for one publication, platform-admin only.",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "published",
+        "rejected",
+        "failed",
+        "retracted"
+      ]
+    },
+    "reviewOutcome": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected"
+      ]
+    },
+    "moderation": {
+      "type": "object",
+      "nullable": true,
+      "description": "The recorded verdict, or null when this Editio was never held or rejected.",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "The classifier's raw verdict text."
+        },
+        "hold": {
+          "type": "boolean",
+          "description": "True only when this verdict HELD (vs. terminally rejected)."
+        },
+        "scannedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "reason",
+        "scannedAt"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "status",
+    "moderation"
   ]
 }
 ```
@@ -11974,6 +12052,10 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
             "rejected"
           ],
           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "moderationNote": {
+          "type": "string",
+          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12111,6 +12193,10 @@ Clear a moderation HOLD so the held publication re-settles and publishes (spec �
           ],
           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
         },
+        "moderationNote": {
+          "type": "string",
+          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+        },
         "externalRef": {
           "type": "string",
           "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
@@ -12246,6 +12332,10 @@ Decline a held publication → terminal `rejected` (spec §4). Restricted to the
             "rejected"
           ],
           "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+        },
+        "moderationNote": {
+          "type": "string",
+          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",

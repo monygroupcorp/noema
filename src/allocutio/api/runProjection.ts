@@ -219,6 +219,10 @@ export function toEdition(e: Editio): Edition {
     updatedAt: e.mutatum.toISOString(),
   }
   if (e.reviewOutcome !== undefined) out.reviewOutcome = e.reviewOutcome
+  // Generic, author-safe note only — the raw classifier text (`e.moderation.reason`)
+  // stays admin-only (`CrystalApi.getEditionModeration`), never reaches this public
+  // projection (docs/spec/moderation-reject-reason.md §3(a) privacy note).
+  if (e.moderation !== undefined) out.moderationNote = 'Flagged by automated review.'
   if (e.externalRef !== undefined) out.externalRef = e.externalRef
   if (e.owners !== undefined) out.owners = e.owners
   if (e.license !== undefined) out.license = e.license

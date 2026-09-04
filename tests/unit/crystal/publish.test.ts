@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import { PublicationWorker } from '../../../src/crystal/PublicationWorker.js'
 import { FeedAdapter } from '../../../src/crystal/FeedAdapter.js'
@@ -51,7 +53,7 @@ class MemEditionum implements Editionum {
         ('animaId' in by ? 'animaId' in e.by && e.by.animaId === by.animaId
                          : 'commitment' in e.by && e.by.commitment === by.commitment)))
   }
-  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil'>>) {
+  async update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation'>>) {
     const e = { ...this.store.get(id)!, ...patch, mutatum: new Date() }
     this.store.set(id, e)
     return e
@@ -692,6 +694,130 @@ test('A2 reject/approve guard: only a pending-review Editio can be adjudicated',
   // Not held → approving/rejecting it is a not-found (nothing to adjudicate).
   await assert.rejects(() => api.approveHeldEdition(admin, ed.id))
   await assert.rejects(() => api.rejectHeldEdition(admin, ed.id))
+})
+
+// =============================================================================
+// Moderation reject-reason (docs/spec/moderation-reject-reason.md) — the gate's
+// verdict.reason is REQUIRED on every refusal but was discarded on both the HOLD
+// and REJECT branches of `_settlePublication`. These guard that it now (a) lands
+// on the Editio's `moderation` field on both branches, (b) is logged loudly on
+// both branches, and (c) surfaces (generically) on the review queue + (raw,
+// admin-only) via the dedicated moderation-inspect read.
+// =============================================================================
+
+/** Collect `crystal-api` component log entries emitted during `run()`. */
+async function collectLogs(run: () => Promise<void>): Promise<LogEntry[]> {
+  const entries: LogEntry[] = []
+  const collect = (entry: LogEntry) => { if (entry.component === 'crystal-api') entries.push(entry) }
+  bus.on('log', collect)
+  try {
+    await run()
+  } finally {
+    bus.off('log', collect)
+  }
+  return entries
+}
+
+test('reject: the refusal reason is persisted on the Editio moderation field', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nsfw: explicit content detected' } } }
+  const { api, editiones, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'rejected')
+  assert.equal(stored?.moderation?.reason, 'nsfw: explicit content detected')
+  assert.notEqual(stored?.moderation?.hold, true, 'a terminal reject is not recorded as a hold')
+  assert.equal(typeof stored?.moderation?.scannedAt, 'string')
+})
+
+test('hold: the refusal reason is persisted on the Editio moderation field, with hold:true', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, hold: true, reason: 'pre-Thorn NSFW router escalation' } } }
+  const { api, editiones, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.reviewOutcome, 'pending')
+  assert.equal(stored?.moderation?.reason, 'pre-Thorn NSFW router escalation')
+  assert.equal(stored?.moderation?.hold, true)
+  assert.equal(typeof stored?.moderation?.scannedAt, 'string')
+})
+
+test('reject: the gate logs the verdict (editioId, artifactRef, reason, hold) on the reject branch', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nope' } } }
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+
+  const entries = await collectLogs(flush)
+  const line = entries.find((e) => e.msg === 'publication REJECTED by moderation gate')
+  assert.ok(line, 'the reject branch must log the refusal')
+  assert.equal(line?.level, 'warn')
+  assert.equal(line?.editioId, ed.id)
+  assert.deepEqual(line?.artifactRef, { kind: 'actum', id: OWNED_ACTUM })
+  assert.equal(line?.reason, 'nope')
+  assert.equal(line?.hold, false)
+})
+
+test('hold: the gate logs the verdict (editioId, artifactRef, reason, hold) on the hold branch', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+
+  const entries = await collectLogs(flush)
+  const line = entries.find((e) => e.msg === 'publication HELD by moderation gate')
+  assert.ok(line, 'the hold branch must log the refusal')
+  assert.equal(line?.level, 'warn')
+  assert.equal(line?.editioId, ed.id)
+  assert.deepEqual(line?.artifactRef, { kind: 'actum', id: OWNED_ACTUM })
+  assert.equal(line?.reason, 'flagged for human review')
+  assert.equal(line?.hold, true)
+})
+
+test('review queue: a held item carries a generic moderationNote, never the raw reason', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, hold: true, reason: 'raw classifier internals: score=0.94 model=nsfw-v3' } } }
+  const { api, flush } = makeApi({ gate })
+  await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const [held] = await api.listHeldEditions(anima1)
+  assert.equal(held.moderationNote, 'Flagged by automated review.')
+  assert.ok(
+    !JSON.stringify(held).includes('raw classifier internals'),
+    'the review queue projection (author-reachable) must never carry the raw classifier text',
+  )
+})
+
+test('admin moderation read: surfaces the RAW reason for a terminal rejected item (no queue entry otherwise)', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, reason: 'raw classifier internals: score=0.94 model=nsfw-v3' } } }
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  // Rejected items never appear in the review queue (it's `reviewOutcome:'pending'` only).
+  assert.equal((await api.listHeldEditions(admin)).length, 0)
+
+  const detail = await api.getEditionModeration(admin, ed.id)
+  assert.equal(detail.status, 'rejected')
+  assert.equal(detail.moderation?.reason, 'raw classifier internals: score=0.94 model=nsfw-v3')
+  assert.equal(detail.moderation?.hold, undefined)
+})
+
+test('admin moderation read: platform-admin only — an author is refused', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, reason: 'nope' } } }
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  await assert.rejects(() => api.getEditionModeration(anima1, ed.id), /platform administrator/)
+})
+
+test('admin moderation read: moderation is null for an Editio the gate never flagged', async () => {
+  const { api, flush } = makeApi() // permissive gate → publishes straight through
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  const detail = await api.getEditionModeration(admin, ed.id)
+  assert.equal(detail.status, 'published')
+  assert.equal(detail.moderation, null)
 })
 
 // =============================================================================

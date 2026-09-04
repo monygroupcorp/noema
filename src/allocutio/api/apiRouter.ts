@@ -16,7 +16,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, RunOrder, Collection, Team, Edition, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
+import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
@@ -194,6 +194,7 @@ export interface ApiFacade {
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
+  getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail>
   approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   rejectHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
   confirmCsamAndReport(auctor: AuctorKey, id: string): Promise<Edition>
@@ -717,6 +718,14 @@ export function createApiRouter(deps: {
   // settle land: pending → published (with the `externalRef`, e.g. an archive ZIP url).
   router.get('/editiones/:id', wrap(async (req, res) => {
     res.json({ edition: await api.getEdition(await auth(req), String(req.params.id)) })
+  }))
+
+  // GET /v1/editiones/:id/moderation — the moderation gate's RAW verdict for one
+  // publication (spec: moderation-reject-reason). PLATFORM-ADMIN ONLY. Reaches any
+  // Editio by id regardless of status — the companion to `/editiones/review` for a
+  // TERMINAL rejected item, which has no queue entry to inspect.
+  router.get('/editiones/:id/moderation', wrap(async (req, res) => {
+    res.json(await api.getEditionModeration(await auth(req), String(req.params.id)))
   }))
 
   // POST /v1/editiones/:id/retract — unpublish where the destination allows it (author-scoped).
