@@ -88,8 +88,26 @@ test('all three MiniMax H3 flows declare the real 17k+5 clip-length rule', () =>
     assert.equal(frames.min, 5, `${id}: legal H3 lengths start at 5`)
     assert.equal(frames.step, 17, `${id}: legal H3 lengths are spaced 17 apart (17k+5)`)
     assert.equal(frames.max, undefined, `${id}: no measured ceiling exists, so none is declared`)
-    assert.equal(frames.default, 209, `${id}: 209 = 17*12+5, the rig-proven default`)
   }
+})
+
+test('the H3 defaults follow the CHECKPOINT, not the flow family', () => {
+  // This started as one assertion that all three default to 209. Production falsified it:
+  // 209 runs on fl2va (t2v and fl2v) and fails on ref2va inside ComfyUI with
+  // `shape '[21504, 5376]' is invalid for input of size 55090912` — an execution error, charged
+  // for the pod, the weights and the model load before it fires. ref2v completes at 124.
+  //
+  // The rule the seeds encode is per-checkpoint, and the two checkpoints do not agree.
+  const defaults = Object.fromEntries(
+    H3_FLOWS.map(id => [id, CANONICAL_ESSENTIAE.find(e => e.id === id)?.aditus?.frames?.default]),
+  )
+  assert.equal(defaults['minimax-h3-t2v'], 209, 'fl2va: 209 = 17*12+5, verified on prod')
+  assert.equal(defaults['minimax-h3-fl2v'], 209, 'fl2va: same checkpoint, same length')
+  assert.equal(defaults['minimax-h3-ref2v'], 124, 'ref2va: 124 = 17*7+5, verified on prod; 209 throws')
+  assert.notEqual(
+    defaults['minimax-h3-ref2v'], defaults['minimax-h3-fl2v'],
+    'a shared default across the two checkpoints is the bug this pins',
+  )
 })
 
 test('the wan22 flows deliberately declare no frame rule', () => {
