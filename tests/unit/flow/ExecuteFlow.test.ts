@@ -1002,6 +1002,19 @@ function routingDepsFor(modus: Modus): { deps: ExecuteFlowDeps; atCursor: () => 
         },
       }),
     },
+    // Both dataset modi declare their `dataset`/`captionset` ports as references to a stored
+    // record, so casting one resolves it for the caster before dispatch. These tests are about
+    // which ports reach the cursor, so the fixture is the caster's OWN dataset — the refusal
+    // path is covered in `tests/unit/execution/ownedAditusEntryPoints.test.ts`.
+    ownedResources: {
+      datasets: {
+        async findOwned(id: string, owner: string) {
+          return owner === 'anima-1' && id === 'dataset-alpha'
+            ? { id, captionsets: [{ id: 'captionset-alpha' }] }
+            : null
+        },
+      },
+    },
   })
   return { deps, atCursor: () => seen }
 }

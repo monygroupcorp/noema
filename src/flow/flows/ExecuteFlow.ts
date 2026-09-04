@@ -2,6 +2,7 @@ import type { Flow, FlowContext, Step, Resolution, PrimitiveEvent, Primitive } f
 import type { Modorum, Forma } from '../../types/modus.js'
 import type { ModelRef } from '../../types/actum.js'
 import { validateAditus } from '../../execution/validateAditus.js'
+import { ownedAditusVerdict, type OwnedResourceStores } from '../../execution/ownedAditusGuard.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
@@ -75,6 +76,13 @@ export interface ExecuteFlowDeps {
   /** Compositus engine (ADR-0008) — passed straight through to dispatchInceptio so
    *  /run can cast a compositus (spell) modus. Absent → compositus modi throw. */
   compositusCursor?: import('../../execution/dispatchInceptio.js').DispatchDeps['compositusCursor']
+  /**
+   * The stores a declared owned-resource reference resolves through. `/run` can cast any
+   * canonical atomic modus, three of which take the id of a stored, owner-bearing record, and
+   * this flow is the last seam that still knows who is casting. Absent → every declared
+   * reference is refused, the same fail-closed rule the REST run route follows.
+   */
+  ownedResources?: OwnedResourceStores
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +467,35 @@ export class ExecuteFlow implements Flow {
   // ---------------------------------------------------------------------------
 
   private async _submit(ctx: FlowContext, state: ExecuteFlowState): Promise<Step | Resolution> {
+    // Resource scope comes from the CASTER. A modus declares which of its aditus ports name a
+    // stored, owner-bearing record (`Porta.owned`), and this is the last seam that still knows
+    // who is casting: an Actum is identity-blind, so by the time a cursor reads the port there is
+    // no caller left to scope it against. Refused HERE, above `dispatchInceptio`, so a refusal
+    // reserves no signa, creates no actum and provisions no pod. A modus that declares no
+    // reference costs nothing — the verdict returns before any store is read.
+    const casting = await this.deps.modorum.find(state.modusId!)
+    const verdict = await ownedAditusVerdict(
+      this.deps.ownedResources ?? {},
+      ctx.identity,
+      casting,
+      state.aditus,
+    )
+    if (!verdict.ok) {
+      // Names the port, never the value and never whether a record exists behind it — the same
+      // non-enumerability the REST refusal preserves.
+      return {
+        primitives: [{
+          kind: 'Detail',
+          label: 'Not your input',
+          content: `The value in \`${verdict.field}\` names something this account cannot use.\n\nCheck the id and try again.`,
+          actions: [
+            { id: 'edit',   label: 'edit' },
+            { id: 'cancel', label: '✕'    },
+          ],
+        }],
+      }
+    }
+
     // The neutral initiate→dispatch core lives in `dispatchInceptio` so any facade
     // (REST/MCP/…) reuses the exact same logic. Pinned models (Mod • → Add) ride a
     // first-class field alongside shareTokenHint → stored on the Actum → unioned into
