@@ -99,3 +99,35 @@ test('ref2v does not inherit fl2va lengths (they are different checkpoints)', ()
   // Guessing one would refuse lengths that may work.
   assert.equal((ref2v.aditus.frames as { max?: number }).max, undefined)
 })
+
+test("a slot-mapped knob's baked graph value is its declared default", () => {
+  // The slot map only writes a value the CALLER supplied: `_applySlotMap` skips an undefined
+  // input, so an omitted optional knob runs at whatever the template JSON bakes into the graph,
+  // NOT at the `Porta.default` the schema advertises. The two are the same number or they are a
+  // lie — and on ref2v they diverged into a run that fails after the pod, the 56 GB weight pull
+  // and the model load are all paid for: the seed said 124, the graph still said 209.
+  //
+  // Every knob, not just that one — the seam is generic, and this is the only thing standing
+  // between a corrected default and a graph that quietly ignores it. The seed port is the
+  // authority; a template that disagrees is the bug.
+  const SEED_EXEMPT = (e: { seedInputKey?: string }, key: string) => key === (e.seedInputKey ?? 'input_seed')
+  const KNOBS = new Set(['int', 'float'])
+  for (const e of CANONICAL_ESSENTIAE) {
+    if (!e.workflowTemplate) continue
+    const file = path.join(WORKFLOWS, `${e.workflowTemplate}-v${e.workflowTemplateVersion ?? '1'}.json`)
+    if (!existsSync(file)) continue
+    const t = JSON.parse(readFileSync(file, 'utf8')) as {
+      inputTemplate: Record<string, unknown>
+      slotMap: Record<string, string>
+    }
+    for (const [pointer, key] of Object.entries(t.slotMap ?? {})) {
+      const porta = e.aditus[key]
+      // A seed is resolved for every run (`_resolveSeed`), so its slot is never left baked.
+      if (!porta || !KNOBS.has(porta.type) || porta.default === undefined || SEED_EXEMPT(e, key)) continue
+      let node: unknown = t.inputTemplate
+      for (const seg of pointer.slice(1).split('/')) node = (node as Record<string, unknown>)?.[seg]
+      assert.equal(node, porta.default,
+        `'${e.id}' declares ${key}=${porta.default} but ${e.workflowTemplate} bakes ${JSON.stringify(node)} at ${pointer} — an omitted ${key} would run at the baked value`)
+    }
+  }
+})

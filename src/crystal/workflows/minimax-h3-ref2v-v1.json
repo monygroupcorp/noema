@@ -1,7 +1,7 @@
 {
   "templateId": "minimax-h3-ref2v",
   "version": "1",
-  "displayName": "MiniMax H3 \u2014 reference to video with voice (960x768, 209f @24fps, 4-step turbo)",
+  "displayName": "MiniMax H3 \u2014 reference to video with voice (960x768, 124f @24fps, 4-step turbo)",
   "seedInputKey": "input_seed",
   "customNodes": [
     {
@@ -81,7 +81,7 @@
         ],
         "width": 960,
         "height": 768,
-        "length": 209,
+        "length": 124,
         "ref_image_size": "match",
         "ref_images.ref_image_0": [
           "img0",
