@@ -106,8 +106,15 @@ test('classifyBaseModel: license verdicts across families', () => {
   assert.equal(licenseCommercial(classifyBaseModel('FLUX.2').license), 'unknown')
 })
 
-test('classifyModelLicense: base-string priority provenance.base > nomen > familia (reclassify + sweep share this)', () => {
-  // provenance.base wins even when nomen/familia disagree — the author-declared lineage is truth.
+test('classifyModelLicense: base-string priority baseModel > provenance.base > nomen > familia (reclassify + sweep share this)', () => {
+  // baseModel (the resolved training/import-time descriptor) wins over everything, including a
+  // disagreeing provenance.base (a DIFFERENT statement — external retrain lineage).
+  assert.deepEqual(
+    classifyModelLicense({ baseModel: 'FLUX.1-schnell', provenance: { base: 'FLUX.1-dev' }, nomen: 'My Dev-ish LoRA', familia: 'flux' }),
+    { license: 'apache-2.0', commercialUse: 'yes' },
+  )
+  // No baseModel → provenance.base wins even when nomen/familia disagree — the author-declared
+  // lineage is truth.
   assert.deepEqual(
     classifyModelLicense({ provenance: { base: 'FLUX.1-dev' }, nomen: 'My Schnell-ish LoRA', familia: 'flux' }),
     { license: 'flux-1-dev-nc', commercialUse: 'no' },
@@ -208,6 +215,7 @@ test('civitai: resolves genus/familia/trigger/dest + origin source with meta', a
   assert.equal(r.sizeBytes, 13500 * 1024)
   assert.equal(r.origin.provenance, 'civitai')
   assert.deepEqual(r.origin.meta, { modelId: '92654', modelVersionId: '1165788', author: 'someartist' })
+  assert.equal(r.baseModel, 'SD 1.5')   // the same string familia/license were classified from
 })
 
 test('civitai: ?modelVersionId selects that version', async () => {
@@ -233,6 +241,7 @@ test('huggingface: base_model → lora genus/familia, resolve download URL + pre
   assert.deepEqual(r.samples, [{ url: 'https://huggingface.co/someuser/my-flux-lora/resolve/main/preview.png' }])
   assert.equal(r.origin.provenance, 'huggingface')
   assert.deepEqual(r.provenance, { repo: 'someuser/my-flux-lora', base: 'black-forest-labs/FLUX.1-dev' })
+  assert.equal(r.baseModel, 'black-forest-labs/FLUX.1-dev')   // the same string familia/license were classified from
 })
 
 test('huggingface: a multi-file diffusers repo (weights only in subfolders) is rejected, not grabbed', async () => {
@@ -254,6 +263,7 @@ test('direct file: infers familia from filename', async () => {
   assert.equal(r.familia, 'sdxl')
   assert.equal(r.filename, 'my-sdxl-style.safetensors')
   assert.equal(r.origin.provenance, 'custom')
+  assert.equal(r.baseModel, 'my-sdxl-style')   // the parsed filename stem — the only descriptor a direct file has
 })
 
 test('direct file: genus hint honored; unknown family rejected', async () => {
@@ -306,6 +316,8 @@ test('import: registers a private, owner-scoped, ORIGIN-ONLY Intella (no R2 weig
   assert.equal(intella.familia, 'sd15')
   assert.equal(intella.trigger, 'gothic armor,armored_dress')
   assert.equal(intella.dest, 'loras/armored-dress-v02.safetensors')
+  // §3: every genus gets one classifier-usable field — populated consistently with familia/license.
+  assert.equal(intella.baseModel, 'SD 1.5')
 
   // WEIGHT sources = origin ONLY. No miladystation mirror at import — the pod downloads from the
   // origin; a public promotion prepends the our-bucket source later.

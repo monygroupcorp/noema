@@ -4355,8 +4355,14 @@ export class CrystalApi {
    * import, a misclassification, or a model we've cleared by taking out a commercial license.
    * Two modes: an explicit clearance ({ license, commercialUse }) — the operator's decision, e.g.
    * marking an SD3 model `'yes'` once we hold the Stability license — or `reclassify:true`, which
-   * re-derives the verdict from the model's recorded base string (`provenance.base`) via the same
-   * classifier (bulk-fix models imported before license classification existed). Platform-admin only.
+   * re-derives the verdict from the model's recorded base string (`baseModel` > `provenance.base` >
+   * `nomen` > `familia`) via the same classifier (bulk-fix models imported before license
+   * classification existed). Platform-admin only.
+   *
+   * `reclassify` never downgrades: if the freshly computed verdict is `'unknown'` but the record
+   * already carries a real (non-'unknown') `license` — from a prior correct classification, or a
+   * manual clearance applied through a different route — the stored value is left alone and the
+   * unchanged record is returned, rather than silently overwritten back to `'unknown'`.
    */
   async setModelLicense(auctor: AuctorKey, id: string, opts: SetModelLicenseOpts): Promise<ModelCard> {
     this._assertPlatformAdmin(auctor)
@@ -4366,9 +4372,20 @@ export class CrystalApi {
     if (opts.reclassify) {
       const m = await registry.find(id)
       if (!m) throw Errors.notFoundModel(id)
-      // Re-derive from the model's recorded base via the shared classifier (provenance.base > nomen
-      // > familia) — the SAME path the backfill sweep runs, so admin + sweep never disagree.
+      // Re-derive from the model's recorded base via the shared classifier (baseModel >
+      // provenance.base > nomen > familia) — the SAME path the backfill sweep runs, so admin +
+      // sweep never disagree.
       ;({ license, commercialUse } = classifyModelLicense(m))
+      // Guard: reclassify must never DOWNGRADE an already-classified record. If the classifier
+      // still can't place the base (fresh verdict 'unknown') but the record already carries a real
+      // license — whether from a prior correct classification, or a manual admin override applied
+      // through a different route (e.g. a direct clearance the classifier itself couldn't derive) —
+      // there was never a better answer to fall back to, so leave the stored value untouched rather
+      // than silently overwrite it with 'unknown'. (Observed in production: a manually-cleared
+      // model's correct license was wiped back to 'unknown' by a reclassify click.)
+      if (license === 'unknown' && m.license !== undefined && m.license !== 'unknown') {
+        return toModelCardFromIntella(m)
+      }
     }
     if (license === undefined && commercialUse === undefined) {
       throw Errors.inputMalformed('provide license and/or commercialUse, or reclassify:true')

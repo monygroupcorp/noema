@@ -64,11 +64,15 @@ test('completed run: hosts the LoRA bytes in R2, registers a private Intella, re
 })
 
 test('license inherits the base: schnell → commercially listable; dev → private-use-only (training UX)', async () => {
-  const schnell = makeTrainingFinalizer({ ...harness(), newId: () => 'l1', now: () => new Date(0) })
+  const hSchnell = harness()
+  const schnell = makeTrainingFinalizer({ ...hSchnell, newId: () => 'l1', now: () => new Date(0) })
   const sx = await schnell(actum({ triggerWord: 'x', baseModel: 'FLUX.1-schnell', ownerAnimaId: 'a' }), completed())
   assert.equal(sx.license, 'apache-2.0')
   assert.equal(sx.commercialUse, 'yes')
   assert.match(String(sx.licenseNote), /listable/i)
+  // 'FLUX.1-schnell' is already a descriptive string, not a trainable-preset alias — resolveBasePreset
+  // has nothing to resolve it TO, so it's classified (and recorded) as-is, unchanged.
+  assert.equal(hSchnell.upserts[0].baseModel, 'FLUX.1-schnell')
 
   const h = harness()
   const dev = makeTrainingFinalizer({ ...h, newId: () => 'l2', now: () => new Date(0) })
@@ -76,6 +80,7 @@ test('license inherits the base: schnell → commercially listable; dev → priv
   assert.equal(dx.commercialUse, 'no')                       // NC base → NC derivative
   assert.match(String(dx.licenseNote), /Private use only/i)
   assert.equal(h.upserts[0].commercialUse, 'no')             // and recorded on the Intella for the gate
+  assert.equal(h.upserts[0].baseModel, 'FLUX.1-dev')
 })
 
 test('card enrichment: persists trainingSteps (aditus steps wins), description, and retrain provenance', async () => {
@@ -94,6 +99,42 @@ test('card enrichment: persists trainingSteps (aditus steps wins), description, 
   assert.equal(i.trainingSteps, 1000)                                  // aditus steps, not just lastStep
   assert.equal(i.description, 'anthropomorphic cat collages')
   assert.deepEqual(i.provenance, { repo: 'ms2stationthis/drifella', base: 'FLUX.1-dev' })
+  // baseModel is the RESOLVED training-time descriptor ('flux2-klein' alias → its preset's HF id),
+  // a DIFFERENT statement from provenance.base (the external retrain lineage above) — and it's what
+  // this run's own license was classified from, not the (unrelated, external) provenanceBase.
+  assert.equal(i.baseModel, 'black-forest-labs/FLUX.2-klein-base-4B')
+  assert.equal(i.license, 'apache-2.0')
+  assert.equal(i.commercialUse, 'yes')
+})
+
+test('Intella.baseModel is set to the RESOLVED preset descriptor, not the raw training alias (spec §1b/§2)', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-base-a', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'brutalite', baseModel: 'klein-4b', ownerAnimaId: 'a' }), completed())
+  const i = h.upserts[0]
+  assert.equal(i.baseModel, 'black-forest-labs/FLUX.2-klein-base-4B')  // NOT the raw alias 'klein-4b'
+  assert.equal(i.license, 'apache-2.0')
+  assert.equal(i.commercialUse, 'yes')
+})
+
+test('license + baseModel for the krea2-raw preset', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-krea', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'x', baseModel: 'krea2-raw', ownerAnimaId: 'a' }), completed())
+  const i = h.upserts[0]
+  assert.equal(i.baseModel, 'krea/Krea-2-Raw')
+  assert.equal(i.license, 'krea-community')       // conditional (Krea 2 Community, <$1M revenue)
+  assert.equal(i.commercialUse, 'conditional')
+})
+
+test('license + baseModel for the zimage preset', async () => {
+  const h = harness()
+  const finalize = makeTrainingFinalizer({ ...h, newId: () => 'lora-zimage', now: () => new Date(0) })
+  await finalize(actum({ triggerWord: 'x', baseModel: 'zimage', ownerAnimaId: 'a' }), completed())
+  const i = h.upserts[0]
+  assert.equal(i.baseModel, 'Tongyi-MAI/Z-Image')
+  assert.equal(i.license, 'apache-2.0')
+  assert.equal(i.commercialUse, 'yes')
 })
 
 test('repro artifacts: persists samples (paired with prompts), datasetItems, and a repo-relative configYaml', async () => {
@@ -113,6 +154,10 @@ test('repro artifacts: persists samples (paired with prompts), datasetItems, and
   assert.deepEqual(i.datasetItems, [{ url: 'https://cdn/img0.png', caption: 'a koh' }, { url: 'https://cdn/img1.png' }])
   assert.match(i.configYaml ?? '', /folder_path: "dataset"/)       // repo-relative for reproduction
   assert.match(i.configYaml ?? '', /arch: "flux2_klein_4b"/)
+  // klein-4b resolves to Apache-2.0 (docs/spec/model-base-provenance.md) — the exact input the
+  // fallback-chain bug shipped with 13 untested cases (spec §1b/§5).
+  assert.equal(i.license, 'apache-2.0')
+  assert.equal(i.commercialUse, 'yes')
 })
 
 test('samples pair with dataset-derived samplePrompts (aditus), [trigger]-substituted, by index', async () => {
@@ -126,6 +171,8 @@ test('samples pair with dataset-derived samplePrompts (aditus), [trigger]-substi
   const i = h.upserts[0]
   assert.equal(i.samples?.[0].prompt, 'koh, a koh on a roof')      // dataset caption, not the generic default
   assert.equal(i.samples?.[1].prompt, 'koh, a koh in the rain')
+  assert.equal(i.license, 'apache-2.0')
+  assert.equal(i.commercialUse, 'yes')
 })
 
 test('cleanup: a remote completion sweeps the intermediate checkpoint + redundant pod-final (keeps samples)', async () => {
@@ -141,6 +188,8 @@ test('cleanup: a remote completion sweeps the intermediate checkpoint + redundan
   )
 
   assert.deepEqual(deleted, ['training/koh/checkpoint.safetensors', 'training/koh/koh.safetensors'])
+  assert.equal(h.upserts[0].license, 'apache-2.0')
+  assert.equal(h.upserts[0].commercialUse, 'yes')
 })
 
 test('cleanup: the LOCAL path (no outputUrl) sweeps nothing', async () => {
@@ -151,6 +200,8 @@ test('cleanup: the LOCAL path (no outputUrl) sweeps nothing', async () => {
     actum({ jobId: 'koh', triggerWord: 'koh', baseModel: 'klein-4b', steps: 250 }), completed(250),
   )
   assert.deepEqual(deleted, [])
+  assert.equal(h.upserts[0].license, 'apache-2.0')
+  assert.equal(h.upserts[0].commercialUse, 'yes')
 })
 
 test('withLocalSamples: collects the END-OF-RUN previews (max step, by prompt index), hosts them, feeds sampleUrls', async () => {
@@ -206,6 +257,7 @@ test('repro artifacts: no samples/dataset on a bare run leaves the fields unset'
   )
   assert.equal(h.upserts[0].samples, undefined)
   assert.equal(h.upserts[0].datasetItems, undefined)
+  assert.equal(h.upserts[0].license, 'apache-2.0')
 })
 
 test('slug override: publishes under a name that differs from the invocation trigger', async () => {
@@ -221,6 +273,7 @@ test('slug override: publishes under a name that differs from the invocation tri
   assert.equal(i.trigger, '333')                 // /make invocation word unchanged
   assert.equal(i.slug, '333flux-klein')          // repo name + dest stem use the override
   assert.equal(i.dest, 'loras/333flux-klein.safetensors')
+  assert.equal(i.license, 'apache-2.0')
 })
 
 test('card enrichment: omits provenance when no source repo is given', async () => {
@@ -230,6 +283,7 @@ test('card enrichment: omits provenance when no source repo is given', async () 
   )
   assert.equal(h.upserts[0].provenance, undefined)
   assert.equal(h.upserts[0].trainingSteps, 250)
+  assert.equal(h.upserts[0].license, 'apache-2.0')
 })
 
 test('an owner-less run still hosts + records an (archival) Intella, slugging the jobId', async () => {
