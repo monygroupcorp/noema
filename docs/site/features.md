@@ -15,9 +15,9 @@
 
 ### Text Generation
 
-**Headline:** Every leading model. Zero logging.
+**Headline:** Every leading model. Never trained on your work.
 
-**Body:** Access the best open-source and frontier language models — Llama, Qwen, Mistral, and more — through the standard API or your own endpoint. Chat, reason, write, code. We do not retain your prompts or outputs after the request, and we never train on them.
+**Body:** Access the best open-source and frontier language models — Llama, Qwen, Mistral, and more — through the standard API or your own endpoint. Chat, reason, write, code. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
 **Supported:** vLLM, llama.cpp runtimes. OpenAI-compatible API.
 
@@ -27,9 +27,9 @@
 
 ### 3. Image Generation
 
-**Headline:** Generate without a record.
+**Headline:** The best open image models, composed.
 
-**Body:** FLUX Schnell and other leading image models. We don't retain your prompt or output after the request completes, and we never train on them.
+**Body:** FLUX Schnell and other leading image models. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
 **Supported:** FLUX.1 Schnell, SDXL, and others via ComfyUI workflows.
 
@@ -39,9 +39,9 @@
 
 ### 4. Video Generation
 
-**Headline:** Frame by frame. Nothing retained.
+**Headline:** Frame by frame, in one flow.
 
-**Body:** Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We don't retain your prompt or output after the request completes, and we never train on them.
+**Body:** Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
 **CTA:** Generate video →
 
@@ -49,9 +49,9 @@
 
 ### 5. Audio and Music
 
-**Headline:** Sound, nothing retained.
+**Headline:** Say what it should sound like.
 
-**Body:** Music generation, text-to-speech, and audio processing. Describe what you want; get a finished output. No audio retention, no training on your productions.
+**Body:** Music generation, text-to-speech, and audio processing. Describe what you want; get a finished output. We never train on your productions. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
 
 **CTA:** Make audio →
 
