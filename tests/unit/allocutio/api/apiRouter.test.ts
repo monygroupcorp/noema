@@ -656,6 +656,76 @@ test('ANON_PURSE on: an ownerless x-bursa-token spends unchanged → 200 (post-c
 })
 
 // ---------------------------------------------------------------------------
+// Revoked/redeemed purse (widget-security). `/widget` hands a purse token to a
+// partner's visitor in a query string (`?code=`), so a code reaching browser
+// history, a shared link or an access log is the expected failure — and the
+// owner's remedy is `POST /v1/purses/:token/revoke`. Revoking used to be a
+// BALANCE fact only (it drains the purse); the token still authenticated, and
+// any credits that landed back in the purse — `ActumInceptor` credits it back
+// when actum creation fails after the debit — were spendable again. A terminal
+// purse now refuses its own token, whatever the ANON_PURSE flag says.
+// ---------------------------------------------------------------------------
+
+const REVOKED_BURSA: Bursa = { id: 'revoked-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'revoked' }
+const REDEEMED_BURSA: Bursa = { id: 'redeemed-tok', credits: 0n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'redeemed', redeemedAt: new Date() }
+const ACTIVE_BURSA: Bursa = { id: 'active-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'active' }
+
+test('a REVOKED purse cannot spend: POST /v1/runs is refused 403 (purse.revoked)', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(OWNED_BURSA, REVOKED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'revoked-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a REDEEMED purse cannot spend: POST /v1/runs is refused 403 (purse.revoked)', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(OWNED_BURSA, REDEEMED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'redeemed-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a revoked purse is refused on READS too — GET /v1/runs/:id is 403, not just the spend', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(OWNED_BURSA, REVOKED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs/r1`, { headers: { 'x-bursa-token': 'revoked-tok' } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('ANON_PURSE on does not resurrect a revoked purse — still 403', async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: true, bursarium: gateBursarium(OWNED_BURSA, REVOKED_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'revoked-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test("an explicitly 'active' owned purse spends unchanged → 200", async () => {
+  const { server, url } = await createGatedServer({ anonPurseEnabled: false, bursarium: gateBursarium(ACTIVE_BURSA) })
+  try {
+    const res = await request(`${url}/v1/runs`, { method: 'POST', headers: { 'x-bursa-token': 'active-tok' }, body: { modusId: 'flux-schnell', verb: 'run' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.run.id, 'r1')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ---------------------------------------------------------------------------
 // POST /v1/runs — the per-key spend ceiling reaches invokeFlow, and only from
 // the credential
 // ---------------------------------------------------------------------------

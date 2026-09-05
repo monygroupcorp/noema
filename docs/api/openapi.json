@@ -17822,6 +17822,11 @@
       "httpStatus": 503
     },
     {
+      "code": "purse.revoked",
+      "httpStatus": 403,
+      "retryable": false
+    },
+    {
       "code": "rate.limited",
       "httpStatus": 429,
       "retryable": true

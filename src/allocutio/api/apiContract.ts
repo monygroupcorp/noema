@@ -2976,6 +2976,9 @@ export const API_CONTRACT: ApiContract = {
     { code: 'deposit.price_unavailable', httpStatus: 422 },
     { code: 'feature.not_implemented', httpStatus: 501 },
     { code: 'purse.disabled', httpStatus: 503 },
+    // The purse behind the presented bursa token is revoked or redeemed. NOT retryable:
+    // both states are terminal, and the holder needs a different code, not a retry.
+    { code: 'purse.revoked', httpStatus: 403, retryable: false },
     { code: 'rate.limited', httpStatus: 429, retryable: true },
     { code: 'capacity.no_pods', httpStatus: 503, retryable: true },
     { code: 'internal.unavailable', httpStatus: 503, retryable: true },

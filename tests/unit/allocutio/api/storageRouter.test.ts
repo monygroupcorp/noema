@@ -160,3 +160,43 @@ test('ANON_PURSE on: an ownerless x-bursa-token spends unchanged → 200 (post-c
     .set('x-bursa-token', 'anon-token').send({ filename: 'x.png', contentType: 'image/png' })
   assert.equal(res.status, 200)
 })
+
+// ── Revoked/redeemed purse (widget-security) ────────────────────────────────────────────
+// The `/widget` embed hands a purse token to a visitor in a query string, so a leaked code
+// is the expected failure. The owner's remedy is revoke, and revoke has to cut the code off
+// on every surface it can present itself at — including one that spends nothing but writes
+// objects into the purse's own key namespace. Independent of ANON_PURSE: a revocation that
+// only held while a flag was off would not be a revocation.
+
+const REVOKED: Bursa = { id: 'revoked-token', credits: 500n, createdAt: new Date(), owner: { animaId: 'me' }, status: 'revoked' }
+const REDEEMED: Bursa = { id: 'redeemed-token', credits: 0n, createdAt: new Date(), owner: { animaId: 'me' }, status: 'redeemed', redeemedAt: new Date() }
+
+test('a REVOKED purse token is refused 403 (purse.revoked), never presigns', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: false, bursarium: bursariumOf(OWNED, REVOKED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'revoked-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(store.signed.length, 0)
+})
+
+test('a REDEEMED purse token is refused 403 (purse.revoked), never presigns', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: false, bursarium: bursariumOf(OWNED, REDEEMED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'redeemed-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(store.signed.length, 0)
+})
+
+test('ANON_PURSE on does not resurrect a revoked purse — still 403', async () => {
+  const store = mockStore()
+  const res = await request(appWithGate(store, { anonPurseEnabled: true, bursarium: bursariumOf(OWNED, REVOKED) }))
+    .post('/api/v1/storage/uploads/sign')
+    .set('x-bursa-token', 'revoked-token').send({ filename: 'x.png', contentType: 'image/png' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(store.signed.length, 0)
+})

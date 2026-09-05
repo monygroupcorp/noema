@@ -20,6 +20,7 @@ import type { ObjectStore } from '../../crystal/R2Uploader.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders } from './IdentityResolver.js'
+import { admitBursaToken } from './bursaGate.js'
 import type { Identity } from './apiRouter.js'
 import type { Bursarum } from '../../types/bursa.js'
 
@@ -62,18 +63,14 @@ export function createStorageRouter(deps: {
     log.warn('object store has no getSignedUploadUrl — /storage/uploads/sign will 503')
   }
 
-  /** Resolve the caller (bursaToken header/body short-circuits to anon bursa).
-   *  ANON_PURSE gate (noema-131): when the flag is off, an ownerless/arcanum (forgeable) or
-   *  unknown bursa is refused 503; a SOUND owned purse (`owner` set) is accepted unchanged. */
+  /** Resolve the caller (bursaToken header/body short-circuits to anon bursa), once
+   *  `admitBursaToken` has cleared the purse row: a revoked or redeemed purse refuses its
+   *  own token, and the ANON_PURSE gate (noema-131) refuses an ownerless/arcanum or unknown
+   *  one while the flag is off. Both rules live in `bursaGate.ts`. */
   const auth = async (req: Request): Promise<AuctorKey> => {
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
     if (bursaToken) {
-      if (!deps.anonPurseEnabled) {
-        const bursa = deps.bursarium ? await deps.bursarium.findByToken(bursaToken) : null
-        if (!bursa?.owner) {
-          throw new ApiError('purse.disabled', 'anonymous purse coming soon', 503)
-        }
-      }
+      await admitBursaToken(deps, bursaToken)
       return { bursaToken }
     }
     return identity.resolve(
