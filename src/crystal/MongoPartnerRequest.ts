@@ -48,4 +48,9 @@ export class MongoPartnerRequest implements PartnerRequestStore {
     const docs = await this.col.find({ emailKey }).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
+
+  async findByAnimaId(animaId: string): Promise<PartnerRequest[]> {
+    const docs = await this.col.find({ animaId }).sort({ natum: -1 }).toArray()
+    return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
 }

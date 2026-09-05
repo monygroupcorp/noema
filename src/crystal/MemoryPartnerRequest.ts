@@ -36,4 +36,10 @@ export class MemoryPartnerRequest implements PartnerRequestStore {
   async findByEmailKey(emailKey: string): Promise<PartnerRequest[]> {
     return Array.from(this.store.values()).filter(r => r.emailKey === emailKey)
   }
+
+  async findByAnimaId(animaId: string): Promise<PartnerRequest[]> {
+    return Array.from(this.store.values())
+      .filter(r => r.animaId === animaId)
+      .sort((a, b) => b.natum.getTime() - a.natum.getTime())
+  }
 }

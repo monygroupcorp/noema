@@ -32,6 +32,7 @@ import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
 import type { PartnerStore } from '../../types/partner.js'
+import type { PartnerRequest, PartnerRequestStore } from '../../types/partnerRequest.js'
 import { rotatePartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
 
 const log = makeLogger('api:router')
@@ -290,6 +291,11 @@ export function createApiRouter(deps: {
    *  `GET /v1/me/partner` (must have an active Partner record first). Omitted → 503, same
    *  reasoning as `partners` above. */
   apiKeys?: MintPartnerApiKeyDeps
+  /** B2B partner intake queue (types/partnerRequest.ts). Backs `GET /v1/me/partner-request`
+   *  ONLY — the applicant's read of their OWN application. This router never files or decides
+   *  a request (the public intake and the admin queue are separate surfaces entirely). Omitted
+   *  → 503 `internal.unavailable`, same reasoning as `partners` above. */
+  partnerRequests?: PartnerRequestStore
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -1046,6 +1052,44 @@ export function createApiRouter(deps: {
     const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
     if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
     res.status(200).json(partner)
+  }))
+
+  // GET /v1/me/partner-request — the caller's OWN partner application, so an applicant can
+  // find out where they stand without an admin telling them. This is the counterpart to
+  // `GET /v1/me/partner` above, and the reason both exist: that route reports approval only,
+  // and 404s identically for someone who never applied, someone still under review, and
+  // someone who was declined. Those are three different facts and an applicant is entitled to
+  // know which one is theirs.
+  //
+  // Returns the MOST RECENT request only. Reapplying after a decline is the normal way back
+  // in (nothing forbids a second submission), and the latest one is the live answer; the older
+  // ones are the admin queue's history, not the applicant's.
+  //
+  // Only requests filed while SIGNED IN are visible here — an anonymous submission carries no
+  // animaId to match on, which is the same gap `partnerRequestRouter.ts` documents and the
+  // intake page warns about before you submit. 404 `not_found.partner_request` when this
+  // account has filed nothing; 503 when no intake store is wired into this deployment.
+  //
+  // `emailKey` (an internal rate-limit index) and `decidedBy` (which admin decided) are never
+  // returned — the applicant's own submission is theirs to read back; the queue's internals
+  // are not.
+  router.get('/me/partner-request', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    if (!deps.partnerRequests) throw Errors.partnerDirectoryUnavailable()
+    const filed = 'animaId' in auctor ? await deps.partnerRequests.findByAnimaId(auctor.animaId) : []
+    const latest: PartnerRequest | undefined = filed[0]
+    if (!latest) throw Errors.notFoundOwnPartnerRequest()
+    res.status(200).json({
+      id: latest.id,
+      status: latest.status,
+      useCase: latest.useCase,
+      contactEmail: latest.contactEmail,
+      natum: latest.natum,
+      ...(latest.nomen !== undefined ? { nomen: latest.nomen } : {}),
+      ...(latest.org !== undefined ? { org: latest.org } : {}),
+      ...(latest.notes !== undefined ? { notes: latest.notes } : {}),
+      ...(latest.decidedAt !== undefined ? { decidedAt: latest.decidedAt } : {}),
+    })
   }))
 
   // POST /v1/me/partner/api-key — self-serve issue-or-rotate. NOT reachable from the admin

@@ -197,6 +197,7 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('partnerRequests').createIndex({ id: 1 }, { unique: true }),
     db.collection('partnerRequests').createIndex({ status: 1, natum: -1 }),
     db.collection('partnerRequests').createIndex({ emailKey: 1, natum: -1 }),
+    db.collection('partnerRequests').createIndex({ animaId: 1, natum: -1 }),
 
     // partners — approved B2B partner accounts (one per animaId)
     db.collection('partners').createIndex({ animaId: 1 }, { unique: true }),

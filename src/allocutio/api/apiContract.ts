@@ -551,6 +551,26 @@ const BindResponseSchema: JsonSchema = {
   required: ['verb', 'modusId'],
 }
 
+/** The response body for `GET /v1/me/partner-request` — the caller's own application.
+ *  Deliberately narrower than the stored `PartnerRequest`: `emailKey` (an internal
+ *  rate-limit index) and `decidedBy` (the deciding admin) are never returned. */
+const PartnerRequestSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's most recent B2B partner application and where it stands.",
+  properties: {
+    id: { type: 'string', description: 'The application id.' },
+    status: { type: 'string', description: "'pending' (awaiting review), 'approved' (GET /v1/me/partner now returns a record), or 'declined'." },
+    useCase: { type: 'string', description: 'What the applicant said they wanted to build.' },
+    contactEmail: { type: 'string', description: 'The contact email the application was filed with.' },
+    nomen: { type: 'string', description: 'Applicant display name, if given.' },
+    org: { type: 'string', description: 'Organization name, if given.' },
+    notes: { type: 'string', description: 'Free-text notes, if given.' },
+    natum: { type: 'string', format: 'date-time', description: 'When the application was filed.' },
+    decidedAt: { type: 'string', format: 'date-time', description: 'When it was approved or declined. Absent while pending.' },
+  },
+  required: ['id', 'status', 'useCase', 'contactEmail', 'natum'],
+}
+
 /** The response body for `GET /v1/me/partner` — a B2B Partner record. */
 const PartnerSchema: JsonSchema = {
   type: 'object',
@@ -2200,6 +2220,13 @@ export const API_CONTRACT: ApiContract = {
       summary: "Return the authenticated caller's B2B partner record — an ordinary Anima a platform admin has approved. 404 not_found.partner when the caller has no partner record, or has one but it was revoked (indistinguishable from the caller's side). 503 internal.unavailable when this deployment has no partner directory wired.",
       auth: true,
       response: PartnerSchema,
+    },
+    {
+      method: 'GET',
+      path: '/me/partner-request',
+      summary: "Return the authenticated caller's most recent B2B partner application and its state, so an applicant can see whether they are pending, approved or declined without waiting to be told. Only applications filed while signed in are visible — an anonymous submission carries no account to match on. 404 not_found.partner_request when this account has filed none. 503 internal.unavailable when this deployment has no partner intake wired.",
+      auth: true,
+      response: PartnerRequestSchema,
     },
     {
       method: 'GET',

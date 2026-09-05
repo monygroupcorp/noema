@@ -24,9 +24,10 @@ import './doc.css';
 // submitter can never reach /partner to issue a key and has to be onboarded by hand. There is
 // no email in this codebase to send them a link with. So a signed-out visitor is told, before
 // they submit, that signing in first is what makes the rest of the flow self-serve; and the
-// success state points a signed-in submitter at /partner, which is where approval shows up and
-// where they issue their own key. Nothing here promises a human will follow up: no machinery
-// in this codebase sends that mail.
+// success state points a signed-in submitter at /partner, which reads back their application's
+// state (GET /v1/me/partner-request) while it is pending, says so if it is declined, and becomes
+// their dashboard when it is approved. Nothing here promises a human will follow up by mail: no
+// machinery in this codebase sends that mail — /partner is where the answer appears.
 
 type Phase = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -105,8 +106,8 @@ export function RequestDemo() {
                     Go to your partner dashboard
                   </Link>
                   <div className="sub" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-                    It'll say you don't have access yet until a reviewer approves you. Check back —
-                    nothing else is needed from you.
+                    Until a reviewer decides, it shows your application sitting in the queue — and it
+                    tells you either way, approved or declined. Nothing else is needed from you.
                   </div>
                 </>
               ) : (

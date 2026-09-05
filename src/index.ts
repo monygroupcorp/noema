@@ -1304,6 +1304,7 @@ async function main(): Promise<void> {
     anonPurseEnabled,
     bursarium: ring.bursarium,
     partners: ring.partners,
+    partnerRequests: ring.partnerRequests,
     apiKeys: { personae: ring.personae, usersCol },
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
