@@ -20,6 +20,8 @@ export interface TelegramMedia {
   animation?: { file_id: string; mime_type?: string }
   audio?: { file_id: string; mime_type?: string }
   voice?: { file_id: string; mime_type?: string }
+  /** A round video message. Carries no MIME type or filename — it is always an mp4. */
+  video_note?: { file_id: string }
   /** The catch-all wrapper: media sent uncompressed, but also a PDF or a zip. */
   document?: { file_id: string; mime_type?: string; file_name?: string }
 }

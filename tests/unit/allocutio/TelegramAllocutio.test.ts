@@ -1693,6 +1693,8 @@ const BARE_INGEST: Array<{ label: string; media: Record<string, unknown>; fileId
   { label: 'audio', media: { audio: { file_id: 'aud-1', mime_type: 'audio/mpeg' } }, fileId: 'aud-1' },
   { label: 'voice note', media: { voice: { file_id: 'voi-1', mime_type: 'audio/ogg' } }, fileId: 'voi-1' },
   { label: 'uncompressed image sent as a document', media: { document: { file_id: 'doc-1', mime_type: 'image/png', file_name: 'x.png' } }, fileId: 'doc-1' },
+  { label: 'round video note', media: { video_note: { file_id: 'vn-1' } }, fileId: 'vn-1' },
+  { label: 'document whose sender set no MIME type', media: { document: { file_id: 'doc-2', file_name: 'shot.png' } }, fileId: 'doc-2' },
 ]
 
 for (const { label, media, fileId } of BARE_INGEST) {
@@ -1750,6 +1752,27 @@ test('caption command: a video whose caption is /run … carries the video as en
   const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
   assert.ok(state?.entryMediaUrl?.endsWith('cap-vid'), 'the attached video becomes the entry media')
   assert.equal(state?.entryMediaType, 'video', 'and it is typed as a video, not an image')
+})
+
+// A video note carries no caption (the Bot API has no caption on sendVideoNote), so
+// the only way to aim a command at one is to reply to it.
+test('reply-to video note: a round video note is typed as a video, not an image', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive({
+    update_id: 11,
+    message: {
+      message_id: 13,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      text: '/run some-video-modus',
+      date: Math.floor(Date.now() / 1000),
+      reply_to_message: { message_id: 12, video_note: { file_id: 'rep-note' } },
+    },
+  })
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('rep-note'), 'the replied-to video note becomes the entry media')
+  assert.equal(state?.entryMediaType, 'video')
 })
 
 test('reply-to video: a text command replying to a video sources the video', async () => {
