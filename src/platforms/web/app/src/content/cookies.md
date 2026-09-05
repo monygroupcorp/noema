@@ -1,6 +1,5 @@
-# Cookie Policy — DRAFT
-**Last updated:** 2026-08-26
-**Status:** DRAFT. Requires review before publication.
+# Cookie Policy
+**Last updated:** 2026-09-05
 
 ---
 
@@ -34,6 +33,7 @@ The rest of what the app remembers lives in your browser's `localStorage`. It st
 | `noema-exec`, `noema-<account>-exec` | Your execution-mode preference — whose hardware a run should go to. |
 | `noema-availability` | Your availability preference from Account Settings. |
 | `noema-pins` | The flows you pinned to the rail. |
+| `noema-<account>-space-selection` | Which regions you have selected in the corpus explorer, and the projection layer you carved them in. |
 | `noema-onboarded` | Whether you have completed onboarding. |
 | `noema-chat-example-cleared` | Whether you dismissed the example prompt in chat. |
 

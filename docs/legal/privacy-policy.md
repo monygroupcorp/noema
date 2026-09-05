@@ -1,7 +1,9 @@
-# Privacy Policy — DRAFT
-**Last updated:** 2026-08-26
-**Status:** DRAFT. Not legal advice. Requires review before publication.
-**Entity placeholder:** [ENTITY NAME], [JURISDICTION]
+<!-- Reference copy of the page published at /legal/privacy. The published page is the source of
+     truth: `src/platforms/web/app/src/content/privacy.md`. Keep the two in step. -->
+
+# Privacy Policy
+**Last updated:** 2026-09-05
+**Controller:** MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina.
 
 ---
 
@@ -9,7 +11,11 @@
 
 We collect as little as we can and we do not track you. Here is what that means in practice:
 
-- Your runs — the inputs you submit and the outputs they produce — are kept as **your own history**, so you can go back to what you made and what it cost. We do not use them to train models.
+- **We never ask who you are.** No email, at any point. Sign up with a wallet and there is no
+  username either — the account is a signature. Anonymous credits work with no account at all.
+- Your runs — the inputs you submit and the outputs they produce — **are kept**, as **your own
+  history**, so you can go back to what you made and what it cost. We can technically read them.
+  We do not use them to train models, and there is no automatic expiry today (see Section 2c).
 - We do not run Google Analytics or any third-party tracking.
 - If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
 - Your session content travels encrypted, but it is **executed on rented third-party GPU hardware**. The operator of that hardware is inside the trust boundary. We do not claim otherwise (see Section 2d).
@@ -21,9 +27,9 @@ The long version follows.
 
 ## 1. Who we are
 
-[ENTITY NAME] operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean [ENTITY NAME]. Our registered address is [ADDRESS].
+MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina, operates the Noema Crystal platform, an AI compute service. References to "we," "us," or "our" mean MONY GROUP LLC. Our registered address is 116 Agnes Rd, Ste 200, Knoxville, TN 37919-6306.
 
-For GDPR purposes, [ENTITY NAME] is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
+For GDPR purposes, MONY GROUP LLC is the data controller for account, billing, and run data, and uses the processors listed in Section 5 to deliver the service.
 
 ---
 
@@ -34,14 +40,21 @@ For GDPR purposes, [ENTITY NAME] is the data controller for account, billing, an
 | Data | Why we collect it | Retention |
 |---|---|---|
 | Username | Sign-in and account identification | Until you erase your account (see Section 8) |
-| Email address (if you supply one) | Account recovery | Until you erase your account |
 | Password hash | Authentication | Until you erase your account |
 | Account ID (animaId) | Run and billing association | Pseudonymized on erasure; the opaque id is retained (Section 7) |
 | Wallet address (if crypto sign-up) | Payment rail association | Until you erase your account |
 
-We do not currently send email. Verification and reset links are issued in-product; no outbound mail provider is configured in the deployment.
+**We never ask for an email address.** There is no email field in sign-up, no verification mail,
+and no outbound mail provider configured in the deployment. Account recovery does not use email
+either: you bind a wallet or a Telegram account yourself, from your profile, and proving one of
+those is what recovers the account.
 
-You can use anonymous credits without an account. If you do, we hold none of the above.
+**You can hold an account without a username.** Signing up with a wallet mints the account from a
+signature alone — no username, no password, and nothing to remember. In that case the only row
+above we hold is the wallet address and the opaque account id.
+
+You can also use anonymous credits without any account at all. If you do, we hold none of the
+above.
 
 ### 2b. Billing and payment data
 
@@ -154,7 +167,7 @@ We share data only in these limited circumstances:
 
 We screen crypto deposit addresses against OFAC sanctions lists. We retain this screening record for compliance. If a deposit address matches a sanctioned entity, we freeze the associated balance and report as required.
 
-We run content classifiers and hash-matching against known CSAM databases at the trust boundary (model input and output). This scanning does not require us to store or surveil your content — it runs on the content as it passes through and retains nothing on a clean match.
+We screen for child sexual abuse material at the trust boundary. The enforced point is publication: nothing reaches a public surface without clearing the moderation gate, and where the gate cannot run the publication is refused rather than allowed. A human reviewer confirms an apparent match before any NCMEC report is filed. The screening runs on the content as it passes through and retains nothing on a clean result — it does not require us to store or surveil what you make.
 
 ---
 
@@ -167,7 +180,7 @@ We run content classifiers and hash-matching against known CSAM databases at the
 | Generated media in object storage | Until you erase your account |
 | Credit ledger, deposits, and payment records | Retained — the ledger is append-only and is never rewritten. After erasure it carries no identifying fields (Section 8) |
 | Account anchor after erasure | Pseudonymized shell, 7 years, for financial-record and dispute-resolution duties |
-| In-progress workflow state | 30 days from last update (automatic expiry) |
+| In-progress workflow state | 24 hours from last update (automatic expiry) |
 | Sign-in links and short-lived secrets | Expire at their own stated expiry (automatic) |
 | Data-export bundles | Private bucket; the download link expires 15 minutes after it is issued |
 | IP addresses | Not stored |
@@ -190,7 +203,7 @@ Depending on your jurisdiction, you may have the right to:
 
 **Export** is self-service: the product assembles everything held under your account into a downloadable bundle, delivered by a link that expires fifteen minutes after it is issued.
 
-**Erasure** is self-service, and it works by pseudonymization rather than by rewriting the ledger. When you erase your account:
+**Erasure** works by pseudonymization rather than by rewriting the ledger. The control lives in your account settings; where an environment has not yet enabled it, the contact address below reaches us for the same request. When your account is erased:
 
 1. Your live sessions are revoked immediately.
 2. Your account record is stripped of its identifying fields — name, credentials, wallet — and marked erased. What remains is an opaque id with nothing in it that points to a person.
@@ -200,13 +213,13 @@ Depending on your jurisdiction, you may have the right to:
 
 We state this plainly rather than promise a deletion we do not perform: erasure severs the person from the record, and the anonymized financial and run rows remain.
 
-To exercise these rights: use the account controls in the product, or contact [CONTACT EMAIL].
+To exercise these rights: use the account controls in the product, or contact mony.group.corporation+privacy@gmail.com.
 
 ---
 
 ## 9. International transfers
 
-If you are located in the EU/EEA, your data may be transferred to and processed in [JURISDICTION]. We rely on [TRANSFER MECHANISM — e.g., Standard Contractual Clauses] for such transfers.
+If you are located in the EU/EEA, your data may be transferred to and processed in the United States, where our processors run. We have not yet settled the transfer mechanism we rely on for those transfers; when we do, this section will name it.
 
 ---
 
@@ -218,15 +231,15 @@ The service is not directed to children under 13 (or 16 in the EU). We do not kn
 
 ## 11. Changes
 
-We will notify you of material changes via [email / in-app notice] at least 14 days before they take effect. The "last updated" date at the top of this policy reflects the most recent revision.
+We will notify you of material changes by in-app notice at least 14 days before they take effect. We cannot notify you by email, because we do not hold one. The "last updated" date at the top of this policy reflects the most recent revision.
 
 ---
 
 ## 12. Contact
 
-Privacy questions: [PRIVACY EMAIL]
-Data protection officer (if applicable): [DPO NAME / EMAIL]
-Address: [ADDRESS]
+Privacy questions: mony.group.corporation+privacy@gmail.com
+Data protection officer: none appointed. We are below the thresholds that require one; if that changes this section will name the appointee.
+Address: 116 Agnes Rd, Ste 200, Knoxville, TN 37919-6306
 
 ---
 
@@ -234,7 +247,8 @@ Address: [ADDRESS]
 - [ ] Confirm GDPR controller/processor classification for each data type
 - [ ] Confirm DPA registration requirement in target jurisdictions
 - [ ] Finalize OFAC retention period
-- [ ] Confirm Standard Contractual Clauses or alternative transfer mechanism
+- [ ] Settle the EU/EEA transfer mechanism (Standard Contractual Clauses or alternative), then
+      name it in Section 9
 - [ ] Add DPO contact if required (EU entities with large-scale processing)
 - [ ] Review cookie section against ePrivacy Directive requirements
 - [ ] Confirm CCPA compliance (if serving California residents)

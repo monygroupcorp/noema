@@ -1,11 +1,6 @@
-# Terms & Conditions — DRAFT TEMPLATE
+# Terms & Conditions
 
-**Date:** 2026-06-11
-**Status:** DRAFT for counsel review. **Not legal advice.** Do not publish without review by
-a qualified attorney.
-
-This template encodes the protections the compliance landscape demands. Bracketed
-`[PLACEHOLDERS]` need entity/jurisdiction decisions.
+**Last updated:** 2026-09-05
 
 ---
 
@@ -35,16 +30,19 @@ your jurisdiction.
 You will not use the Service to generate, store, transmit, or facilitate:
 
 - **Child sexual abuse material (CSAM)** or any sexual content involving minors, real or
-  AI-generated. We employ automated hash-matching and classifiers, report apparent CSAM to
-  **NCMEC** as required by **18 U.S.C. § 2258A**, preserve evidence, and cooperate with law
-  enforcement. This is a zero-tolerance, immediate-termination offense.
+  AI-generated. Nothing reaches a public surface without clearing a moderation gate, and where
+  that gate cannot run the publication is refused rather than allowed. Apparent CSAM is
+  confirmed by a human reviewer, reported to **NCMEC** as required by **18 U.S.C. § 2258A**,
+  and preserved as evidence; we cooperate with law enforcement. This is a zero-tolerance,
+  immediate-termination offense.
 - **Non-consensual intimate imagery**, including AI deepfakes of real persons (per the
   **TAKE IT DOWN Act** and state law). We honor takedown requests within 48 hours.
 - Content that is illegal in your jurisdiction or ours, infringes others' rights, or
   facilitates violence, terrorism, or trafficking.
 
-We scan at the **trust boundary** (input/output), not by surveilling your identity. We do
-not log private-session content beyond what these controls require.
+Screening reads the content itself as it passes the **trust boundary**, not who you are, and
+publication to a public surface is where it is enforced. We do not log private-session content
+beyond what these controls require.
 
 ## 4. Model licensing & intellectual property
 
@@ -85,7 +83,7 @@ sanctions match, or chargeback.
 The Service and model outputs are provided **"as is", without warranty**. AI outputs may be
 inaccurate, offensive, or unsuitable; you are responsible for reviewing and for your use. To
 the maximum extent permitted by law, our aggregate liability is limited to the Credits you
-paid in the [3] months preceding the claim. We are not liable for indirect or consequential
+paid for the Service. We are not liable for indirect or consequential
 damages.
 
 ## 8. Indemnification
@@ -102,13 +100,3 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 
 Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
 acceptance. Material changes will be notified by in-app notice.
-
----
-
-### Counsel review checklist
-- [ ] Confirm closed-loop credit framing holds in target jurisdictions (avoids MSB/MTL).
-- [ ] Confirm token absence / credit characterization avoids securities treatment.
-- [ ] Validate CSAM reporting + retention language against §2258A / REPORT Act.
-- [ ] Validate flow-down license language per model in the register.
-- [ ] Arbitration / class-action waiver clause (jurisdiction-dependent).
-- [ ] DMCA agent registration + takedown procedure.
