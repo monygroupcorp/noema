@@ -203,6 +203,18 @@ This confirms:
 
 It does NOT require trusting anyone — it is a mathematical verification.
 
+### What `zkey verify` does not tell you
+
+It proves the key you hold is *a* valid chain of contributions. It cannot tell you the
+chain is *the* one the transcript published: a key that forks off an earlier point and
+drops every contribution since is, on its own, just as valid. So compare the two — the
+contributions inside the key must match the published transcript link for link, same
+order, nothing missing.
+
+The sequencer enforces this on the way in. An upload is checked against the bytes of the
+key it was handed, not against the `x-based-on` hash the client claims, so a fork that
+drops contributions is refused however it labels itself.
+
 ---
 
 ## After the ceremony: wiring the verifier

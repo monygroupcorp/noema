@@ -204,8 +204,18 @@ export function createCeremoniaRouter(
           return res.status(400).json({ error: 'no contribution detected (output identical to input)' })
         }
 
-        const verdict = await verifyContinuation(bytes, config.verifier)
+        // The head's own bytes are what the upload has to continue — `x-based-on` only
+        // names them, and the client picks that header.
+        const headBytes = await config.custody.get(head)
+        if (!headBytes) return res.status(503).json({ error: 'head zkey not in custody' })
+
+        const verdict = await verifyContinuation(bytes, headBytes, config.verifier)
         if (!verdict.ok) {
+          // A verifier that could not run is our fault, not the contributor's: say so, and
+          // leave their one-per-session slot unspent (nothing is recorded on this path).
+          if (verdict.unavailable) {
+            return res.status(503).json({ error: 'could not verify right now — please try again shortly' })
+          }
           return res.status(400).json({ error: verdict.reason ?? 'invalid contribution' })
         }
 
