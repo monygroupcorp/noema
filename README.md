@@ -28,7 +28,7 @@ NOEMA is in active development. Data is stored in MongoDB and cloud storage. End
 
 1. **Install dependencies**
    ```bash
-   npm install
+   npm ci
    ```
 
 2. **Configure environment** – Copy `.env-example` to `.env` and fill in:

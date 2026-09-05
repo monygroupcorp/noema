@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install --legacy-peer-deps
+      - run: npm ci
       - run: npm run typecheck         # tsc --noEmit (src/) — was unchecked in CI before
       - run: npm run typecheck:tests   # tsc -p tsconfig.tests.json (test tree — see that file for the tranche)
       - run: npm run typecheck:scripts # tsc -p tsconfig.scripts.json (scripts/ — whole tree, incl. migrations)
@@ -54,7 +54,7 @@ jobs:
           until docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 })' >/dev/null 2>&1; do sleep 1; done
           docker exec mongo mongosh --quiet --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
           until [ "$(docker exec mongo mongosh --quiet --eval 'rs.status().myState')" = "1" ]; do sleep 1; done
-      - run: npm install --legacy-peer-deps
+      - run: npm ci
       # run-with-env.sh no-ops the .env load when absent. `?replicaSet=rs0` is REQUIRED — it drives
       # the driver's topology discovery so transactions are available. DB name is hardcoded
       # `noemaplane_test`. (Do NOT add directConnection=true — it disables the RS topology txns need.)

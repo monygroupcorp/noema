@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm ci --legacy-peer-deps
+      - run: npm ci
 
       - name: Refresh blocklist from OFAC SDN mirror
         run: npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json

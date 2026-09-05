@@ -20,8 +20,8 @@ RUN npm run build
 # Stage 2: Compile TypeScript
 FROM node:22-slim AS ts-builder
 WORKDIR /build
-COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+COPY package*.json .npmrc ./
+RUN npm ci
 COPY . .
 RUN npx tsc
 # Copy non-TS assets (JSON, plain JS modules, circuit artifacts) into dist alongside compiled output.
@@ -44,12 +44,14 @@ RUN apt-get update \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and install dependencies first
-COPY package*.json ./
+# Copy package files and install dependencies first. .npmrc travels with them: it carries the
+# peer-resolver setting the lockfile was generated under, and npm ci reads it from the workdir.
+COPY package*.json .npmrc ./
 
-# Install only production dependencies
+# Install only production dependencies, from the lockfile — a lockfile that has drifted from
+# package.json fails the build here instead of resolving to some other tree at image-build time.
 ENV NODE_ENV=production
-RUN npm install --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev
 
 # Copy the rest of the application code (JS workers, scripts, etc.)
 COPY . .
