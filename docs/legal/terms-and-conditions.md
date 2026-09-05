@@ -1,17 +1,15 @@
-# Terms & Conditions — DRAFT TEMPLATE
+<!-- Reference copy of the page published at /legal/terms. The published page is the source of
+     truth: `src/platforms/web/app/src/content/terms.md`. Keep the two in step. -->
 
-**Date:** 2026-06-11
-**Status:** DRAFT for counsel review. **Not legal advice.** Do not publish without review by
-a qualified attorney. Derived from `docs/legal/compliance-landscape.md`.
+# Terms & Conditions
 
-This template encodes the protections the compliance landscape demands. Bracketed
-`[PLACEHOLDERS]` need entity/jurisdiction decisions.
+**Last updated:** 2026-09-05
 
 ---
 
 ## 1. The Service
 
-[ENTITY] ("we", "us") provides access to rented GPU compute for running AI models
+MONY GROUP LLC ("we", "us") provides access to rented GPU compute for running AI models
 ("Service"). Two usage modes:
 
 - **Catalog mode** — you select from models we provide and pay per use ("Credits").
@@ -35,16 +33,19 @@ your jurisdiction.
 You will not use the Service to generate, store, transmit, or facilitate:
 
 - **Child sexual abuse material (CSAM)** or any sexual content involving minors, real or
-  AI-generated. We employ automated hash-matching and classifiers, report apparent CSAM to
-  **NCMEC** as required by **18 U.S.C. § 2258A**, preserve evidence, and cooperate with law
-  enforcement. This is a zero-tolerance, immediate-termination offense.
+  AI-generated. Nothing reaches a public surface without clearing a moderation gate, and where
+  that gate cannot run the publication is refused rather than allowed. Apparent CSAM is
+  confirmed by a human reviewer, reported to **NCMEC** as required by **18 U.S.C. § 2258A**,
+  and preserved as evidence; we cooperate with law enforcement. This is a zero-tolerance,
+  immediate-termination offense.
 - **Non-consensual intimate imagery**, including AI deepfakes of real persons (per the
   **TAKE IT DOWN Act** and state law). We honor takedown requests within 48 hours.
 - Content that is illegal in your jurisdiction or ours, infringes others' rights, or
   facilitates violence, terrorism, or trafficking.
 
-We scan at the **trust boundary** (input/output), not by surveilling your identity. We do
-not log private-session content beyond what these controls require.
+Screening reads the content itself as it passes the **trust boundary**, not who you are, and
+publication to a public surface is where it is enforced. We do not log private-session content
+beyond what these controls require.
 
 ## 4. Model licensing & intellectual property
 
@@ -52,7 +53,7 @@ not log private-session content beyond what these controls require.
   commercial use, and only offer models so licensed. Some models carry **use-based
   restrictions** (e.g., OpenRAIL-M, Meta Llama Community License); by using them you agree to
   comply with those upstream restrictions, which **flow down** to you as a condition of use.
-  The applicable restrictions are listed at [MODEL_LICENSE_PAGE_URL].
+  The applicable restrictions are those of the upstream model's own licence, which travels with the weights; we do not publish a consolidated list of them today.
 - **BYO mode:** you represent and warrant that you hold all rights necessary to use the
   weights you supply, and you indemnify us against any claim arising from your model. We do
   not review or license your supplied weights.
@@ -62,12 +63,10 @@ not log private-session content beyond what these controls require.
 
 ## 5. Privacy & confidentiality
 
-- **Private (Full Case)** sessions route through an encrypted WireGuard tunnel whose keys are
-  generated on your device, terminating at a single-tenant compute instance. This is network
-  isolation, not hardware-sealed private compute: the infrastructure provider hosting the instance can
-  technically access its memory. A hardware-sealed tier that would remove the provider from the
-  trust boundary is **in development and not yet available** — until it ships, do not treat a
-  session as sealed from the compute provider. We retain only metadata necessary to bill and
+- Sessions route through an encrypted WireGuard tunnel whose keys are generated on your device,
+  terminating at a single-tenant compute instance. This is network isolation only: the
+  infrastructure provider hosting the instance can technically access its memory, so do not treat
+  a session as sealed from the compute provider. We retain only metadata necessary to bill and
   operate (that a session occurred, its cost, its duration).
 - In **bot-mediated (Simple Case)** sessions, we act as your client and necessarily process
   your prompts, outputs, and identity to deliver the Service.
@@ -87,7 +86,7 @@ sanctions match, or chargeback.
 The Service and model outputs are provided **"as is", without warranty**. AI outputs may be
 inaccurate, offensive, or unsuitable; you are responsible for reviewing and for your use. To
 the maximum extent permitted by law, our aggregate liability is limited to the Credits you
-paid in the [3] months preceding the claim. We are not liable for indirect or consequential
+paid for the Service. We are not liable for indirect or consequential
 damages.
 
 ## 8. Indemnification
@@ -102,8 +101,8 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 
 ## 10. Governing law & changes
 
-Governed by the laws of [JURISDICTION]. We may update these terms; continued use constitutes
-acceptance. Material changes will be notified via [CHANNEL].
+Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
+acceptance. Material changes will be notified by in-app notice.
 
 ---
 
@@ -114,3 +113,5 @@ acceptance. Material changes will be notified via [CHANNEL].
 - [ ] Validate flow-down license language per model in the register.
 - [ ] Arbitration / class-action waiver clause (jurisdiction-dependent).
 - [ ] DMCA agent registration + takedown procedure.
+- [ ] Settle the aggregate-liability lookback period (the draft's bracketed window was removed
+      rather than guessed).

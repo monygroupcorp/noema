@@ -1,6 +1,5 @@
-# Privacy Policy — DRAFT
-**Last updated:** 2026-08-26
-**Status:** DRAFT. Not legal advice. Requires review before publication.
+# Privacy Policy
+**Last updated:** 2026-09-05
 **Controller:** MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina.
 
 ---
@@ -165,7 +164,7 @@ We share data only in these limited circumstances:
 
 We screen crypto deposit addresses against OFAC sanctions lists. We retain this screening record for compliance. If a deposit address matches a sanctioned entity, we freeze the associated balance and report as required.
 
-We run content classifiers and hash-matching against known CSAM databases at the trust boundary (model input and output). This scanning does not require us to store or surveil your content — it runs on the content as it passes through and retains nothing on a clean match.
+We screen for child sexual abuse material at the trust boundary. The enforced point is publication: nothing reaches a public surface without clearing the moderation gate, and where the gate cannot run the publication is refused rather than allowed. A human reviewer confirms an apparent match before any NCMEC report is filed. The screening runs on the content as it passes through and retains nothing on a clean result — it does not require us to store or surveil what you make.
 
 ---
 
@@ -178,7 +177,7 @@ We run content classifiers and hash-matching against known CSAM databases at the
 | Generated media in object storage | Until you erase your account |
 | Credit ledger, deposits, and payment records | Retained — the ledger is append-only and is never rewritten. After erasure it carries no identifying fields (Section 8) |
 | Account anchor after erasure | Pseudonymized shell, 7 years, for financial-record and dispute-resolution duties |
-| In-progress workflow state | 30 days from last update (automatic expiry) |
+| In-progress workflow state | 24 hours from last update (automatic expiry) |
 | Sign-in links and short-lived secrets | Expire at their own stated expiry (automatic) |
 | Data-export bundles | Private bucket; the download link expires 15 minutes after it is issued |
 | IP addresses | Not stored |
@@ -201,7 +200,7 @@ Depending on your jurisdiction, you may have the right to:
 
 **Export** is self-service: the product assembles everything held under your account into a downloadable bundle, delivered by a link that expires fifteen minutes after it is issued.
 
-**Erasure** is self-service, and it works by pseudonymization rather than by rewriting the ledger. When you erase your account:
+**Erasure** works by pseudonymization rather than by rewriting the ledger. The control lives in your account settings; where an environment has not yet enabled it, the contact address below reaches us for the same request. When your account is erased:
 
 1. Your live sessions are revoked immediately.
 2. Your account record is stripped of its identifying fields — name, credentials, wallet — and marked erased. What remains is an opaque id with nothing in it that points to a person.
@@ -217,7 +216,7 @@ To exercise these rights: use the account controls in the product, or contact mo
 
 ## 9. International transfers
 
-If you are located in the EU/EEA, your data may be transferred to and processed in the United States. We rely on [TRANSFER MECHANISM — e.g., Standard Contractual Clauses] for such transfers.
+If you are located in the EU/EEA, your data may be transferred to and processed in the United States, where our processors run. We have not yet settled the transfer mechanism we rely on for those transfers; when we do, this section will name it.
 
 ---
 
@@ -238,15 +237,3 @@ We will notify you of material changes by in-app notice at least 14 days before 
 Privacy questions: mony.group.corporation+privacy@gmail.com
 Data protection officer: none appointed. We are below the thresholds that require one; if that changes this section will name the appointee.
 Address: 116 Agnes Rd, Ste 200, Knoxville, TN 37919-6306
-
----
-
-*Review checklist:*
-- [ ] Confirm GDPR controller/processor classification for each data type
-- [ ] Confirm DPA registration requirement in target jurisdictions
-- [ ] Finalize OFAC retention period
-- [ ] Confirm Standard Contractual Clauses or alternative transfer mechanism
-- [ ] Add DPO contact if required (EU entities with large-scale processing)
-- [ ] Review cookie section against ePrivacy Directive requirements
-- [ ] Confirm CCPA compliance (if serving California residents)
-- [ ] Re-state Section 2c once run-record expiry windows exist

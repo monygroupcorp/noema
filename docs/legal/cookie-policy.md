@@ -1,6 +1,8 @@
-# Cookie Policy — DRAFT
-**Last updated:** 2026-08-26
-**Status:** DRAFT. Requires review before publication.
+<!-- Reference copy of the page published at /legal/cookies. The published page is the source of
+     truth: `src/platforms/web/app/src/content/cookies.md`. Keep the two in step. -->
+
+# Cookie Policy
+**Last updated:** 2026-09-05
 
 ---
 
@@ -34,6 +36,7 @@ The rest of what the app remembers lives in your browser's `localStorage`. It st
 | `noema-exec`, `noema-<account>-exec` | Your execution-mode preference — whose hardware a run should go to. |
 | `noema-availability` | Your availability preference from Account Settings. |
 | `noema-pins` | The flows you pinned to the rail. |
+| `noema-<account>-space-selection` | Which regions you have selected in the corpus explorer, and the projection layer you carved them in. |
 | `noema-onboarded` | Whether you have completed onboarding. |
 | `noema-chat-example-cleared` | Whether you dismissed the example prompt in chat. |
 
@@ -56,4 +59,4 @@ You can clear cookies and site data at any time through your browser settings. C
 
 ## Contact
 
-Questions about cookies: [PRIVACY EMAIL]
+Questions about cookies: mony.group.corporation+privacy@gmail.com
