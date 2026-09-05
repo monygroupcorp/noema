@@ -9,12 +9,14 @@
 We collect as little as we can and we do not track you. Here is what that means in practice:
 
 - **We never ask who you are.** No email, at any point. Sign up with a wallet and there is no
-  username either — the account is a signature. Anonymous credits work with no account at all.
+  username either — the account is a signature.
 - Your runs — the inputs you submit and the outputs they produce — **are kept**, as **your own
   history**, so you can go back to what you made and what it cost. We can technically read them.
   We do not use them to train models, and there is no automatic expiry today (see Section 2c).
 - We do not run Google Analytics or any third-party tracking.
-- If you use purse anonymous credits, we cannot link your spend to an identity. The billing is a zero-knowledge proof.
+- The anonymous purse — a bearer credit whose spend we could not link to an identity — is **not
+  switched on**. It unlocks after the trusted-setup ceremony. Today every credit is tied to an
+  account, and Section 2b says what that means for what we hold.
 - Your session content travels encrypted, but it is **executed on rented third-party GPU hardware**. The operator of that hardware is inside the trust boundary. We do not claim otherwise (see Section 2d).
 - A hardware-sealed private-compute tier (TEE), in which session content would be technically inaccessible to us and to the host, is **in development and not available** (see Section 2e).
 
@@ -50,8 +52,8 @@ those is what recovers the account.
 signature alone — no username, no password, and nothing to remember. In that case the only row
 above we hold is the wallet address and the opaque account id.
 
-You can also use anonymous credits without any account at all. If you do, we hold none of the
-above.
+Once the anonymous purse opens, a purse will spend without any account at all, and we will hold
+none of the rows above for it. That is not available yet — see Section 2b.
 
 ### 2b. Billing and payment data
 
@@ -59,7 +61,7 @@ We do not store payment card numbers. Card payments are processed by Stripe, sub
 
 Crypto deposits: deposit events reach us through Alchemy's webhooks, so the depositing address and transaction hash are visible to that provider and to us. We screen incoming deposit addresses against OFAC sanctions lists. This is a legal obligation, not surveillance. We retain the deposit address and transaction ID for compliance record-keeping (see Section 6).
 
-Anonymous credit: a purse token is a Groth16 zero-knowledge proof. We verify the proof and dispense compute; we cannot link the spend to your identity or prior transactions. We retain: that a proof was verified, the credit amount, the timestamp.
+Anonymous credit, when it opens: a purse token is a Groth16 zero-knowledge proof. We would verify the proof and dispense compute, and could not link that spend to your identity or your prior transactions; we would retain that a proof was verified, the credit amount, and the timestamp. **That rail is switched off today** — minting a purse is refused until the trusted-setup ceremony concludes, because until then the proving key it verifies against is one a single party holds. Every credit spent today is tied to the account that holds it, and is covered by the run and ledger records described below.
 
 ### 2c. Run records
 
@@ -185,7 +187,7 @@ We screen for child sexual abuse material at the trust boundary. The enforced po
 | Diagnostic logs | Host container log; not stored in the application database |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
-| Purse ZK proof records | Proof verification timestamp + credit amount |
+| Purse ZK proof records | None yet — the purse rail is switched off (Section 2b). When it opens: proof verification timestamp + credit amount |
 
 ---
 

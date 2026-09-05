@@ -18,6 +18,13 @@ import { fileURLToPath } from 'node:url';
 // read of `content/` covered the six top-level pages and silently skipped every guide — the
 // exact blind spot this file exists to close, reopened by a folder.
 
+// The same hole exists one step over, and it is wider: the landing page, the site footer, the
+// pricing page and the ceremony page write their links as `<Link to="/…">` in TSX. React Router
+// does not validate a `to` against the route table either — an unrouted path renders as a normal
+// link and lands the visitor on the 404 stub. The landing page alone carries sixteen of them in a
+// footer nobody re-reads. So the walk below covers both surfaces: markdown by file, and every
+// literal `to=` / `href=` path in the screens.
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONTENT = join(HERE, '..', 'content');
 const APP = join(HERE, '..', 'App.tsx');
@@ -76,6 +83,18 @@ describe('links in published marketing copy', () => {
     it(`${file} links only to paths that exist`, () => {
       const md = readFileSync(join(CONTENT, file), 'utf8');
       const links = [...md.matchAll(/\]\((\/[^)\s]*)\)/g)].map((m) => m[1]);
+      const dead = links.filter((l) => !resolves(l.split(/[?#]/)[0], routes));
+      expect(dead, `dead internal links in ${file}`).toEqual([]);
+    });
+  }
+
+  // Every screen, not a hand-kept list of the marketing ones: a list is a second place the truth
+  // lives, and it goes stale the first time a page is added. Only literal paths are read — a
+  // template or a variable is skipped rather than guessed at.
+  for (const file of readdirSync(HERE).filter((f) => f.endsWith('.tsx'))) {
+    it(`${file} links only to paths that exist`, () => {
+      const src = readFileSync(join(HERE, file), 'utf8');
+      const links = [...src.matchAll(/\b(?:to|href)=["'](\/[^"'\s]*)["']/g)].map((m) => m[1]);
       const dead = links.filter((l) => !resolves(l.split(/[?#]/)[0], routes));
       expect(dead, `dead internal links in ${file}`).toEqual([]);
     });
