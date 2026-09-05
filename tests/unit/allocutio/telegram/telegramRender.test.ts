@@ -82,3 +82,20 @@ test('a Form card shows a filled image Porta as (image), never as a URL', () => 
   assert.match(out.text, /Image: \(image\)/)
   assert.match(out.text, /Prompt: describe this/, 'non-URL values still render')
 })
+
+test('a Form card shows a chained PRIVATE input as (image), never as its key', () => {
+  const out = renderPrimitive({
+    kind: 'Form',
+    label: 'Interrogate',
+    fields: [
+      { key: 'image', label: 'Image', required: true },
+      { key: 'prompt', label: 'Prompt', required: false },
+    ],
+    values: {
+      image: 'noema-private://private-outputs/abcdef0123456789/cccc.png',
+      prompt: 'again, colder',
+    },
+  } as never)
+  assert.ok(!out.text.includes('noema-private://'), 'no private-output key on the card')
+  assert.match(out.text, /Image: \(image\)/)
+})

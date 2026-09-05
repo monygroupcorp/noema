@@ -258,7 +258,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined> } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -285,6 +285,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     botStartupTime: opts.botStartupTime,
     ...(opts.botUsername ? { botUsername: opts.botUsername } : {}),
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
+    ...(opts.resolvePrivateMedia ? { resolvePrivateMedia: opts.resolvePrivateMedia } : {}),
     acta,
     ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
     ...(opts.modorum ? { modorum: opts.modorum as unknown as import('../../../src/types/modus.js').Modorum } : {}),
@@ -1901,4 +1902,103 @@ test('render target follows the flow\'s own chat, even after the user types else
 
   assert.equal(sender.photos.length, 1)
   assert.equal(sender.photos[0].chatId, 111, 'renders into the chat the flow was opened in, not chat B')
+})
+
+// =============================================================================
+// Private generation (noema-347): a private result arrives as MEDIA
+// =============================================================================
+//
+// A private run's output is a `noema-private://<key>` marker, not a URL — the bucket it names
+// has no public binding. Telegram cannot fetch a scheme it has no client for, so the marker is
+// resolved to a link minted for this one send, which Telegram fetches server-side. What must
+// never happen is the marker (or the grant) reaching the chat as text.
+
+const PRIVATE_MEDIA_MARKER = 'noema-private://private-outputs/abcdef0123456789/cccc.png'
+
+/** The Result step a completed private run produces — media, because the marker IS media. */
+function privateResultStep(url = PRIVATE_MEDIA_MARKER): import('../../../src/flow/types.js').Step {
+  return {
+    primitives: [{
+      kind: 'Result',
+      actumId: 'actum-42',
+      label: 'Result',
+      media: [{ url, type: 'image', caption: 'a cat' }],
+      actions: [{ id: 'info', label: 'ℹ' }],
+    }],
+  }
+}
+
+const privateCtx: FlowContext = {
+  intent: 'execute',
+  state: {},
+  identity: { animaId: 'test-anima' },
+  platform: 'telegram',
+  platformUserId: '123',
+  platformChatId: '456',
+}
+
+test('a private result is sent as a photo, through a link minted for the send', async () => {
+  const asked: string[] = []
+  const { allocutio, router, sender } = makeAllocutio({
+    resolvePrivateMedia: async (marker) => { asked.push(marker); return 'https://private.example/cccc.png?sig=minted' },
+  })
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+
+  sender.sent.length = 0
+  router.triggerStep(privateCtx, privateResultStep())
+  await new Promise(r => setImmediate(r))
+
+  assert.deepEqual(asked, [PRIVATE_MEDIA_MARKER], 'the marker was resolved once, at the send')
+  assert.equal(sender.photos.length, 1, 'it arrives as a photo, not as text')
+  assert.equal(sender.photos[0].url, 'https://private.example/cccc.png?sig=minted')
+  for (const m of sender.sent) {
+    assert.ok(!m.text.includes('noema-private://'), `the marker reached the chat as text: ${m.text}`)
+  }
+})
+
+test('with no way to resolve it, a private result says so and prints no key', async () => {
+  const { allocutio, router, sender } = makeAllocutio()   // no resolvePrivateMedia wired
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+
+  sender.sent.length = 0
+  router.triggerStep(privateCtx, privateResultStep())
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(sender.photos.length, 0)
+  assert.equal(sender.sent.length, 1, 'the user is told, once')
+  assert.ok(!sender.sent[0].text.includes('noema-private://'), 'and never shown the key itself')
+})
+
+test('a failed send of a private result never falls back to posting the link', async () => {
+  const { allocutio, router, sender } = makeAllocutio({
+    resolvePrivateMedia: async () => 'https://private.example/cccc.png?sig=minted',
+  })
+  ;(sender as unknown as { sendPhoto: (...args: unknown[]) => unknown }).sendPhoto = async () => {
+    throw new Error('Permission denied')
+  }
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+
+  sender.sent.length = 0
+  router.triggerStep(privateCtx, privateResultStep())
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(sender.sent.length, 1)
+  // The public path may fall back to the URL as text; a private grant may not — posting it
+  // hands everyone in the room a working read on a private object, outliving the failure.
+  assert.ok(!sender.sent[0].text.includes('sig=minted'), 'the grant was posted into the chat')
+  assert.ok(!sender.sent[0].text.includes('noema-private://'))
+})
+
+test('a public result still falls back to the URL as text when the send fails', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  ;(sender as unknown as { sendPhoto: (...args: unknown[]) => unknown }).sendPhoto = async () => {
+    throw new Error('Permission denied')
+  }
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+
+  sender.sent.length = 0
+  router.triggerStep(privateCtx, privateResultStep('https://example.com/image.png'))
+  await new Promise(r => setImmediate(r))
+
+  assert.equal(sender.sent[0].text, 'https://example.com/image.png', 'the public fallback is unchanged')
 })

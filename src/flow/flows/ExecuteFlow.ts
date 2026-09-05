@@ -8,6 +8,7 @@ import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
+import { isMediaRef } from '../../crystal/MediaFetcher.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -614,7 +615,10 @@ export class ExecuteFlow implements Flow {
     // is key-agnostic, so it works whatever the flow's exitus schema names its output
     // (`image`, `imageUrl`, `mesh`, …) — the schema/runtime key never has to match a
     // delivery convention again.
-    const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\//.test(v)
+    //
+    // A PRIVATE run's output is a `noema-private://` marker, not a URL, and it is media just
+    // the same: an adapter resolves it at the moment of delivery. Counting it as media is what
+    // stops it being swept into `textContent` and printed into the chat as a raw key.
     const mediaType = (url: string): 'video' | 'audio' | 'image' => {
       const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
       if (/^(mp4|webm|mov|m4v|mkv)$/.test(ext)) return 'video'
@@ -623,11 +627,11 @@ export class ExecuteFlow implements Flow {
     }
 
     const media = Object.entries(result)
-      .filter(([, v]) => isUrl(v))
+      .filter(([, v]) => isMediaRef(v))
       .map(([, v]) => ({ url: v as string, type: mediaType(v as string) }))
 
-    // Text content: non-URL values, skipping internal underscore-prefixed keys (collection bookkeeping).
-    const textEntries = Object.entries(result).filter(([k, v]) => !isUrl(v) && !k.startsWith('_'))
+    // Text content: non-media values, skipping internal underscore-prefixed keys (collection bookkeeping).
+    const textEntries = Object.entries(result).filter(([k, v]) => !isMediaRef(v) && !k.startsWith('_'))
     const textContent = textEntries.length > 0
       ? textEntries.map(([k, v]) => `${k}: ${String(v)}`).join('\n')
       : undefined
@@ -677,11 +681,10 @@ export class ExecuteFlow implements Flow {
     if (!state.modusId) return undefined
 
     // Extract the assistant's text reply (for chat continuation). Value-driven:
-    // genuine text = string values that are NOT URLs, so a media output (e.g. an
-    // `image` URL) never pollutes the conversation thread. Image-only flows yield
-    // no text → no priorMessages.
-    const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\//.test(v)
-    const textEntries = Object.entries(result).filter(([, v]) => typeof v === 'string' && !isUrl(v))
+    // genuine text = string values that are NOT media references, so a media output (an `image`
+    // URL, or a private run's marker) never pollutes the conversation thread — and never rides
+    // a marker into a chat model's transcript. Image-only flows yield no text → no priorMessages.
+    const textEntries = Object.entries(result).filter(([, v]) => typeof v === 'string' && !isMediaRef(v))
     if (textEntries.length === 0) return { modusId: state.modusId }
 
     const rawText = String(result.response ?? result.text ?? textEntries[0]?.[1] ?? '')

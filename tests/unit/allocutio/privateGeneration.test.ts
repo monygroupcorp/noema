@@ -10,8 +10,9 @@
 //   3. the moderation/triage fetch path can read a private output
 //   4. an absent `privateOutputs` preference generates PUBLIC
 //
-// Plus the fallout each of those implies: the feed's imago filter, the publish
-// refusal, and the toggle's refusal on a deployment with no private bucket.
+// Plus the fallout each of those implies: the feed's imago filter and the toggle's refusal on
+// a deployment with no private bucket. Phase 2 (publishing a private output) is at the foot of
+// the file; phase 3 (chaining one back in as an input) sits with the dispatch tests above it.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -556,21 +557,207 @@ test('privateOutputs persists where a private bucket IS configured', async () =>
   assert.equal(stored.length, 1)
 })
 
-test('publishing a private output is refused, not silently re-hosted', async () => {
-  const actum = makeActum({
-    status: 'completus',
-    signaConsumed: ['signum-1'],
-    exitus: { image: privateMarker(MARKER_KEY) },
-  })
+
+// ── Phase 2: publishing a private output copies it OUT ────────────────────────
+//
+// Publishing is the deliberate act that makes a private output public. It does not move the
+// object or change the run: the private bytes stay where they are and the exitus keeps its
+// marker. What the publication gets is its OWN public copy, keyed by the Editio — so the
+// destination adapter and the feed render something a stranger can fetch, and a retract can
+// take those bytes back out again.
+
+/** An in-memory Editionum, enough of one for the publish → settle → retract lane. */
+function memoryEditiones() {
+  const rows: Array<Record<string, unknown>> = []
+  return {
+    rows,
+    async create(input: Record<string, unknown>) {
+      const e = { ...input, id: `ed-${rows.length + 1}`, status: 'pending', natum: new Date(), mutatum: new Date() }
+      rows.push(e)
+      return e
+    },
+    async find(id: string) { return rows.find((r) => r.id === id) ?? null },
+    async update(id: string, patch: Record<string, unknown>) {
+      const e = rows.find((r) => r.id === id)
+      if (!e) throw new Error(`no editio ${id}`)
+      Object.assign(e, patch)
+      return e
+    },
+    async listFeed() { return rows.filter((r) => r.status === 'published') },
+    async listByArtifact() { return [] },
+    async listByAuthor() { return [] },
+    async listHeld() { return rows.filter((r) => r.reviewOutcome === 'pending') },
+    async claimPending() { return null },
+  }
+}
+
+/** A public object store that records what it was handed, and the bytes it holds. */
+function recordingPublicStore() {
+  const put: Array<{ key: string; contentType: string; bytes: string }> = []
+  const deleted: string[] = []
+  return {
+    put, deleted,
+    store: {
+      async put(key: string, bytes: Buffer, contentType: string) {
+        put.push({ key, contentType, bytes: bytes.toString() })
+        return `https://cdn.example/${key}`
+      },
+      async del(key: string) { deleted.push(key) },
+    },
+  }
+}
+
+/**
+ * A CrystalApi wired for the publication lane over one completed run.
+ *
+ * `copyOut: false` models a deployment with no public bucket to copy INTO — the one case that
+ * is still refused. `gate` installs a moderation gate (only consulted for a public surface).
+ */
+function publishingApi(opts: {
+  exitus: Record<string, unknown>
+  copyOut?: boolean
+  gate?: { ok: boolean; hold?: boolean }
+} = { exitus: {} }) {
+  const gate = opts.gate
+  const actum = makeActum({ status: 'completus', signaConsumed: ['signum-1'], exitus: opts.exitus })
+  const editiones = memoryEditiones()
+  const publicStore = recordingPublicStore()
+  const publishedWith: Array<Record<string, unknown> | undefined> = []
+  const fetched: string[] = []
+
   const api = new CrystalApi({
     actorum: { async findById() { return actum }, async findByCompositum() { return [] } },
     signorum: { async ownsAny() { return true } },
-    editiones: { async create(e: unknown) { return e }, async find() { return null }, async update() { return null } },
-    publicationAdapters: [{ key: 'feed', async publish() { throw new Error('the adapter must never be reached') } }],
+    editiones,
+    publicationAdapters: [{
+      key: 'feed',
+      async publish(artifact: { output?: Record<string, unknown> }) {
+        publishedWith.push(artifact.output)
+        return { externalRef: 'feed:post-1' }
+      },
+      async retract() { /* the feed retract is a status flip */ },
+    }],
+    ...(gate ? { moderationGate: { async scan() { return { ok: gate.ok, reason: 'because', ...(gate.hold ? { hold: true } : {}) } } } } : {}),
+    ...(opts.copyOut === false ? {} : {
+      publicationCopyOut: {
+        async fetch(ref: string) { fetched.push(ref); return Buffer.from(`bytes-of:${ref}`) },
+        store: publicStore.store,
+      },
+    }),
+    privateOutputs: {
+      store: { async getSignedDownloadUrl(key: string) { return `https://private.example/${key}?sig=x` } },
+    },
   } as never)
+
+  return { api, actum, editiones, publicStore, publishedWith, fetched }
+}
+
+const PRIVATE_EXITUS = { image: privateMarker(MARKER_KEY) }
+
+test('publishing a private output copies the bytes into the public store', async () => {
+  const { api, publishedWith, publicStore, fetched } = publishingApi({ exitus: PRIVATE_EXITUS })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'unlisted' } as never)
+  await api.settlePublication(ed.id)
+
+  assert.deepEqual(fetched, [privateMarker(MARKER_KEY)], 'the bytes were read through the private store')
+  assert.equal(publicStore.put.length, 1, 'one object was written to the public bucket')
+  assert.ok(publicStore.put[0].key.startsWith(`editiones/${ed.id}/`), 'the copy is keyed by the publication that made it')
+  assert.equal(publicStore.put[0].contentType, 'image/png', 'the content type is carried over from the marker')
+
+  // The destination adapter is handed the COPY — no marker survives into a publication.
+  const output = publishedWith[0] ?? {}
+  assert.equal(output.image, `https://cdn.example/${publicStore.put[0].key}`)
+  assert.ok(!isPrivateMarker(output.image), 'the adapter never sees a marker')
+})
+
+test('the run itself stays private after its output is published', async () => {
+  const { api, actum } = publishingApi({ exitus: PRIVATE_EXITUS })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'unlisted' } as never)
+  await api.settlePublication(ed.id)
+
+  assert.equal(actum.exitus?.image, privateMarker(MARKER_KEY), 'the run record still holds the marker')
+})
+
+test('a private output inside a list is copied out too', async () => {
+  const { api, publishedWith, publicStore } = publishingApi({
+    exitus: { images: [PUBLIC_URL, privateMarker(MARKER_KEY), privateMarker('private-outputs/abcdef0123456789/dddd.png')] },
+  })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'unlisted' } as never)
+  await api.settlePublication(ed.id)
+
+  assert.equal(publicStore.put.length, 2, 'both markers in the list were copied')
+  const images = (publishedWith[0]?.images ?? []) as string[]
+  assert.equal(images.length, 3, 'the list keeps its length and order')
+  assert.equal(images[0], PUBLIC_URL, 'a public url is left alone')
+  for (const url of images) assert.ok(!isPrivateMarker(url), `a marker survived into the publication: ${url}`)
+})
+
+test('the feed renders the publication’s copy, never the marker', async () => {
+  const { api, publicStore } = publishingApi({ exitus: PRIVATE_EXITUS, gate: { ok: true } })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'feed', destination: 'feed' } as never)
+  await api.settlePublication(ed.id)
+
+  const items = await api.feed()
+  assert.equal(items.length, 1)
+  assert.equal(items[0].output?.image, `https://cdn.example/${publicStore.put[0].key}`)
+})
+
+test('retracting the publication deletes its public copy', async () => {
+  const { api, publicStore } = publishingApi({ exitus: PRIVATE_EXITUS })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'unlisted' } as never)
+  await api.settlePublication(ed.id)
+  await api.retractEdition({ animaId: 'anima-1' }, ed.id)
+
+  assert.deepEqual(publicStore.deleted, [publicStore.put[0].key], 'the bytes came back out of the public bucket')
+})
+
+test('a publication the gate HOLDS puts no private byte in the public bucket', async () => {
+  const { api, publicStore, publishedWith } = publishingApi({
+    exitus: PRIVATE_EXITUS,
+    gate: { ok: false, hold: true },
+  })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'feed', destination: 'feed' } as never)
+  await api.settlePublication(ed.id)
+
+  assert.equal(publicStore.put.length, 0, 'the copy is made only once the gate has passed')
+  assert.equal(publishedWith.length, 0, 'and the adapter was never reached')
+})
+
+test('a held private publication is presigned for the reviewer, who must see it to decide', async () => {
+  const { api } = publishingApi({ exitus: PRIVATE_EXITUS, gate: { ok: false, hold: true } })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'feed', destination: 'feed' } as never)
+  await api.settlePublication(ed.id)
+
+  const preview = await api.previewHeldEdition({ animaId: 'platform' }, ed.id)
+  assert.equal(preview.mediaUrls.length, 1)
+  assert.ok(!isPrivateMarker(preview.mediaUrls[0]), 'a marker renders as nothing — the reviewer gets a link')
+  assert.match(preview.mediaUrls[0], /^https:\/\/private\.example\//)
+})
+
+test('publishing a private output is refused where the deployment cannot copy it out', async () => {
+  const { api, publishedWith } = publishingApi({ exitus: PRIVATE_EXITUS, copyOut: false })
 
   await assert.rejects(
     () => api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'feed' } as never),
     (err: unknown) => err instanceof ApiError && err.code === 'internal.unavailable',
   )
+  assert.equal(publishedWith.length, 0, 'the adapter must never be reached')
+})
+
+test('a PUBLIC output publishes with nothing copied at all', async () => {
+  const { api, publicStore, publishedWith, fetched } = publishingApi({ exitus: { image: PUBLIC_URL } })
+
+  const ed = await api.publish({ animaId: 'anima-1' }, { artifact: { kind: 'actum', id: 'act-1' }, visibility: 'unlisted' } as never)
+  await api.settlePublication(ed.id)
+
+  assert.equal(fetched.length, 0)
+  assert.equal(publicStore.put.length, 0, 'the copy-out is the private path only')
+  assert.equal(publishedWith[0]?.image, PUBLIC_URL)
 })

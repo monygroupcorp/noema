@@ -54,11 +54,18 @@ import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
 import { COPY } from '../lexicon/copy.js'
+import { isPrivateMarker } from '../../crystal/MediaFetcher.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 // Re-export the adapter contracts so existing importers (index, TelegramSenderAdapter) keep working.
 export type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 
 const log = makeLogger('telegram:allocutio')
+
+/** One media item of a result, ready to send: `url` is always something Telegram can fetch, and
+ *  `isPrivate` records that it got there through a one-send grant on a private object — the flag
+ *  the failure paths read before deciding whether a link may be printed into the chat. */
+type DeliverableMedium =
+  NonNullable<Extract<Primitive, { kind: 'Result' }>['media']>[number] & { isPrivate: boolean }
 
 // ---------------------------------------------------------------------------
 // TelegramAllocutio
@@ -104,6 +111,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
+    /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
+     *  server-side. Absent → a private run's media cannot be delivered on this bot. */
+    resolvePrivateMedia?: (marker: string) => Promise<string | undefined>
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
@@ -180,6 +190,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     issueTelegramRecovery?: (telegramUserId: string) => Promise<string>
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
+    /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
+     *  server-side (private generation, noema-347). The bytes live in a bucket with no public
+     *  binding, so a marker is the only thing a private run hands us; the link is minted for
+     *  this one send and never appears in the chat — Telegram fetches it and keeps the file.
+     *  Absent (no private-outputs store on this deployment) → a private result is not delivered
+     *  here, and the user is told so rather than shown a key. */
+    resolvePrivateMedia?: (marker: string) => Promise<string | undefined>
   }) {
     this.deps = deps
     this.router = deps.router
@@ -831,6 +848,30 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // _sendResult — special handling for Result primitive (media sending)
   // -------------------------------------------------------------------------
 
+  /**
+   * Every media item of a result, as something Telegram can actually fetch.
+   *
+   * A private run hands us a `noema-private://` marker, not a URL: the object lives in a bucket
+   * with no public binding. Each marker becomes a link minted for this one send, which Telegram
+   * fetches server-side — the chat only ever holds the resulting photo/video. A marker that
+   * cannot be resolved (no private-outputs store here, or the store refused) is DROPPED rather
+   * than sent: passing it on would put the key itself in the chat, which is the one outcome the
+   * marker scheme exists to prevent.
+   */
+  private async _deliverableMedia(
+    media: NonNullable<Extract<Primitive, { kind: 'Result' }>['media']>,
+  ): Promise<{ items: DeliverableMedium[]; withheld: number }> {
+    const items: DeliverableMedium[] = []
+    let withheld = 0
+    for (const m of media) {
+      if (!isPrivateMarker(m.url)) { items.push({ ...m, isPrivate: false }); continue }
+      const link = await this.deps.resolvePrivateMedia?.(m.url).catch(() => undefined)
+      if (link) items.push({ ...m, url: link, isPrivate: true })
+      else withheld++
+    }
+    return { items, withheld }
+  }
+
   private async _sendResult(
     chatId: number,
     primitive: Extract<Primitive, { kind: 'Result' }>
@@ -848,8 +889,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       return
     }
 
-    if (primitive.media.length === 1) {
-      const m = primitive.media[0]
+    const { items, withheld } = await this._deliverableMedia(primitive.media)
+    if (items.length === 0) {
+      // Everything this result had was private and unresolvable. Say so; print no reference.
+      const sent = await this.sender.sendMessage(chatId, COPY.status.privateUndeliverable, extra)
+      track(sent.message_id, COPY.status.privateUndeliverable, false)
+      return
+    }
+    if (withheld > 0) await this.sender.sendMessage(chatId, COPY.status.privateUndeliverable).catch(() => {})
+
+    if (items.length === 1) {
+      const m = items[0]
       try {
         let sent: { message_id: number }
         if (m.type === 'image') {
@@ -861,21 +911,27 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         }
         track(sent.message_id, m.caption ?? '', true)
       } catch {
-        await this.sender.sendMessage(chatId, m.url, extra)
+        // The send failed — fall back to the link as text, but ONLY for a public output. A
+        // resolved private link is a working grant on a private object; posting it into the chat
+        // hands it to everyone in the room and outlives the failure that prompted it.
+        if (m.isPrivate) await this.sender.sendMessage(chatId, COPY.status.privateUndeliverable, extra)
+        else await this.sender.sendMessage(chatId, m.url, extra)
       }
       return
     }
 
     // Multiple media: sendMediaGroup (no inline keyboard support), then keyboard as text
     try {
-      const media = primitive.media.map((m, i) => ({
+      const media = items.map((m, i) => ({
         type: m.type === 'video' ? 'video' : 'photo',
         media: m.url,
         caption: i === 0 ? m.caption : undefined,
       }))
       await this.sender.sendMediaGroup(chatId, media)
     } catch {
-      for (const m of primitive.media) {
+      // Same rule per item: a public URL may fall back to text, a private grant may not.
+      for (const m of items) {
+        if (m.isPrivate) continue
         await this.sender.sendMessage(chatId, m.url).catch(() => {})
       }
     }

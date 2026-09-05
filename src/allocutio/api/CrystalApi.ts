@@ -50,7 +50,7 @@ import {
 } from '../../crystal/MandatumRunner.js'
 import { describeFlow, type FlowDescription, type DescribableModus } from './aditusToJsonSchema.js'
 import { Errors, ApiError } from './errors.js'
-import { isPrivateMarker, privateKeyOf } from '../../crystal/MediaFetcher.js'
+import { isPrivateMarker, privateKeyOf, withResolvedPrivateMarkers } from '../../crystal/MediaFetcher.js'
 import { v4 as uuidv4 } from 'uuid'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
@@ -197,7 +197,7 @@ import type { VerdictCache } from '../../crystal/VerdictCache.js'
 import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/VerdictCache.js'
 import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
 import type { CsamReviewReporter } from '../../crystal/CsamReviewReporter.js'
-import { allMediaUrls } from '../../crystal/BucketAdapter.js'
+import { allMediaUrls, mediaTypeFor } from '../../crystal/BucketAdapter.js'
 import { isPodLockedReport } from '../../crystal/expiryReaper.js'
 import { makeLogger } from '../../lib/logger.js'
 import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
@@ -235,6 +235,12 @@ const TEE_READY_WATCHDOG_MS = Number(process.env.TEE_READY_WATCHDOG_MS ?? 20 * 6
 /** TTL of a presigned read link for a private output. Long enough to load a page and open the
  *  original; short enough that a copied link is not a durable handle to private media. */
 const PRIVATE_PRESIGN_TTL_SECONDS = 15 * 60
+
+/** The public-bucket prefix a publication's own copy of a private output is written under,
+ *  keyed by the Editio (`editiones/<editioId>/<n>.<ext>`). The same prefix `BucketAdapter` hosts
+ *  its media under, and for the same reason: these are publication-owned bytes, so a retract can
+ *  recompute the key and delete them. */
+const PUBLICATION_COPY_PREFIX = 'editiones'
 
 /** The cause recorded on a run the owner stops themselves (`POST /v1/runs/:id/cancel`, and each
  *  piece a collection cancel settles). It is only ever the cause when nothing more specific was
@@ -284,6 +290,21 @@ export interface CrystalApiDeps {
     store: { getSignedDownloadUrl(key: string, opts?: { expiresIn?: number }): Promise<string> }
     /** TTL (seconds) for a presigned read link. Default 900 (15 min). */
     presignTtlSeconds?: number
+  }
+  /**
+   * Copying a private output OUT of the private bucket, for a publication (noema-347 phase 2).
+   * `fetch` reads the bytes a `noema-private://` marker names; `store` is the PUBLIC outputs
+   * bucket the copy is written to - a separate bucket, never a view of the private one.
+   *
+   * Absent, publishing a private output is REFUSED rather than re-hosted, exactly as it was in
+   * phase 1: a deployment that cannot copy the bytes out must not pretend it published them.
+   */
+  publicationCopyOut?: {
+    fetch(ref: string): Promise<Buffer>
+    store: {
+      put(key: string, bytes: Buffer, contentType: string): Promise<string>
+      del(key: string): Promise<void>
+    }
   }
   /** Compositus engine (ADR-0008) — lets `invokeFlow` dispatch a compositus (spell)
    *  modus, not just atomics. Absent → compositus modi throw at dispatch. */
@@ -1864,7 +1885,9 @@ export class CrystalApi {
     const items = await editiones.listFeed({ ...filter, visibility })
     const out: FeedItem[] = []
     for (const e of items) {
-      const output = await this._artifactOutput(e.artifactRef)
+      // A publication that copied a private output out renders ITS copy — the artifact's own
+      // exitus still holds markers no reader outside the owner can fetch.
+      const output = e.hostedOutput ?? await this._artifactOutput(e.artifactRef)
       out.push({
         editionId: e.id,
         artifact: { kind: e.artifactRef.kind, id: e.artifactRef.id },
@@ -1896,6 +1919,7 @@ export class CrystalApi {
     const adapter = this._resolveAdapter(e.destination)
     if (!adapter.retract) throw Errors.authForbidden(`'${e.destination}' publications cannot be retracted (permanent)`)
     await adapter.retract(e)
+    await this._dropHostedOutput(e)
     const updated = await editiones.update(id, { status: 'retracted' })
     await this._reconcile(updated)
     return toEdition(updated)
@@ -1957,7 +1981,12 @@ export class CrystalApi {
     const e = await editiones.find(id)
     if (!e || e.reviewOutcome !== 'pending') throw Errors.notFoundEdition(id)
     const output = await this._artifactOutput(e.artifactRef)
-    const mediaUrls = allMediaUrls(output)
+    // A HELD publication has not been copied out yet — the copy is only made once the gate has
+    // passed — so a private output is still a marker here, and a marker renders as nothing. The
+    // reviewer is the one person who must see it to decide, so presign it for them, under the
+    // platform-admin gate this method already stands behind.
+    const mediaUrls: string[] = []
+    for (const url of allMediaUrls(output)) mediaUrls.push(await this._presignPrivateRef(url) ?? url)
     // Richer per-item metadata when the output carries it (an intella's `samples[]` — see
     // `_artifactOutput`'s `intella` branch, each entry `{ url, pathInRepo, prompt? }`).
     // Kind-agnostic on purpose: any future artifact output shaped as `samples: {url,prompt?}[]`
@@ -2055,22 +2084,89 @@ export class CrystalApi {
   /** Run the moderation gate (public surfaces only) then the adapter publish,
    *  recording the outcome on the Editio. Pending → published | rejected | failed. */
   /**
-   * Refuse to publish an artifact whose produced output is private (noema-347).
+   * Refuse to publish a private output only where this deployment cannot copy it out.
+   *
+   * Phase 1 of private generation refused EVERY private publication; phase 2 copies the bytes
+   * into the public bucket at settle instead (`_copyOutPrivateOutput`), so the refusal narrows
+   * to the one case that is still a promise we cannot keep: no copy-out store is wired, and the
+   * publication would either fail at its destination or hand a marker to a surface that renders
+   * it verbatim. Fail closed there rather than publish something unreadable.
    *
    * Guards the whole publication lane: the synchronous `publish` entry (where the caller sees the
    * typed refusal) and the durable settle below (where a row that predates this guard, or one
-   * whose run went private after the fact, is failed rather than re-hosted).
+   * whose run went private after the fact, is failed rather than sent on).
    */
   private async _assertPublishableOutput(ref: ArtifactRef): Promise<void> {
+    if (this.deps.publicationCopyOut) return
     const output = await this._artifactOutput(ref)
-    if (!output) return
-    if (!Object.values(output).some((v) => isPrivateMarker(v))) return
+    if (this._privateRefsIn(output).length === 0) return
     throw new ApiError(
       'internal.unavailable',
-      'Publishing a private output is not available yet. Turn off private generation and run it again to publish.',
+      'Publishing a private output is not available on this deployment. Turn off private generation and run it again to publish.',
       503,
       { retryable: false },
     )
+  }
+
+  /**
+   * Every `noema-private://` marker an artifact's produced output carries, deduped.
+   *
+   * Scans the same media shapes the moderation gate hashes, so a marker inside a list
+   * (`images[]`, an intella's `samples[]`) counts exactly like a top-level one — the phase-1
+   * check looked only at top-level values and so missed a multi-image run.
+   */
+  private _privateRefsIn(output?: Record<string, unknown>): string[] {
+    return allMediaUrls(output).filter(isPrivateMarker)
+  }
+
+  /**
+   * Copy every private output an artifact carries into the PUBLIC bucket under this
+   * publication's own key, and return the output with each marker replaced by the copy's URL.
+   *
+   * This is what publishing a private output means. Nothing is moved and the run is not
+   * changed — the private object stays where it is and the run's `exitus` keeps its markers —
+   * but this one publication gets a public copy that the destination adapter, the feed and
+   * `retract` all work on. Throws if any copy fails, so a publication never goes live
+   * half-copied, with some markers still in it.
+   */
+  private async _copyOutPrivateOutput(
+    editioId: string,
+    output: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const copyOut = this.deps.publicationCopyOut
+    if (!copyOut) throw new Error('publication copy-out is not configured')
+    const resolved = new Map<string, string>()
+    for (const marker of this._privateRefsIn(output)) {
+      const { contentType, ext } = mediaTypeFor(marker)
+      const bytes = await copyOut.fetch(marker)
+      const key = `${PUBLICATION_COPY_PREFIX}/${editioId}/${resolved.size}.${ext}`
+      resolved.set(marker, await copyOut.store.put(key, bytes, contentType))
+    }
+    return withResolvedPrivateMarkers(output, resolved)
+  }
+
+  /**
+   * Delete this publication's public copy of a private output.
+   *
+   * Retracting a publication that copied private bytes out has to take those bytes back out
+   * too, or "private" only ever held until the first publish. A delete that fails is logged
+   * loudly and does NOT fail the retract — the publication is already down; a stranded object
+   * is a cleanup job, not a reason to leave the post up.
+   */
+  private async _dropHostedOutput(e: Editio): Promise<void> {
+    const copyOut = this.deps.publicationCopyOut
+    if (!copyOut || !e.hostedOutput) return
+    const marker = `/${PUBLICATION_COPY_PREFIX}/${e.id}/`
+    for (const url of allMediaUrls(e.hostedOutput)) {
+      const at = url.indexOf(marker)
+      if (at < 0) continue
+      const key = `${PUBLICATION_COPY_PREFIX}/${e.id}/${url.slice(at + marker.length)}`
+      await copyOut.store.del(key).catch((err: unknown) => {
+        log.error('retract: the public copy of a private output was NOT deleted — it is still readable', {
+          editioId: e.id, key, error: err instanceof Error ? err.message : String(err),
+        })
+      })
+    }
   }
 
   private async _settlePublication(editioId: string): Promise<void> {
@@ -2079,9 +2175,14 @@ export class CrystalApi {
     const e = await editiones.find(editioId)
     if (!e || e.status !== 'pending') return
 
-    const artifact = { ref: e.artifactRef, output: await this._artifactOutput(e.artifactRef), editioId: e.id, by: e.by }
-    // Belt to `publish`'s braces: a pending row whose output is private never reaches an adapter.
-    if (artifact.output && Object.values(artifact.output).some((v) => isPrivateMarker(v))) {
+    // A settle re-entered after a reviewer's approval may already own its copy of a private
+    // output; use that rather than the artifact's markers, so an approve → re-settle never
+    // copies the same bytes into a second public object.
+    const output0 = e.hostedOutput ?? await this._artifactOutput(e.artifactRef)
+    const artifact = { ref: e.artifactRef, output: output0, editioId: e.id, by: e.by }
+    // Belt to `publish`'s braces: a pending row carrying a private output on a deployment that
+    // cannot copy one out never reaches an adapter.
+    if (this._privateRefsIn(artifact.output).length > 0 && !this.deps.publicationCopyOut) {
       await editiones.update(editioId, { status: 'failed' })
       return
     }
@@ -2141,10 +2242,30 @@ export class CrystalApi {
         return
       }
     }
+    // The copy-out (private generation, noema-347 phase 2), deliberately HERE: after the gate,
+    // before the adapter. The gate reads a marker directly (the MediaFetcher resolves one to
+    // bytes), so a hold or a rejection is decided without a single private byte reaching a
+    // public bucket; only a publication that has cleared the gate gets its public copy.
+    let output = artifact.output
+    if (this._privateRefsIn(output).length > 0) {
+      try {
+        output = await this._copyOutPrivateOutput(e.id, output as Record<string, unknown>)
+      } catch (err) {
+        log.error('publish: copying a private output into the public bucket FAILED — the publication is not live', {
+          editioId: e.id, error: err instanceof Error ? err.message : String(err),
+        })
+        await editiones.update(editioId, { status: 'failed' })
+        return
+      }
+      // Recorded before the adapter runs: the bytes are already public, so a crash between here
+      // and the adapter must not leave an object nothing can find again to delete.
+      await editiones.update(editioId, { hostedOutput: output })
+    }
+
     try {
       const adapter = this._resolveAdapter(e.destination)
       const custodyTarget = await this._custodyTarget(e)
-      const { externalRef } = await adapter.publish(artifact, {
+      const { externalRef } = await adapter.publish({ ...artifact, output }, {
         visibility: e.visibility,
         custody: e.custody,
         ...(e.owners !== undefined ? { owners: e.owners } : {}),

@@ -131,6 +131,20 @@ export interface Editio {
   /** The moderation gate's verdict when it HELD or REJECTED this publication. Absent
    *  on the normal (approved/never-gated) path. */
   moderation?: EditioModeration
+  /**
+   * This publication's own PUBLIC copy of an artifact output that was private
+   * (`noema-private://` markers - private generation, noema-347).
+   *
+   * The artifact stays canonical and stays private: the run's `exitus` still holds the
+   * markers and the object in the private bucket is untouched. Publishing is the deliberate
+   * act that makes those particular bytes public, so the copy belongs to the PUBLICATION and
+   * not to the run - it is written under the Editio's own key, every downstream reader (the
+   * destination adapter, the feed) renders it, and `retract` deletes it again.
+   *
+   * Written only once the moderation gate has passed, so a held or rejected publication never
+   * puts private bytes in a public bucket. Absent for the ordinary case of a public output.
+   */
+  hostedOutput?: Record<string, unknown>
   /** "natum" = born — when the publish was requested. */
   natum: Date
   /** "mutatum" = changed — when the status/handle last changed. */
@@ -178,7 +192,7 @@ export interface Editionum {
    */
   listHeld(by?: Editio['by']): Promise<Editiones>
   create(input: Omit<Editio, 'id' | 'natum' | 'mutatum' | 'status'>): Promise<Editio>
-  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation'>>): Promise<Editio>
+  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation' | 'hostedOutput'>>): Promise<Editio>
   /**
    * Atomically claim one settle-able publication for a worker: the oldest `pending`
    * Editio with no live lease AND not awaiting review (`reviewOutcome !== 'pending'`),
