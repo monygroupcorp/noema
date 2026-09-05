@@ -57,6 +57,50 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
    `:previous` tag was set by the last deploy) re-runs the same blue-green flow against
    the prior image.
 
+## OFAC deposit screening (compliance)
+
+Deposit screening is live only when **both** of these hold. Either one alone is a NO-OP
+that clears every address, so do not read one of them as evidence the gate is on.
+
+1. **The private compliance module is mounted.** `src/compliance/SanctionsScreen.ts` in
+   this repo ships only the port and the permissive stub; the real Set-backed screen and
+   the SDN loader are not published here (ADR-0012 §49) and reach the container as a
+   read-only bind mount at deploy time. Both documented ways to start the prod bot carry
+   that mount on the same `COMPLIANCE_DIR` default (`/opt/noema/private/compliance`):
+   `deploy.sh`'s `docker run`, and `docker-compose.prod.yml`'s `bot` service. The
+   `staging` service and `deploy-staging.sh` deliberately do not — staging is not a
+   deposit boundary and always runs the stub, whatever its `.env.staging` says.
+2. **`OFAC_BLOCKLIST_PATH` points at a non-empty list.** Set it in the production `.env`
+   to the bundled file:
+
+   ```
+   OFAC_BLOCKLIST_PATH=data/ofac-blocklist.json
+   ```
+
+With either one missing the container boots with a loud warning — `OFAC sanctions
+screening inactive (private compliance module absent or OFAC_BLOCKLIST_PATH unset) —
+deposit screening is a NO-OP` — and every depositor clears. Never leave it that way once
+real deposits flow.
+
+**How to check, without exec-ing into the container:** `deploy.sh` reports both at the end
+of every deploy — whether the mount is `POPULATED` or `EMPTY`, and, when it is populated,
+whether `OFAC_BLOCKLIST_PATH` is set. An empty mount is indistinguishable from a correct
+one from outside, which is why the deploy says which case it was rather than leaving you
+to guess. An empty directory is not a failure on a dev box or a fresh droplet: the
+fallback is deliberate, and the deploy names it out loud.
+
+Freshness of the list:
+
+- `data/ofac-blocklist.json` is committed and **baked into the image**, so each deploy
+  ships the list as of that build.
+- The `Refresh OFAC blocklist` workflow (`.github/workflows/ofac-blocklist.yml`) refreshes
+  the file daily and commits it back to `main` when it changes, so the next build stays
+  current. `npm run refresh:ofac` updates it locally.
+- **Between-deploy liveness (optional, more robust):** a host cron on the droplet can
+  refresh the list into a path mounted into the container, so a new designation is picked
+  up without waiting for a redeploy. The OFAC SDN crypto list changes a few times a year,
+  so the per-deploy plus daily-commit baseline is adequate for launch.
+
 ## Go-live: new app (merge-to-main cutover)
 
 **Decision (operator, 2026-07-14):** the cutover mechanism is **merge-to-main**, not a
@@ -162,6 +206,10 @@ Only items backed by facts established above:
       `ghcr.io/monygroupcorp/noema:<version>` and `:latest` published.
 - [ ] `ssh noema && ./deploy.sh <VERSION>` run; `deploy.sh`'s own health check against
       `/api/health` passed (blue-green swap completed, not aborted).
+- [ ] OFAC deposit screening confirmed live from that deploy's own report — it logged
+      `Compliance mount POPULATED` and did **not** log the `OFAC_BLOCKLIST_PATH is not
+      set` note (see "OFAC deposit screening"). Real deposits must not open before this
+      line is checked.
 - [ ] Soak window (operator-defined at go-live time) observed with no incident on
       `noema.art`/`www.noema.art`/`app.noema.art`.
 - [ ] Legacy decommission checklist (above) executed in order, after the soak window.

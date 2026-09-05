@@ -63,39 +63,16 @@ One container, one process.
 
 ## OFAC deposit screening (compliance)
 
-Screening is on only when **both** of these hold. Either one alone is a NO-OP that clears
-every address, so do not read one of them as evidence the gate is live.
+**Staging always runs the permissive stub.** The real sanctions screen lives in the private
+compliance module, which reaches a container as a deploy-time bind mount; `deploy-staging.sh`
+and `docker-compose.prod.yml`'s `staging` service deliberately do not mount it, because staging
+is not a deposit boundary. No value of `OFAC_BLOCKLIST_PATH` in `.env.staging` changes that, so
+staging is not a place to test whether screening works.
 
-1. **The private compliance module is mounted.** `src/compliance/SanctionsScreen.ts` in this
-   repo ships only the port and the permissive stub; the real Set-backed screen and the SDN
-   loader are not published here (ADR-0012 §49) and are bind-mounted into the container at
-   deploy. `deploy.sh` does this for production; `deploy-staging.sh` and
-   `docker-compose.prod.yml`'s `staging` service deliberately do not, so **staging always
-   runs the permissive stub** no matter what its `.env.staging` says.
-2. **`OFAC_BLOCKLIST_PATH` points at a non-empty list.** Set it to the bundled file:
-
-   ```
-   OFAC_BLOCKLIST_PATH=data/ofac-blocklist.json
-   ```
-
-If either is missing the container boots with a LOUD warning and screening is a NO-OP —
-never leave it that way once real deposits flow.
-
-**How to check, without exec-ing into the container:** `deploy.sh` reports both at the end
-of every deploy — whether the mount is populated or empty, and, when it is populated,
-whether `OFAC_BLOCKLIST_PATH` is set. An empty mount looks identical to a correct one from
-outside, which is why the deploy says which case it was rather than leaving you to guess.
-
-Freshness:
-- `data/ofac-blocklist.json` is committed and **baked into the image**, so each deploy
-  ships the list as of that build.
-- The `Refresh OFAC blocklist` GitHub Action (`.github/workflows/ofac-blocklist.yml`)
-  refreshes the file daily and commits changes to `main`, so the repo (and the next build)
-  stays current. Run `npm run refresh:ofac` to update locally.
-- **Between-deploy liveness (optional, more robust):** add a host cron on the droplet that
-  runs the refresh into a path mounted into the container, so a new OFAC designation is
-  picked up without waiting for a redeploy. The OFAC SDN crypto-list changes rarely (a few
-  times a year), so the per-deploy + daily-commit baseline is adequate for launch.
+The two preconditions for the screen actually being live, how to read them off a deploy's own
+report, and how the blocklist stays fresh are in `docs/ops/production-deploy.md` under "OFAC
+deposit screening (compliance)" — production is where the gate matters and where it is
+configured.
 
 ## Production (for contrast)
 
