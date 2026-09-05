@@ -220,6 +220,30 @@ export interface Collectio {
 /** "Collectiones" — nominative plural */
 export type Collectiones = Collectio[]
 
+/** Owner-scoped, cursor-paginated read opts for `Collectionum.listOwned` — the same shape
+ *  `DatasetListOpts` uses, and for the same reason: the access predicate belongs IN THE QUERY,
+ *  not in a post-filter over every collection in the store. */
+export interface CollectioListOpts {
+  /** The caller's funding identity, matched against `Collectio.by`. */
+  by: Collectio['by']
+  /**
+   * FK[] -> Sodalitas. The teams the CALLER is a member of, resolved at the API layer from the
+   * authenticated caller and never from a request parameter. A collection whose `sodalitasId`
+   * is in this set is listed alongside the caller's own — the read half of the team overlay.
+   * Absent/empty -> funder-only.
+   */
+  sodalitasIds?: string[]
+  /** Opaque page cursor from a prior page; omit for the first page. */
+  cursor?: string
+  /** Page size (clamped 1..500; default 100). */
+  limit?: number
+}
+
+export interface CollectioListPage {
+  entries: Collectiones
+  nextCursor?: string
+}
+
 /**
  * Collectionum — genitive plural "of the collections."
  * The batch store.
@@ -227,6 +251,13 @@ export type Collectiones = Collectio[]
 export interface Collectionum {
   find(id: string): Promise<Collectio | null>
   list(filter?: Partial<Pick<Collectio, 'status'>>): Promise<Collectiones>
+  /**
+   * The caller's collections, newest first, owner-scoped and paged IN THE STORE. Optional:
+   * an in-memory store may omit it, and `CrystalApi.listCollections` falls back to `list()`
+   * plus an in-process ownership filter (the same fallback shape `Datasets.findOwned` has).
+   * Every store a deployment actually runs on implements it — the fallback is a full scan.
+   */
+  listOwned?(opts: CollectioListOpts): Promise<CollectioListPage>
   listByStatus(status: CollectioStatus): Promise<Collectiones>
   create(collectio: Omit<Collectio, 'id' | 'natum' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal'>): Promise<Collectio>
   update(id: string, patch: Partial<Pick<Collectio, 'status' | 'acta' | 'completae' | 'fractae' | 'pendentes' | 'reiectae' | 'impetusTotal' | 'completum' | 'nomen' | 'descriptio' | 'modusId' | 'numerus' | 'tractus' | 'provenanceHash' | 'pausatum'>>): Promise<Collectio>

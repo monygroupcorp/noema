@@ -645,8 +645,16 @@ export const api = {
   // ── Collections (Collectio) — a batch-gen over a Tractus grid ────────────────
   // Owner-scoped by the caller commitment. Create LAUNCHES generation of `total`
   // pieces (real compute) — always a deliberate, confirmed action.
-  listCollections: () => fetch('/v1/collectiones', { headers: readHeaders() })
-    .then(j<{ collections: Collection[] }>),
+  // GET /v1/collectiones — the caller's collections, newest first, cursor-paginated like
+  // /v1/me/runs. `listAllCollections` below walks the pages for the screens that want the lot.
+  listCollections: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return fetch(`/v1/collectiones${qs ? `?${qs}` : ''}`, { headers: readHeaders() })
+      .then(j<{ collections: Collection[]; nextCursor?: string }>);
+  },
   getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: readHeaders() })
     .then(j<{ collection: Collection }>),
   createCollection: (body: CreateCollectionRequest) =>
@@ -1221,6 +1229,24 @@ export const api = {
       }),
     }).then(j<{ id: string }>),
 };
+
+// Every collection the caller owns, newest first — the pre-pagination reading of
+// `GET /v1/collectiones`, now assembled by walking its pages. The two screens that list
+// collections want the whole set (a grid, and a name lookup), so the walk lives here rather
+// than in each of them. Bounded: a page must be non-empty and carry a fresh cursor to earn
+// another request, so a server that keeps handing back the same cursor cannot spin this.
+export async function listAllCollections(): Promise<Collection[]> {
+  const out: Collection[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await api.listCollections(cursor ? { cursor } : {});
+    out.push(...page.collections);
+    if (!page.nextCursor || !page.collections.length || seen.has(page.nextCursor)) return out;
+    seen.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+}
 
 // ── Shared activity poll (noema-326) ──────────────────────────────────────────
 // Rail's badge and Status's running/finished bands read ONE poll, not two: a plain

@@ -10031,9 +10031,14 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
 
 ### GET /v1/collectiones
 
-List the authenticated caller's Collections (owner-scoped).
+List the authenticated caller's Collections (owner-scoped) — the ones they funded plus the ones shared with a Team (Sodalitas) they are a member of. Newest first, paged.
 
 - **Auth:** required
+
+**Query parameters:**
+
+- `cursor` (string) — Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.
+- `limit` (integer) — Page size. Clamped to 1..500; defaults to 100.
 
 **Response (200):**
 
@@ -10215,6 +10220,10 @@ List the authenticated caller's Collections (owner-scoped).
           "rejected"
         ]
       }
+    },
+    "nextCursor": {
+      "type": "string",
+      "description": "Present when more collections remain — pass it back as `cursor` for the next page."
     }
   },
   "required": [

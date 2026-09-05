@@ -277,7 +277,7 @@ export async function listCollectionsTool(
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
-    return ok({ collections: await api.listCollections(auctor) })
+    return ok(await api.listCollections(auctor))
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))

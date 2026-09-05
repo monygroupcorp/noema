@@ -923,10 +923,13 @@ const CollectionPiecesSchema: JsonSchema = {
   required: ['pieces'],
 }
 
-/** The `{ collections }` envelope returned by `GET /v1/collectiones`. */
+/** The `{ collections, nextCursor? }` page returned by `GET /v1/collectiones`. */
 const CollectionsListSchema: JsonSchema = {
   type: 'object',
-  properties: { collections: { type: 'array', items: CollectionSchema } },
+  properties: {
+    collections: { type: 'array', items: CollectionSchema },
+    nextCursor: { type: 'string', description: 'Present when more collections remain — pass it back as `cursor` for the next page.' },
+  },
   required: ['collections'],
 }
 
@@ -2620,8 +2623,20 @@ export const API_CONTRACT: ApiContract = {
     {
       method: 'GET',
       path: '/collectiones',
-      summary: "List the authenticated caller's Collections (owner-scoped).",
+      summary: "List the authenticated caller's Collections (owner-scoped) — the ones they funded plus the ones shared with a Team (Sodalitas) they are a member of. Newest first, paged.",
       auth: true,
+      query: [
+        {
+          name: 'cursor',
+          description: 'Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.',
+          schema: { type: 'string' },
+        },
+        {
+          name: 'limit',
+          description: 'Page size. Clamped to 1..500; defaults to 100.',
+          schema: { type: 'integer' },
+        },
+      ],
       response: CollectionsListSchema,
     },
     {

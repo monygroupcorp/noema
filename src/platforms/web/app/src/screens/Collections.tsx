@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, type Collection, type CreateCollectionRequest, type Tractus } from '../lib/api';
+import { api, listAllCollections, type Collection, type CreateCollectionRequest, type Tractus } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
@@ -158,7 +158,7 @@ export function Collections() {
 
   useEffect(() => {
     let live = true;
-    api.listCollections().then((r) => { if (live) setItems(r.collections); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+    listAllCollections().then((cs) => { if (live) setItems(cs); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, []);
 

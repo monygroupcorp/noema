@@ -111,6 +111,15 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // collectiones — batch containers
     db.collection('collectiones').createIndex({ id: 1 }, { unique: true }),
+    // The owner-scoped listing (`MongoCollectio.listOwned`, behind `GET /v1/collectiones`) is a
+    // per-caller read, so its access predicate is in the query and these back it: one index per
+    // arm of that predicate, each carrying the (natum, id) page sort so a page is a bounded
+    // index walk rather than a scan of every tenant's collections.
+    db.collection('collectiones').createIndex({ 'by.animaId': 1, natum: -1, id: -1 }, { sparse: true }),
+    db.collection('collectiones').createIndex({ 'by.commitment': 1, natum: -1, id: -1 }, { sparse: true }),
+    db.collection('collectiones').createIndex({ sodalitasId: 1, natum: -1, id: -1 }, { sparse: true }),
+    // The CollectioCursor's dispatch scan (`listByStatus('agens')`).
+    db.collection('collectiones').createIndex({ status: 1 }),
 
     // tabulae — canvas workspaces
     db.collection('tabulae').createIndex({ id: 1 }, { unique: true }),

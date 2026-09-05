@@ -1547,15 +1547,39 @@ export class CrystalApi {
     return out
   }
 
-  /** List the caller's Collections. */
-  async listCollections(auctor: AuctorKey): Promise<Collection[]> {
-    const all = (await this.deps.collectiones?.list()) ?? []
-    // Resolve the caller's team ids ONCE (not one lookup per collection).
-    const teamIds =
-      'animaId' in auctor && this.deps.sodalitatum
-        ? new Set((await this.deps.sodalitatum.listByMember(auctor.animaId)).map((t) => t.id))
-        : new Set<string>()
-    return all.filter((c) => this._ownsCollectionWith(auctor, c, teamIds)).map(toCollection)
+  /**
+   * List the caller's Collections, newest first — owner-scoped and paged IN THE STORE
+   * (`Collectionum.listOwned`), cursor-paginated like `GET /v1/me/runs` and `GET /v1/data/datasets`.
+   *
+   * The scope is a query, not a post-filter: a collection the caller may not name is never loaded,
+   * and one caller's listing does not read every other tenant's documents. `sodalitasIds` is
+   * resolved here from the authenticated caller and never taken from a request parameter.
+   */
+  async listCollections(
+    auctor: AuctorKey,
+    opts: { cursor?: string; limit?: number } = {}
+  ): Promise<{ collections: Collection[]; nextCursor?: string }> {
+    const store = this.deps.collectiones
+    if (!store) return { collections: [] }
+    // `_isFunder` matches an anima against `by.animaId` and a commitment against `by.commitment`,
+    // and nothing else — a bursa-token caller funds no collection, so its list is empty.
+    const by: Collectio['by'] | null =
+      'animaId' in auctor ? { animaId: auctor.animaId }
+      : 'commitment' in auctor ? { commitment: auctor.commitment }
+      : null
+    if (!by) return { collections: [] }
+    const sodalitasIds = await this._callerTeamIds(auctor)
+
+    if (store.listOwned) {
+      const { entries, nextCursor } = await store.listOwned({ by, sodalitasIds, ...opts })
+      return { collections: entries.map(toCollection), ...(nextCursor ? { nextCursor } : {}) }
+    }
+
+    // Fallback for a store with no owner-scoped read (the in-memory ones): the pre-existing
+    // in-process filter, with the caller's team ids resolved ONCE (not one lookup per collection).
+    const all = await store.list()
+    const teamIds = new Set(sodalitasIds)
+    return { collections: all.filter((c) => this._ownsCollectionWith(auctor, c, teamIds)).map(toCollection) }
   }
 
   /** Synchronous ownership check given a precomputed set of the caller's team ids. */
