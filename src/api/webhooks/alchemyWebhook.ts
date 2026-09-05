@@ -669,15 +669,14 @@ async function handleAnonymousDepositLog(
   if (!entry.topics[1]) return false  // malformed log — no indexed commitment
   const commitment = entry.topics[1]  // already 0x-prefixed 32-byte hex
 
-  // Decode non-indexed params: (address token, uint256 amount).
-  // NOTE: the arcanum-tree leaf still stores `valor` in raw on-chain units (wei / token-decimals);
-  // the anon note's SPEND-side credit conversion is a separate concern (arcanum path). Here we only
-  // (a) admit the leaf and (b) book the deposit's USD FMV to the revenue book via the AssetPricer.
-  let valor: bigint
+  // Decode non-indexed params: (address token, uint256 amount) — the RAW on-chain amount
+  // (wei / token-decimals). It is priced and converted to impetus below before any leaf is
+  // written: `ArcanumLeaf.valor` is impetus points on every issuance path.
+  let amountRaw: bigint
   let token: string
   try {
     const [tokenAddr, amount] = AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], entry.data) as unknown as [string, bigint]
-    valor = BigInt(amount)
+    amountRaw = BigInt(amount)
     token = tokenAddr
   } catch {
     return false  // malformed log data — skip rather than 500ing the whole webhook
@@ -688,8 +687,8 @@ async function handleAnonymousDepositLog(
   // event topics is unlinkable by design); screening here is the only moment it
   // is observable. Fail-CLOSED: if the Alchemy query did not provide `from`, we
   // cannot screen, so we refuse the leaf rather than admit an unscreened note.
-  // (Safe: anonymous notes are not yet spendable — see valor-scale note above —
-  // so refusing here cannot break a live spend path.)
+  // Refusing here can never invalidate a note already in circulation — this handler is the only
+  // place a blind note is created, and it refuses before writing anything.
   const funder = entry.transaction?.from?.toLowerCase()
   if (!funder) {
     log.warn('OFAC: anonymous deposit has no tx.from — cannot screen, refusing leaf', { commitment, txHash: entry.transaction?.hash })
@@ -708,18 +707,39 @@ async function handleAnonymousDepositLog(
     return false
   }
 
+  // Price the deposit, then convert to impetus through the SAME helper the identified deposit
+  // path uses — same funding-rate haircut, same canonical rate, so the two issuance paths value
+  // an identical deposit identically. This conversion MUST happen here and not at redemption:
+  // `valor` is hashed into the Merkle leaf, and the spend proof certifies whatever number was
+  // hashed. A leaf written in raw on-chain units would redeem for its wei count.
+  const usdFmv = await priceDeposit(deps, chainId, token, amountRaw, `anon:${commitment}`)
+  if (usdFmv === null) {
+    // Fail-CLOSED, like the unscreenable funder above: a note whose value we cannot determine
+    // must not enter the tree, because its valor is fixed at insert and never revisited.
+    // priceDeposit already warned loudly. A redelivery re-attempts once the oracle is back —
+    // nothing was written, so there is nothing to be idempotent about.
+    return false
+  }
+
+  // The NET buy amount (gross FMV × the per-asset funding rate). Sub-point dust yields no note
+  // rather than a valor-0 leaf: the verifier requires valor > 0, so such a leaf would be
+  // permanently unspendable, and admitting it would make the redelivery guard swallow the
+  // deposit for good.
+  const valor = creditImpetus(usdFmv, token)
+  if (valor <= 0n) {
+    log.warn('anonymous deposit priced but below one impetus — no note admitted', { commitment, token, usdFmv: usdFmv.toString() })
+    return false
+  }
+
   // Insert into Merkle tree — no animaId, no signum, no ledger entry
   await deps.arcanumTree.insert(commitment, valor)
   log.info('arcanum deposit inserted', { commitment, valor: valor.toString() })
 
-  // Book USD revenue in aggregate (ADR-0013 §7: no anon deposit bypasses the FMV stamp). No
-  // depositumId — anon notes have no Depositum; the findLeaf guard above is the re-delivery
+  // Book USD revenue at GROSS in aggregate (ADR-0013 §7: no anon deposit bypasses the FMV stamp).
+  // No depositumId — anon notes have no Depositum; the findLeaf guard above is the re-delivery
   // dedupe, so this runs once per commitment. Anonymity limits per-user reporting, not the top line.
-  // (No credit is issued here — the note is spent later via the arcanum path, not a Signum now.)
-  const usdFmv = await priceDeposit(deps, chainId, token, valor, `anon:${commitment}`)
-  if (usdFmv !== null) {
-    await bookRevenue(deps, { usdFmv, origo: 'crypto', token })
-  }
+  // (No Signum is issued here — the note itself is the credit, spent later via the arcanum path.)
+  await bookRevenue(deps, { usdFmv, origo: 'crypto', token })
 
   return true
 }

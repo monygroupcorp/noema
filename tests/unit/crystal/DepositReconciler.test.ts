@@ -415,7 +415,11 @@ test('an anonymous deposit gets its funder from the transaction, so the leaf is 
 
   assert.equal(report.processed, 1)
   assert.deepEqual(rpc.txCalls, ['0x' + '22'.repeat(32)])
-  assert.equal(webhook.arcanumTree.leaves.get(commitment), AMOUNT)
+  // The leaf carries impetus, not the raw wei amount — the same figure the identified path
+  // credits for this deposit. valor is hashed into the leaf and the spend proof certifies it,
+  // so the conversion happens once, here at issuance, and never again at redemption.
+  assert.equal(webhook.arcanumTree.leaves.get(commitment), EXPECTED_CREDIT_IMPETUS)
+  assert.notEqual(webhook.arcanumTree.leaves.get(commitment), AMOUNT)
   assert.equal(webhook.signorum.issued.length, 0, 'an anonymous note issues no Signum')
 })
 

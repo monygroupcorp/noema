@@ -744,7 +744,54 @@ test('OFAC: clean anonymous deposit funder is admitted (leaf inserted)', async (
   assert.equal(result.status, 200)
   assert.equal(result.body.processed, 1)
   assert.equal(arcanumTree.leaves.size, 1)
-  assert.equal(arcanumTree.leaves.get(COMMITMENT), AMOUNT)
+  assert.equal(arcanumTree.leaves.get(COMMITMENT), EXPECTED_CREDIT_IMPETUS)
+})
+
+// 20a. The blind path values a deposit exactly as the identified path does. `ArcanumLeaf.valor`
+// is impetus points and is hashed into the leaf, so the spend proof certifies whatever is written
+// here — a leaf carrying the raw wei amount would redeem for its wei count.
+test('anonymous deposit writes its leaf in impetus, at the same rate as the identified path', async () => {
+  const arcanumTree = makeArcanumTree()
+  const anima = makeAnima(PAYER)
+  const animae = makeAnimae(new Map([[PAYER.toLowerCase(), anima]]))
+  const deps = makeDeps({ arcanumTree, animae })
+
+  // Same asset, same amount, one delivery carrying both an identified and a blind deposit.
+  const body = makeWebhookBody([makePaymentLog({ payer: PAYER }), makeAnonDepositLog({ from: PAYER })])
+  await handleAlchemyWebhook(makeReq(body), deps)
+
+  assert.equal(deps.signorum.issued[0].valor, EXPECTED_CREDIT_IMPETUS)
+  assert.equal(arcanumTree.leaves.get(COMMITMENT), EXPECTED_CREDIT_IMPETUS)
+  assert.notEqual(arcanumTree.leaves.get(COMMITMENT), AMOUNT)  // not the raw wei amount
+})
+
+// 20b. Unpriceable asset → no leaf. The valor is fixed at insert and never revisited, so a note
+// whose value we cannot determine must not enter the tree. Nothing is written, so a redelivery
+// re-attempts cleanly once the oracle is back.
+test('anonymous deposit that cannot be priced admits no leaf and books no revenue', async () => {
+  const arcanumTree = makeArcanumTree()
+  const deps = makeDeps({ arcanumTree, pricer: nullPricer })
+
+  const result = await handleAlchemyWebhook(makeReq(makeWebhookBody([makeAnonDepositLog({ from: PAYER })])), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 0)
+  assert.equal(arcanumTree.leaves.size, 0)
+  assert.equal(deps.redituum.rows.length, 0)
+})
+
+// 20c. Sub-impetus dust → no leaf. A valor-0 leaf is unspendable (the verifier requires
+// valor > 0) and would make the redelivery guard swallow the deposit permanently.
+test('anonymous deposit below one impetus admits no leaf', async () => {
+  const arcanumTree = makeArcanumTree()
+  // $3000/ETH: 1000 wei is $3e-12 — far below one impetus ($0.000337).
+  const deps = makeDeps({ arcanumTree })
+
+  const result = await handleAlchemyWebhook(makeReq(makeWebhookBody([makeAnonDepositLog({ from: PAYER, amount: 1_000n })])), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.body.processed, 0)
+  assert.equal(arcanumTree.leaves.size, 0)
 })
 
 // 21. Blocked NFT sender → no Testimonium

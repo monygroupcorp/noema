@@ -1191,9 +1191,6 @@ async function main(): Promise<void> {
     }),
     verifier:   ring.arcanumVerifier,
     bursarium:  ring.bursarium,
-    weiToCredits: ALCHEMY_API_KEY
-      ? (wei) => import('./arcanum/ethPrice.js').then(m => m.weiToCredits(wei, ALCHEMY_API_KEY))
-      : undefined,
   }))
   // Ceremony sequencer — mounted before the /v1 catch-all so /v1/ceremony resolves here.
   // Live chain: public status + self-serve contribution upload (KZG-summoning model).
