@@ -167,3 +167,7 @@ tee/wg-server/tee-wg-server
 # inductions write one per run — the rescued WIP commit carried 39k lines of them
 # in by accident). The driver's own header always claimed these were ignored.
 /walk-runs/
+
+# Harvested dataset images and their sidecars (scripts/dataset/*-fetch.mjs).
+# Large binaries with their own licensing; the scripts are the reproducible part.
+/dataset_raw/
