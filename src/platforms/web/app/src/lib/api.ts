@@ -1365,7 +1365,10 @@ export interface SecretView {
 // ── Arcanum wire shapes (GET /arcanum/config, POST /arcanum/issue, /tree/proof) ──
 // Prover discovery. ready=false when wasm or zkey isn't configured server-side — the
 // Vault mint path stays disabled and links to the ceremony rather than faking readiness.
-export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean }
+/** `enabled` is ANON_PURSE_ENABLED (noema-131) — false until the trusted-setup ceremony runs.
+ *  Optional because an older server omits it; read it as `=== true`, never as a truthy default,
+ *  so a page never promises the purse to a visitor the server will refuse. */
+export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean; enabled?: boolean }
 // What POST /arcanum/issue returns (mirror src/arcanum/types.ts ArcanumIssuance). We
 // already hold valor locally; the load-bearing fields here are leafIndex + the Merkle path.
 export interface ArcanumIssuance {

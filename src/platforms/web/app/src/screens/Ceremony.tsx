@@ -4,6 +4,7 @@ import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
 import { ceremony, type CeremonyStatus, type ContributePhase } from '../lib/ceremony';
+import { CEREMONY_GUIDE } from '../lib/repo';
 import './landing.css';
 import './ceremony.css';
 
@@ -329,7 +330,7 @@ export function Ceremony() {
             <p className="cer-cli-note">
               Running a validator or prefer the terminal? The same contribution works from
               the command line — see the{' '}
-              <a href="https://github.com/monygroupcorp/noema/blob/main/docs/arcanum-ceremony.md" target="_blank" rel="noreferrer">contributor guide</a>.
+              <a href={CEREMONY_GUIDE} target="_blank" rel="noreferrer">contributor guide</a>.
             </p>
           </div>
 
@@ -369,7 +370,7 @@ export function Ceremony() {
                 </>
               )}
               <div className="cer-card-foot">
-                <a className="btn-ghost" href="https://github.com/monygroupcorp/noema/blob/main/docs/arcanum-ceremony.md" target="_blank" rel="noreferrer">
+                <a className="btn-ghost" href={CEREMONY_GUIDE} target="_blank" rel="noreferrer">
                   <Ic name="file-text" /> Full contributor guide
                 </a>
               </div>
