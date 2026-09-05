@@ -27,7 +27,10 @@ export function PlateDeck({ slots, label, format, showPlaceholders = false, ...r
       {...rest}
       label={label}
       aspect={PLATE_ASPECT[format ?? run[0].format]}
-      aspectNarrow={2 / 3}
+      /* No second composition. A plate's format is the shape its art was made at, so the crop
+         that flatters it on a desktop is the same crop on a phone — and the run used to take a
+         2:3 here, which cropped an already-cropped banner down to a column of its middle. What
+         changes on a narrow screen is the card's size, not its shape. */
       items={run.map((slot, i) => (
         <>
           <LandingPlate slot={slot} fill priority={i === 0} />

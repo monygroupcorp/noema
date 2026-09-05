@@ -9,8 +9,20 @@
   --deck-aspect:2;
   --deck-aspect-narrow:var(--deck-aspect);
   --deck-a:var(--deck-aspect);      /* the crop in force at this width */
-  --deck-stagger:18px;                                        /* how far the pile is squared off by */
+  --deck-stagger:var(--deck-stagger-wide,18px);               /* how far the pile is squared off by */
   --deck-spread:calc((var(--deck-n) - 1) * var(--deck-stagger));
+  /* How tall the pile is allowed to get. The card's width follows from this and the crop,
+     which is the whole reason a square run is possible: a card sized from the page width is a
+     page-tall slab at 1:1, and the only way to make it a banner is to crop the art until it is
+     one. Sized from height instead, the crop is free — it costs width, of which there is
+     plenty — and the art is shown whole. The pile also has to fit inside the stage it is
+     pinned in, which is one viewport tall and shares that with a heading. */
+  --deck-h:min(84vh,780px);
+  /* the width the pile takes when the height budget is what binds, and how far in from the
+     page edge that leaves it. The departure below has to cross that gutter as well as the
+     card, or a centred pile leaves a sliver of the top card stranded against the frame. */
+  --deck-max:calc(var(--deck-a) * (var(--deck-h) - var(--deck-spread)) + var(--deck-spread));
+  --deck-gutter:max(0px,calc((100vw - var(--deck-max)) / 2));
   position:relative;
   overflow:hidden;                                            /* clips the departing card */
   width:100%;
@@ -19,11 +31,23 @@
    declared here, so `--p` is inherited from the enclosing stage. */
 .lp-deck-pass{--p:0}
 
-/* height is the card's own crop plus the pile's offset, so the stack fills the banner exactly */
+/* The pile's frame: as wide as the page allows, but never taller than the height budget.
+   The bound is on the track, not on `.lp-deck` — the deck stays the full width of the page so
+   a departing card travels off the edge of the screen instead of vanishing at a hard clip in
+   the middle of it — and `margin-inline:auto` stands the pile in the middle of that.
+
+   Inverting the height rule gives the width at which the budget is exactly spent:
+       (W - spread) / a + spread = --deck-h    ⇒    W = a * (--deck-h - spread) + spread
+   so the track takes the narrower of that and the page. Height is then whichever bound
+   actually bound. Both percentages below are the PARENT's width, not the track's — a
+   percentage padding always resolves against the containing block — which is why the height
+   is written as a `min()` against the budget rather than derived from the track's own width. */
 .lp-deck-track{
   position:relative;
   height:0;
-  padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread));
+  width:min(100%,var(--deck-max));
+  margin-inline:auto;
+  padding-bottom:min(var(--deck-h),calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread)));
 }
 
 .lp-deck-card{
@@ -42,8 +66,9 @@
   width:calc(100% - var(--deck-spread));
   aspect-ratio:var(--deck-a);
   z-index:calc(100 - var(--i));
-  /* the departing card leaves to the left, far enough to clear its own offset and the frame */
-  transform:translate3d(calc(-1 * var(--dp) * (100% + var(--i) * var(--deck-stagger) + 6vw)),0,0);
+  /* the departing card leaves to the left, far enough to clear its own offset, the gutter the
+     centred pile stands in, and the frame */
+  transform:translate3d(calc(-1 * var(--dp) * (100% + var(--deck-gutter) + var(--i) * var(--deck-stagger) + 6vw)),0,0);
   /* the pile falls away in value, so depth reads before anything has moved */
   filter:brightness(calc(1 - var(--r) * .14));
   border-radius:var(--r-lg);
@@ -62,7 +87,11 @@
   letter-spacing:-.04em;pointer-events:none}
 
 @media(max-width:640px){
-  /* a banner crop is a letterbox slot on a phone — the run takes its narrow composition here */
-  .lp-deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow)}
+  /* On a phone the width, not the height, is what runs out, so the bound is lifted and the
+     card takes the column. A run whose crop is the art's own needs no second composition here
+     — `--deck-aspect-narrow` still exists for the runs that do (the screen captures), and a
+     square run simply passes its own square through. */
+  .lp-deck{--deck-stagger:8px;--deck-a:var(--deck-aspect-narrow);--deck-gutter:0px}
+  .lp-deck-track{width:100%;padding-bottom:calc((100% - var(--deck-spread)) / var(--deck-a) + var(--deck-spread))}
   .lp-deck-i{left:var(--s4);bottom:var(--s3);font-size:clamp(40px,14vw,64px)}
 }
