@@ -51,18 +51,18 @@ function interactive(modi: Modus[] = [MODUS]) {
   })
 }
 
-test('entrance gate: no access code → the enter-code gate, not the run panel', async () => {
+test('gate + run panel ship together, gated client-side: the panel is hidden until a code is held', async () => {
   const res = await request(interactive()).get('/widget/camel42')
   assert.equal(res.status, 200)
   assert.match(res.text, /id="gateform"/)
   assert.match(res.text, /Enter your access code/)
-  assert.doesNotMatch(res.text, /id="runbtn"/)                      // no run until a code
+  assert.match(res.text, /id="runwrap" hidden/)                     // panel present but not shown
+  assert.match(res.text, /id="runbtn"/)
 })
 
-test('with a code: run panel holds the token + runs on the purse via /v1/runs (no x402/wallet)', async () => {
-  const res = await request(interactive()).get('/widget/camel42?code=purse-abc')
+test('no code: the run panel is fully rendered + runs on the purse via /v1/runs (no x402/wallet)', async () => {
+  const res = await request(interactive()).get('/widget/camel42')
   assert.equal(res.status, 200)
-  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)      // the Bursa token is held
   assert.match(res.text, /class="mform active"[^>]*data-modus="m1"/)
   assert.match(res.text, /<textarea name="prompt"/)                 // text porta → textarea
   assert.match(res.text, /name="seed"[^>]*type="number"|type="number"[^>]*name="seed"/) // int → number
@@ -73,8 +73,34 @@ test('with a code: run panel holds the token + runs on the purse via /v1/runs (n
   assert.doesNotMatch(res.text, /class="modchip/)                  // single modus → no picker
 })
 
-test('with a code: multiple modi → a picker with one chip + form (distinct credit prices)', async () => {
-  const res = await request(interactive([MODUS, MODUS2])).get('/widget/camel42?code=x')
+// The Bursa token is a bearer credential capped only by the purse's balance, with no expiry —
+// a copy of it spends the purse. It therefore never reaches the server and never reaches the
+// served HTML; the browser adopts a legacy ?code= link, scrubs the URL, and presents the token
+// only as `x-bursa-token`.
+test('a legacy ?code= link is never echoed into the served page', async () => {
+  const res = await request(interactive()).get('/widget/camel42?code=purse-abc')
+  assert.equal(res.status, 200)
+  assert.doesNotMatch(res.text, /purse-abc/)                        // the token is not in the HTML
+  assert.doesNotMatch(res.text, /data-code=/)                       // nor in any attribute
+  assert.match(res.text, /history\.replaceState/)                   // the client scrubs it from the URL
+  assert.match(res.text, /searchParams\.delete\('code'\)/)
+})
+
+test('every framed HTML view sends Referrer-Policy: no-referrer (a code in the URL rides no request)', async () => {
+  for (const path of ['/widget/camel42', '/widget/camel42?code=purse-abc', '/widget/gallery/0xCOLLECTION', '/widget/nope']) {
+    const res = await request(interactive()).get(path)
+    assert.equal(res.headers['referrer-policy'], 'no-referrer', path)
+  }
+})
+
+test('the code is never a query param the server reads: ?code= changes no byte of the response', async () => {
+  const bare = await request(interactive()).get('/widget/camel42')
+  const withCode = await request(interactive()).get('/widget/camel42?code=purse-abc')
+  assert.equal(withCode.text, bare.text)
+})
+
+test('multiple modi → a picker with one chip + form (distinct credit prices)', async () => {
+  const res = await request(interactive([MODUS, MODUS2])).get('/widget/camel42')
   assert.equal(res.status, 200)
   assert.match(res.text, /class="modchip active" data-modus="m1">memeify/)
   assert.match(res.text, /class="modchip" data-modus="m2">upscale/)
@@ -261,18 +287,17 @@ test('mode regression: no mode param is byte-identical to ?mode=list (today\'s c
 })
 
 test('mode regression: no mode param matches the exact pre-mode-dispatch combined view (interactive agent)', async () => {
-  const res = await request(interactive()).get('/widget/camel42?code=purse-abc')
+  const res = await request(interactive()).get('/widget/camel42')
   assert.equal(res.status, 200)
-  // Exactly the prior fixed test's assertions for the combined (code-holding) view — proves
-  // the run panel is untouched by the new mode plumbing.
-  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)
+  // The combined view still carries the whole run panel — proves it is untouched by the mode plumbing.
+  assert.match(res.text, /id="runwrap" hidden/)
   assert.match(res.text, /id="runbtn">Run · ~\d+ cr/)
 })
 
 test('mode=panel: renders only the run panel/gate, suppresses the trailing gallery grid', async () => {
-  const res = await request(interactive()).get('/widget/camel42?code=purse-abc&mode=panel')
+  const res = await request(interactive()).get('/widget/camel42?mode=panel')
   assert.equal(res.status, 200)
-  assert.match(res.text, /id="runwrap" data-code="purse-abc"/)   // panel present
+  assert.match(res.text, /id="runwrap" hidden/)                  // panel present
   assert.doesNotMatch(res.text, /Recent creations/)               // gallery section suppressed
   assert.doesNotMatch(res.text, /class="grid"><div class="tile"/) // no tile grid rendered
 })
@@ -293,7 +318,7 @@ test('mode=panel: entrance gate case also suppresses the gallery block', async (
 })
 
 test('mode=gallery: renders only this agent\'s own feed, suppresses the run panel/gate', async () => {
-  const res = await request(interactive()).get('/widget/camel42?code=purse-abc&mode=gallery')
+  const res = await request(interactive()).get('/widget/camel42?mode=gallery')
   assert.equal(res.status, 200)
   assert.doesNotMatch(res.text, /id="runwrap"/)                   // no run panel
   assert.doesNotMatch(res.text, /id="gateform"/)                  // no entrance gate
