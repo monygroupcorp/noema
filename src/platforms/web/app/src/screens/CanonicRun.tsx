@@ -64,18 +64,27 @@ export function CanonicRun() {
     if (!id) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The collection and the rarity table are fetched INDEPENDENTLY, not as one `Promise.all`.
+    // Only the collection gates the screen — the rarity block has its own empty state ("Rarity
+    // fills in as pieces settle") and is decoration until pieces land. Awaiting both together
+    // meant a slow or never-answering rarity read held the whole screen on "Loading…" with no
+    // error and no way out, which is the one state this screen must not be able to reach: the
+    // rarity read walks every actum in the collection one at a time, so it is precisely the
+    // request that gets slow as a run grows.
     async function poll() {
       try {
-        const [col, rar] = await Promise.all([
-          api.getCollection(id!),
-          api.getCollectionRarity(id!).catch(() => null),
-        ]);
+        const { collection } = await api.getCollection(id!);
         if (!live) return;
-        setC(col.collection);
-        if (rar?.rarity) setRarity(rar.rarity);
-        if ((col.collection.status === 'pending' || col.collection.status === 'running') && live) {
+        // A 200 carrying no collection would otherwise leave `c` null forever — the same
+        // "Loading… and nothing else" dead end, reached by a different door. Say so instead.
+        if (!collection) throw new Error('this run could not be read');
+        setC(collection);
+        if (collection.status === 'pending' || collection.status === 'running') {
           timer = setTimeout(poll, 2500);
         }
+        // Rarity trails the collection: it refreshes the table when it answers and is dropped
+        // when it does not. Never awaited, so it cannot delay this tick or the next.
+        api.getCollectionRarity(id!).then((r) => { if (live && r?.rarity) setRarity(r.rarity); }).catch(() => {});
       } catch (e) {
         if (live) setErr(e instanceof Error ? e.message : String(e));
       }
