@@ -9,6 +9,7 @@ import { LandingCatalog } from './LandingCatalog';
 import { LandingOpen } from './LandingOpen';
 import { LandingModes } from './LandingModes';
 import { LandingPricing } from './LandingPricing';
+import { LandingAnon } from './LandingAnon';
 import { platesIn, type PlateFormat } from './landingPlates';
 import './landing-page.css';
 
@@ -53,12 +54,18 @@ const BEATS: Beat[] = [
   },
 ];
 
-/** The sequence, in the order it was actually driven. Draft — the truth pass rewrites these. */
+/** The sequence, in the order it was actually driven, and each rung is a screen that exists:
+ *  /datasets, /datasets/:id/caption, /datasets/:id/derive → /train/run/:id → /models, then the
+ *  catalogue and the publish flows the split below pays out on.
+ *
+ *  Step 04 said "every workflow the catalogue carries", which the catalogue itself contradicts:
+ *  a weight records the base family it is for (`familia`, surfaced as `basis`), and listing
+ *  filters models by it, so a trained identity reaches the workflows built on its own base. */
 const STEPS = [
   { n: '01', t: 'Bring material', d: 'Upload what you have, or make the source set here first.' },
   { n: '02', t: 'Caption it', d: 'The set is described so a model can be taught from it.' },
   { n: '03', t: 'Train', d: 'A LoRA on a base of your choosing. It lands on your shelf.' },
-  { n: '04', t: 'Make with it', d: 'Your trigger works in every workflow the catalogue carries.' },
+  { n: '04', t: 'Make with it', d: 'Your trigger works in every workflow built on the base you trained.' },
   { n: '05', t: 'Publish it', d: 'Put the model, the workflow or the collection out — and start earning on it.' },
 ];
 
@@ -270,21 +277,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
 
         <LandingPricing />
 
-        <section className="lp-anon">
-          <div className="lp-anon-in">
-            <span className="lp-anon-tag mono"><Ic name="eye-off" /> anonymous by construction</span>
-            <h2>Nobody has to know it was you.</h2>
-            <p>
-              Deposit, join the anonymity set, and spend with a zero-knowledge proof — we never
-              learn your wallet. Generation runs on external providers today; hardware-sealed
-              compute is on the roadmap, not in the product.
-            </p>
-            <span className="lp-anon-links">
-              <Link className="btn-ghost" to="/about"><Ic name="file-text" /> Read the architecture</Link>
-              <Link className="btn-ghost" to="/legal/privacy"><Ic name="eye-off" /> Privacy policy</Link>
-            </span>
-          </div>
-        </section>
+        <LandingAnon />
 
 
         {/* a closing CTA is not an argument that needs holding — it is a door. */}

@@ -17,6 +17,11 @@ import './doc.css';
 // /arcanum/config (ANON_PURSE_ENABLED, noema-131). The rail is off until the trusted-setup
 // ceremony runs — POST /arcanum/purse answers "anonymous purse coming soon" — so a page that
 // offers minting outright sells a visitor something the server refuses.
+//
+// `npm run guard:claims` reads this file a line at a time, so a denied phrase has to carry its
+// own hedge on the SAME source line. Both direct-to-commitment sentences below are wrapped for
+// that: reflowing one so "roadmap" lands on the next line is not a cosmetic change, it is an
+// unhedged confidentiality claim as far as the guard is concerned.
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 export function Pricing() {
@@ -143,16 +148,16 @@ export function Pricing() {
               balance and its spends will be cryptographically unlinkable to what you funded. It
               unlocks after the trusted-setup <Link to="/ceremony">ceremony</Link> — until then the
               rail is switched off and minting is refused, because the proving key it would verify
-              against is not yet one nobody controls. Direct-to-commitment deposits, where we never
-              see the funding wallet, are further out still.
+              against is not yet one nobody controls. Direct-to-commitment deposits, where
+              we never see the funding wallet, are further out on the roadmap.
             </>
           ) : (
             <>
               On top of that, mint a ZK purse from your balance: its spends are cryptographically
               unlinkable to what you funded. Minting a purse needs a signed-in account, so it's an
               unlinkable spend layer over an identified balance — strongest when you fund from a
-              shielded wallet. Direct-to-commitment deposits, where we never see the funding
-              wallet, are on the roadmap.
+              shielded wallet. Direct-to-commitment deposits, where
+              we never see the funding wallet, are on the roadmap.
             </>
           )}
         </p>
