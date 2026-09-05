@@ -490,6 +490,12 @@ export const api = {
   // (not `j`) so a 404 (no/revoked partner) surfaces as a typed `ApiRequestError` the Partner
   // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
   mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
+  // GET /v1/me/partner-request — the caller's OWN most recent application and its state.
+  // The companion to mePartner(): that one reports approval and 404s the same way for someone
+  // who never applied, someone under review and someone declined. This one says which.
+  // `jApi` again, so the Partner screen can branch on `err.code === 'not_found.partner_request'`
+  // (this account has filed nothing) rather than showing an error for a normal state.
+  mePartnerRequest: () => fetch('/v1/me/partner-request', { headers: readHeaders() }).then(jApi<OwnPartnerRequest>),
   // POST /v1/me/partner/api-key — self-serve issue-or-rotate, callable ONLY by the partner
   // themselves (never returned from the admin approval route — see adminDecidePartnerRequest's
   // comment below for why). Each call retires any key this same flow issued previously and
@@ -1773,6 +1779,22 @@ export interface PartnerRequest {
   natum: string;
   decidedAt?: string;
   decidedBy?: string;
+}
+
+// The caller's own application as GET /v1/me/partner-request returns it. Deliberately NOT
+// `PartnerRequest`: that is the admin queue's row, and the applicant's read omits `emailKey`
+// (an internal rate-limit index), `decidedBy` (the deciding admin) and `animaId` (always the
+// caller's own here, so it says nothing).
+export interface OwnPartnerRequest {
+  id: string;
+  status: PartnerRequestStatus;
+  useCase: string;
+  contactEmail: string;
+  nomen?: string;
+  org?: string;
+  notes?: string;
+  natum: string;
+  decidedAt?: string;
 }
 
 // A settled run in spend history (GET /v1/me/runs) — mirrors the backend SettledRun.

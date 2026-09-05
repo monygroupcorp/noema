@@ -1939,6 +1939,68 @@ Return the authenticated caller's B2B partner record — an ordinary Anima a pla
 }
 ```
 
+### GET /v1/me/partner-request
+
+Return the authenticated caller's most recent B2B partner application and its state, so an applicant can see whether they are pending, approved or declined without waiting to be told. Only applications filed while signed in are visible — an anonymous submission carries no account to match on. 404 not_found.partner_request when this account has filed none. 503 internal.unavailable when this deployment has no partner intake wired.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's most recent B2B partner application and where it stands.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The application id."
+    },
+    "status": {
+      "type": "string",
+      "description": "'pending' (awaiting review), 'approved' (GET /v1/me/partner now returns a record), or 'declined'."
+    },
+    "useCase": {
+      "type": "string",
+      "description": "What the applicant said they wanted to build."
+    },
+    "contactEmail": {
+      "type": "string",
+      "description": "The contact email the application was filed with."
+    },
+    "nomen": {
+      "type": "string",
+      "description": "Applicant display name, if given."
+    },
+    "org": {
+      "type": "string",
+      "description": "Organization name, if given."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-text notes, if given."
+    },
+    "natum": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the application was filed."
+    },
+    "decidedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it was approved or declined. Absent while pending."
+    }
+  },
+  "required": [
+    "id",
+    "status",
+    "useCase",
+    "contactEmail",
+    "natum"
+  ]
+}
+```
+
 ### GET /v1/me/status
 
 Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.

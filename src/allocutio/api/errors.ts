@@ -119,6 +119,13 @@ export const Errors = {
    *  same request, and an already-issued key is never re-shown (show-once). */
   conflictAlreadyDecided: (id: string, status: string) =>
     new ApiError('conflict.already_decided', `Partner request '${id}' was already ${status}`, 409),
+  /** The caller has never filed a partner request under this account. Distinct from
+   *  `notFoundPartner`: that one means "not an approved partner", which is also true of
+   *  someone waiting on review. This one means there is nothing to wait on. Shares the
+   *  `not_found.partner_request` code with the by-id variant above — same resource, and the
+   *  dashboard branches on the code, not on which lookup missed. */
+  notFoundOwnPartnerRequest: () =>
+    new ApiError('not_found.partner_request', 'No partner request found for this account', 404),
   /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
    *  both look identical from the caller's side: "you don't have partner access". */
   notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),

@@ -114,8 +114,10 @@ export function createPartnerAdminRouter(deps: PartnerAdminRouterDeps): Router {
     res.status(200).json({ requests })
   }))
 
-  // PATCH /:id — decide a request: approve or decline. Approving a request that carries
-  // an animaId provisions a Partner record + a fresh API key (returned ONCE, here).
+  // PATCH /:id — decide a request: approve or decline. Approving a request that carries an
+  // animaId provisions a Partner record and nothing else — no API key is minted here (see this
+  // file's header for why the key is the partner's own, self-serve call). Either decision is
+  // visible to the applicant at `GET /v1/me/partner-request`; nothing mails them.
   // Mounted at `/v1/admin/partner-requests/:id`.
   router.patch('/:id', wrap(async (req, res) => {
     const auctor = await resolveAdmin(req)

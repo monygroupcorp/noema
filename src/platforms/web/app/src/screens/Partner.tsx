@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, ApiRequestError, type Partner as PartnerRecord, type SettledRun } from '../lib/api';
+import { api, ApiRequestError, type OwnPartnerRequest, type Partner as PartnerRecord, type SettledRun } from '../lib/api';
 import { useSession } from '../state/session';
 
 // Partner — the B2B partner's own self-service dashboard (v1-minimal).
@@ -10,8 +10,18 @@ import { useSession } from '../state/session';
 // A "partner" is deliberately simple: an ordinary account (Anima) a platform admin has
 // approved through the intake/approval flow on a sibling branch — no on-chain agent, NFT, or
 // treasury lookup. GET /v1/me/partner is the access gate: 404 (no/revoked record) renders a
-// plain "you don't have partner access" state rather than erroring the page; any other failure
-// renders a generic error state.
+// not-a-partner state rather than erroring the page; any other failure renders a generic error
+// state.
+//
+// A 404 THERE IS NOT ONE FACT, which is why this screen makes a second call. "No partner
+// record" is equally true of someone who never applied, someone whose application is still in
+// the review queue, and someone who was declined — and telling all three "you don't have
+// partner access" is how an applicant ends up refreshing this page forever, waiting on an
+// answer that was already given. So on 404 we ask GET /v1/me/partner-request, which returns the
+// caller's own application, and say which of the three it is (or, when an approved application
+// has no live Partner record, that access was ended). If THAT call fails for any reason other
+// than its own 404, we fall back to the flat message rather than erroring a page whose real
+// answer — you are not a partner — we already have.
 //
 // Balance + spend reuse the SAME two calls (and the same rendering shape) Status.tsx already
 // uses for this — GET /v1/me/status + GET /v1/me/runs — there is no separate shared "balance
@@ -30,13 +40,28 @@ import { useSession } from '../state/session';
 
 const IMPETUS_USD = 0.000337;
 
-type Gate = 'loading' | 'signed-out' | 'no-access' | 'error' | 'ok';
+type Gate =
+  | 'loading'
+  | 'signed-out'
+  /** Not a partner, and the follow-up call could not say why — the fallback, not the normal path. */
+  | 'no-access'
+  /** Not a partner, and no application on file under this account. */
+  | 'not-applied'
+  /** Applied, still in the review queue. */
+  | 'pending'
+  /** Applied and declined. */
+  | 'declined'
+  /** Approved, but no live Partner record — access was revoked. */
+  | 'revoked'
+  | 'error'
+  | 'ok';
 
 export function Partner() {
   const { session, ready } = useSession();
   const [gate, setGate] = useState<Gate>('loading');
   const [partner, setPartner] = useState<PartnerRecord | null>(null);
   const [gateErr, setGateErr] = useState<string | null>(null);
+  const [application, setApplication] = useState<OwnPartnerRequest | null>(null);
 
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [keyBusy, setKeyBusy] = useState(false);
@@ -58,7 +83,21 @@ export function Partner() {
       .then((p) => { if (live) { setPartner(p); setGate('ok'); } })
       .catch((err) => {
         if (!live) return;
-        if (err instanceof ApiRequestError && err.code === 'not_found.partner') { setGate('no-access'); return; }
+        if (err instanceof ApiRequestError && err.code === 'not_found.partner') {
+          // Not a partner — now find out which kind. Any failure here degrades to the flat
+          // no-access state: the page's own question is already answered.
+          api.mePartnerRequest()
+            .then((r) => {
+              if (!live) return;
+              setApplication(r);
+              setGate(r.status === 'pending' ? 'pending' : r.status === 'declined' ? 'declined' : 'revoked');
+            })
+            .catch((e) => {
+              if (!live) return;
+              setGate(e instanceof ApiRequestError && e.code === 'not_found.partner_request' ? 'not-applied' : 'no-access');
+            });
+          return;
+        }
         setGateErr(err instanceof Error ? err.message : String(err));
         setGate('error');
       });
@@ -150,6 +189,55 @@ export function Partner() {
             <div className="s">
               This account isn't an approved B2B partner. If you believe this is a mistake, use the
               report button below to reach us.
+            </div>
+          </div>
+        )}
+
+        {gate === 'not-applied' && (
+          <div className="empty">
+            <div className="ico"><Ic name="users" /></div>
+            <div className="t">You haven't applied yet</div>
+            <div className="s">
+              This page becomes your dashboard once a B2B partner application from this account is
+              approved. There's no application on file under this account.
+            </div>
+            <Link className="btn" to="/partners"><Ic name="users" /> Apply to become a partner</Link>
+          </div>
+        )}
+
+        {gate === 'pending' && (
+          <div className="empty">
+            <div className="ico"><Ic name="users" /></div>
+            <div className="t">Your application is with a reviewer</div>
+            <div className="s">
+              Filed {fmtDate(application?.natum)}{application?.org ? ` for ${application.org}` : ''}. We
+              review by hand, so this can take a few days. Nothing else is needed from you — once it's
+              approved this page becomes your dashboard, and you issue your API key here.
+            </div>
+          </div>
+        )}
+
+        {gate === 'declined' && (
+          <div className="empty">
+            <div className="ico"><Ic name="users" /></div>
+            <div className="t">Your application wasn't approved</div>
+            <div className="s">
+              We reviewed the application you filed {fmtDate(application?.natum)} and declined it
+              {application?.decidedAt ? ` on ${fmtDate(application.decidedAt)}` : ''}. If your plans have
+              changed since, you're welcome to apply again; if you think we got it wrong, use the report
+              button below to reach us.
+            </div>
+            <Link className="btn" to="/partners"><Ic name="users" /> Apply again</Link>
+          </div>
+        )}
+
+        {gate === 'revoked' && (
+          <div className="empty">
+            <div className="ico"><Ic name="users" /></div>
+            <div className="t">Your partner access has ended</div>
+            <div className="s">
+              This account's application was approved, but its partner access is no longer active, and
+              any API key it issued has stopped working. Use the report button below to reach us.
             </div>
           </div>
         )}

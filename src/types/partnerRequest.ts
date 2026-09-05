@@ -70,4 +70,10 @@ export interface PartnerRequestStore {
   /** Rate-limit lookup: every request sharing `emailKey`, for the counted-window
    *  check in `partnerRequestRouter.ts` (mirrors `QuerelaStore.findByOwner`). */
   findByEmailKey(emailKey: string): Promise<PartnerRequest[]>
+  /** SUBMITTER-SCOPED: every request this `animaId` filed, newest first. Backs
+   *  `GET /v1/me/partner-request` — the one route by which an applicant can read
+   *  their own decision. Only ever finds requests submitted while signed in: an
+   *  anonymous submission carries no `animaId` and is unreachable here by design
+   *  (see this file's header). */
+  findByAnimaId(animaId: string): Promise<PartnerRequest[]>
 }
