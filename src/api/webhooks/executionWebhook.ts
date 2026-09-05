@@ -2,17 +2,12 @@ import crypto from 'node:crypto'
 import type { Actorum, ActumCompletor } from '../../types/cursus.js'
 import type { Actum } from '../../types/actum.js'
 import type { Exitus } from '../../types/cursus.js'
-import type { Nexus } from '../../types/nexus.js'
-import type { Signorum } from '../../types/significandi.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
-import type { HospitiumStore } from '../../types/hospitium.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { projectExitus } from '../../execution/projectExitus.js'
 import { privateMarker } from '../../crystal/MediaFetcher.js'
-import { modoHostFor } from '../../ledger/rates.js'
-import { resolveModelRoyaltyPayees } from '../../ledger/resolveModelPayees.js'
 
 type AuctorKey = { animaId: string } | { commitment: string } | { bursaToken: string }
 
@@ -28,10 +23,6 @@ export interface ExecutionWebhookDeps {
       result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
     ): Promise<AuctorKey | null>
   }
-  /** Optional: Nexus event bus — fires execution_spend hooks after completion. */
-  nexus?: Nexus
-  /** Optional: ledger write target — bulk-inserts hook-produced signa. Required when nexus is set. */
-  signorum?: Signorum
   /** Optional: vestigium store — writes a generation trace after each completion. */
   vestigiorum?: Vestigiorum
   /** Optional: modus registry — used to look up spell author for royalty routing. */
@@ -47,14 +38,6 @@ export interface ExecutionWebhookDeps {
     modus: import('../../types/modus.js').Modus | null,
     outputItems: Array<{ url?: string; path?: string; kind?: string } | string>,
   ): Promise<Record<string, unknown> | null>
-  /** Optional: identity-bearing hosting side-table — resolves modoHostAnimaId at emit. */
-  hospitia?: HospitiumStore
-  /** Optional: compiled-bundle store — reads the resolved `spec.models` (the models the
-   *  gen actually used) to route model royalties. Absent → no model-royalty payees. */
-  deployments?: import('../../types/deploymentum.js').DeploymentumStore
-  /** Optional: publication store — a model's published `Editio.owners[]` is its royalty
-   *  surface (spec §5e). Absent → no model-royalty payees. */
-  editiones?: import('../../types/editio.js').Editionum
   /** Optional: studio store — merges `executio.modelsInstalled` reports into
    *  `Materia.installedModels` so the bulletin Mod • → View loadout reflects reality. */
   materiae?: MateriaStore
@@ -251,61 +234,10 @@ export async function handleExecutionWebhook(
       // is this webhook's pre-settlement figure and must not reach the session
       // counter, which the budget guard weighs against the ledger.
 
-      // Spell-author royalty routing — reuse the `modus` resolved above.
-      // `Modus.auctor` is the `{ animaId } | { commitment }` owner union. Royalty
-      // routing addresses identified authors only; anon-owned (commitment) saved
-      // flows have no animaId to route to here.
-      const modusAuctorAnimaId: string | undefined =
-        modus?.auctor && typeof modus.auctor === 'object' && 'animaId' in modus.auctor
-          ? modus.auctor.animaId : undefined   // typeof guard: legacy stringy data can't crash the webhook
-
-      // Hosting payout (Phase C): resolve the host's full HostKey from Hospitium
-      // at emit time — host identity is NEVER on the actum or materia. The
-      // host-bound hooks (hostCutHook, hospitiumHook) branch on the discriminant
-      // to mint reward (identified) or arcanum (commitment) signa.
-      let modoHostKey: import('../../types/hospitium.js').HostKey | undefined
-      if (deps.hospitia && completed.executio?.pricingTier && completed.materiamId) {
-        const hospitium = await deps.hospitia.findByMateriaId(completed.materiamId).catch(() => null)
-        modoHostKey = modoHostFor(completed.executio.pricingTier, hospitium)
-      }
-
-      // baseImpetus is written by ActumCompletor at completion, derived from the
-      // measured pod cost (post-167). The `?? completed.impetus` fallback covers
-      // rails that complete without a completor-written executio stamp.
-      const baseImpetus = completed.executio?.baseImpetus ?? completed.impetus
-
-      // Model royalty routing (roadmap Tier 1 #1): the models this gen actually used
-      // → their published Editio rights split → weighted payees. The `modelRoyaltyHook`
-      // splits the 5% pool across them; empty list → it no-ops (no published models).
-      const intellaRoyaltyPayees = await resolveModelRoyaltyPayees(completed, {
-        deployments: deps.deployments,
-        editiones: deps.editiones,
-      })
-
-      if (deps.nexus && deps.signorum) {
-        const royaltySigna = await deps.nexus.emit({
-          type: 'execution_spend',
-          payload: {
-            actum: completed,
-            impetus: completed.impetus,
-            baseImpetus,
-            modusAuctorAnimaId,
-            modoHostKey,
-            ...(intellaRoyaltyPayees.length ? { intellaRoyaltyPayees } : {}),
-          },
-        })
-        let allSigna = royaltySigna
-        // Fire royalty_fired so platformSkimHook can take its cut
-        if (royaltySigna.length > 0) {
-          const royaltyValor = royaltySigna.reduce((sum, s) => sum + s.valor, 0n)
-          const skimSigna = await deps.nexus.emit({
-            type: 'royalty_fired',
-            payload: { actumId: completed.id, royaltyValor, baseValor: completed.impetus },
-          })
-          if (skimSigna.length) allSigna = [...allSigna, ...skimSigna]
-        }
-        if (allSigna.length) await deps.signorum.createMany(allSigna)
-      }
+      // Royalty, host cut and platform skim are NOT emitted here. `completor.complete`
+      // above is the single `execution_spend` emitter for every rail, so this webhook
+      // and a sync-cursor dispatch pay identically. A second emit here would double-pay
+      // the host-bound hooks, which do not gate on royalty enrichment.
 
       // Route collection acta to CollectioCursor
       if (deps.collectioRouter) {

@@ -11,6 +11,7 @@ import { Nexus } from '../../../src/ledger/Nexus.js'
 import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { MemoryModorum } from '../../../src/execution/MemoryModorum.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
+import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
 import { hostCutHook } from '../../../src/ledger/hooks/hostCut.js'
 import { spellRoyaltyHook } from '../../../src/ledger/hooks/spellRoyalty.js'
 import { modelRoyaltyHook } from '../../../src/ledger/hooks/modelRoyalty.js'
@@ -487,18 +488,35 @@ const TEST_MODUS: Modus = {
   mutatum: new Date(),
 }
 
-function makeLedgerDeps() {
+function makeLedgerDeps(hospitia?: Pick<HospitiumStore, 'findByMateriaId'>) {
   const nexus = new Nexus()
   nexus.on('execution_spend', hostCutHook)
   nexus.on('execution_spend', spellRoyaltyHook)
   nexus.on('execution_spend', modelRoyaltyHook)
   nexus.on('royalty_fired', platformSkimHook)
-  return {
-    nexus,
-    signorum: new MemorySignorum(),
-    modorum: new MemoryModorum(),
-    actorum: new MemoryActorum(),
+  const signorum = new MemorySignorum()
+  const modorum = new MemoryModorum()
+  const actorum = new MemoryActorum()
+
+  // The REAL completor, not the mock. `ActumCompletor.complete()` is the single
+  // `execution_spend` emitter, so a webhook completion reaches the ledger only
+  // through it — a mock here would leave every ledger assertion below asserting
+  // nothing. Wrapped only to record the calls the rail made.
+  const real = new ActumCompletor({ acta: actorum, signorum, nexus, modorum, hospitia })
+  const completor: CompletorMock = {
+    completed: [],
+    failed: [],
+    async complete(actum, exitus, auctor) {
+      completor.completed.push({ actumId: actum.id, exitus, auctor })
+      return real.complete(actum, exitus, auctor as { animaId: string } | { commitment: string } | undefined)
+    },
+    async fail(actum, error) {
+      completor.failed.push({ actumId: actum.id, error })
+      return real.fail(actum, error)
+    },
   }
+
+  return { nexus, signorum, modorum, actorum, completor }
 }
 
 async function seedActum(actorum: MemoryActorum, actum: Actum): Promise<void> {
@@ -506,56 +524,42 @@ async function seedActum(actorum: MemoryActorum, actum: Actum): Promise<void> {
   await actorum.create(input)
 }
 
-// 17. spellRoyalty signum issued to modus auctor on COMPLETED
-test('COMPLETED with spell author — spellRoyalty signum issued to auctor', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+// 17. End-to-end: a webhook completion pays, through the completor that emits.
+//
+// The payout matrix itself — spell royalty, model royalty, host cut, platform skim,
+// and the empty cases — lives in tests/unit/execution/ActumCompletor.test.ts, at the
+// layer that actually emits `execution_spend`. What THIS rail owes is proof that a
+// RunPod callback still arrives at that emitter and that the ledger moves.
+test('COMPLETED — the webhook rail pays the flow author and the platform skim', async () => {
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   await seedActum(actorum, makeActum())
 
-  const deps: ExecutionWebhookDeps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-  }
-  // 200s → 200n impetus; spellRoyalty = 10% = 20n
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
+  // 200s → 200n measured; spellRoyalty = 10% = 20n, platformSkim = 5% = 10n.
   await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
 
-  const signa = await signorum.history({ animaId: 'anima-flux-author' })
-  assert.equal(signa.length, 1)
-  assert.equal(signa[0].forma, 'reward')
-  assert.equal(signa[0].valor, 20n)
-  assert.equal(signa[0].auctor, 'nexus:spellRoyalty')
+  const authorSigna = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(authorSigna.length, 1)
+  assert.equal(authorSigna[0].valor, 20n)
+  assert.equal(authorSigna[0].auctor, 'nexus:spellRoyalty')
+
+  const platformSigna = await signorum.history({ animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' })
+  assert.equal(platformSigna.length, 1)
+  assert.equal(platformSigna[0].auctor, 'nexus:platformSkim')
 })
 
-// 18. platformSkim signum issued to platform after royalty fires
-test('platformSkim signum issued when spellRoyalty produces a signum', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
-  await modorum.register({ ...TEST_MODUS })
-  await seedActum(actorum, makeActum())
-
-  const deps: ExecutionWebhookDeps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-  }
-  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
-
-  // platformSkim = 5% of baseValor(200n impetus) = 10n
-  const platformId = process.env.PLATFORM_ANIMA_ID ?? 'platform'
-  const signa = await signorum.history({ animaId: platformId })
-  assert.equal(signa.length, 1)
-  assert.equal(signa[0].forma, 'reward')
-  assert.equal(signa[0].valor, 10n)
-  assert.equal(signa[0].auctor, 'nexus:platformSkim')
-})
-
-// 18a. hostCutHook (post-167): a guest-tier completion taxes the MEASURED cost,
-// not the surcharged/capped settle total and not the reservation the actum locked.
-test('guest completion — hostCutHook taxes the measured cost, not the reservation', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
-  await modorum.register({ ...TEST_MODUS, auctor: undefined })   // isolate hostCut from spellRoyalty
-  await seedActum(actorum, makeActum({
-    impetus: 1800n,                        // reservation — well above the measured run
-    executio: { pricingTier: 'guest' },
-    materiamId: 'materia-1',
-  }))
-
+// 18. The double-emission proof, on the rail that used to hold the second emitter.
+//
+// This webhook once built its own fully-enriched `execution_spend` after calling
+// `complete()`. Now that `complete()` builds the enriched payload itself, leaving
+// that second call site in place would fire two IDENTICAL enriched events per
+// webhook completion — and every hook gates on enrichment, not on emit count, so
+// all of them would pay twice: the author, the model owners, the host, the skim.
+// Restore that call site and this count goes to 2, and so does the host's signum.
+// (The pre-fix pairing was harmless only by accident: complete()'s old payload was
+// bare, and a bare payload no-ops every hook — see hostCut.ts's `!modoHostKey` guard.)
+test('COMPLETED emits execution_spend once, and pays the host once', async () => {
   const hospitia: Pick<HospitiumStore, 'findByMateriaId'> = {
     async findByMateriaId(id) {
       return id === 'materia-1'
@@ -563,74 +567,37 @@ test('guest completion — hostCutHook taxes the measured cost, not the reservat
         : null
     },
   }
+  const { nexus, signorum, modorum, actorum, completor } = makeLedgerDeps(hospitia)
+  await modorum.register({ ...TEST_MODUS, auctor: undefined })   // isolate hostCut
+  await seedActum(actorum, makeActum({ executio: { pricingTier: 'guest' }, materiamId: 'materia-1' }))
 
-  const deps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum, hospitia,
-  } as unknown as ExecutionWebhookDeps
-  // 200s measured pod-time → baseImpetus 200n; hostCut = 20% of that measured
-  // base (40n), not of the guest-surcharged settle total (280n) or the 1800n
-  // reservation.
+  const seen: string[] = []
+  const emit = nexus.emit.bind(nexus)
+  nexus.emit = async (event) => { seen.push(event.type); return emit(event) }
+
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
   await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
 
-  const signa = await signorum.history({ animaId: 'host-anima' })
-  assert.equal(signa.length, 1)
-  assert.equal(signa[0].forma, 'reward')
-  assert.equal(signa[0].valor, 40n)
-  assert.equal(signa[0].auctor, 'nexus:hostCut')
+  assert.equal(seen.filter(t => t === 'execution_spend').length, 1)
+  const hostSigna = await signorum.history({ animaId: 'host-anima' })
+  assert.equal(hostSigna.length, 1)
+  assert.equal(hostSigna[0].valor, 40n)   // 20% of the 200n measured base
+  assert.equal(hostSigna[0].auctor, 'nexus:hostCut')
 })
 
-// 19. No signa when modus has no auctor — royalty_fired also not triggered
+// 19. No signa when the flow has no identified author — royalty_fired never follows.
 test('no signa issued when modus has no auctor', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS, auctor: undefined })
   await seedActum(actorum, makeActum())
 
-  const deps: ExecutionWebhookDeps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-  }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
   await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
 
   const authorSigna = await signorum.history({ animaId: 'anima-flux-author' })
   assert.equal(authorSigna.length, 0)
   const platformSigna = await signorum.history({ animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' })
   assert.equal(platformSigna.length, 0)
-})
-
-// 19a. Model royalty: a gen that used a PUBLISHED model pays its owner (roadmap #1)
-test('COMPLETED — model royalty routed to the used model\'s published owner', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
-  await modorum.register({ ...TEST_MODUS, auctor: undefined })   // isolate the model-royalty signum
-  await seedActum(actorum, makeActum({ deploymentHash: 'sha256:dep-1' }))
-
-  // The deployment bundle records that this gen used 'lora-1'; that model has a
-  // published Editio with no explicit split → its publisher earns the 5% pool.
-  const deployments = {
-    async find(h: string) {
-      return h === 'sha256:dep-1' ? { hash: h, spec: { models: [{ id: 'lora-1', role: 'lora' }] }, natum: new Date() } : null
-    },
-  }
-  const editiones = {
-    async listByArtifact(ref: { kind: string; id: string }) {
-      if (ref.kind === 'intella' && ref.id === 'lora-1') {
-        const now = new Date()
-        return [{ id: 'e-1', artifactRef: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface', visibility: 'unlisted', custody: 'ours', by: { animaId: 'lora-author' }, status: 'published', natum: now, mutatum: now }]
-      }
-      return []
-    },
-  }
-
-  const deps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-    deployments, editiones,
-  } as unknown as ExecutionWebhookDeps
-  // 200s → 200n impetus; model royalty = 5% = 10n to the sole payee.
-  await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }), deps)
-
-  const signa = await signorum.history({ animaId: 'lora-author' })
-  assert.equal(signa.length, 1)
-  assert.equal(signa[0].forma, 'reward')
-  assert.equal(signa[0].valor, 10n)
-  assert.equal(signa[0].auctor, 'nexus:modelRoyalty')
 })
 
 // 19b. Inventory merge: comfyrunner's modelsInstalled report set-unions into Materia.installedModels
@@ -685,13 +652,11 @@ test('COMPLETED with NO modelsInstalled report — Materia untouched', async () 
 
 // 20. No signa issued on FAILED
 test('no signa issued on FAILED', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   await seedActum(actorum, makeActum())
 
-  const deps: ExecutionWebhookDeps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-  }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
   const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'FAILED', error: 'OOM' }), deps)
 
   assert.equal(result.status, 200)
@@ -701,34 +666,16 @@ test('no signa issued on FAILED', async () => {
 
 // 21. No signa issued on CANCELLED
 test('no signa issued on CANCELLED', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   await seedActum(actorum, makeActum())
 
-  const deps: ExecutionWebhookDeps = {
-    actorum, completor: makeCompletor(), nexus, signorum, modorum,
-  }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
   const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'CANCELLED' }), deps)
 
   assert.equal(result.status, 200)
   const signa = await signorum.history({ animaId: 'anima-flux-author' })
   assert.equal(signa.length, 0)
-})
-
-// 22. Missing nexus dep is a no-op (backward compat)
-test('missing nexus dep is a no-op — request still succeeds', async () => {
-  const actum = makeActum()
-  const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = {
-    actorum: makeActorum(actum),
-    completor,
-  }
-  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 1000 }
-  const result = await handleExecutionWebhook(makeReq(body), deps)
-
-  assert.equal(result.status, 200)
-  assert.equal(result.body.success, true)
-  assert.equal(completor.completed.length, 1)
 })
 
 // ── Modo session spend ────────────────────────────────────────────────────────
@@ -876,14 +823,13 @@ test('flowRouter identity takes precedence over actumIndex fallback', async () =
 
 // 42. A callback presenting no nonce for a run that HAS one is refused with no side effects.
 test('nonce-less callback for a run that carries a nonce writes nothing', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   const modos = new MemoryModo()
   const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
   await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A', modoId: modo.id }))
 
-  const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
 
   const result = await handleExecutionWebhook(
     makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }),
@@ -899,15 +845,14 @@ test('nonce-less callback for a run that carries a nonce writes nothing', async 
 
 // 43. A nonce belonging to another run, presented with this run's job id, is refused likewise.
 test('a nonce from a different run writes nothing', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   const modos = new MemoryModo()
   const modo = await modos.create({ status: 'active', impetusAccrued: 100n, acta: [], idleWarmthSec: 300 })
   await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A', modoId: modo.id }))
   await seedActum(actorum, makeActum({ id: 'actum-test-2', externusJobId: 'job-other', callbackNonce: 'nonce-B' }))
 
-  const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
 
   const result = await handleExecutionWebhook(
     makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }, { nonce: 'nonce-B' }),
@@ -922,12 +867,11 @@ test('a nonce from a different run writes nothing', async () => {
 
 // 44. The matching nonce completes the run exactly as before — the check adds admission only.
 test('the run\'s own nonce completes it and settles the ledger as before', async () => {
-  const { nexus, signorum, modorum, actorum } = makeLedgerDeps()
+  const { signorum, modorum, actorum, completor } = makeLedgerDeps()
   await modorum.register({ ...TEST_MODUS })
   await seedActum(actorum, makeActum({ callbackNonce: 'nonce-A' }))
 
-  const completor = makeCompletor()
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, modorum }
+  const deps: ExecutionWebhookDeps = { actorum, completor, modorum }
 
   const result = await handleExecutionWebhook(
     makeReq({ id: 'job-abc-123', status: 'COMPLETED', output: [], executionTime: 200_000 }, { nonce: 'nonce-A' }),

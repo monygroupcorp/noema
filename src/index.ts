@@ -551,10 +551,25 @@ async function main(): Promise<void> {
     log.warn('R2_PRIVATE_OUTPUTS_BUCKET unset — private generation DISABLED (the preference cannot be enabled and every run generates public). Refusing to host private outputs in the public outputs bucket.')
   }
 
+  // The event bus, and the one instance of it. Built before the ring because the ring's
+  // completor emits on it — the sole `execution_spend` site, so every completion rail
+  // pays a royalty on the same terms. A second Nexus would split these registrations
+  // across two buses and silently halve the payouts.
+  const nexus = new Nexus()
+  nexus.on('execution_spend', hostCutHook)
+  nexus.on('execution_spend', hospitiumHook)
+  nexus.on('execution_spend', spellRoyaltyHook)
+  nexus.on('execution_spend', modelRoyaltyHook)
+  nexus.on('royalty_fired', platformSkimHook)
+  nexus.on('session_spend', sessionSpendHook)
+  nexus.on('studio_spend', studioSpendHook)
+  nexus.on('deposit_confirmed', referralSplitHook)
+
   const ring = createContainer(mongo, {
     mongoUri: MONGODB_URI as string,
     dbName: DB_NAME,
     compile: compile as ContainerConfig['compile'],
+    nexus,      // the completor emits execution_spend/royalty_fired on it
     materiae,   // pre-created, shared with SecurePodClient
     hospitia,   // pre-created, shared with SecurePodClient + TelegramAllocutio
     terminatePod: podTerminator,
@@ -647,17 +662,6 @@ async function main(): Promise<void> {
       log.warn('pod reconciliation error', { error: (err as Error).message })
     }
   }
-
-  // 4. Create Nexus, register hooks
-  const nexus = new Nexus()
-  nexus.on('execution_spend', hostCutHook)
-  nexus.on('execution_spend', hospitiumHook)
-  nexus.on('execution_spend', spellRoyaltyHook)
-  nexus.on('execution_spend', modelRoyaltyHook)
-  nexus.on('royalty_fired', platformSkimHook)
-  nexus.on('session_spend', sessionSpendHook)
-  nexus.on('studio_spend', studioSpendHook)
-  nexus.on('deposit_confirmed', referralSplitHook)
 
   // 4. Seed canonical modi + essentiae + intellae + fundamenta
   for (const modus of CANONICAL_MODI) {
@@ -1780,13 +1784,8 @@ async function main(): Promise<void> {
     completor: ring.completor,
     secret: RUNPOD_WEBHOOK_SECRET,
     flowRouter: router,
-    nexus,
-    signorum: ring.signorum,
     modorum: ring.modorum,
     ...(exitusResolver ? { resolveExitus: exitusResolver } : {}),
-    hospitia: ring.hospitia,
-    deployments: ring.deployments,
-    editiones: ring.editiones,
     materiae,
     actumIndex: ring.actumIndex,
     vestigiorum: ring.vestigiorum,
