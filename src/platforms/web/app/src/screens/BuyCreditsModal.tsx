@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { parseEther } from 'viem';
 import { Ic } from '../lib/icons';
-import { api, type DepositConfig, type DepositQuote, type MyDeposit } from '../lib/api';
+import { api, type DepositConfig, type DepositQuote, type MyDeposit, type Pack } from '../lib/api';
 import { connectWallet, waitForReceipt, type ConnectedWallet } from '../lib/wallet';
 import { sendEthDeposit } from '../lib/deposit';
+import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { useSession } from '../state/session';
 import { Meter } from './IdentityMeter';
 import './buy-credits-modal.css';
@@ -75,6 +77,7 @@ export function lineMode(line: 1 | 2 | 3 | 4, phase: Phase): 'settled' | 'active
 
 export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { session } = useSession();
+  const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>('connect');
   const [wallet, setWallet] = useState<ConnectedWallet | null>(null);
   const [connectErr, setConnectErr] = useState<string | null>(null);
@@ -95,6 +98,12 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [signErr, setSignErr] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+
+  // The card rail offered alongside the wallet on the opening phase. Same server pack catalog
+  // and same checkout request the Funding page builds — one source, two places you can start it.
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const [cardBusy, setCardBusy] = useState<string | null>(null);
+  const [cardErr, setCardErr] = useState<string | null>(null);
 
   const [preBalance, setPreBalance] = useState<number | null>(null);
   const [newBalance, setNewBalance] = useState<number | null>(null);
@@ -137,8 +146,21 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     if (!open) return;
     let live = true;
     api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
+    api.listPacks().then((p) => { if (live) setPacks(p); }).catch(() => { /* card rail simply doesn't render */ });
     return () => { live = false; };
   }, [open]);
+
+  // Card pack purchase, the same rail the Funding page runs. An anon caller can't buy on it
+  // (the server 401s payments.identity_required), so rather than a dead click we hand them to
+  // the door carrying this pack — signing in returns them to that exact purchase.
+  function buyPack(packId: string) {
+    setCardErr(null);
+    if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId)); return; }
+    setCardBusy(packId);
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
+      .then((s) => { window.location.href = s.url; })
+      .catch((e) => { setCardErr(e instanceof Error ? e.message : String(e)); setCardBusy(null); });
+  }
 
   // Reference quote for 1 ETH — powers the quick-target anchors (1K/10K/100K/1M cr).
   useEffect(() => {
@@ -445,6 +467,36 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
 
         {phase === 'connect' && (
           <div className="bcm-connect">
+            {/* The card rail, offered here rather than only on the Funding page. This modal is
+                what the credits pill opens, so it is where most people arrive wanting credits;
+                without this the fastest way to pay was the one you could not reach from it. */}
+            <div className="bcm-card-rail">
+              <div className="bcm-card-head"><Ic name="credit-card" /> Card — fastest, and we see your name</div>
+              <div className="bcm-card-packs">
+                {packs.map((p) => (
+                  <button
+                    key={p.id}
+                    className="bcm-qchip"
+                    disabled={cardBusy != null}
+                    onClick={() => buyPack(p.id)}
+                  >
+                    <span className="bcm-qcr">{fmtInt(p.credits)} cr</span>
+                    <span className="bcm-qeth">${p.usd}</span>
+                  </button>
+                ))}
+              </div>
+              {!session && (
+                <div className="bcm-amber-note">
+                  A card purchase needs an account — pick a pack and we'll take you to the door,
+                  then straight back to it.
+                </div>
+              )}
+              {cardBusy && <div className="bcm-amber-note">Taking you to Stripe…</div>}
+              {cardErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{cardErr}</div>}
+            </div>
+
+            <div className="bcm-rail-or">or</div>
+
             <p>
               Connect a wallet to pay with what it already holds. We see an address, not a
               person — an amount and a timestamp, never a name, never what you make. How
