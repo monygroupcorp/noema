@@ -152,7 +152,7 @@ export interface ApiFacade {
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
   extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
-  listCollections(auctor: AuctorKey): Promise<Collection[]>
+  listCollections(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ collections: Collection[]; nextCursor?: string }>
   pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
   resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
@@ -637,9 +637,14 @@ export function createApiRouter(deps: {
     res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id)) })
   }))
 
-  // GET /v1/collectiones — list the caller's collections (owner-scoped).
+  // GET /v1/collectiones — list the caller's collections (owner-scoped), newest first and
+  // cursor-paginated like `GET /v1/me/runs`: `?cursor=&limit=`, `nextCursor` when more remain.
   router.get('/collectiones', wrap(async (req, res) => {
-    res.json({ collections: await api.listCollections(await auth(req)) })
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listCollections(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
   }))
 
   // GET /v1/collectiones/:id — fetch one (owner-scoped: 404 if not yours).

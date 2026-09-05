@@ -11506,7 +11506,7 @@
         }
       },
       "get": {
-        "summary": "List the authenticated caller's Collections (owner-scoped).",
+        "summary": "List the authenticated caller's Collections (owner-scoped) — the ones they funded plus the ones shared with a Team (Sodalitas) they are a member of. Newest first, paged.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -11697,6 +11697,10 @@
                           "rejected"
                         ]
                       }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "description": "Present when more collections remain — pass it back as `cursor` for the next page."
                     }
                   },
                   "required": [
@@ -11716,7 +11720,27 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to 1..500; defaults to 100.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/collectiones/{id}/tractus": {

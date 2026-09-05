@@ -1,6 +1,26 @@
-import { Collection } from 'mongodb'
+import { Collection, Document, Filter } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import type { Collectio, Collectiones, CollectioStatus, Collectionum } from '../types/collectio.js'
+import type { Collectio, CollectioListOpts, CollectioListPage, Collectiones, CollectioStatus, Collectionum } from '../types/collectio.js'
+
+/** Opaque page cursor = the (natum, id) of the last row on the previous page. Base64url of
+ *  `${iso}|${id}` — the same encoding MongoDataset uses, resuming the deterministic
+ *  (natum desc, id desc) sort. */
+function encodeCursor(natum: Date, id: string): string {
+  return Buffer.from(`${natum.toISOString()}|${id}`, 'utf8').toString('base64url')
+}
+function decodeCursor(cursor: string): { natum: Date; id: string } | null {
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf8')
+    const sep = raw.lastIndexOf('|')
+    if (sep < 0) return null
+    const natum = new Date(raw.slice(0, sep))
+    const id = raw.slice(sep + 1)
+    if (Number.isNaN(natum.getTime()) || !id) return null
+    return { natum, id }
+  } catch {
+    return null
+  }
+}
 
 function toDoc(c: Partial<Collectio>): Record<string, unknown> {
   const { impetusTotal, ...rest } = c
@@ -46,6 +66,50 @@ export class MongoCollectio implements Collectionum {
 
   async listByStatus(status: CollectioStatus): Promise<Collectiones> {
     return this.list({ status })
+  }
+
+  /**
+   * The caller's collections, newest first, owner-scoped and paged in the DATABASE.
+   *
+   * `list()` above answers "every collection in the store" and is the cursor's status scan; it
+   * is not a read a request may take. A per-caller listing that loads every document and drops
+   * the ones the caller does not own reads the whole table on every hit, and the documents it
+   * discards are other tenants' — so the scope goes in the filter, and the page size bounds
+   * what a single request can pull back however large the store grows.
+   *
+   * The predicate is `_ownsCollection`'s, expressed as a query: the funding identity on `by`,
+   * UNION the collections shared with a team the caller belongs to (`sodalitasId`, resolved at
+   * the API layer from the authenticated caller — never from a request parameter). A document
+   * with no `sodalitasId` cannot match the `$in`, which is the `c.sodalitasId !== undefined`
+   * half of the in-process check.
+   */
+  async listOwned(opts: CollectioListOpts): Promise<CollectioListPage> {
+    const funder: Filter<Document> =
+      'animaId' in opts.by ? { 'by.animaId': opts.by.animaId } : { 'by.commitment': opts.by.commitment }
+    const teamIds = opts.sodalitasIds ?? []
+    const access: Filter<Document> =
+      teamIds.length > 0 ? { $or: [funder, { sodalitasId: { $in: teamIds } }] } : funder
+
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100) || 100, 1), 500)
+    const clauses: Filter<Document>[] = [access]
+    if (opts.cursor) {
+      const c = decodeCursor(opts.cursor)
+      if (c) {
+        clauses.push({ $or: [{ natum: { $lt: c.natum } }, { natum: c.natum, id: { $lt: c.id } }] })
+      }
+    }
+
+    const docs = await this.col
+      .find({ $and: clauses })
+      .sort({ natum: -1, id: -1 })
+      .limit(limit + 1)
+      .toArray()
+
+    const hasMore = docs.length > limit
+    const entries = (hasMore ? docs.slice(0, limit) : docs).map(d => fromDoc(d as Record<string, unknown>))
+    const last = entries[entries.length - 1]
+    const nextCursor = hasMore && last ? encodeCursor(new Date(last.natum), last.id) : undefined
+    return { entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
   // `nomen` / `descriptio` / `modusId` ride the same generic $set path as every other

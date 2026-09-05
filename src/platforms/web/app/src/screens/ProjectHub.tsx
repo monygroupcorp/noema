@@ -5,7 +5,7 @@ import { useProject } from '../state/project';
 import { counts } from '../lib/projects';
 import { DATASETS } from '../lib/datasets';
 import { Ic } from '../lib/icons';
-import { api, type Team } from '../lib/api';
+import { api, listAllCollections, type Team } from '../lib/api';
 
 // Project hub (project-hub-spec.md, render noema-project-hub.png) — one project's home: a
 // tabbed workbench. Overview summarizes the six holdings; the asset tabs (Datasets/Models/
@@ -64,7 +64,7 @@ export function ProjectHub() {
     let live = true;
     api.listTeams().then((r) => { if (live) setTeams(r.teams); }).catch(() => { if (live) setTeams([]); });
     api.listMyModels().then((r) => { if (live) setModelNames(Object.fromEntries(r.models.map((m) => [m.intellaId, m.nomen]))); }).catch(() => {});
-    api.listCollections().then((r) => { if (live) setCollNames(Object.fromEntries(r.collections.map((x) => [x.id, x.nomen || 'Untitled collection']))); }).catch(() => {});
+    listAllCollections().then((cs) => { if (live) setCollNames(Object.fromEntries(cs.map((x) => [x.id, x.nomen || 'Untitled collection']))); }).catch(() => {});
     return () => { live = false; };
   }, []);
   const dsNames = useMemo(() => Object.fromEntries(DATASETS.map((d) => [d.id, d.name])), []);

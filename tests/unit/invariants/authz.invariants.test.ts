@@ -508,8 +508,8 @@ test('INVARIANT: identity B cannot read or mutate identity A\'s Collectio by id'
 
   // Several of those mutate through the cursor rather than the store — none may be reached.
   assert.deepEqual(cursorCalls, [], 'no dispatch/review side effect may fire for a foreign collection')
-  assert.equal((await api.listCollections(B)).length, 0, 'B\'s own list stays empty')
-  assert.equal((await api.listCollections(A)).length, 1, 'A still sees their own collection')
+  assert.equal((await api.listCollections(B)).collections.length, 0, 'B\'s own list stays empty')
+  assert.equal((await api.listCollections(A)).collections.length, 1, 'A still sees their own collection')
 })
 
 // ── BY ID: Sodalitas (_memberTeam) ───────────────────────────────────────────
