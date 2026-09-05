@@ -1651,6 +1651,11 @@ export interface Collection {
   provenanceHash: string;
   owners?: Array<{ animaId: string; weight: number }>;
   tractus?: Tractus[];
+  /** The base prompt as authored. It selects how traits reach the prompt, for the prompt
+   *  as a whole: one containing `{{` anywhere is in token mode (a `{{porta}}` is replaced
+   *  in place; an axis with no token of its own reaches the prompt not at all), any other
+   *  is in join mode (fragments appended in axis order). See `axisSplice`. */
+  basePrompt?: string;
   reviewEnabled?: boolean;
   // Dispatching new pieces is held (in-flight pieces still finish). Present + true only
   // while paused — absent means running normally. Survives a server restart.

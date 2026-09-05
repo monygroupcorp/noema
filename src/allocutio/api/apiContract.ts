@@ -889,6 +889,7 @@ const CollectionSchema: JsonSchema = {
     total: { type: 'number', description: 'Target piece count (the size of the run).' },
     provenanceHash: { type: 'string', description: 'Content-address of the generative config (`sha256:<hex>`) — the NFT provenance hash.' },
     tractus: { type: 'array', items: TractusSchema, description: 'The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired.' },
+    basePrompt: { type: 'string', description: 'The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt.' },
     reviewEnabled: { type: 'boolean', description: 'Whether each piece is held for review before it counts.' },
     paused: { type: 'boolean', description: 'Dispatching new pieces is held (in-flight pieces still finish). Present + true only while paused. Survives a restart.' },
     owners: {
