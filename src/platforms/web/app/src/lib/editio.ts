@@ -26,6 +26,10 @@ export interface Editio {
   externalRef?: string;                       // feed post id / HF repo / token id / R2 url
   status: EditioStatus;
   reviewOutcome?: ReviewOutcome;              // present only for a moderation-gate HELD item
+  // Present whenever the moderation gate held OR refused this publication. Deliberately
+  // generic ('Flagged by automated review.') — the classifier's raw verdict text is admin-
+  // only (GET /v1/editiones/:id/moderation) and never reaches this projection.
+  moderationNote?: string;
   createdAt: string;                          // ISO
   updatedAt: string;                          // ISO
 }
@@ -83,3 +87,30 @@ export const STATUS_LABEL: Record<EditioStatus, string> = {
 // A mint is permanent — never offer retract for it.
 export const canRetract = (e: Editio) =>
   e.status === 'published' && e.destination !== 'mint';
+
+// What the PUBLISHER needs to be told, on one axis. The backend keeps two — `status` and
+// `reviewOutcome` — and reading either alone tells the publisher something untrue:
+//   • a moderation HOLD keeps status:'pending', so a status-only reader shows "still
+//     publishing" forever for an item that will never settle on its own;
+//   • a gate REFUSAL lands on status:'rejected', which a status-only reader renders the same
+//     as an adapter crash, so the publisher is offered a retry that cannot ever succeed.
+// Collapse both here, once, so every publish surface tells the same story.
+//   settling — genuinely still working (adapter upload, worker not there yet).
+//   held     — the gate escalated it; a human reviewer has to clear it.
+//   refused  — the gate (or a reviewer) declined it. Terminal. Not retryable.
+//   live · failed · withdrawn — published / adapter threw / retracted.
+export type PublishOutcome = 'settling' | 'held' | 'refused' | 'live' | 'failed' | 'withdrawn';
+
+export function publishOutcome(e: Editio): PublishOutcome {
+  if (e.status === 'published') return 'live';
+  if (e.status === 'rejected') return 'refused';
+  if (e.status === 'failed') return 'failed';
+  if (e.status === 'retracted') return 'withdrawn';
+  // status:'pending' — the hold lives on the other axis.
+  return e.reviewOutcome === 'pending' ? 'held' : 'settling';
+}
+
+// The reason line shown to the publisher of a held or refused publication. The server sends
+// its own wording on `moderationNote`; the fallback covers an API build older than the field
+// (the note is what makes a refusal explicable at all, so never render nothing).
+export const publishNote = (e: Editio) => e.moderationNote ?? 'Flagged by automated review.';
