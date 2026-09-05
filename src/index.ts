@@ -1033,6 +1033,14 @@ async function main(): Promise<void> {
     // cannot honour is refused, not silently downgraded) and presigns markers on an owner-scoped
     // run read.
     ...(privateOutputsStore ? { privateOutputs: { store: privateOutputsStore } } : {}),
+    // Publishing a private output (phase 2): copy the bytes out of the private bucket into the
+    // PUBLIC outputs bucket, under the publication's own key. `httpMediaFetcher` is what reads a
+    // marker (it resolves one through the private resolver registered above); the public bucket
+    // is the same one every public run writes to. Both required — with no public bucket to copy
+    // INTO, publishing a private output stays refused rather than half-done.
+    ...(privateOutputsStore && RUNPOD_R2 ? {
+      publicationCopyOut: { fetch: (ref: string) => httpMediaFetcher.fetch(ref), store: new R2Uploader(RUNPOD_R2) },
+    } : {}),
     compositusCursor: ring.compositusCursor,
     collectiones: ring.collectiones,
     datasets: ring.datasets,

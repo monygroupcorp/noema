@@ -68,18 +68,25 @@ export function privateMarkersIn(aditus: Record<string, unknown>): string[] {
 }
 
 /**
- * The same inputs with every private-output marker replaced by what `resolved` maps it to.
+ * The same record with every private-output marker replaced by what `resolved` maps it to.
  *
- * Shape is preserved exactly — a string stays a string, a list keeps its length and order — so
- * a flow's schema sees the inputs it declared. A marker missing from the map is left as-is;
- * every caller here resolves the full set from `privateMarkersIn` first, so that cannot silently
- * drop one.
+ * Shape is preserved exactly — a string stays a string, a list keeps its length and order, an
+ * item carried as `{ url }` stays an object with its other fields intact — so a flow's schema,
+ * or a publication adapter, sees the shape it declared. A marker missing from the map is left
+ * as-is; every caller here resolves the full set first, so that cannot silently drop one.
  */
 export function withResolvedPrivateMarkers(
   aditus: Record<string, unknown>,
   resolved: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
-  const swap = (v: unknown): unknown => (isPrivateMarker(v) ? resolved.get(v) ?? v : v)
+  const swap = (v: unknown): unknown => {
+    if (isPrivateMarker(v)) return resolved.get(v) ?? v
+    if (v && typeof v === 'object' && isPrivateMarker((v as { url?: unknown }).url)) {
+      const url = (v as { url: string }).url
+      return { ...(v as object), url: resolved.get(url) ?? url }
+    }
+    return v
+  }
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(aditus)) {
     out[key] = Array.isArray(value) ? value.map(swap) : swap(value)
