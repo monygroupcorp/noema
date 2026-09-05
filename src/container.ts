@@ -33,6 +33,8 @@ import { MongoHospitium } from './crystal/MongoHospitium.js'
 import { MongoActumIndex } from './crystal/MongoActumIndex.js'
 import { MongoDeploymentum } from './crystal/MongoDeploymentum.js'
 import { Praefectus } from './crystal/Praefectus.js'
+import { Vocator } from './crystal/Vocator.js'
+import { MongoLocorum } from './crystal/MongoLocorum.js'
 import { WarmPodClient } from './crystal/WarmPodClient.js'
 import { Conductor } from './crystal/Conductor.js'
 import type { Procurator } from './crystal/Procurator.js'
@@ -217,6 +219,9 @@ export interface Ring {
   /** Compositus chain orchestrator (ADR-0008) — runs a modus-made-of-modi, threading
    *  each step's exitus into the next step's aditus. Sibling of collectioCursor. */
   compositusCursor: CompositusCursor
+  /** The warm-pod line — holds a run whose economy pool was empty and calls it forward
+   *  when a pod falls idle. Every dispatch facade passes it to `dispatchInceptio`. */
+  vocator: Vocator
   /** Studio-lifecycle anchor (ADR-0006) — present only when a Procurator
    *  (provisionStudio-capable pod client) is wired. Composes Materia + Hospitium
    *  + Modo + budget tessera into one verb both adapters call. */
@@ -328,6 +333,8 @@ export interface ContainerConfig {
   mintJobToken?: (claims: { actumId: string; ownerKey: string; exp: number }) => string
   /** Collection name for acta — default 'acta' */
   actaCollection?: string
+  /** Collection name for the warm-pod line — default 'loci' */
+  locorumCollection?: string
   /** Collection name for modi — default 'modi' */
   modiCollection?: string
   /** Collection name for signa — default 'signa' */
@@ -869,9 +876,15 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // (actumIndex, hooks) AND a Collectio piece can itself be a compositus (cook-over-spell).
   // Self-reference resolved via a holder — `compositusCursor` is assigned before any
   // dispatch call can fire.
+  // The warm-pod line. Built after the completor and the cursorum because it settles and
+  // dispatches through both: a run it calls forward goes back down the ordinary cursor path,
+  // and one it cannot place is failed exactly as a first attempt would have been.
+  const locorum = new MongoLocorum(db.collection(config.locorumCollection ?? 'loci'))
+  const vocator = new Vocator({ locorum, actorum, modorum, cursorum, completor })
+
   let compositusCursor: CompositusCursor
   const sharedDispatch = (inc: Inceptio) =>
-    dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor }, inc)
+    dispatchInceptio({ inceptor, modorum, cursorum, completor, actumIndex, compositusCursor, queue: vocator }, inc)
   // The parent actum's deadline is derived from its steps' own wall-clock budgets, so a step
   // cursor that declares a long terminus cannot be outlived by the umbrella that owns it.
   // Injected as a function so CompositusCursor stays independent of Cursorum, exactly as
@@ -895,6 +908,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     fundamentorum,
     collectioCursor,
     compositusCursor,
+    vocator,
     ...(conductor ? { conductor } : {}),
     ...(config.confidentialPod
       ? { teeProvisioner: new ConfidentialPodClient(config.confidentialPod) }

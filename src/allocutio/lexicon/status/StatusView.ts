@@ -55,6 +55,11 @@ export const StatusView = {
 // ── line formatting ─────────────────────────────────────────────────────────
 
 function genLine(g: GenEntry): string {
+  // A gen holding a place in the warm-pod line has a more useful thing to say than
+  // "queued on pending": it can say where it stands and what it is waiting for.
+  if (g.queue) {
+    return `${g.modusLabel} — waiting for a warm pod — ${g.queue.place} of ${g.queue.depth} in line`
+  }
   const where = g.studio
     ? (g.studio.isOwn ? 'your studio' : `${g.studio.hostLabel}'s studio`)
     : 'pending'

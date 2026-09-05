@@ -79,6 +79,10 @@ export interface ExecuteFlowDeps {
   /** Compositus engine (ADR-0008) — passed straight through to dispatchInceptio so
    *  /run can cast a compositus (spell) modus. Absent → compositus modi throw. */
   compositusCursor?: import('../../execution/dispatchInceptio.js').DispatchDeps['compositusCursor']
+  /** The warm-pod line — passed straight through to dispatchInceptio, so a chat-cast run
+   *  on the economy strategy waits for a pod instead of being refused. Absent → an empty
+   *  pool settles the run, as it did before the line existed. */
+  queue?: import('../../execution/dispatchInceptio.js').DispatchDeps['queue']
   /**
    * The stores a declared owned-resource reference resolves through. `/run` can cast any
    * canonical atomic modus, three of which take the id of a stored, owner-bearing record, and
@@ -523,13 +527,19 @@ export class ExecuteFlow implements Flow {
       const opts = this._buildReplyOpts(state, state.result)
       return this._buildResultStep(state.result, actum.id, opts)
     } else {
-      // Async: set waiting state — the completion webhook finishes it.
+      // Async: set waiting state — the completion webhook finishes it. That is the same
+      // state whether the run reached a pod or is standing in the warm-pod line for one,
+      // so the LABEL asks which it is: a run that queued says so, and says where it
+      // stands, rather than claiming to be executing on a pod it has not been given yet.
       state.step = 'AWAITING_COMPLETION'
       ctx.pendingActumId = actum.id
+      const at = await this.deps.queue?.place(actum.id).catch(() => null) ?? null
       return {
         primitives: [{
           kind: 'Stream',
-          label: 'Executing…',
+          label: at
+            ? `Waiting for a warm pod — ${at.place} of ${at.depth} in line`
+            : 'Executing…',
           actumId: actum.id,
           status: 'running',
         }],

@@ -56,6 +56,13 @@ export interface GenEntry {
   elapsedMs?: number
   /** Rough ETA for queued gens (estimated from queue depth + typical exec). */
   etaMs?: number
+  /**
+   * Where a gen WAITING FOR A WARM POD stands in line: 1-based place, and how many runs
+   * are waiting on the same substrate image. Present only while the run is actually
+   * queued — a `nascens` gen that is cold-starting its own pod is not in a line and
+   * carries nothing here, which is the distinction the row needs to draw.
+   */
+  queue?: { place: number; depth: number }
 }
 
 /** One row under YOUR STUDIOS. */

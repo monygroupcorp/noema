@@ -105,6 +105,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     intellarum?: Intellarum
     /** Per-anima dispatch index — populates /status YOUR GENS + per-row Cancel. */
     actumIndex?: ActumIndexStore
+    /** Warm-pod line — lets /status say where a waiting gen stands rather than just "queued". */
+    vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
     /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution. */
     consuetudinum?: Consuetudinum
     /** Bot's @username — composes `https://t.me/<bot>?start=pod_<token>` share links. */
@@ -178,6 +180,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Per-anima dispatch index — when present, /status YOUR GENS populates
      *  from here and per-row Cancel works. */
     actumIndex?: ActumIndexStore
+    /** Warm-pod line — when present, a gen waiting for a pod shows the place it holds
+     *  on /status instead of a bare "queued". */
+    vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
     /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make
      *  resolution. Absent → /bind reports unavailable, every verb uses the default. */
     consuetudinum?: Consuetudinum
@@ -958,6 +963,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         actorum:  this.deps.actorum,
         modorum:  this.deps.modorum,
         ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
+        ...(this.deps.vocator ? { vocator: this.deps.vocator } : {}),
       },
       // inFlightActumIds is the fallback when actumIndex isn't wired — aggregator
       // prefers the index when present (identified runs only).
@@ -989,6 +995,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           signorum: this.deps.signorum, hospitia: this.deps.hospitia, materiae: this.deps.materiae,
           actorum: this.deps.actorum, modorum: this.deps.modorum,
           ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
+          ...(this.deps.vocator ? { vocator: this.deps.vocator } : {}),
         },
         { auctorKey, inFlightActumIds: [] },
       )

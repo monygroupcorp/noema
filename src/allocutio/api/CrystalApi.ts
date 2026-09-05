@@ -318,6 +318,10 @@ export interface CrystalApiDeps {
   /** Compositus engine (ADR-0008) — lets `invokeFlow` dispatch a compositus (spell)
    *  modus, not just atomics. Absent → compositus modi throw at dispatch. */
   compositusCursor?: DispatchDeps['compositusCursor']
+  /** The warm-pod line (`Vocator`). Present → a run that finds the economy pool empty
+   *  waits in line instead of being refused, and both run reads report its place.
+   *  Absent → an empty pool settles the run, as it did before the line existed. */
+  vocator?: DispatchDeps['queue']
   /** Collection store + fan-out cursor — back `collect`/`getCollection`/review.
    *  Absent → collection ops unavailable. */
   collectiones?: Collectionum
@@ -723,7 +727,7 @@ export class CrystalApi {
     aditus: Record<string, unknown>,
     opts: InvokeOpts = {},
   ): Promise<Run> {
-    const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum, compositusCursor } = this.deps
+    const { inceptor, modorum, cursorum, completor, actumIndex, consuetudinum, compositusCursor, vocator } = this.deps
 
     // Dispute freeze (noema-082, Q3): an anima frozen by a chargeback (`charge.dispute.created`)
     // cannot initiate a generation SPEND (value outflow) while the dispute is held for review. This
@@ -933,7 +937,7 @@ export class CrystalApi {
     let actum: Actum
     try {
       ({ actum } = await dispatchInceptio(
-        { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor },
+        { inceptor, modorum, cursorum, completor, actumIndex, compositusCursor, ...(vocator ? { queue: vocator } : {}) },
         inceptio,
       ))
     } catch (err) {
@@ -981,7 +985,26 @@ export class CrystalApi {
 
     const run = toRunDetail(actum)
     if (mandatum) run.order = toRunOrder(mandatum)
+    // A run that found no warm pod is queued, not refused, and the caller is told where it
+    // stands in the SAME response that hands them the run id — so "queued" is something the
+    // client reads off a field rather than infers from a `pending` that never moves.
+    await this._attachQueuePlace(run, actum)
     return run
+  }
+
+  /**
+   * Stamp a run's place in the warm-pod line onto its projection, when it is in one.
+   *
+   * Read live rather than stored: a place is a position among other people's runs and
+   * changes when THEY move, so a copy written onto the actum would be stale the moment
+   * anything ahead of it dispatched. A settled run is never in a line, so it is not asked
+   * about; and a store that cannot answer leaves the field absent rather than guessing.
+   */
+  private async _attachQueuePlace(run: Run, actum: Actum): Promise<void> {
+    if (!this.deps.vocator) return
+    if (actum.status === 'completus' || actum.status === 'fractus') return
+    const at = await this.deps.vocator.place(actum.id).catch(() => null)
+    if (at) run.queue = at
   }
 
   /**
@@ -1106,6 +1129,7 @@ export class CrystalApi {
     // from a field — never by reading the failure sentence.
     const mandatum = await this.deps.mandata?.findByActum(id).catch(() => null)
     if (mandatum) run.order = toRunOrder(mandatum)
+    await this._attachQueuePlace(run, a)
     return run
   }
 
@@ -4994,6 +5018,7 @@ export class CrystalApi {
         actorum: this.deps.actorum, modorum: this.deps.modorum,
         ...(this.deps.actumIndex ? { actumIndex: this.deps.actumIndex } : {}),
         ...(this.deps.modos ? { modos: this.deps.modos } : {}),
+        ...(this.deps.vocator ? { vocator: this.deps.vocator } : {}),
       },
       { auctorKey: auctor, inFlightActumIds: [] },
     )

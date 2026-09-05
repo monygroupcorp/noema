@@ -741,6 +741,7 @@ async function main(): Promise<void> {
     inceptor: ring.inceptor,
     actumIndex: ring.actumIndex,
     compositusCursor: ring.compositusCursor,
+    queue: ring.vocator,
     // `/run` casts any canonical atomic modus, three of which take the id of a stored,
     // owner-bearing record. Wired for the same reason the REST run route is: the flow resolves
     // that reference for the casting identity, and a store it cannot reach is a reference it
@@ -828,6 +829,7 @@ async function main(): Promise<void> {
     intellarum: intellae,
     fundamentorum,
     actumIndex: ring.actumIndex,
+    vocator: ring.vocator,
     consuetudinum,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     // Private generation (noema-347): a private run's output is a marker, so the bot mints a
@@ -1053,6 +1055,7 @@ async function main(): Promise<void> {
       publicationCopyOut: { fetch: (ref: string) => httpMediaFetcher.fetch(ref), store: new R2Uploader(RUNPOD_R2) },
     } : {}),
     compositusCursor: ring.compositusCursor,
+    vocator: ring.vocator,
     collectiones: ring.collectiones,
     datasets: ring.datasets,
     // The corpus store a declared corpus reference resolves against (the training modus's
@@ -1558,6 +1561,14 @@ async function main(): Promise<void> {
     compositusCursor: ring.compositusCursor,
   }, EXPIRY_REAPER_INTERVAL_MS)
   log.info('expiry reaper started', { tickMs: EXPIRY_REAPER_INTERVAL_MS })
+
+  // The warm-pod line's caller — subscribes to pods falling idle and calls the next run
+  // waiting on that image forward. The subscription is the fast path; the sweep it also
+  // starts is the durable one, because a pod can free without an event reaching this
+  // process (another instance served the job, or this one restarted mid-wait) and a line
+  // that only ever moved on an in-process event would sit still until its runs refunded.
+  ring.vocator.start()
+  log.info('warm-pod line started')
 
   // Mandatum runner (noema-310) — works the standing orders a training click opens. It reads
   // each order's outstanding attempt, and when that attempt failed for a reason another
