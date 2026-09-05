@@ -10,8 +10,9 @@
 
 import type { ModelRef } from '../../types/actum.js'
 import type { FailureStage } from '../../lib/retryVerdict.js'
+import type { EarningKind } from '../../ledger/earnings.js'
 
-export type { FailureStage }
+export type { FailureStage, EarningKind }
 
 /** Public run status — the externalised projection of ActumStatus. */
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed'
@@ -143,6 +144,57 @@ export interface RunsPage {
   nextCursor?: string
   /** Lifetime spend total for the owner (all settled runs, not just this page). */
   runningTotal: { impetus: string; usd: number }
+}
+
+/**
+ * Earning — one payment the caller RECEIVED because someone else ran something: a royalty
+ * on their flow or their model, a cut of a gen served on their pod, a referral share.
+ *
+ * The mirror of `SettledRun`. Where that row is money the caller spent, this one is money
+ * the caller was paid; both are JSON-safe projections with impetus as a string and USD
+ * derived on read at the platform reference rate.
+ */
+export interface Earning {
+  /** The ledger row's id — stable, and the tiebreak the page cursor resumes on. */
+  id: string
+  /** Which stream paid: a spell royalty, a model royalty, a host cut, a host bonus, a referral. */
+  kind: EarningKind
+  /** Impetus earned by this row, serialised as a string. */
+  impetus: string
+  /** Derived USD at the platform reference rate — computed on read, not stored. */
+  usd: number
+  /** When it was earned (the ledger row's `natum`), as an ISO-8601 string. */
+  earnedAt: string
+  /** The studio the earning came from, on the hosting streams that carry one. */
+  studioId?: string
+}
+
+/** One stream's lifetime contribution to the caller's earnings. */
+export interface EarningStream {
+  kind: EarningKind
+  /** Everything this stream has ever paid the caller, as a string. */
+  impetus: string
+  usd: number
+  /** How many payments made it up. */
+  count: number
+}
+
+/**
+ * EarningsPage — what the caller has earned: the lifetime total, the per-stream breakdown
+ * behind it, and a page of the individual payments, newest first.
+ *
+ * `lifetime` and `streams` cover the caller's WHOLE history, not just this page — paging
+ * through `earnings` never changes them.
+ */
+export interface EarningsView {
+  /** Everything the caller has ever earned, across every stream. */
+  lifetime: { impetus: string; usd: number }
+  /** The streams that have paid, in a stable display order. A stream that never paid is absent. */
+  streams: EarningStream[]
+  /** This page of individual payments, newest first. */
+  earnings: Earning[]
+  /** Opaque cursor for the next page; absent on the last page. */
+  nextCursor?: string
 }
 
 /**

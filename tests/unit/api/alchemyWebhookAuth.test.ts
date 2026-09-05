@@ -143,6 +143,8 @@ function makeSignorum() {
     async lock() {},
     async release() {},
     async history() { return [] },
+    async earningTotals() { return [] },
+    async listEarnings() { return { entries: [] } },
     async settle() {},
     // Admission-only suite: the handler never reaches these. They are present so the
     // double satisfies Signorum, and they throw rather than return a plausible value —

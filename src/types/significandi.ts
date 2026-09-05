@@ -141,6 +141,26 @@ export type Transferatio =
   | { ok: false; available: bigint }
 
 /**
+ * One earning stream's lifetime total for an identity — the grouped result of a real
+ * server-side aggregation, never a sum taken over a loaded history.
+ */
+export interface EarningTotal {
+  /** The issuing hook's auctor (`nexus:spellRoyalty`, `nexus:hostCut`, ...). */
+  auctor: string
+  /** Everything this stream has ever paid the identity, in impetus points. */
+  impetus: bigint
+  /** How many times it paid — one row per run or deposit that earned. */
+  count: number
+}
+
+/** A page of earning rows, newest first, with the cursor to resume from. */
+export interface EarningsPage {
+  entries: Signa
+  /** Absent on the last page. */
+  nextCursor?: string
+}
+
+/**
  * Signorum — genitive plural "of the signs."
  * The append-only ledger. No update() method — immutability is the contract.
  */
@@ -188,6 +208,24 @@ export interface Signorum {
   release(signaIds: string[]): Promise<void>
   /** Full ledger history for an identity — all signa ever issued */
   history(by: { animaId: string } | { commitment: string }): Promise<Signa>
+  /**
+   * What this identity has EARNED, per stream, for its whole life on the platform — a
+   * grouped sum over the earning auctors (`EARNING_AUCTOR_IDS`) and nothing else. A
+   * deposit is not an earning, and the platform's own skim is not this identity's.
+   *
+   * Sums EVERY status: a royalty the earner has since spent was still earned. Streams
+   * that never paid are absent rather than zero, so an empty array means "earned nothing".
+   */
+  earningTotals(by: { animaId: string } | { commitment: string }): Promise<EarningTotal[]>
+  /**
+   * The identity's earning rows, newest first, cursor-paginated — the statement behind
+   * `earningTotals`. Same auctor allowlist, same all-status rule. Filtered and paged in
+   * the store, never by loading `history()` and slicing it in app memory.
+   */
+  listEarnings(
+    by: { animaId: string } | { commitment: string },
+    opts: { limit: number; cursor?: string },
+  ): Promise<EarningsPage>
   /**
    * Resolve the Stripe fiat-PURCHASE credit signum by its `testis` receipt (the
    * `stripe:<payment_intent>` key), scoped to auctor:'stripe:purchase' — the one auctor whose
