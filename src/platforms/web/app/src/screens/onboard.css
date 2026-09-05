@@ -54,8 +54,21 @@
 .auth-alt{margin-top:8px;font-size:12.5px;color:var(--muted);text-align:center;line-height:1.6}
 .auth-alt a{color:var(--accent-soft);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .auth-note{margin-top:8px;font-size:11px;line-height:1.5;color:var(--faint)}
-/* the inline auth form swaps in over Door A's three buttons */
+/* Door A IS the form — nothing gates it, so these styles are the door's own */
 .door-auth{display:flex;flex-direction:column;gap:10px}
 .door-auth .link-row{display:flex;justify-content:space-between;font-size:12px}
 .door-auth .link-row a,.door-auth .link-row button.linkish{color:var(--accent-soft);text-decoration:underline;
   text-underline-offset:2px;cursor:pointer;background:none;border:0;font:inherit;padding:0}
+
+/* password + reveal toggle. The toggle stands in for a confirm-password field: with no email
+   reset, being able to read what you typed is the check that mattered. */
+.pw-field{position:relative;display:flex;align-items:center}
+.pw-field .byo-input{width:100%;padding-right:38px}
+.pw-reveal{position:absolute;right:8px;display:flex;align-items:center;justify-content:center;
+  background:none;border:0;padding:4px;cursor:pointer;color:var(--faint);border-radius:6px}
+.pw-reveal:hover{color:var(--muted)}
+.pw-reveal svg.lucide{width:15px;height:15px}
+/* the recovery rails, folded away behind "Forgot your password?" */
+.door-recover{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--hair);
+  border-radius:10px;background:var(--bg)}
+.door-recover .pw-field .byo-input{padding-right:10px}

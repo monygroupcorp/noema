@@ -3,41 +3,53 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
-import { AuthApiError } from '../lib/api';
+import { AuthApiError, getAccounts } from '../lib/api';
 import { markOnboarded } from '../lib/entry';
 import { Wordmark } from '../ui/Wordmark';
 import type { Execution } from '../lib/idents';
 import './onboard.css';
 
-// Auth / onboarding — the front door (auth-spec.md, render noema-auth.png). Two equal,
-// honest doors: BRING AN IDENTITY (named) vs STAY ANONYMOUS (bearer purse — funding-side anonymity).
-// The door sets the IDENTITY axis (who we are to you); compute custody (what we see of the
-// work) is a per-run choice — said in the footer, never set here.
+// Auth / onboarding — the front door. Two equal, honest doors: BRING AN IDENTITY (named) vs
+// STAY ANONYMOUS (bearer purse — funding-side anonymity). The door sets the IDENTITY axis (who
+// we are to you); compute custody (what we see of the work) is a per-run choice — said in the
+// footer, never set here.
 //
-// Door A now carries the REAL fiat session (username/password rail): "Continue with a
-// username" expands inline into a sign-in / create-account form (useSession). No email —
-// registering logs you straight in. Wallet sign-up is live (it mints an account from a signature alone, no username); Passkey is not. Door B
-// (anonymous) is the bearer identity skin — funding-side anonymity, our compute.
+// Door A carries the real fiat session (username/password rail). No email — registering logs
+// you straight in, so the form IS the door: a visitor types a username and a password and is
+// in. Wallet sign-up is live (it mints an account from a signature alone, no username); Passkey
+// is not. Door B (anonymous) is the bearer identity skin — funding-side anonymity, our compute.
 //
-// ADDITIVE MODE (`/onboard?add=1`, Keyring Decision 3): reached via "Add account" from the
-// Keyring / account menu. The multi-session store APPENDS a login rather than replacing, so
-// this flag only governs copy + where we land afterwards (back to /keyring, not /app).
+// ADDITIVE MODE (`/onboard?add=1`): reached via "Add account" from the Keyring / account menu.
+// The multi-session store APPENDS a login rather than replacing, so this flag only governs copy
+// and where we land afterwards (back to /keyring, not /app).
+//
+// RETURN (`?next=<path>`): a visitor sent here mid-task — pressing Buy on a pack without an
+// account, say — is handed back to that exact task once the session is live, so the choice they
+// already made is not one they make twice.
 
 const MIN_PASSWORD = 8;
 const MIN_USERNAME = 3;
+
+// Only same-origin app paths are honoured as a return target: `next` arrives from the query
+// string, so an absolute or protocol-relative URL would be an open redirect off the site.
+export function safeNext(next: string | null): string | null {
+  if (!next || !next.startsWith('/') || next.startsWith('//')) return null;
+  return next;
+}
 
 export function Onboard() {
   const { setExecution } = useIdentity();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const addMode = params.get('add') === '1';
+  const next = safeNext(params.get('next'));
 
   // Anon entry (Door B): the anon commitment path is a session with no account, so there's
   // nothing to set beyond the execution mode — funding derives from the (absent) session.
   const enter = (exec: Execution) => {
     setExecution(exec);       // session mode; custody is still per-run inside the app
     markOnboarded();
-    navigate(addMode ? '/keyring' : '/app');
+    navigate(next ?? (addMode ? '/keyring' : '/app'));
   };
 
   return (
@@ -59,7 +71,7 @@ export function Onboard() {
 
       <div className="auth-doors">
         {/* Door A — bring an identity (real account) */}
-        <IdentityDoor addMode={addMode} />
+        <IdentityDoor addMode={addMode} next={next} />
 
         {/* Door B — stay anonymous (slate / dashed hemisphere) */}
         <section className="door anon">
@@ -80,21 +92,70 @@ export function Onboard() {
   );
 }
 
-// Door A: collapsed (buttons) → username form (sign in / create). On success the session
-// context adopts a live session; here we mark the named profile + onboarded and enter the app.
-function IdentityDoor({ addMode }: { addMode: boolean }) {
+// A password field with a reveal toggle. The toggle is not decoration: there is no email reset
+// here, so a password typed with a typo is a lost account. Being able to READ what you typed is
+// what a second "confirm" box was standing in for, in one field instead of two.
+function PasswordField({ value, onChange, placeholder, autoComplete, disabled }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  autoComplete: 'current-password' | 'new-password';
+  disabled?: boolean;
+}) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="pw-field">
+      <input
+        className="byo-input"
+        type={shown ? 'text' : 'password'}
+        required
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        aria-label="password"
+        disabled={disabled}
+      />
+      <button
+        type="button"
+        className="pw-reveal"
+        onClick={() => setShown((s) => !s)}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-pressed={shown}
+        tabIndex={-1}
+      >
+        <Ic name={shown ? 'eye-off' : 'eye'} />
+      </button>
+    </div>
+  );
+}
+
+// Door A. The form is the door — there is no button that only reveals it. A visitor arriving at
+// the front door has no account yet, so they land on CREATE; someone adding a second login to a
+// keyring they already hold lands on SIGN IN. Either way the other is one click away.
+function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null }) {
   const { login, register, signUpWithWallet, recoverWithWallet, recoverWithTelegram } = useSession();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'collapsed' | 'signin' | 'register'>('collapsed');
+  // Which form opens. Read the held logins straight from the client store rather than from
+  // session context: on a cold load of this page the provider has not hydrated yet, and a
+  // returning visitor would be offered "create an account" for one they already have.
+  const [mode, setMode] = useState<'signin' | 'register'>(
+    addMode || getAccounts().accounts.length > 0 ? 'signin' : 'register',
+  );
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tgRecover, setTgRecover] = useState(false);   // reveal the Telegram code input
+  const [forgot, setForgot] = useState(false);      // reveal the two recovery rails
   const [tgCode, setTgCode] = useState('');
 
-  // Wallet-first SIGNUP (collapsed door): connect + sign, mint-if-absent, land in the app.
+  const reset = () => { setErr(null); };
+  // The session is live; hand the visitor back to whatever sent them here, else into the app
+  // (or back to the keyring when they were adding an account).
+  const done = () => { markOnboarded(); navigate(next ?? (addMode ? '/keyring' : '/app')); };
+
+  // Wallet-first SIGNUP: connect + sign, mint-if-absent, land wherever we were headed. A wallet
+  // that is already bound logs into that same soul, so this button is both doors at once.
   async function onSignUpWallet() {
     reset(); setBusy(true);
     try { await signUpWithWallet(); done(); }
@@ -117,10 +178,6 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
     finally { setBusy(false); }
   }
 
-  const reset = () => { setErr(null); };
-  // session is live; land in the app, or back on the keyring when adding an account.
-  const done = () => { markOnboarded(); navigate(addMode ? '/keyring' : '/app'); };
-
   async function onSignin(e: FormEvent) {
     e.preventDefault();
     reset(); setBusy(true);
@@ -137,7 +194,6 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
     reset();
     if (username.trim().length < MIN_USERNAME) { setErr(`Username must be at least ${MIN_USERNAME} characters.`); return; }
     if (password.length < MIN_PASSWORD) { setErr(`Password must be at least ${MIN_PASSWORD} characters.`); return; }
-    if (password !== confirm) { setErr('Passwords do not match.'); return; }
     setBusy(true);
     try { await register(username.trim(), password); done(); }   // register logs you straight in
     catch (e) {
@@ -146,6 +202,10 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
     } finally { setBusy(false); }
   }
 
+  // Switching between the two forms keeps what has been typed: the username and password a
+  // visitor entered are the same ones they need on the other form.
+  const swap = (to: 'signin' | 'register') => { reset(); setForgot(false); setMode(to); };
+
   return (
     <section className="door">
       <div className="door-h">
@@ -153,53 +213,49 @@ function IdentityDoor({ addMode }: { addMode: boolean }) {
         <h2>Bring an identity</h2>
       </div>
 
-      {mode === 'collapsed' && (
-        <>
-          <p className="door-d">Sign in or create an account — just a username, no email. Synced across web, Telegram, and the API — pick up anywhere.</p>
+      {mode === 'register' ? (
+        <form className="door-auth" onSubmit={onRegister}>
+          <p className="door-d">Create an account — just a username and a password, no email. One identity across web, Telegram, and the API.</p>
           {err && <div className="warn">{err}</div>}
-          <button className="door-cta primary" onClick={() => { reset(); setMode('signin'); }}>Continue with a username</button>
-          <button className="door-opt" disabled={busy} onClick={onSignUpWallet}><Ic name="wallet" /> {busy ? 'Connecting…' : 'Wallet'}</button>
-          <button className="door-opt" disabled title="Coming soon"><Ic name="key-round" /> Passkey <span className="opt-meta">coming soon</span></button>
+          <input className="byo-input" type="text" required placeholder={`username (min ${MIN_USERNAME} chars)`} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" disabled={busy} />
+          <PasswordField value={password} onChange={setPassword} placeholder={`Password (min ${MIN_PASSWORD} chars)`} autoComplete="new-password" disabled={busy} />
+          <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
+          <button type="button" className="door-opt" disabled={busy} onClick={onSignUpWallet}><Ic name="wallet" /> {busy ? 'Connecting…' : 'Continue with a wallet'}</button>
+          <button type="button" className="door-opt" disabled title="Coming soon"><Ic name="key-round" /> Passkey <span className="opt-meta">coming soon</span></button>
+          <div className="link-row">
+            <button type="button" className="linkish" onClick={() => swap('signin')}>I already have an account</button>
+          </div>
+          <p className="auth-note">There's no email reset — add a Telegram or wallet backup in your profile so you can recover this account.</p>
           <div className="door-knows"><span className="hemi lit sm" aria-hidden="true" /> noema knows: <b>it's you</b></div>
-        </>
-      )}
-
-      {mode === 'signin' && (
+        </form>
+      ) : (
         <form className="door-auth" onSubmit={onSignin}>
           <p className="door-d">Sign in to your account.</p>
           {err && <div className="warn">{err}</div>}
-          <input className="byo-input" type="text" required placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" />
-          <input className="byo-input" type="password" required placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-label="password" />
+          <input className="byo-input" type="text" required placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" disabled={busy} />
+          <PasswordField value={password} onChange={setPassword} placeholder="Password" autoComplete="current-password" disabled={busy} />
           <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-          <button type="button" className="door-opt" disabled={busy} onClick={onRecoverWallet}><Ic name="wallet" /> Recover with a linked wallet</button>
-          {tgRecover ? (
-            <div className="door-auth" style={{ gap: 8 }}>
-              <input className="byo-input" type="text" placeholder="Paste the code from the bot" value={tgCode} onChange={(e) => setTgCode(e.target.value)} aria-label="Telegram recovery code" />
-              <button type="button" className="door-cta primary" disabled={busy || !tgCode.trim()} onClick={onRecoverTelegram}>{busy ? 'Recovering…' : 'Recover'}</button>
-            </div>
-          ) : (
-            <button type="button" className="door-opt" disabled={busy} onClick={() => { reset(); setTgRecover(true); }}><Ic name="send" /> Recover with Telegram</button>
-          )}
+          <button type="button" className="door-opt" disabled={busy} onClick={onSignUpWallet}><Ic name="wallet" /> Continue with a wallet</button>
           <div className="link-row">
-            <button type="button" className="linkish" onClick={() => { reset(); setMode('register'); }}>Create an account</button>
+            <button type="button" className="linkish" onClick={() => swap('register')}>Create an account</button>
+            <button type="button" className="linkish" onClick={() => { reset(); setForgot((f) => !f); }} aria-expanded={forgot}>Forgot your password?</button>
           </div>
-          <p className="auth-note">Forgot your password? Recover with a wallet or Telegram you linked in your profile — there's no email reset. For Telegram, open our bot and send <b>/recover</b>.</p>
-          <p className="auth-note">Work or credits from anonymous browsing stay with that anonymous session — they don't move into your account.</p>
-        </form>
-      )}
 
-      {mode === 'register' && (
-        <form className="door-auth" onSubmit={onRegister}>
-          <p className="door-d">Create your account — one identity across web, Telegram, and the API. No email required.</p>
-          {err && <div className="warn">{err}</div>}
-          <input className="byo-input" type="text" required placeholder={`username (min ${MIN_USERNAME} chars)`} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" />
-          <input className="byo-input" type="password" required placeholder={`Password (min ${MIN_PASSWORD} chars)`} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-label="password" />
-          <input className="byo-input" type="password" required placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" aria-label="confirm password" />
-          <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
-          <p className="auth-note">Keep your password safe — add a Telegram or wallet backup in your profile so you can recover the account.</p>
-          <div className="link-row">
-            <button type="button" className="linkish" onClick={() => { reset(); setMode('signin'); }}>I already have an account</button>
-          </div>
+          {/* Recovery is folded away until asked for: it is the rarer path, and there are two of
+              them, so unfolded it doubles the size of a form whose whole job is two fields. */}
+          {forgot && (
+            <div className="door-recover">
+              <p className="auth-note" style={{ marginTop: 0 }}>There's no email reset. Recover with a wallet or a Telegram account you linked in your profile — for Telegram, open our bot and send <b>/recover</b>.</p>
+              <button type="button" className="door-opt" disabled={busy} onClick={onRecoverWallet}><Ic name="wallet" /> Recover with a linked wallet</button>
+              <div className="pw-field">
+                <input className="byo-input" type="text" placeholder="Paste the code from the bot" value={tgCode} onChange={(e) => setTgCode(e.target.value)} aria-label="Telegram recovery code" disabled={busy} />
+              </div>
+              <button type="button" className="door-opt" disabled={busy || !tgCode.trim()} onClick={onRecoverTelegram}><Ic name="send" /> {busy ? 'Recovering…' : 'Recover with Telegram'}</button>
+            </div>
+          )}
+
+          <p className="auth-note">Work or credits from anonymous browsing stay with that anonymous session — they don't move into your account.</p>
+          <div className="door-knows"><span className="hemi lit sm" aria-hidden="true" /> noema knows: <b>it's you</b></div>
         </form>
       )}
     </section>
