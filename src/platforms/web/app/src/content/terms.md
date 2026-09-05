@@ -69,9 +69,9 @@ not log private-session content beyond what these controls require.
   operate (that a session occurred, its cost, its duration).
 - In **bot-mediated (Simple Case)** sessions, we act as your client and necessarily process
   your prompts, outputs, and identity to deliver the Service.
-- For regulated workloads (e.g., healthcare PHI), additional terms apply; contact us for a
-  **Business Associate Agreement (BAA)** before transmitting PHI. Do not transmit PHI or
-  privileged material under these standard terms alone.
+- The Service is **not offered for regulated workloads**. We do not act as a HIPAA Business
+  Associate and offer no Business Associate Agreement. Do not transmit protected health
+  information, or privileged material, through the Service.
 
 ## 6. Payment
 
@@ -110,6 +110,5 @@ acceptance. Material changes will be notified by in-app notice.
 - [ ] Confirm token absence / credit characterization avoids securities treatment.
 - [ ] Validate CSAM reporting + retention language against §2258A / REPORT Act.
 - [ ] Validate flow-down license language per model in the register.
-- [ ] BAA template for the healthcare vertical.
 - [ ] Arbitration / class-action waiver clause (jurisdiction-dependent).
 - [ ] DMCA agent registration + takedown procedure.
