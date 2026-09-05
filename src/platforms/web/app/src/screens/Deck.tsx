@@ -111,7 +111,11 @@ export function Deck({
     '--deck-aspect': String(aspect),
     '--deck-aspect-narrow': String(aspectNarrow ?? aspect),
     '--deck-trail': String(trail),
-    '--deck-stagger': `${stagger}px`,
+    // the wide stagger, not the stagger: a narrow screen halves it in CSS, and an inline
+    // `--deck-stagger` would win over that media query and quietly keep the wide pile's
+    // spread — which on a phone is a tenth of the column spent on the edges of cards nobody
+    // can see yet.
+    '--deck-stagger-wide': `${stagger}px`,
   } as CSSProperties;
 
   return (

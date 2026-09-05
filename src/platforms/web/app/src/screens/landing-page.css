@@ -68,6 +68,12 @@
   font-size:clamp(22px,3.6vw,44px);letter-spacing:-.01em}
 .lp-cand-hero h1 .dim{color:var(--muted)}
 .lp-cand-hero .noema-rule{margin:var(--s7) auto var(--s6)}
+/* the kicker — the one line under the headline. It carried a class and no rule anywhere, so it
+   rendered at body size in near-white with zero margin, sitting on the headline's own baseline:
+   not a kicker, a fragment of the headline that had come loose. It takes the hero's own 32px
+   rhythm and the mono register every other small standing label on this page is set in. */
+.lp-cand-hero .lp-cand-kicker{display:block;margin-top:var(--s7);font-size:var(--fs-xs);
+  letter-spacing:.14em;color:var(--accent-soft)}
 .lp-cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
 .lp-cand-hero .lp-cand-cta{display:block;margin-top:var(--s7)}
 /* app.css:1184 sets `.btn.lg{flex-direction:column}` — written for a stacked label/sub-label,
@@ -75,8 +81,10 @@
    locally here; the shared rule is a live defect on `/` and is not this file's to change. */
 .lp .btn.lg{flex-direction:row;gap:var(--s2)}
 
-/* the coda run is the quieter second pass — inset and shorter, so it returns without repeating */
-.lp-deck-coda{max-width:1180px;margin:0 auto;border-radius:var(--r-lg)}
+/* the coda run is the quieter second pass — a smaller card, so it returns without repeating.
+   Smaller is a height, not a width: the deck sizes its card from `--deck-h` and the width
+   follows, so capping the width here would only crop the card the reader is looking at. */
+.lp-deck-coda{--deck-h:min(56vh,470px);border-radius:var(--r-lg)}
 
 /* a held beat — one statement, alone on the screen, for as long as the reader stays with it.
    Three small cards in a row say the same words and none of them land. */

@@ -19,7 +19,7 @@ const files = readdirSync(HERE);
 const read = (f: string) => readFileSync(join(HERE, f), 'utf8');
 
 /** Structural elements that carry a class for querying and readability but need no rule. */
-const UNSTYLED_BY_DESIGN = new Set(['lp-cand-foot-brand', 'lp-cand-foot-col', 'lp-cand-kicker']);
+const UNSTYLED_BY_DESIGN = new Set(['lp-cand-foot-brand', 'lp-cand-foot-col']);
 
 function classesUsedInComponents(): Set<string> {
   const used = new Set<string>();

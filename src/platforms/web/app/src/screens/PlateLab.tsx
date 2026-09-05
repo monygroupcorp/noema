@@ -32,7 +32,7 @@ const LEADINGS = [1.02, 1.12, 1.22];
 export function PlateLab() {
   const [display, setDisplay] = useState<LandingProps['face']>('fraunces');
   const [leading, setLeading] = useState(1.12);
-  const [crop, setCrop] = useState<PlateFormat>('21:9');
+  const [crop, setCrop] = useState<PlateFormat>('1:1');
   const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
   const [theme, setTheme] = useState<'current' | 'editorial'>('editorial');

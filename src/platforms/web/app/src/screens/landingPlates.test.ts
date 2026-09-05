@@ -35,10 +35,16 @@ describe('the slot registry', () => {
     for (const s of PLATES) expect(['deck', 'deck-coda']).toContain(s.section);
   });
 
-  it('crops every deck card wide, since a card holds most of a banner', () => {
+  // The rule this replaced said the opposite — every deck card had to be at least 1.5 wide,
+  // "since a card holds most of a banner". It was a rule about the layout, enforced against the
+  // art, and it was satisfied by pre-cropping six square pictures to 1024x439. A picture cannot
+  // be shown well at a shape it was not made at, so the shape the art arrives in is what the
+  // deck now takes.
+  it('shows every plate at a format its art can actually be made at', () => {
     for (const s of PLATES) {
       expect(DECK_FORMATS).toContain(s.format);
-      expect(PLATE_ASPECT[s.format]).toBeGreaterThanOrEqual(1.5);
+      // Nothing wider than 3:2: past that a plate is a crop of a composition, not a composition.
+      expect(PLATE_ASPECT[s.format]).toBeLessThanOrEqual(1.5);
     }
   });
 

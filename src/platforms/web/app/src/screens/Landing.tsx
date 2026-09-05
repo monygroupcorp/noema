@@ -127,7 +127,7 @@ export function Landing({
   theme = 'editorial',
   cta = 'ink',
   mark = 'serif',
-  crop = '21:9',
+  crop = '1:1',
   stagger = 18,
   scroll = 'lock',
   leading = 1.12,
