@@ -48,11 +48,6 @@ export interface ArcanumRouterConfig {
    */
   bursarium?: Bursarum
   /**
-   * Convert wei to impetus credits at the current ETH price.
-   * Called at purse-mint time. Absent or returning 0n = dev mode (1 wei = 1 credit).
-   */
-  weiToCredits?: (wei: bigint) => Promise<bigint>
-  /**
    * ANON_PURSE_ENABLED (noema-131) — the anonymous ZK purse master switch. Default OFF.
    * The arcanum path currently verifies against a committed SOLO DEV proving key: anonymity
    * holds, but SOUNDNESS does not — the dev-key holder can forge spend proofs and counterfeit
@@ -190,11 +185,12 @@ export function createArcanumRouter(
     try {
       const { nullifierHash, valor } = await config.verifier.verify(arcanumProof)
 
-      // Convert valor (wei) to impetus credits at current ETH price.
-      // Falls back to 1 wei = 1 credit when converter not configured (dev mode).
-      const credits = config.weiToCredits
-        ? await config.weiToCredits(valor)
-        : valor
+      // `valor` is ALREADY impetus points, whichever path issued the note: /issue debits an
+      // identified impetus balance, and the blind on-chain path prices the deposit and converts
+      // it before writing the leaf. It is hashed into the leaf and certified by the proof, so
+      // redemption reads it as-is — converting again here would re-price a number that was never
+      // in the source unit.
+      const credits = valor
 
       // Burn nullifier before minting — note is gone even if create fails
       await config.verifier.markSpent(nullifierHash)
