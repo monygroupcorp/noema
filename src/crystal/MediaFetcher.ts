@@ -30,6 +30,18 @@ export function isPrivateMarker(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(PRIVATE_MEDIA_SCHEME)
 }
 
+/**
+ * Whether a value is a MEDIA REFERENCE: a fetchable http(s) URL, or a private-output marker a
+ * delivery surface resolves into one at the moment it delivers.
+ *
+ * The surfaces that decide "is this output a picture or is it text" do it by VALUE, not by key
+ * name, and every one of them has to make that decision the same way — a marker classed as text
+ * is a raw `noema-private://…` key printed into a chat, a caption, or a model's transcript.
+ */
+export function isMediaRef(value: unknown): value is string {
+  return typeof value === 'string' && (/^https?:\/\//.test(value) || isPrivateMarker(value))
+}
+
 /** The marker for an object key in the private-outputs bucket. */
 export function privateMarker(key: string): string {
   return `${PRIVATE_MEDIA_SCHEME}${key}`

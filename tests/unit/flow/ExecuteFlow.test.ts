@@ -1181,3 +1181,24 @@ test('routing: an undeclared decompose key cannot turn an incremental pass into 
   assert.equal('Redo' in at, false)
   assert.equal('force' in at, false)
 })
+
+// A private run's output is a `noema-private://` marker, not a URL. The result step classifies
+// outputs by VALUE, and a marker classed as text is the raw key printed into the chat — which is
+// exactly what a private output must never become.
+test('a private output is carried as media, never swept into the result text', async () => {
+  const flow = new ExecuteFlow(makeDeps())
+  const ctx = makeCtx({
+    state: { step: 'AWAITING_COMPLETION', modusId: 'mod-1', aditus: { prompt: 'a cat' }, actumId: 'actum-1', browsePageIndex: 0 },
+    pendingActumId: 'actum-1',
+  })
+
+  const marker = 'noema-private://private-outputs/abcdef0123456789/cccc.png'
+  const result = await flow.handleCompletion(ctx, { kind: 'complete', exitus: { image: marker, seed: 4242 } })
+  assertStep(result)
+
+  const primitive = result.primitives[0]
+  assert.equal(primitive.kind, 'Result')
+  if (primitive.kind !== 'Result') return
+  assert.deepEqual(primitive.media, [{ url: marker, type: 'image' }], 'the marker is media, typed by its extension')
+  assert.equal(primitive.textContent, 'seed: 4242', 'and it is nowhere in the text')
+})

@@ -220,6 +220,10 @@ export const COPY = {
   status: {
     working: '⏳ Working on it…',
     done: '✅ Done.',
+    /** A private run finished, but its media could not be resolved for delivery here. Says so
+     *  plainly and prints NOTHING of the reference — the marker is the one thing that must never
+     *  reach the chat. The result is still on the account, readable on the web. */
+    privateUndeliverable: '🔒 Your private result is ready, but it could not be sent here. Open it on the web.',
     podInvite: [
       'A NOEMA pod is warming up.',
       'Send /make [your prompt] to queue your generation on this pod.',

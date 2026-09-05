@@ -6,6 +6,7 @@
 // kept out of the adapter so TelegramAllocutio is just orchestration.
 
 import type { Primitive, PrimitiveEvent } from '../../flow/types.js'
+import { isMediaRef } from '../../crystal/MediaFetcher.js'
 
 // ── inline keyboard helpers ──────────────────────────────────────────────────
 
@@ -32,16 +33,17 @@ export interface RenderResult {
 /**
  * How a filled Porta value is shown on a Form card.
  *
- * A URL is never printed. A resolved image input is a Telegram file link —
+ * A media reference is never printed. A resolved image input is a Telegram file link —
  * `https://api.telegram.org/file/bot<TOKEN>/…` — so echoing the raw value publishes
- * the bot token to the chat. Nobody reading a card wants a URL anyway; they want to
- * know the field is filled. (`redactSecrets` at the sender is the backstop; this is
- * the surface deciding not to print URLs in the first place.)
+ * the bot token to the chat; and a private output chained in as an input is a
+ * `noema-private://` marker, which belongs in a chat even less. Nobody reading a card wants
+ * either anyway; they want to know the field is filled. (`redactSecrets` at the sender is the
+ * backstop; this is the surface deciding not to print references in the first place.)
  */
 function displayValue(value: unknown): string {
   if (value === undefined || value === null) return '—'
   const str = typeof value === 'object' ? JSON.stringify(value) : String(value)
-  if (/^https?:\/\//i.test(str.trim())) return '(image)'
+  if (isMediaRef(str.trim())) return '(image)'
   return str
 }
 

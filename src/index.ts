@@ -127,7 +127,7 @@ import { MongoProvinciarum } from './crystal/MongoProvinciarum.js'
 import { MongoPetitio } from './crystal/MongoPetitio.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
-import { httpMediaFetcher, registerPrivateMediaResolver } from './crystal/MediaFetcher.js'
+import { httpMediaFetcher, privateKeyOf, registerPrivateMediaResolver } from './crystal/MediaFetcher.js'
 import { makeTrainingFinalizer, urlLoraReader, makeTrainingExitusResolver } from './crystal/trainingFinalizer.js'
 import { makeCaptionFinalizer, urlCaptionHarvestReader, makeCaptionExitusResolver, composeExitusResolvers } from './crystal/captionFinalizer.js'
 import { MongoConsuetudinum } from './crystal/MongoConsuetudinum.js'
@@ -830,6 +830,17 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     consuetudinum,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
+    // Private generation (noema-347): a private run's output is a marker, so the bot mints a
+    // short-lived link per send and lets Telegram fetch the bytes server-side — the chat holds
+    // the photo, never the reference. Absent on a deployment with no private-outputs bucket,
+    // where no run is private either.
+    ...(privateOutputsStore ? {
+      resolvePrivateMedia: async (marker: string): Promise<string | undefined> => {
+        const key = privateKeyOf(marker)
+        if (key === undefined) return undefined
+        return privateOutputsStore.getSignedDownloadUrl(key, { expiresIn: 300 }).catch(() => undefined)
+      },
+    } : {}),
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
     cancelActum: async (actumId, reason) => {
