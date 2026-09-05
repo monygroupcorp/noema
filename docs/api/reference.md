@@ -14484,6 +14484,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `deposit.price_unavailable` | 422 | no |
 | `feature.not_implemented` | 501 | no |
 | `purse.disabled` | 503 | no |
+| `purse.revoked` | 403 | no |
 | `rate.limited` | 429 | yes |
 | `capacity.no_pods` | 503 | yes |
 | `internal.unavailable` | 503 | yes |

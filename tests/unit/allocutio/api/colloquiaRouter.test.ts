@@ -128,12 +128,14 @@ function fakeSignorum(bal: { v: bigint }) {
   }
 }
 
-function fakeBursarium(creditsRef: { v: bigint }, token = 'bt-1') {
+function fakeBursarium(creditsRef: { v: bigint }, token = 'bt-1', status?: 'active' | 'revoked' | 'redeemed') {
   return {
     token,
     debits: [] as bigint[],
     async findByToken(t: string) {
-      return t === token ? { id: token, credits: creditsRef.v, createdAt: new Date() } : null
+      return t === token
+        ? { id: token, credits: creditsRef.v, createdAt: new Date(), owner: { animaId: 'A' }, ...(status ? { status } : {}) }
+        : null
     },
     async debit(t: string, amount: bigint) {
       if (t !== token) throw new Error('unknown purse')
@@ -211,6 +213,8 @@ interface HarnessOpts {
   auctor?: AuctorKey
   balance?: bigint
   bursaCredits?: bigint
+  /** Lifecycle of the purse behind `bt-1`. Absent = the pre-lifecycle shape, which spends. */
+  bursaStatus?: 'active' | 'revoked' | 'redeemed'
   script?: OpenRouterChatResult[]
   spicyMode?: boolean
   onSpend?: () => void
@@ -222,7 +226,7 @@ function harness(opts: HarnessOpts = {}) {
   const bal = { v: opts.balance ?? 100_000n }
   const signorum = fakeSignorum(bal)
   const bursaCredits = { v: opts.bursaCredits ?? 100_000n }
-  const bursarium = fakeBursarium(bursaCredits)
+  const bursarium = fakeBursarium(bursaCredits, 'bt-1', opts.bursaStatus)
   const captured = { tools: [] as OpenRouterToolSpec[][] }
   const runToolChat = fakeRunToolChat(opts.script ?? [reply(2000)], captured)
 
@@ -472,4 +476,40 @@ test('a dicta POST without a turnKey is rejected (idempotency key is required)',
   const res = await request(h.app).post(`/v1/colloquia/${id}/dicta`).send({ message: 'hi' })
   assert.equal(res.status, 400)
   assert.equal(h.dicta.store.length, 0)
+})
+
+// ── Revoked/redeemed purse (widget-security) ──────────────────────────────────
+// A concierge thread is owned by the caller's ownerKey, and a bursaToken IS that owner key.
+// So a leaked `/widget` access code does not merely spend — it reads and writes the threads
+// belonging to whoever the code was minted for. Revoking the code has to close that door,
+// and it has to close it on the free reads too, not only at the flat-cap debit.
+
+test('a REVOKED purse cannot open a colloquium — 403 purse.revoked, no thread created', async () => {
+  const h = harness({ bursaStatus: 'revoked' })
+  const res = await request(h.app).post('/v1/colloquia').set('x-bursa-token', 'bt-1').send({})
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(h.colloquia.store.size, 0)
+})
+
+test('a REDEEMED purse cannot open a colloquium — 403 purse.revoked', async () => {
+  const h = harness({ bursaStatus: 'redeemed' })
+  const res = await request(h.app).post('/v1/colloquia').set('x-bursa-token', 'bt-1').send({})
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+})
+
+test('a revoked purse cannot READ the threads it opened while it was live', async () => {
+  const live = harness()
+  const id = await createThread(live.app, { 'x-bursa-token': 'bt-1' })
+  const revoked = harness({ bursaStatus: 'revoked' })
+  const res = await request(revoked.app).get(`/v1/colloquia/${id}`).set('x-bursa-token', 'bt-1')
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+})
+
+test("an 'active' purse opens a colloquium unchanged", async () => {
+  const h = harness({ bursaStatus: 'active' })
+  const res = await request(h.app).post('/v1/colloquia').set('x-bursa-token', 'bt-1').send({})
+  assert.equal(res.status, 200)
 })

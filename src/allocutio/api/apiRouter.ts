@@ -25,6 +25,7 @@ import type { PackView } from '../../ledger/stripePacks.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials, type ResolvedCaller } from './IdentityResolver.js'
+import { admitBursaToken } from './bursaGate.js'
 import { API_CONTRACT } from './apiContract.js'
 import { generateOpenApi } from './docgen.js'
 import type { RunEventHub } from './RunEventHub.js'
@@ -370,23 +371,15 @@ export function createApiRouter(deps: {
     }
 
   /** Resolve the caller's identity from the request, or throw an ApiError.
-   *  bursaToken in body or x-bursa-token header short-circuits to anonymous bursa identity.
-   *
-   *  ANON_PURSE gate (noema-131): the ownerless (arcanum/forgeable-dev-key) bursa spend path is
-   *  a money path that must NOT carry real value in v1. When the flag is off we resolve the bursa
-   *  and inspect `owner`: an OWNED purse (§7, identified funder) spends unchanged; an ownerless or
-   *  unknown/nonexistent bursa is refused 503 (fail-closed — the dev key can forge these). When the
-   *  flag is on, the short-circuit is unchanged (post-ceremony restore is a one-flag flip). */
+   *  bursaToken in body or x-bursa-token header short-circuits to anonymous bursa identity,
+   *  once `admitBursaToken` has cleared the purse row behind it — a revoked or redeemed
+   *  purse refuses its own token, and the ANON_PURSE gate (noema-131) refuses an ownerless
+   *  or unknown one while the flag is off. See `bursaGate.ts` for both rules. */
   const authCaller = async (req: Request): Promise<ResolvedCaller> => {
     const seam = req as SeamRequest
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
     if (bursaToken) {
-      if (!deps.anonPurseEnabled) {
-        const bursa = deps.bursarium ? await deps.bursarium.findByToken(bursaToken) : null
-        if (!bursa?.owner) {
-          throw new ApiError('purse.disabled', 'anonymous purse coming soon', 503)
-        }
-      }
+      await admitBursaToken(deps, bursaToken)
       // A `bursaToken` is a bearer credential. No log field is ever derived from it —
       // not hashed, not truncated. The caller stays unattributed on the log line.
       seam.__callerHash = undefined

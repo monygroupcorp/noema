@@ -60,6 +60,7 @@ import type { ColloquiumStore, DictumStore, Dictum, Colloquium } from '../../typ
 import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { OPENROUTER_PROVIDER, chatImpetus } from '../../crystal/apiProviders.js'
 import { credentialsFromHeaders, type Credentials } from './IdentityResolver.js'
+import { refuseTerminalPurse, TerminalPurseError } from './bursaGate.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { runConcierge, type ConciergeContext, type ConciergeDeps, type ConciergeResult } from './ConciergeAgent.js'
@@ -181,10 +182,17 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
   const runTurn = deps.runConcierge ?? runConcierge
 
   /** Resolve the caller's identity. A bursaToken in the body or `x-bursa-token` header
-   *  short-circuits to the anonymous bursa identity (noema-092 seam), matching apiRouter.ts. */
-  const auth = (req: Request): Promise<AuctorKey> => {
+   *  short-circuits to the anonymous bursa identity (noema-092 seam), matching apiRouter.ts —
+   *  but only for a purse that is still live. A revoked or redeemed purse refuses its own
+   *  token here, before it can own a thread or read one (`bursaGate.ts`). This surface has no
+   *  ANON_PURSE gate of its own and does not acquire one: an anon purse holds concierge
+   *  threads today, and only the terminal-status rule is being added. */
+  const auth = async (req: Request): Promise<AuctorKey> => {
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
-    if (bursaToken) return Promise.resolve({ bursaToken })
+    if (bursaToken) {
+      refuseTerminalPurse(await deps.bursarium.findByToken(bursaToken))
+      return { bursaToken }
+    }
     return deps.identity.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body),
     )
@@ -213,7 +221,8 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
       let auctor: AuctorKey
       try {
         auctor = await auth(req)
-      } catch {
+      } catch (err) {
+        if (err instanceof TerminalPurseError) throw err   // a decided refusal, not a failed read
         fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token to start a conversation')
         return
       }
@@ -244,7 +253,8 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
       let auctor: AuctorKey
       try {
         auctor = await auth(req)
-      } catch {
+      } catch (err) {
+        if (err instanceof TerminalPurseError) throw err   // a decided refusal, not a failed read
         fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token to list conversations')
         return
       }
@@ -272,7 +282,8 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
       let auctor: AuctorKey
       try {
         auctor = await auth(req)
-      } catch {
+      } catch (err) {
+        if (err instanceof TerminalPurseError) throw err   // a decided refusal, not a failed read
         fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token')
         return
       }
@@ -297,7 +308,8 @@ export function createColloquiaRouter(deps: ColloquiaRouterDeps): Router {
       let auctor: AuctorKey
       try {
         auctor = await auth(req)
-      } catch {
+      } catch (err) {
+        if (err instanceof TerminalPurseError) throw err   // a decided refusal, not a failed read
         fail(res, 401, 'auth.invalid', 'Sign in or present a bursa token')
         return
       }
