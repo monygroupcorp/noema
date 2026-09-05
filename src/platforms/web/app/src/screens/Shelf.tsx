@@ -6,7 +6,7 @@ import { api, type ModelCard, type CatalogSort } from '../lib/api';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
-import { publishNote, publishOutcome } from '../lib/editio';
+import { publishNote, publishOutcome, type Editio } from '../lib/editio';
 
 // The models page, in two surfaces:
 //   1. the SHELF (train-shelf-spec.md) — the caller's own trained + imported models, from
@@ -91,6 +91,35 @@ export function applyCatalogFilters(models: ModelCard[], genus: string, basis: s
   );
 }
 
+// Per-model publish state. A publish settles asynchronously (PublicationWorker; an HF weight
+// upload can take a while), so 'pending' is a real, honest state here, not a placeholder for
+// 'done'. 'held' is DISTINCT from 'pending': the moderation gate escalated this publish to a
+// human reviewer rather than leaving it genuinely still-settling. 'refused' is likewise distinct
+// from 'err': the gate declined this model, which is terminal and carries a reason, whereas
+// 'err' is an adapter/network failure worth retrying. `note` carries the server's author-safe
+// reason for a 'held' or 'refused' item.
+export type PubState = { s: 'busy' | 'pending' | 'held' | 'refused' | 'err'; note?: string };
+
+// A HELD publish lives on the SERVER, not in this screen's memory: it never settles on its own,
+// only a reviewer clears it. Held state discovered during a publish attempt therefore vanished
+// on reload, and the shelf offered a plain "Publish" again — a held model was indistinguishable
+// from an unpublished one, and pressing the button filed a second edition of the same model
+// behind the first. Seed the per-model state from the caller's own review queue
+// (GET /v1/editiones/review) so the hold is still visible on the next visit.
+//
+// The queue is newest-first, so the first entry for a model is the live one; an older hold for
+// the same model does not overwrite it.
+export function heldModelPublishStates(editions: Editio[]): Record<string, PubState> {
+  const held: Record<string, PubState> = {};
+  for (const e of editions) {
+    if (e.artifact.kind !== 'intella') continue;
+    if (publishOutcome(e) !== 'held') continue;
+    if (held[e.artifact.id]) continue;
+    held[e.artifact.id] = { s: 'held', note: publishNote(e) };
+  }
+  return held;
+}
+
 const SORT_LABELS: { key: CatalogSort; label: string }[] = [
   { key: 'newest', label: 'newest' },
   { key: 'name', label: 'name' },
@@ -112,20 +141,12 @@ export function Shelf() {
   const [licBusy, setLicBusy] = useState<string | null>(null);
 
   // Publish (POST /v1/editiones) — makes a private model listed + royalty-eligible. Per-model
-  // state since several cards can be mid-publish at once. A publish settles asynchronously
-  // (PublicationWorker; HF weight upload can take a while), so 'pending' is a real, honest
-  // terminal state here, not a placeholder for 'done' — we poll briefly and stop rather than
-  // claim success before the edition actually lands. 'held' is a DISTINCT state from 'pending':
-  // the moderation gate escalated this publish to a human reviewer (reviewOutcome:'pending')
-  // rather than leaving it genuinely still-settling — conflating the two left the button stuck
-  // on a bare "publishing…" forever, indistinguishable from a hang (publish-review-visibility
-  // spec, Gap A).
-  // 'refused' is likewise distinct from 'err': the gate declined this model, which is terminal
-  // and carries a reason, whereas 'err' is an adapter/network failure worth retrying. Offering
-  // "publish failed — retry" for a refusal sends the publisher round a loop that cannot ever
-  // succeed and never tells them why (moderation-reject-reason spec, §3(a) author surface).
-  // `note` carries the server's author-safe reason for a 'held' or 'refused' item.
-  type PubState = { s: 'busy' | 'pending' | 'held' | 'refused' | 'err'; note?: string };
+  // state since several cards can be mid-publish at once. We poll briefly and stop rather than
+  // claim success before the edition actually lands; conflating a hold with a still-settling
+  // publish left the button stuck on a bare "publishing…" forever, indistinguishable from a
+  // hang (publish-review-visibility spec, Gap A), and offering "publish failed — retry" for a
+  // refusal sent the publisher round a loop that cannot ever succeed and never told them why
+  // (moderation-reject-reason spec, §3(a) author surface). See `PubState`.
   const [pubState, setPubState] = useState<Record<string, PubState>>({});
 
   // The global catalog surface (GET /v1/models) — collapsed until asked for.
@@ -142,6 +163,12 @@ export function Shelf() {
       .then((r) => { if (live) setModels(r.models); })
       .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => {});
+    // The caller's own held publications, so a model the gate escalated still reads "held for
+    // review" after a reload instead of offering a Publish button that would file a duplicate.
+    // Anything already in `pubState` — a publish begun in this session — wins over the snapshot.
+    api.listReviewQueue()
+      .then((q) => { if (live) setPubState((s) => ({ ...heldModelPublishStates(q.editions), ...s })); })
+      .catch(() => {});
     return () => { live = false; };
   }, []);
 
@@ -361,6 +388,7 @@ export function Shelf() {
                       {!listed && pub?.s === 'held' && (
                         <span className="mc-meta mono" title="A moderator needs to clear this before it can go live">
                           held for review · {pub.note}
+                          {' · '}<Link to="/feed">track it in the feed</Link>
                           {admin && <> · <Link to="/admin/review">see admin/review</Link></>}
                         </span>
                       )}
