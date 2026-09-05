@@ -36,7 +36,7 @@
 // =============================================================================
 
 import type { Modus } from './modus.js'
-import type { Actum, ComputeStrategy, GpuClass, ModelRef } from './actum.js'
+import type { Actum, ActumStatus, ComputeStrategy, GpuClass, ModelRef } from './actum.js'
 import type { Modo } from './modo.js'
 import type { ArcanumSpendProof } from '../arcanum/types.js'
 
@@ -212,6 +212,17 @@ export interface Actorum {
    * its own) from its children's `signaConsumed` / bearer tokens. (ADR-0008.)
    */
   findByCompositum(parentId: string): Promise<Actum[]>
+  /**
+   * How many of `ids` currently hold one of `statuses` — answered by the store in ONE query
+   * rather than a `findById` per id. The caller names the predicate so this method carries no
+   * status opinion of its own (unlike `findInFlight`, which also requires an `externusJobId`).
+   *
+   * Optional, the same way `Collectionum.listOwned` is: a store may omit it and the caller
+   * falls back to the per-id scan. Every store a deployment actually runs on implements it —
+   * the fallback costs one database round trip per id, and its callers pass a whole
+   * collection's acta.
+   */
+  countByIdsWithStatus?(ids: string[], statuses: ActumStatus[]): Promise<number>
 }
 
 // ---------------------------------------------------------------------------
