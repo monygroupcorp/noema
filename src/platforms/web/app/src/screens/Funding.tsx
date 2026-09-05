@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, ApiRequestError, type DepositConfig, type Pack } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
+import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
@@ -14,24 +15,15 @@ import { BuyCreditsModal } from './BuyCreditsModal';
 // server table (server-authoritative — /v1/payments/checkout credits the backend impetus constant,
 // never a client computation); the anon-rail chips reuse the same denominations as an informational
 // preview. Change a pack number in stripePacks.ts and every surface here updates automatically.
+//
+// The rails are ordered by how many people take them, not by how private they are: card first
+// (the page's own copy calls it the fastest path), then the wallet, then the purse layer that
+// only applies once you have a balance, and last the code redemption, which needs a code someone
+// else minted. Each still says plainly what it reveals — the honesty is in the copy, not the order.
 
-// Identified-account gate for the fiat rail: a card purchase requires a signed-in anima
-// (client_reference_id = animaId) — an anon/purse-only caller is 401'd server-side, so we
-// prompt sign-in instead of ever starting checkout for one.
-export function canCheckout(session: unknown): boolean {
-  return session != null;
-}
-
-// The checkout request shape sent to POST /v1/payments/checkout. successUrl/cancelUrl
-// point back at this page with a `checkout` query flag so we know to poll on return
-// (Stripe's webhook credits async — the redirect itself carries no proof of payment).
-export function buildCheckoutRequest(packId: string, origin: string): { packId: string; successUrl: string; cancelUrl: string } {
-  return {
-    packId,
-    successUrl: `${origin}/funding?checkout=success`,
-    cancelUrl: `${origin}/funding?checkout=cancel`,
-  };
-}
+// The card-rail helpers live in lib/checkout so the buy-credits modal builds the same request.
+// Re-exported here because this module was their original home.
+export { canCheckout, buildCheckoutRequest };
 
 // A redeem refusal, said plainly. The server answers `{ error: { code, message } }`; each code
 // below is a state the holder of a code can actually be in, so each gets its own sentence rather
@@ -64,8 +56,11 @@ function WarnIc() {
 }
 
 export function Funding() {
-  const { session } = useSession();
-  // Preselect the pack from the pricing-page CTA (?pack=<id>), else the default mid-tier.
+  const { session, ready } = useSession();
+  const navigate = useNavigate();
+  // The pack named by the pricing-page CTA (?pack=<id>), else the default mid-tier. Arriving
+  // WITH one is a decision the visitor already made by pressing Buy, so it starts checkout
+  // rather than only highlighting a chip they would have to press again.
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get('pack');
   const [pack, setPack] = useState(preselected ?? 'plus_50');
@@ -132,17 +127,41 @@ export function Funding() {
     catch { /* clipboard blocked — the address is still shown in full via the title tooltip */ }
   }
 
-  // Card pack purchase. Anon/purse callers never reach the API call — canCheckout() gates
-  // it client-side (the inline sign-in prompt below covers that case); the server would
-  // 401 payments.identity_required anyway, this just avoids a doomed round-trip.
+  // Card pack purchase. An anon/purse caller can't buy on this rail (the server 401s
+  // payments.identity_required), so instead of a click that does nothing we send them to the
+  // door with this pack in hand — signing in returns them here and the purchase resumes.
   function buyPack(packId: string) {
     setCheckoutErr(null);
-    if (!canCheckout(session)) return;
+    if (!canCheckout(session)) { navigate(signInThenBuy(packId)); return; }
     setCheckoutBusy(packId);
     api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
   }
+
+  // Arriving as /funding?pack=<id> — from a pricing card's Buy, or handed back by the door after
+  // signing in — starts that purchase straight away. Pressing Buy already WAS the choice; making
+  // it again on this page is the step this removes. It fires once (a ref, not state, so a
+  // re-render can't double-charge) and only once auth has settled, so a signed-in visitor whose
+  // session is still hydrating isn't mistaken for an anon one.
+  //
+  // Without a session it deliberately does NOT route to the door: someone who took this pack to
+  // the door and then chose "Enter anonymously" comes back here still anon, and bouncing them
+  // again would loop forever. They land on the highlighted pack with the sign-in note under it,
+  // and clicking is what takes them to the door.
+  const autoBuyFired = useRef(false);
+  useEffect(() => {
+    if (!ready || autoBuyFired.current || !preselected || packs.length === 0) return;
+    if (!canCheckout(session)) return;
+    if (!packs.some((p) => p.id === preselected)) return;   // not a real SKU — leave them on the page
+    autoBuyFired.current = true;
+    // Drop the pack from the URL before leaving, the way the return-from-Stripe flag is dropped:
+    // otherwise coming BACK from Stripe lands on this URL again and starts the same checkout,
+    // and the back button never escapes.
+    window.history.replaceState({}, '', window.location.pathname);
+    buyPack(preselected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, session, preselected, packs]);
 
   useEffect(() => {
     let live = true;
@@ -219,63 +238,75 @@ export function Funding() {
 
         <div className="fund-rows">
 
-          {/* Have a code? — someone funded a purse from their balance and sent you the token.
-              Redeeming moves its whole remaining balance onto your account, once. Not a rail
-              of its own: no money enters the system here, it changes hands. */}
+          {/* Row 1 · Card — the fastest path and the one most people take; it sees you. Not
+              anonymous — say so plainly, and say it first. */}
           <section className="fund-row">
             <div className="fund-rowhead">
-              <div className="fund-ic slate"><Ic name="key-round" /></div>
+              <div className="fund-ic gold"><Ic name="credit-card" /></div>
               <div className="fund-rowmain">
                 <div className="fund-titleline">
-                  <h3>Have a code?</h3>
+                  <h3>Card</h3>
                 </div>
                 <p className="fund-desc">
-                  Someone can send you credits as a code. Redeem it and whatever is left in it
-                  becomes part of your balance. A code works <b>once</b>.
+                  Pay by card via Stripe. The fastest path — and <b>not anonymous</b>: we see
+                  your name and card. Fixed packs — the price and the credit are locked in.
                 </p>
+              </div>
+              <div className="fund-aside">
+                <Meter sees="you" label="you" />
               </div>
             </div>
 
             <div className="fund-guide">
-              {session ? (
-                <form
-                  className="fund-actions"
-                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)' }}
-                  onSubmit={redeemCode}
-                >
-                  <input
-                    className="inp mono"
-                    style={{ maxWidth: 320 }}
-                    aria-label="Invite code"
-                    placeholder="paste your code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    disabled={redeemBusy}
-                  />
-                  <button className="btn" type="submit" disabled={redeemBusy || code.trim() === ''}>
-                    {redeemBusy ? 'Redeeming…' : <>Redeem <Ic name="arrow-right" /></>}
-                  </button>
-                </form>
-              ) : (
-                <div className="warn fund-warn">
+              <div className="fund-guide-h">
+                <Ic name="credit-card" /> Buy a pack — redirects to Stripe Checkout
+              </div>
+              <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
+                <div className="filters">
+                  {packs.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`fchip${pack === p.id ? ' on' : ''}`}
+                      disabled={checkoutBusy != null}
+                      onClick={() => buyPack(p.id)}
+                    >
+                      <span className="fc-cr">{fmt(p.credits)}</span>
+                      <span className="fc-pr">${p.usd}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!session && (
+                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
                   <WarnIc />
                   <span>
-                    Redeeming a code needs an account — <Link to="/onboard">sign in</Link> first,
-                    then come back and paste it here.
+                    A card purchase needs an identified account (fiat can't fund an anonymous
+                    purse). Pick a pack and we'll take you to the door — you come straight back
+                    here to it.
                   </span>
                 </div>
               )}
-              {redeemErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{redeemErr}</div>}
-              {redeemed && (
+              {checkoutBusy && (
                 <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Redeemed — {fmt(Number(redeemed.credited))} credits added.
-                  {redeemed.balance != null && <> Your balance is {fmt(Number(redeemed.balance))}.</>}
+                  Taking you to Stripe for the {packs.find((p) => p.id === checkoutBusy)?.label ?? checkoutBusy} pack…
+                </div>
+              )}
+              {checkoutErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{checkoutErr}</div>}
+              {checkoutStatus === 'polling' && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Payment received — waiting for the credit to land…
+                </div>
+              )}
+              {checkoutStatus === 'settled' && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Credited — your balance is updated.
                 </div>
               )}
             </div>
           </section>
 
-          {/* Row 1 · On-chain wallet — an address, not a person. Normal = pseudonymous,
+          {/* Row 2 · On-chain wallet — an address, not a person. Normal = pseudonymous,
               shielded/fresh = the strong-anonymity path available today. */}
           <section className="fund-row">
             <div className="fund-rowhead">
@@ -371,67 +402,6 @@ export function Funding() {
 
           <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
 
-          {/* Row 2 · Card — the fastest path; it sees you. Not anonymous — say so plainly. */}
-          <section className="fund-row">
-            <div className="fund-rowhead">
-              <div className="fund-ic gold"><Ic name="credit-card" /></div>
-              <div className="fund-rowmain">
-                <div className="fund-titleline">
-                  <h3>Card</h3>
-                </div>
-                <p className="fund-desc">
-                  Pay by card via Stripe. The fastest path — and <b>not anonymous</b>: we see
-                  your name and card. Fixed packs — the price and the credit are locked in.
-                </p>
-              </div>
-              <div className="fund-aside">
-                <Meter sees="you" label="you" />
-              </div>
-            </div>
-
-            <div className="fund-guide">
-              <div className="fund-guide-h">
-                <Ic name="credit-card" /> Buy a pack — redirects to Stripe Checkout
-              </div>
-              <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
-                <div className="filters">
-                  {packs.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`fchip${pack === p.id ? ' on' : ''}`}
-                      disabled={checkoutBusy != null}
-                      onClick={() => buyPack(p.id)}
-                    >
-                      <span className="fc-cr">{fmt(p.credits)}</span>
-                      <span className="fc-pr">${p.usd}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {!session && (
-                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
-                  <WarnIc />
-                  <span>
-                    A card purchase requires an identified account — <Link to="/onboard">sign in</Link> first
-                    (fiat can't fund an anonymous purse).
-                  </span>
-                </div>
-              )}
-              {checkoutErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{checkoutErr}</div>}
-              {checkoutStatus === 'polling' && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Payment received — waiting for the credit to land…
-                </div>
-              )}
-              {checkoutStatus === 'settled' && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Credited — your balance is updated.
-                </div>
-              )}
-            </div>
-          </section>
-
           {/* Added layer · ZK purse — NOT a peer entry rail. A step you take AFTER you have a
               balance: fund from your balance → mint a bearer purse whose spends are
               cryptographically unlinkable to the note. Fund anonymously (shielded wallet)
@@ -509,6 +479,62 @@ export function Funding() {
                   </Link>
                 )}
               </div>
+            </div>
+          </section>
+
+          {/* Last · Have a code? — someone funded a purse from their balance and sent you the token.
+              Redeeming moves its whole remaining balance onto your account, once. Not a rail
+              of its own: no money enters the system here, it changes hands. */}
+          <section className="fund-row">
+            <div className="fund-rowhead">
+              <div className="fund-ic slate"><Ic name="key-round" /></div>
+              <div className="fund-rowmain">
+                <div className="fund-titleline">
+                  <h3>Have a code?</h3>
+                </div>
+                <p className="fund-desc">
+                  Someone can send you credits as a code. Redeem it and whatever is left in it
+                  becomes part of your balance. A code works <b>once</b>.
+                </p>
+              </div>
+            </div>
+
+            <div className="fund-guide">
+              {session ? (
+                <form
+                  className="fund-actions"
+                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)' }}
+                  onSubmit={redeemCode}
+                >
+                  <input
+                    className="inp mono"
+                    style={{ maxWidth: 320 }}
+                    aria-label="Invite code"
+                    placeholder="paste your code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    disabled={redeemBusy}
+                  />
+                  <button className="btn" type="submit" disabled={redeemBusy || code.trim() === ''}>
+                    {redeemBusy ? 'Redeeming…' : <>Redeem <Ic name="arrow-right" /></>}
+                  </button>
+                </form>
+              ) : (
+                <div className="warn fund-warn">
+                  <WarnIc />
+                  <span>
+                    Redeeming a code needs an account — <Link to="/onboard">sign in</Link> first,
+                    then come back and paste it here.
+                  </span>
+                </div>
+              )}
+              {redeemErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{redeemErr}</div>}
+              {redeemed && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Redeemed — {fmt(Number(redeemed.credited))} credits added.
+                  {redeemed.balance != null && <> Your balance is {fmt(Number(redeemed.balance))}.</>}
+                </div>
+              )}
             </div>
           </section>
 

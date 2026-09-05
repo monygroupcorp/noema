@@ -120,3 +120,21 @@
   margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hair, rgba(255,255,255,0.08));
 }
 .bcm-willcredit { font-family: var(--font-mono); font-size: 13px; color: var(--gold, #d9be8f); }
+
+/* The card rail on the opening phase. This modal is what the credits pill opens, so the
+   fastest way to pay has to be reachable from it — not only from the Funding page. */
+.bcm-card-rail { margin-bottom: 14px; }
+.bcm-card-head {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 10px;
+  font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: .04em;
+  text-transform: uppercase; color: var(--faint, #6b7280);
+}
+.bcm-card-head svg.lucide { width: 14px; height: 14px; }
+.bcm-card-packs { display: flex; gap: 8px; flex-wrap: wrap; }
+.bcm-rail-or {
+  display: flex; align-items: center; gap: 10px; margin: 14px 0;
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--faint, #6b7280);
+}
+.bcm-rail-or::before, .bcm-rail-or::after {
+  content: ''; flex: 1; height: 1px; background: var(--hair, rgba(128,128,128,.25));
+}
