@@ -205,6 +205,9 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // materiae — GPU pod records
     db.collection('materiae').createIndex({ id: 1 }, { unique: true }),
     db.collection('materiae').createIndex({ status: 1, imageRef: 1 }),
+    // The idle reaper's drain-deadline arm, swept every 30s and status-blind, so the
+    // status index above cannot serve it.
+    db.collection('materiae').createIndex({ drainOnly: 1, drainUntil: 1 }),
 
     // deployments — content-addressed compiled specs
     db.collection('deployments').createIndex({ hash: 1 }, { unique: true }),

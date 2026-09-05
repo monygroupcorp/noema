@@ -53,7 +53,7 @@ export class MongoMateria implements MateriaStore {
       | 'podPolicy' | 'shareToken' | 'warmUntil'
       | 'groupChatId' | 'openToNonAdmins'
       | 'bootCostImpetus' | 'bootRecovered'
-      | 'drainOnly'
+      | 'drainOnly' | 'drainUntil'
       | 'installedModels' | 'volumeUsedGb' | 'volumeCapGb'
     >>
   ): Promise<Materia> {
@@ -93,16 +93,28 @@ export class MongoMateria implements MateriaStore {
 
   async reapIdle(now: Date): Promise<Materia[]> {
     const reaped: Materia[] = []
-    // One atomic claim per pod: reap an idle pod when EITHER it's past its warm
-    // deadline OR it's been drained (`drainOnly` — budget/balance exhausted, see
-    // Census). Draining makes `maxImpetus` a HARD cap: a budget-exhausted idle
-    // studio dies on the next sweep instead of billing on to `warmUntil`. A pod
-    // running a gen is `status:'active'` so it's never reaped mid-job — it drains,
-    // finishes, goes idle, then this matches. A concurrent findWarm (idle→active)
-    // wins the race and this filter no longer matches it.
+    // One atomic claim per pod, matching either of two arms. A concurrent findWarm
+    // (idle→active) wins the race and neither arm matches it any more.
+    //
+    // Idle arm: reap an idle pod when EITHER it's past its warm deadline OR it's
+    // been drained (`drainOnly` — budget/balance exhausted, see Census). Draining
+    // makes `maxImpetus` a HARD cap: a budget-exhausted idle studio dies on the next
+    // sweep instead of billing on to `warmUntil`. A pod running a gen is
+    // `status:'active'`, so this arm never takes one mid-job — it drains, finishes,
+    // goes idle, and then this matches.
+    //
+    // Drain-deadline arm: that hand-off back to idle requires the release path to
+    // run. When it doesn't — process died mid-job, runner gone, completion webhook
+    // lost — the pod is stranded `active`, which Census still bills and the provider
+    // still charges, and the idle arm can never reach it. `drainUntil` (stamped with
+    // `drainOnly`) bounds that: past the deadline the pod is reaped whatever its
+    // status. The grace window is the whole point of matching on the deadline rather
+    // than on `drainOnly` alone — a real in-flight gen gets it all to finish in.
+    const stranded = { drainOnly: true, drainUntil: { $lte: now }, status: { $ne: 'terminated' } }
+    const idle = { status: 'idle', $or: [{ warmUntil: { $lte: now } }, { drainOnly: true }] }
     for (;;) {
       const doc = await this.col.findOneAndUpdate(
-        { status: 'idle', $or: [{ warmUntil: { $lte: now } }, { drainOnly: true }] },
+        { $or: [idle, stranded] },
         { $set: { status: 'terminated', terminatum: now } },
         { returnDocument: 'after' },
       )

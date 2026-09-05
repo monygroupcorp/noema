@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { censere, type CensusDeps } from '../../../src/crystal/Census.js'
+import { censere, DRAIN_GRACE_MS, type CensusDeps } from '../../../src/crystal/Census.js'
 // Static, same-specifier import. A dynamic `await import()` of this module resolves to a SECOND
 // module instance under tsx on Node 20 (what CI runs), so a listener registered on it never sees
 // the emit Census.ts fires through its own static import. Node 26 dedupes them, which is why this
@@ -176,12 +176,47 @@ test('balance shortfall: clamps to available + sets Materia.drainOnly + emits bu
   assert.equal(res.charged, 100n, 'clamped to available balance')
   assert.equal(res.drainEngaged, true)
 
-  // Materia is now flagged drainOnly
+  // Materia is now flagged drainOnly, with the hard deadline that makes the drain
+  // terminal even if the pod never gets back to idle for the reaper's idle arm.
   const m = await deps.materiae.findById(MATERIA_ID)
   assert.equal(m?.drainOnly, true)
+  assert.equal(
+    m?.drainUntil?.getTime(),
+    h.inceptum.getTime() + 60_000 + DRAIN_GRACE_MS,
+    'drainUntil is the grace window measured from the tick that engaged the drain',
+  )
 
   // Bus event fired
   assert.equal(drainEmitted, true)
+})
+
+// ── 3b. A studio already draining with no deadline gets one ──────────────────
+test('drainOnly with no drainUntil: the next tick stamps the deadline', async () => {
+  // A studio that entered drain before drainUntil existed. Nothing would ever reap
+  // it off 'active', so Census gives it the grace window from now.
+  const deps = makeDeps({ hostBalance: 10_000n, status: 'active' })
+  await new Promise(r => setTimeout(r, 0))
+  await deps.materiae.update(MATERIA_ID, { drainOnly: true })
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const at = new Date(h.inceptum.getTime() + 60_000)
+  await censere(deps, h, at)
+
+  const m = await deps.materiae.findById(MATERIA_ID)
+  assert.equal(m?.drainUntil?.getTime(), at.getTime() + DRAIN_GRACE_MS)
+})
+
+test('an existing drainUntil is never pushed out by a later tick', async () => {
+  const deps = makeDeps({ hostBalance: 10_000n, status: 'active' })
+  await new Promise(r => setTimeout(r, 0))
+  const deadline = new Date(Date.now() + 60_000)
+  await deps.materiae.update(MATERIA_ID, { drainOnly: true, drainUntil: deadline })
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+
+  const m = await deps.materiae.findById(MATERIA_ID)
+  assert.equal(m?.drainUntil?.getTime(), deadline.getTime(), 'a draining studio cannot outrun its own deadline')
 })
 
 // ── 4. Anonymous (commitment) host — arcanum debit, no animaId on debit signum

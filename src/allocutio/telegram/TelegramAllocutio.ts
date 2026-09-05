@@ -25,6 +25,7 @@ import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
 import { mintShareToken } from '../../crystal/shareToken.js'
+import { DRAIN_GRACE_MS } from '../../crystal/Census.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
 import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
@@ -435,13 +436,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // that's the identifier the bulletin tracks on its session.
 
   /** Destroy → Drain: set Materia.drainOnly so the idle reaper terminates once
-   *  the queue empties. New guest gens are refused at admission. */
+   *  the queue empties. New guest gens are refused at admission. The paired
+   *  `drainUntil` is the deadline that makes the drain terminal even if the pod
+   *  never gets back to idle — a host who asks for a drain gets one either way. */
   private async _drainStudio(podId: string): Promise<void> {
     if (!this.deps.materiae) return
     const pods = await this.deps.materiae.findActive().catch(() => [])
     const m = pods.find(p => p.externusId === podId)
     if (!m) return
-    await this.deps.materiae.update(m.id, { drainOnly: true }).catch(() => {})
+    await this.deps.materiae.update(m.id, {
+      drainOnly: true,
+      drainUntil: new Date(Date.now() + DRAIN_GRACE_MS),
+    }).catch(() => {})
     const { bus } = await import('../../lib/bus.js')
     bus.emit('studio.draining', { materiaId: m.id })
   }
