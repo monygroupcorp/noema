@@ -12,7 +12,7 @@ import type { AuctorKey } from '../flow/types.js'
 import { ownerKeyOf } from './ownerKey.js'
 import { tierOf, reservationImpetus, GENERIC_RESERVE_IMPETUS } from '../ledger/rates.js'
 import { isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
-import { privateOutputKeyPrefix } from './MediaFetcher.js'
+import { privateKeyOf, privateMarkersIn, privateOutputKeyPrefix, withResolvedPrivateMarkers } from './MediaFetcher.js'
 import type { Consuetudinum } from '../types/consuetudo.js'
 import { makeLogger } from '../lib/logger.js'
 import { PROVISION_BUDGET_MS } from './SecurePodClient.js'
@@ -134,6 +134,16 @@ interface Config {
    */
   privateOutputsR2?: R2Config
   /**
+   * Mint a short-lived GET for one object in the private-outputs bucket (noema-347). Injected
+   * because the cursor holds that bucket's CONFIG, not a client for it; present exactly when
+   * `privateOutputsR2` is.
+   *
+   * This is the only way a pod ever reads a private output. A run that chains one resolves it
+   * here, at dispatch, and the link it mints reaches the job body and nothing else — no durable
+   * record carries a handle to a private object.
+   */
+  presignPrivateInput?: (key: string, opts: { expiresIn: number }) => Promise<string>
+  /**
    * Account preferences source — read at dispatch to resolve THIS caller's `privateOutputs`
    * choice. Read here, at the one dispatch site that holds the run's owner, and stamped on the
    * actum; every later stage reads the stamp, never the preference (which can change mid-run).
@@ -213,15 +223,53 @@ export class RunPodCursor implements Cursor {
       runTrace?.commitment ? { commitment: runTrace.commitment } :
       undefined
     const runOwnerKey = runOwner ? ownerKeyOf(runOwner) : undefined
-    const { hash, input } = await this.compile(modus, actum.aditus, actum.pinnedModels, runOwnerKey)
 
-    // Private generation (noema-347), resolved HERE because this is the dispatch site that holds
-    // the run's owner. Three conditions, all required: the deployment has a private-outputs
-    // bucket, the run has an owner to scope the key namespace to, and that owner's stored
-    // preference says private. An absent preference reads PUBLIC — the default is unchanged.
+    // Private generation (noema-347), chaining. An earlier run's private output arrives as a
+    // `noema-private://` marker, which a pod cannot read — the bucket has no public binding, by
+    // design. Each marker is resolved to a presigned GET that lapses with this run, and only the
+    // job body ever carries it; `actum.aditus` keeps the marker, so no durable record gains a
+    // handle to a private object.
+    //
+    // Every refusal here is fail-closed. The dispatch stops rather than hand the pod a reference
+    // it could not fetch, or mint a link for bytes the caller has no claim on.
+    const privateInputs = privateMarkersIn(actum.aditus)
+    let aditus = actum.aditus
+    if (privateInputs.length > 0) {
+      if (!this.config.privateOutputsR2 || !this.config.presignPrivateInput) {
+        throw new Error('this run uses a private output as an input, but no private-outputs store is configured')
+      }
+      if (!runOwnerKey) {
+        throw new Error('this run uses a private output as an input, but has no owner to check it against')
+      }
+      // The namespace IS the claim. A private object is written under the hash of its owner's
+      // key, so a marker outside this caller's own prefix belongs to someone else and is never
+      // presigned — however the caller came by it.
+      const ownPrefix = privateOutputKeyPrefix(runOwnerKey)
+      const expiresIn = Math.ceil((PROVISION_BUDGET_MS + (this.config.maxJobSeconds ?? 1800) * 1000) / 1000)
+      const resolved = new Map<string, string>()
+      for (const marker of privateInputs) {
+        if (resolved.has(marker)) continue
+        const key = privateKeyOf(marker) ?? ''
+        if (!key.startsWith(ownPrefix)) {
+          throw new Error('a private output of another account cannot be used as an input')
+        }
+        resolved.set(marker, await this.config.presignPrivateInput(key, { expiresIn }))
+      }
+      aditus = withResolvedPrivateMarkers(actum.aditus, resolved)
+    }
+
+    const { hash, input } = await this.compile(modus, aditus, actum.pinnedModels, runOwnerKey)
+
+    // Privacy for this run's OWN outputs, resolved HERE because this is the dispatch site that
+    // holds the run's owner. The deployment must have a private-outputs bucket and the run must
+    // have an owner to scope the key namespace to; given both, the run is private when the owner's
+    // stored preference says so — an absent preference reads PUBLIC, the default is unchanged —
+    // or when it reads bytes out of the private bucket. That second arm only ever fails safe:
+    // writing the result of a private input to a public bucket would republish it.
     const privateR2 = this.config.privateOutputsR2
     const privateOutputs = !!privateR2 && !!runOwner && !!runOwnerKey &&
-      (await this.config.consuetudinum?.resolveGeneratio(runOwner).catch(() => undefined))?.privateOutputs === true
+      (privateInputs.length > 0 ||
+        (await this.config.consuetudinum?.resolveGeneratio(runOwner).catch(() => undefined))?.privateOutputs === true)
     // The per-run store override: the private bucket under this owner's hashed namespace. Any
     // `publicUrl` is stripped on the way out — a private run's objects have no public handle by
     // construction, so the runner returns KEYS and the host decides who ever gets a link.
@@ -243,7 +291,12 @@ export class RunPodCursor implements Cursor {
         })
       : undefined
 
-    if (this.config.deployments) {
+    // The compiled spec is kept by content hash as the record of what was dispatched. A spec that
+    // carries a resolved private input is neither useful nor safe to keep: the link inside it was
+    // minted for this one run, so the hash never recurs, and storing it would put a handle to a
+    // private object in a durable row — the very thing the marker scheme exists to prevent. The
+    // run still records its `deploymentHash`, so the dispatch remains traceable.
+    if (this.config.deployments && privateInputs.length === 0) {
       await this.config.deployments.upsert({
         hash,
         spec: input as Record<string, unknown>,

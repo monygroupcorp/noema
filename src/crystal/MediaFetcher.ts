@@ -52,6 +52,42 @@ export function privateOutputKeyPrefix(ownerKey: string): string {
 }
 
 /**
+ * Every private-output marker a run's inputs carry, in encounter order.
+ *
+ * An aditus value is a media reference or a list of them; nothing nested deeper holds one, so
+ * the scan is one level into arrays and no further. Duplicates are kept — the caller resolves
+ * by key and puts the results back by value.
+ */
+export function privateMarkersIn(aditus: Record<string, unknown>): string[] {
+  const found: string[] = []
+  for (const value of Object.values(aditus)) {
+    if (isPrivateMarker(value)) found.push(value)
+    else if (Array.isArray(value)) for (const item of value) if (isPrivateMarker(item)) found.push(item)
+  }
+  return found
+}
+
+/**
+ * The same inputs with every private-output marker replaced by what `resolved` maps it to.
+ *
+ * Shape is preserved exactly — a string stays a string, a list keeps its length and order — so
+ * a flow's schema sees the inputs it declared. A marker missing from the map is left as-is;
+ * every caller here resolves the full set from `privateMarkersIn` first, so that cannot silently
+ * drop one.
+ */
+export function withResolvedPrivateMarkers(
+  aditus: Record<string, unknown>,
+  resolved: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  const swap = (v: unknown): unknown => (isPrivateMarker(v) ? resolved.get(v) ?? v : v)
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(aditus)) {
+    out[key] = Array.isArray(value) ? value.map(swap) : swap(value)
+  }
+  return out
+}
+
+/**
  * The owner-scoped prefix a host-side writer must use for THIS actum's outputs, or undefined
  * when the run is public.
  *
