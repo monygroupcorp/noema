@@ -97,16 +97,20 @@ This is where anonymity collides hardest with law. Structure determines exposure
 
 ## 6. Data protection — where the principle becomes an advantage
 
-- GDPR / CCPA exposure scales with personal data held. We hold almost none by design
-  (no content retention, anonymous rails) → unusually **small** compliance surface. (The TEE
-  tier would further reduce it, but it is in development — do not count it yet.)
-- Document "we don't retain content" as a formal posture — it's a selling point to enterprise
-  privacy buyers (medical/legal), not just a principle.
+- GDPR / CCPA exposure scales with **identity** held, and we hold almost none: no email is ever
+  asked for, a wallet sign-up mints an account from a signature alone, and anonymous credits need
+  no account → unusually **small** compliance surface. (The TEE tier would further reduce it, but
+  it is in development — do not count it yet.)
+- **Content, however, IS retained.** A run keeps the inputs submitted and the outputs produced, as
+  the user's own history, until they erase their account (`Actum.aditus` / `Actum.exitus`). "We
+  don't retain content" is therefore NOT a posture we can sell; the sellable one is "we don't know
+  who you are, and we don't train on what you make."
 - **Healthcare:** out of scope. Serving PHI would make us a HIPAA **Business Associate**, which
   requires a **BAA** we do not offer, so the Terms exclude regulated workloads outright. Re-opening
   the vertical means signing BAAs first, not advertising one in advance.
-- **Legal vertical:** confidentiality / privilege expectations — the no-retention posture maps
-  reasonably, but contracts must reflect it and must not promise the undelivered sealed tier.
+- **Legal vertical:** confidentiality / privilege expectations do NOT map onto retained run
+  records. Selling into it means shipping the retention window first, and contracts must not
+  promise the undelivered sealed tier.
 
 ---
 
@@ -176,7 +180,8 @@ commercial license.
 5. **OFAC screening on deposit addresses** → the one identity check we keep.
 6. **EU AI Act content labeling** if serving EU.
 7. **Per-model license clearance** via the register above; permissive-only for the
-   enterprise vertical; **BAAs** for healthcare PHI.
+   enterprise vertical. Healthcare stays out of scope (§6): no BAA is offered, so the
+   vertical is not sold into rather than papered over.
 8. **Spend early money on two specialists, not growth:** crypto/MSB attorney +
    trust-and-safety/child-safety advisor.
 

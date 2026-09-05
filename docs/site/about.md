@@ -21,9 +21,9 @@ We also believe you shouldn't have to hand over your identity to use it. You can
 
 ### How we built it
 
-Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We do not retain your prompts or outputs after a request, and we never train on them.
+Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We never train on your prompts or outputs. We do retain run records until you erase your account — the privacy policy states exactly what is kept and why.
 
-The credits you spend are zero-knowledge proofs. We verify the math; we cannot link the spend to you. This is real anonymity — about *who* you are, not a claim that the compute provider can't see your work.
+Purse credits will be zero-knowledge proofs: we verify the math and cannot link that spend to you. The rail is written and switched off until the trusted-setup ceremony concludes. When it opens, that is anonymity about *who* you are — never a claim that the compute provider cannot see the work itself, which would need the hardware-sealed tier we have not shipped.
 
 ---
 
@@ -34,9 +34,9 @@ Noema is a boutique generative-AI studio. We provide:
 - **A concierge + studio** — describe what you want; curated open- and closed-source models make it
 - **AI generation** — text, image, video, audio, via best-in-class open-source and frontier models
 - **A creative workspace** — a typed, composable canvas for building multi-step AI flows
-- **Anonymous billing** — zero-knowledge credit proofs; no identity required
+- **Billing without an identity** — no email to sign up; zero-knowledge credit proofs once the bearer purse ships
 
-We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own anonymous payment rails.
+We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own payment rails.
 
 ---
 
@@ -50,7 +50,7 @@ We are a small team of engineers and researchers. We care about craft, about giv
 
 ## Transparency
 
-The zero-knowledge circuit for Bursa credits is open source and has undergone a trusted setup ceremony.
+The zero-knowledge circuit for Bursa credits is open source. Its trusted-setup ceremony has not concluded, so the key it verifies against is still one a single person holds — which is why minting a purse is refused today rather than offered on trust.
 
 If you find a discrepancy between what we say we do and what the code does, we want to know: [SECURITY EMAIL]
 
