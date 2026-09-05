@@ -12,6 +12,19 @@ const log = makeLogger('crystal:census')
 /** Materia statuses for which we run the billing meter. Terminated/null = skip. */
 const BILLABLE_STATUSES = new Set(['idle', 'active', 'provisioning', 'bootstrapping'])
 
+/**
+ * How long a draining studio may go on billing before the idle reaper takes it
+ * whatever its status — the grace an in-flight gen has to finish in. Stamped onto
+ * `Materia.drainUntil` the moment drain engages; that field says why a status-blind
+ * deadline is needed at all.
+ *
+ * 15 minutes is not a new policy — it is the actum expiry the platform already
+ * enforces (`DEFAULT_EXPIRAT_MS` in ActumInceptor). A gen still running past its own
+ * expiry is one the expiry reaper has already failed, so a studio still draining past
+ * that window is holding nothing this deadline could cut short.
+ */
+export const DRAIN_GRACE_MS = 15 * 60 * 1000
+
 export interface CensusDeps {
   hospitia: HospitiumStore
   materiae: MateriaStore
@@ -126,7 +139,8 @@ export async function censere(
   }).catch(() => {})
 
   // Two drain triggers, both engaging the SAME drainOnly mode (admission control
-  // refuses new guest gens; the idle reaper terminates once the queue drains):
+  // refuses new guest gens; the idle reaper terminates once the queue drains, or at
+  // `drainUntil` if the pod never makes it back to idle):
   //   1. Balance shortfall — the host couldn't cover the full ask this tick.
   //   2. Budget exhaustion (the `maxImpetus` watchdog) — the studio's total accrued
   //      spend (warm-time `costAccrued` + run `impetusAccrued`) crossed the
@@ -136,13 +150,24 @@ export async function censere(
   const budgetExhausted = await isOverBudget(deps, materia, newCost)
   let drainEngaged = false
   if ((balanceShortfall || budgetExhausted) && !materia.drainOnly) {
-    await deps.materiae.update(materia.id, { drainOnly: true }).catch(() => {})
+    await deps.materiae.update(materia.id, {
+      drainOnly: true,
+      drainUntil: new Date(now.getTime() + DRAIN_GRACE_MS),
+    }).catch(() => {})
     bus.emit('studio.draining', { materiaId: materia.id })
     log.info('studio entered drain mode', {
       materiaId: materia.id, reason: budgetExhausted ? 'budget' : 'balance',
       requested: requested.toString(), charged: charged.toString(),
     })
     drainEngaged = true
+  } else if (materia.drainOnly && !materia.drainUntil) {
+    // Already draining with no deadline on it: a studio that entered drain before
+    // `drainUntil` existed, so nothing would ever reap it off `active`. Give it the
+    // same grace from now rather than backfilling a deadline that may already have
+    // passed — an in-flight gen on it is still owed its window.
+    await deps.materiae.update(materia.id, {
+      drainUntil: new Date(now.getTime() + DRAIN_GRACE_MS),
+    }).catch(() => {})
   }
 
   return { requested, charged, drainEngaged }

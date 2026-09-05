@@ -224,12 +224,37 @@ test('reapIdle leaves an idle pod that is neither past warmUntil nor draining', 
   assert.equal((await store.findById(m.id))?.status, 'idle')
 })
 
-test('reapIdle never reaps a NON-idle (active) pod, even if drainOnly', async () => {
+test('reapIdle leaves an active draining pod inside its drain grace (the gen gets to finish)', async () => {
   const past = new Date(Date.now() - 60_000)
-  const m = await store.create(makeInput({ status: 'active', warmUntil: past, drainOnly: true }))
+  const future = new Date(Date.now() + 15 * 60_000)
+  const m = await store.create(makeInput({ status: 'active', warmUntil: past, drainOnly: true, drainUntil: future }))
   const reaped = await store.reapIdle(new Date())
-  assert.equal(reaped.length, 0, 'an active pod drains-then-reaps only once it goes idle')
+  assert.equal(reaped.length, 0, 'an in-flight gen keeps the whole grace window')
   assert.equal((await store.findById(m.id))?.status, 'active')
+})
+
+test('reapIdle terminates a pod stranded in active past its drainUntil deadline', async () => {
+  const past = new Date(Date.now() - 60_000)
+  const m = await store.create(makeInput({ status: 'active', drainOnly: true, drainUntil: past }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 1, 'a drained pod that never made it back to idle still dies')
+  assert.equal(reaped[0].id, m.id)
+  assert.equal((await store.findById(m.id))?.status, 'terminated')
+})
+
+test('reapIdle leaves an active pod that is not draining, lapsed deadline or not', async () => {
+  const past = new Date(Date.now() - 60_000)
+  const m = await store.create(makeInput({ status: 'active', warmUntil: past, drainUntil: past }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 0, 'the deadline only bites on a pod that is actually draining')
+  assert.equal((await store.findById(m.id))?.status, 'active')
+})
+
+test('reapIdle does not re-reap an already-terminated drained pod', async () => {
+  const past = new Date(Date.now() - 60_000)
+  await store.create(makeInput({ status: 'terminated', drainOnly: true, drainUntil: past }))
+  const reaped = await store.reapIdle(new Date())
+  assert.equal(reaped.length, 0, 'terminated is terminal — no second terminatum, no second pod destroy')
 })
 
 test('findWarm by materiaId atomically claims THAT specific idle pod (studio pinning)', async () => {

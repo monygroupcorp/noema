@@ -188,6 +188,21 @@ export interface Materia {
    */
   drainOnly?: boolean
 
+  /**
+   * Hard drain deadline — the instant a draining pod is reaped whatever its status.
+   * Stamped alongside `drainOnly`, and never extended.
+   *
+   * "It drains, then the reaper takes it once it goes idle" holds only while
+   * something still moves the pod back to idle. A pod whose release path never ran
+   * — the process died mid-job, the runner went away, the completion webhook was
+   * lost — stays `active` forever, and `active` is billable: it accrues host cost on
+   * every Census tick and burns real provider spend, with no status the idle arm of
+   * the reaper can ever match. This deadline is what makes the drain terminal. Past
+   * it the reaper takes the pod from `active` too; a genuinely in-flight gen has the
+   * whole grace window to finish first.
+   */
+  drainUntil?: Date
+
   // ── Inventory (Phase D wrap-up) ────────────────────────────────────────────
   // What's actually downloaded onto this studio's persistent volume. Maintained
   // by the completion webhook from `ActumExecutio.modelsInstalled` reports, then
@@ -220,7 +235,7 @@ export interface MateriaStore {
     | 'podPolicy' | 'shareToken' | 'warmUntil'
     | 'groupChatId' | 'openToNonAdmins'
     | 'bootCostImpetus' | 'bootRecovered'
-    | 'drainOnly'
+    | 'drainOnly' | 'drainUntil'
     | 'installedModels' | 'volumeUsedGb' | 'volumeCapGb'
   >>): Promise<Materia>
   /**
@@ -239,9 +254,11 @@ export interface MateriaStore {
   /** Return all Materiae that are not terminated — used for graceful shutdown teardown. */
   findActive(): Promise<Materia[]>
   /**
-   * Atomically reap idle pods past their warmUntil deadline: transition each from
-   * 'idle' to 'terminated' (one findOneAndUpdate per pod, so a concurrent claim
-   * via findWarm can't lose) and return them so the caller can destroy the pods.
+   * Atomically reap pods that should no longer be billing: an idle pod past its
+   * `warmUntil` deadline or already draining, and a draining pod of ANY status past
+   * its `drainUntil` hard deadline (the stranded-`active` case — see `drainUntil`).
+   * Transitions each to 'terminated' (one findOneAndUpdate per pod, so a concurrent
+   * claim via findWarm can't lose) and returns them so the caller can destroy the pods.
    */
   reapIdle(now: Date): Promise<Materia[]>
 }
