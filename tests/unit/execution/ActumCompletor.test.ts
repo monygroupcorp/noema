@@ -7,7 +7,16 @@ import type { Nexus } from '../../../src/types/nexus.js'
 import type { Vestigiorum } from '../../../src/types/vestigium.js'
 import type { DeploymentumStore } from '../../../src/types/deploymentum.js'
 import type { Intella, Intellarum } from '../../../src/types/intelligendi.js'
+import type { Modus } from '../../../src/types/modus.js'
+import type { Editionum } from '../../../src/types/editio.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
+import { Nexus as RealNexus } from '../../../src/ledger/Nexus.js'
+import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { MemoryModorum } from '../../../src/execution/MemoryModorum.js'
+import { hostCutHook } from '../../../src/ledger/hooks/hostCut.js'
+import { spellRoyaltyHook } from '../../../src/ledger/hooks/spellRoyalty.js'
+import { modelRoyaltyHook } from '../../../src/ledger/hooks/modelRoyalty.js'
+import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
 import { WARM_SURCHARGE_IMPETUS } from '../../../src/ledger/rates.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
 import { bus } from '../../../src/lib/bus.js'
@@ -598,4 +607,244 @@ test('fail emits its wide event with no trace context — a swept run still reac
   assert.equal(seen[0].reservation, '1800')
   assert.equal(seen[0].impetus, '0')
   assert.equal(seen[0].refund, '1800')
+})
+
+// ── Royalty, host cut and platform skim ──────────────────────────────────────
+//
+// `complete()` is the ONE `execution_spend` emitter in the codebase, so this is
+// where the payout is proven. It used to emit a bare payload and the RunPod
+// webhook built an enriched one of its own — which meant a run finishing on the
+// sync-cursor rail (`POST /v1/runs`, MCP dispatch, every hosted-API modus) paid
+// no royalty at all, silently. These tests hold the enrichment at the settlement
+// point, where every rail passes through.
+//
+// Real Nexus + real hooks + MemorySignorum + MemoryModorum: the seams are the
+// actum store and the cursor result, not the ledger.
+
+const LEDGER_MODUS: Modus = {
+  id: 'mod-1',
+  nomen: 'Flux Schnell',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: 'test-hash',
+  aditus: {},
+  exitus: {},
+  canonica: true,
+  auctor: { animaId: 'anima-flux-author' },   // the {animaId}|{commitment} owner union
+  natum: new Date(),
+  mutatum: new Date(),
+}
+
+function makeLedger() {
+  const nexus = new RealNexus()
+  nexus.on('execution_spend', hostCutHook)
+  nexus.on('execution_spend', spellRoyaltyHook)
+  nexus.on('execution_spend', modelRoyaltyHook)
+  nexus.on('royalty_fired', platformSkimHook)
+  return { nexus, signorum: new MemorySignorum(), modorum: new MemoryModorum() }
+}
+
+/** A run with nothing locked — MemorySignorum settles only ids it actually holds,
+ *  and none of these tests are about the lock/refund half. */
+function makeLedgerActum(overrides: Partial<Actum> = {}): Actum {
+  return makeActum({ impetus: 100_000n, signaConsumed: [], ...overrides })
+}
+
+test('spell royalty is paid to the flow author on completion', async () => {
+  const { nexus, signorum, modorum } = makeLedger()
+  await modorum.register({ ...LEDGER_MODUS })
+  const actum = makeLedgerActum()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum, nexus, modorum })
+
+  // 200n measured → spellRoyalty = 10% = 20n
+  await completor.complete(actum, makeRunResult({ impetus: 200n }))
+
+  const signa = await signorum.history({ animaId: 'anima-flux-author' })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].forma, 'reward')
+  assert.equal(signa[0].valor, 20n)
+  assert.equal(signa[0].auctor, 'nexus:spellRoyalty')
+})
+
+test('platform skim is taken once a royalty has fired', async () => {
+  const { nexus, signorum, modorum } = makeLedger()
+  await modorum.register({ ...LEDGER_MODUS })
+  const actum = makeLedgerActum()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum, nexus, modorum })
+
+  await completor.complete(actum, makeRunResult({ impetus: 200n }))
+
+  // platformSkim = 5% of the 200n base
+  const platformId = process.env.PLATFORM_ANIMA_ID ?? 'platform'
+  const signa = await signorum.history({ animaId: platformId })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].valor, 10n)
+  assert.equal(signa[0].auctor, 'nexus:platformSkim')
+})
+
+test('host cut taxes the measured cost, not the surcharged total or the reservation', async () => {
+  const { nexus, signorum, modorum } = makeLedger()
+  await modorum.register({ ...LEDGER_MODUS, auctor: undefined })   // isolate hostCut from spellRoyalty
+  const actum = makeLedgerActum({
+    impetus: 1800n,                        // reservation, well above the measured run
+    executio: { pricingTier: 'guest' },
+  })
+  const hospitia = {
+    async findByMateriaId(id: string) {
+      return id === 'materia-1'
+        ? { id: 'hosp-1', materiaId: 'materia-1', hostKey: { animaId: 'host-anima' }, inceptum: new Date() }
+        : null
+    },
+  }
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum, nexus, modorum, hospitia })
+
+  // 200n measured base; hostCut = 20% of THAT (40n), not of the guest-surcharged
+  // settle total and not of the 1800n reservation.
+  await completor.complete(actum, makeRunResult({ impetus: 200n, materiamId: 'materia-1' }))
+
+  const signa = await signorum.history({ animaId: 'host-anima' })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].valor, 40n)
+  assert.equal(signa[0].auctor, 'nexus:hostCut')
+})
+
+test('model royalty is routed to the used model\'s published owner', async () => {
+  const { nexus, signorum, modorum } = makeLedger()
+  await modorum.register({ ...LEDGER_MODUS, auctor: undefined })   // isolate the model-royalty signum
+  const actum = makeLedgerActum({ deploymentHash: 'sha256:dep-1' })
+
+  // The bundle records that this gen used 'lora-1'; that model has a published
+  // Editio with no explicit split, so its publisher earns the whole 5% pool.
+  const deployments = {
+    async find(h: string) {
+      return h === 'sha256:dep-1'
+        ? { hash: h, spec: { models: [{ id: 'lora-1', role: 'lora' }] }, natum: new Date() }
+        : null
+    },
+  }
+  const editiones = {
+    async listByArtifact(ref: { kind: string; id: string }) {
+      if (ref.kind !== 'intella' || ref.id !== 'lora-1') return []
+      const now = new Date()
+      return [{
+        id: 'e-1', artifactRef: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface',
+        visibility: 'unlisted', custody: 'ours', by: { animaId: 'lora-author' },
+        status: 'published', natum: now, mutatum: now,
+      }]
+    },
+  }
+  const completor = new ActumCompletor({
+    acta: makeActa(actum), signorum, nexus, modorum,
+    deployments: deployments as unknown as DeploymentumStore,
+    editiones: editiones as unknown as Editionum,
+  })
+
+  // 200n measured → model royalty = 5% = 10n to the sole payee.
+  await completor.complete(actum, makeRunResult({ impetus: 200n }))
+
+  const signa = await signorum.history({ animaId: 'lora-author' })
+  assert.equal(signa.length, 1)
+  assert.equal(signa[0].valor, 10n)
+  assert.equal(signa[0].auctor, 'nexus:modelRoyalty')
+})
+
+test('a flow with no identified author earns nothing, and no skim follows', async () => {
+  const { nexus, signorum, modorum } = makeLedger()
+  await modorum.register({ ...LEDGER_MODUS, auctor: undefined })
+  const actum = makeLedgerActum()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum, nexus, modorum })
+
+  await completor.complete(actum, makeRunResult({ impetus: 200n }))
+
+  assert.equal((await signorum.history({ animaId: 'anima-flux-author' })).length, 0)
+  assert.equal((await signorum.history({ animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' })).length, 0)
+})
+
+test('execution_spend carries the flow author resolved from the modus registry', async () => {
+  const modorum = new MemoryModorum()
+  await modorum.register({ ...LEDGER_MODUS })
+  const actum = makeActum()
+  const nexus = makeNexus()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum: makeSignorum(), nexus, modorum })
+
+  await completor.complete(actum, makeRunResult())
+
+  const payload = nexus._emitted[0].payload as { modusAuctorAnimaId?: string }
+  assert.equal(payload.modusAuctorAnimaId, 'anima-flux-author')
+})
+
+test('an anon-owned flow resolves no author to route a royalty to', async () => {
+  const modorum = new MemoryModorum()
+  await modorum.register({ ...LEDGER_MODUS, auctor: { commitment: '0xdeadbeef' } })
+  const actum = makeActum()
+  const nexus = makeNexus()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum: makeSignorum(), nexus, modorum })
+
+  await completor.complete(actum, makeRunResult())
+
+  const payload = nexus._emitted[0].payload as { modusAuctorAnimaId?: string }
+  assert.equal(payload.modusAuctorAnimaId, undefined)
+})
+
+test('execution_spend carries the model royalty payees for a published model', async () => {
+  const actum = makeActum({ deploymentHash: 'sha256:dep-1' })
+  const nexus = makeNexus()
+  const deployments = {
+    async find(h: string) {
+      return h === 'sha256:dep-1'
+        ? { hash: h, spec: { models: [{ id: 'lora-1', role: 'lora' }] }, natum: new Date() }
+        : null
+    },
+  }
+  const editiones = {
+    async listByArtifact(ref: { kind: string; id: string }) {
+      if (ref.kind !== 'intella' || ref.id !== 'lora-1') return []
+      const now = new Date()
+      return [{
+        id: 'e-1', artifactRef: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface',
+        visibility: 'unlisted', custody: 'ours', by: { animaId: 'lora-author' },
+        status: 'published', natum: now, mutatum: now,
+      }]
+    },
+  }
+  const completor = new ActumCompletor({
+    acta: makeActa(actum), signorum: makeSignorum(), nexus,
+    deployments: deployments as unknown as DeploymentumStore,
+    editiones: editiones as unknown as Editionum,
+  })
+
+  await completor.complete(actum, makeRunResult())
+
+  const payload = nexus._emitted[0].payload as { intellaRoyaltyPayees?: Array<{ animaId: string; weight: number }> }
+  assert.deepEqual(payload.intellaRoyaltyPayees, [{ animaId: 'lora-author', weight: 1 }])
+})
+
+test('royalty_fired and the signa write are skipped when nothing was earned', async () => {
+  // A bare nexus whose hooks produce no signa — the empty case that must not
+  // write a ledger row or fire a skim off a zero royalty.
+  const actum = makeActum()
+  const nexus = makeNexus()
+  const signorum = makeSignorum()   // its createMany throws if reached
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum, nexus })
+
+  await completor.complete(actum, makeRunResult())
+
+  assert.deepEqual(nexus._emitted.map(e => e.type), ['execution_spend'])
+})
+
+test('completion emits execution_spend exactly once', async () => {
+  // The non-vacuity proof for the double-emission hazard. `complete()` is the sole
+  // emitter; when the webhook rail also had its own emit, a webhook completion fired
+  // this event TWICE — the bare one no-op'd the royalty hooks but hostCut and
+  // hospitium do not gate on enrichment, so hosts were paid twice. Restore that
+  // second call site and this count goes to 2.
+  const modorum = new MemoryModorum()
+  await modorum.register({ ...LEDGER_MODUS })
+  const actum = makeActum()
+  const nexus = makeNexus()
+  const completor = new ActumCompletor({ acta: makeActa(actum), signorum: makeSignorum(), nexus, modorum })
+
+  await completor.complete(actum, makeRunResult())
+
+  assert.equal(nexus._emitted.filter(e => e.type === 'execution_spend').length, 1)
 })

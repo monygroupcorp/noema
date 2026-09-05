@@ -6,7 +6,11 @@ import type { Vestigiorum } from '../types/vestigium.js'
 import type { DeploymentumStore } from '../types/deploymentum.js'
 import type { Intellarum } from '../types/intelligendi.js'
 import type { ModoStore } from '../types/modo.js'
-import { impetusFor } from '../ledger/rates.js'
+import type { Modorum } from '../types/modus.js'
+import type { Editionum } from '../types/editio.js'
+import type { HospitiumStore, HostKey } from '../types/hospitium.js'
+import { impetusFor, modoHostFor } from '../ledger/rates.js'
+import { resolveModelRoyaltyPayees } from '../ledger/resolveModelPayees.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace, makeTraceContext } from '../lib/trace.js'
 import { buildWideEvent, emitWideEvent } from '../lib/wide.js'
@@ -43,6 +47,17 @@ interface Deps {
    *  Absent → no session accrual, which is the correct behaviour for a slim
    *  deployment that has no sessions at all. */
   modos?: Pick<ModoStore, 'findById' | 'update'>
+  /** Optional: flow registry — resolves `Modus.auctor.animaId` so the flow's author
+   *  earns their royalty. Absent → no spell royalty (the hook no-ops on an absent payee). */
+  modorum?: Pick<Modorum, 'find'>
+  /** Optional: publication store — a model's published `Editio.owners[]` is its royalty
+   *  surface. Passed straight to `resolveModelRoyaltyPayees`; absent → no model royalty. */
+  editiones?: Pick<Editionum, 'listByArtifact'>
+  /** Optional: identity-bearing hosting side-table — resolves the host's `HostKey` at
+   *  emit time (host identity is never on the actum or materia). Absent, or a run with
+   *  no host-backed pricing tier, → no host payout, which is correct for anything not
+   *  running on someone's hardware. */
+  hospitia?: Pick<HospitiumStore, 'findByMateriaId'>
 }
 
 let warnedMissingVestigiorum = false
@@ -87,7 +102,7 @@ export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
   async complete(actum: Actum, result: Exitus, auctor?: Auctor): Promise<Actum> {
-    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum, modos } = this.deps
+    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum, modos, modorum, editiones, hospitia } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -222,21 +237,60 @@ export class ActumCompletor {
       }
     }
 
+    // The ONE `execution_spend` emitter in the codebase. Every completion rail —
+    // the RunPod webhook and the sync cursors alike — reaches the ledger through
+    // here, so a royalty is paid on the same terms whichever way a run finished.
+    // Emitting from a rail instead of from the settlement point is how the sync
+    // rail came to pay nothing at all: it simply never grew the call the webhook
+    // had. A payload built here cannot be missed by a rail added later.
     if (nexus) {
-      // Phase C widened the payload: baseImpetus is mandatory + modoHostKey is
-      // optional. The completor only fires this when its caller (cursors that
-      // don't go through the webhook path) emits directly. The webhook path is
-      // what production uses — it builds the full payload (baseImpetus read back
-      // off executio, modoHostKey resolved from Hospitium). Here we use the
-      // measured base computed above.
-      await nexus.emit({
+      // Spell-author royalty routing. `Modus.auctor` is the `{ animaId } |
+      // { commitment }` owner union; royalty routing addresses identified authors
+      // only, so an anon-owned (commitment) saved flow has nothing to route to.
+      const modus = modorum ? await modorum.find(completed.modusId).catch(() => null) : null
+      const modusAuctorAnimaId: string | undefined =
+        modus?.auctor && typeof modus.auctor === 'object' && 'animaId' in modus.auctor
+          ? modus.auctor.animaId : undefined   // typeof guard: legacy stringy data can't crash a completion
+
+      // Hosting payout: the host's full HostKey comes from Hospitium at emit time —
+      // host identity is NEVER on the actum or materia. The host-bound hooks
+      // (hostCutHook, hospitiumHook) branch on the discriminant to mint reward
+      // (identified) or arcanum (commitment) signa. A hosted-API run has no
+      // materia and no host-backed tier, so this stays undefined and those hooks
+      // no-op — correct, since nothing on that path runs on anyone's hardware.
+      let modoHostKey: HostKey | undefined
+      if (hospitia && completed.executio?.pricingTier && completed.materiamId) {
+        const hospitium = await hospitia.findByMateriaId(completed.materiamId).catch(() => null)
+        modoHostKey = modoHostFor(completed.executio.pricingTier, hospitium)
+      }
+
+      // Model royalty routing: the models this gen actually used → their published
+      // Editio rights split → weighted payees. `modelRoyaltyHook` splits the 5% pool
+      // across them; an empty list → it no-ops (no published models were used).
+      const intellaRoyaltyPayees = await resolveModelRoyaltyPayees(completed, { deployments, editiones })
+
+      const royaltySigna = await nexus.emit({
         type: 'execution_spend',
         payload: {
           actum: completed,
           impetus,
           baseImpetus,
+          modusAuctorAnimaId,
+          modoHostKey,
+          ...(intellaRoyaltyPayees.length ? { intellaRoyaltyPayees } : {}),
         },
       })
+      let allSigna = royaltySigna
+      // Fire royalty_fired so platformSkimHook can take its cut
+      if (royaltySigna.length > 0) {
+        const royaltyValor = royaltySigna.reduce((sum, sig) => sum + sig.valor, 0n)
+        const skimSigna = await nexus.emit({
+          type: 'royalty_fired',
+          payload: { actumId: completed.id, royaltyValor, baseValor: impetus },
+        })
+        if (skimSigna.length) allSigna = [...allSigna, ...skimSigna]
+      }
+      if (allSigna.length) await signorum.createMany(allSigna)
     }
 
     return completed

@@ -96,9 +96,12 @@ async function runScenario(opts: ScenarioOpts) {
     await hospitia.create({ materiaId: opts.materiamId, hostKey: opts.hostKey, inceptum: new Date() })
   }
 
-  const completor = new ActumCompletor({ acta: actorum, signorum })
+  // The completor is the one `execution_spend` emitter, on every rail — so the bus
+  // and the host side-table are wired HERE, not onto the webhook. The webhook's job
+  // is to deliver the completion; the payout is settled where the run is settled.
+  const completor = new ActumCompletor({ acta: actorum, signorum, nexus, hospitia })
 
-  const deps: ExecutionWebhookDeps = { actorum, completor, nexus, signorum, hospitia }
+  const deps: ExecutionWebhookDeps = { actorum, completor }
   const req: WebhookRequest = {
     body: { id: 'job-phase-b-1', status: 'COMPLETED', output: [], executionTime: REPORTED_MS },
     rawBody: '',

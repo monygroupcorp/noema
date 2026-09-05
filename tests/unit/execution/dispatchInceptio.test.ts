@@ -10,6 +10,13 @@ import type { ActumIndex } from '../../../src/types/actumIndex.js'
 import type { Actorum } from '../../../src/types/cursus.js'
 import type { WideEvent } from '../../../src/lib/wide.js'
 import { ActumCompletor } from '../../../src/execution/ActumCompletor.js'
+import { Nexus } from '../../../src/ledger/Nexus.js'
+import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
+import { MemoryModorum } from '../../../src/execution/MemoryModorum.js'
+import { spellRoyaltyHook } from '../../../src/ledger/hooks/spellRoyalty.js'
+import { modelRoyaltyHook } from '../../../src/ledger/hooks/modelRoyalty.js'
+import { platformSkimHook } from '../../../src/ledger/hooks/platformSkim.js'
+import type { resolveModelRoyaltyPayees } from '../../../src/ledger/resolveModelPayees.js'
 import { bus } from '../../../src/lib/bus.js'
 import { withTrace, makeTraceContext } from '../../../src/lib/trace.js'
 
@@ -513,4 +520,94 @@ test('noema-270: a sync cursor that throws fails the actum and releases its sign
   assert.equal(after?.status, 'fractus', 'the run is terminal, so the actum is terminal')
   assert.equal(after?.error, 'the chat call did not answer within 60s')
   assert.deepEqual(released, [['sig-1']], 'nothing ran, so the reservation is released, not settled')
+})
+
+// ── The sync rail pays its royalties ─────────────────────────────────────────
+//
+// This is the fix's actual subject. `POST /v1/runs`, MCP dispatch, and every
+// hosted-API modus resolve to a SYNC cursor, and a sync cursor finishes inside
+// dispatchInceptio — never through the RunPod webhook. That webhook used to be
+// the only place `execution_spend` was emitted with royalty enrichment, so a run
+// finishing here paid the flow's author and the model's owners NOTHING, silently:
+// no error, no log line, just an event nobody fired. `complete()` now emits it on
+// every rail, and this test is the one that would have caught the gap.
+
+const ROYALTY_MODUS: Modus = {
+  ...makeModus(),
+  auctor: { animaId: 'anima-flow-author' },   // the {animaId}|{commitment} owner union
+}
+
+test('sync dispatch pays the flow author and the model owner — the rail that paid nothing', async () => {
+  const nexus = new Nexus()
+  nexus.on('execution_spend', spellRoyaltyHook)
+  nexus.on('execution_spend', modelRoyaltyHook)
+  nexus.on('royalty_fired', platformSkimHook)
+  const signorum = new MemorySignorum()
+
+  const modorum = new MemoryModorum()
+  await modorum.register({ ...ROYALTY_MODUS })
+
+  // The gen resolved to a bundle that used 'lora-1'; that model is published, so
+  // its publisher earns the model-royalty pool.
+  const deployments = {
+    async find(h: string) {
+      return h === 'sha256:dep-1'
+        ? { hash: h, spec: { models: [{ id: 'lora-1', role: 'lora' }] }, natum: new Date() }
+        : null
+    },
+  }
+  const editiones = {
+    async listByArtifact(ref: { kind: string; id: string }) {
+      if (ref.kind !== 'intella' || ref.id !== 'lora-1') return []
+      const now = new Date()
+      return [{
+        id: 'e-1', artifactRef: { kind: 'intella', id: 'lora-1' }, destination: 'huggingface',
+        visibility: 'unlisted', custody: 'ours', by: { animaId: 'lora-author' },
+        status: 'published', natum: now, mutatum: now,
+      }]
+    },
+  }
+
+  // Nothing locked: this test is about what the completion PAYS OUT, not about
+  // the reservation it settles.
+  const actum = makeActum({ impetus: 100_000n, signaConsumed: [], deploymentHash: 'sha256:dep-1' })
+  const deps: DispatchDeps = {
+    inceptor: { initiate: async () => actum },
+    modorum: modorum as unknown as DispatchDeps['modorum'],
+    cursorum: {
+      register: () => {},
+      resolve: () => ({
+        reserve: async () => 100_000n,
+        // kind: 'sync' — an ApiCursor-shaped result: it finishes here, in-process,
+        // and no webhook is ever called for it.
+        run: async () => ({ kind: 'sync' as const, exitus: { exitus: { url: 'https://example.com/img.png' }, impetus: 200n } }),
+      }),
+    },
+    completor: new ActumCompletor({
+      acta: makeActa(actum),
+      signorum,
+      nexus,
+      modorum,
+      deployments: deployments as unknown as Parameters<typeof resolveModelRoyaltyPayees>[1]['deployments'],
+      editiones: editiones as unknown as Parameters<typeof resolveModelRoyaltyPayees>[1]['editiones'],
+    }),
+  }
+
+  const result = await dispatchInceptio(deps, makeInceptio())
+  assert.equal(result.actum.status, 'completus')
+
+  // 200n measured → spellRoyalty 10% = 20n, modelRoyalty 5% = 10n, skim 5% = 10n.
+  const authorSigna = await signorum.history({ animaId: 'anima-flow-author' })
+  assert.equal(authorSigna.length, 1, 'the flow author earns on a sync-cursor run')
+  assert.equal(authorSigna[0].valor, 20n)
+  assert.equal(authorSigna[0].auctor, 'nexus:spellRoyalty')
+
+  const modelSigna = await signorum.history({ animaId: 'lora-author' })
+  assert.equal(modelSigna.length, 1, 'the model owner earns on a sync-cursor run')
+  assert.equal(modelSigna[0].valor, 10n)
+  assert.equal(modelSigna[0].auctor, 'nexus:modelRoyalty')
+
+  const platformSigna = await signorum.history({ animaId: process.env.PLATFORM_ANIMA_ID ?? 'platform' })
+  assert.equal(platformSigna.length, 1, 'the skim follows the royalty on this rail too')
+  assert.equal(platformSigna[0].auctor, 'nexus:platformSkim')
 })

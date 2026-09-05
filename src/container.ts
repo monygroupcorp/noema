@@ -421,6 +421,13 @@ export interface ContainerConfig {
    *  one against `actumIndexCollection` when this is absent. */
   actumIndex?: import('./types/actumIndex.js').ActumIndexStore
   /**
+   * The event bus. The completor emits `execution_spend`/`royalty_fired` on it
+   * directly, so every completion rail routes royalty, host cut and platform skim
+   * identically. Absent → no ledger hooks fire at all, which is the right shape for
+   * a slim deployment or a test that has no ledger.
+   */
+  nexus?: import('./types/nexus.js').Nexus
+  /**
    * Terminate a RunPod pod by ID. Injected so ActumCompletor can kill orphaned pods when
    * failing an actum (boot recovery, manual expiry). Absent: pods are left running on fail().
    */
@@ -821,6 +828,13 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     intellarum: new MongoIntella(db.collection('intellae')),
     // Session spend accrues here, from the settled amount — the sole accrual site.
     modos,
+    // Royalty, host cut and platform skim are emitted here too, for the same reason:
+    // every rail funnels through complete(), so this is the only place the payout can
+    // be stated once and hold for all of them.
+    nexus: config.nexus,
+    modorum,
+    editiones,
+    hospitia,
   })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
