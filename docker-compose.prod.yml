@@ -50,6 +50,13 @@ services:
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
     volumes:
       - /var/run/hyperbot:/var/run/hyperbot
+      # Private compliance module (ADR-0012 §49) — the real OFAC sanctions screen and the
+      # CSAM/NCMEC gate. Host state, deliberately absent from the image; the app dynamically
+      # imports ./private/compliance/index.js at boot. deploy.sh mounts the same path, and
+      # this service must match it: started without the mount, the app silently falls back to
+      # its permissive stubs and deposit screening becomes a no-op. An empty directory is safe
+      # and expected on a box that has no module — the fallback is the same, with a loud warning.
+      - ${COMPLIANCE_DIR:-/opt/noema/private/compliance}:/usr/src/app/dist/private/compliance:ro
     mem_limit: 900m
     networks:
       hyperbot:

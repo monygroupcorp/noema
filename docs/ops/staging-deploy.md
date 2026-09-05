@@ -63,15 +63,28 @@ One container, one process.
 
 ## OFAC deposit screening (compliance)
 
-The deposit sanctions screen (`src/compliance/SanctionsScreen.ts`) reads its blocklist
-from **`OFAC_BLOCKLIST_PATH`**. Set it in `.env` / `.env.staging` to the bundled file:
+Screening is on only when **both** of these hold. Either one alone is a NO-OP that clears
+every address, so do not read one of them as evidence the gate is live.
 
-```
-OFAC_BLOCKLIST_PATH=data/ofac-blocklist.json
-```
+1. **The private compliance module is mounted.** `src/compliance/SanctionsScreen.ts` in this
+   repo ships only the port and the permissive stub; the real Set-backed screen and the SDN
+   loader are not published here (ADR-0012 §49) and are bind-mounted into the container at
+   deploy. `deploy.sh` does this for production; `deploy-staging.sh` and
+   `docker-compose.prod.yml`'s `staging` service deliberately do not, so **staging always
+   runs the permissive stub** no matter what its `.env.staging` says.
+2. **`OFAC_BLOCKLIST_PATH` points at a non-empty list.** Set it to the bundled file:
 
-If unset (or the file is empty) the container boots with a LOUD warning and screening is
-a NO-OP — never leave it unset once real deposits flow.
+   ```
+   OFAC_BLOCKLIST_PATH=data/ofac-blocklist.json
+   ```
+
+If either is missing the container boots with a LOUD warning and screening is a NO-OP —
+never leave it that way once real deposits flow.
+
+**How to check, without exec-ing into the container:** `deploy.sh` reports both at the end
+of every deploy — whether the mount is populated or empty, and, when it is populated,
+whether `OFAC_BLOCKLIST_PATH` is set. An empty mount looks identical to a correct one from
+outside, which is why the deploy says which case it was rather than leaving you to guess.
 
 Freshness:
 - `data/ofac-blocklist.json` is committed and **baked into the image**, so each deploy
