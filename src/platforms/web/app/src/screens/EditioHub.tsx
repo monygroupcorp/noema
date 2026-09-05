@@ -4,6 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Collection } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
+import { publishNote, publishOutcome } from '../lib/editio';
 
 // Collection hub — one collection's home (the editio spine: garden → rules → run → curation →
 // export). Reads the real Collectio; the child authoring screens (garden/rules/curation/export)
@@ -15,7 +16,10 @@ export function EditioHub() {
   const [err, setErr] = useState<string | null>(null);
   // Cross-link into the other publish system: post the whole collection to the moderated feed
   // (UX handoff 2, D6). Mirrors Card's per-result publish, but with a `collectio` artifact ref.
-  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
+  // 'refused' is separate from 'err' for the same reason it is on Card: a gate refusal is
+  // terminal and carries a reason, and discarding the returned edition told the author
+  // "In review" for a post the gate had already turned down.
+  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'refused' | 'err'; msg?: string }>({ s: 'idle' });
 
   useEffect(() => {
     if (!id) return;
@@ -27,7 +31,8 @@ export function EditioHub() {
   async function postToFeed(collId: string) {
     setPub({ s: 'busy' });
     try {
-      await api.publish({ artifact: { kind: 'collectio', id: collId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      const { edition } = await api.publish({ artifact: { kind: 'collectio', id: collId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      if (publishOutcome(edition) === 'refused') { setPub({ s: 'refused', msg: publishNote(edition) }); return; }
       setPub({ s: 'done' });
     } catch (e) {
       setPub({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
@@ -105,6 +110,8 @@ export function EditioHub() {
         <div className="pub-row" style={{ margin: 'var(--s4) 0' }}>
           {pub.s === 'done' ? (
             <span className="pub-done"><Ic name="check" /> In review — it appears in the <Link to="/feed">feed</Link> once approved.</span>
+          ) : pub.s === 'refused' ? (
+            <span className="pub-err">Not published — {pub.msg}</span>
           ) : (
             <>
               <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => postToFeed(c.id)}>

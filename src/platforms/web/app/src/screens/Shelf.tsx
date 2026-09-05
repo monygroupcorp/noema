@@ -6,6 +6,7 @@ import { api, type ModelCard, type CatalogSort } from '../lib/api';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
+import { publishNote, publishOutcome } from '../lib/editio';
 
 // The models page, in two surfaces:
 //   1. the SHELF (train-shelf-spec.md) — the caller's own trained + imported models, from
@@ -119,7 +120,13 @@ export function Shelf() {
   // rather than leaving it genuinely still-settling — conflating the two left the button stuck
   // on a bare "publishing…" forever, indistinguishable from a hang (publish-review-visibility
   // spec, Gap A).
-  const [pubState, setPubState] = useState<Record<string, 'busy' | 'pending' | 'held' | 'err'>>({});
+  // 'refused' is likewise distinct from 'err': the gate declined this model, which is terminal
+  // and carries a reason, whereas 'err' is an adapter/network failure worth retrying. Offering
+  // "publish failed — retry" for a refusal sends the publisher round a loop that cannot ever
+  // succeed and never tells them why (moderation-reject-reason spec, §3(a) author surface).
+  // `note` carries the server's author-safe reason for a 'held' or 'refused' item.
+  type PubState = { s: 'busy' | 'pending' | 'held' | 'refused' | 'err'; note?: string };
+  const [pubState, setPubState] = useState<Record<string, PubState>>({});
 
   // The global catalog surface (GET /v1/models) — collapsed until asked for.
   const [catOpen, setCatOpen] = useState(false);
@@ -164,7 +171,7 @@ export function Shelf() {
   // 'unlisted' (not 'private') is what actually flips the model to listed: the access
   // reconciler (CrystalApi._reconcile) only sets access:'public' when visibility !== 'private'.
   async function publishModel(id: string) {
-    setPubState((s) => ({ ...s, [id]: 'busy' }));
+    setPubState((s) => ({ ...s, [id]: { s: 'busy' } }));
     try {
       const { edition } = await api.publish({
         artifact: { kind: 'intella', id },
@@ -177,20 +184,31 @@ export function Shelf() {
         setPubState((s) => { const n = { ...s }; delete n[id]; return n; });
         return;
       }
-      setPubState((s) => ({ ...s, [id]: 'pending' }));
+      // A permissive/synchronous gate can refuse before the first poll ever runs.
+      if (publishOutcome(edition) === 'refused') {
+        setPubState((s) => ({ ...s, [id]: { s: 'refused', note: publishNote(edition) } }));
+        return;
+      }
+      setPubState((s) => ({ ...s, [id]: { s: 'pending' } }));
       // Brief bounded poll — the worker settles this async (HF weight upload can take a
       // while). Stop and leave it as an honest 'pending' rather than hang indefinitely;
       // the badge catches up on the model's next natural load either way.
       for (let i = 0; i < 8; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         const { edition: polled } = await api.getEdition(edition.id);
-        if (polled.status === 'published') {
+        const outcome = publishOutcome(polled);
+        if (outcome === 'live') {
           setModels((cur) => (cur ?? []).map((m) => (m.intellaId === id ? { ...m, access: 'public' } : m)));
           setPubState((s) => { const n = { ...s }; delete n[id]; return n; });
           return;
         }
-        if (polled.status === 'failed' || polled.status === 'rejected') {
-          setPubState((s) => ({ ...s, [id]: 'err' }));
+        // Terminal refusal — say so, with the reason, and take the retry away.
+        if (outcome === 'refused') {
+          setPubState((s) => ({ ...s, [id]: { s: 'refused', note: publishNote(polled) } }));
+          return;
+        }
+        if (outcome === 'failed') {
+          setPubState((s) => ({ ...s, [id]: { s: 'err' } }));
           return;
         }
         // A HELD item stays status:'pending' through every poll — reviewOutcome is the
@@ -198,14 +216,14 @@ export function Shelf() {
         // the button is left reading "publishing…" forever, with no way to tell a HOLD
         // apart from a hang. Stop polling — an admin approval settles it, it never resolves
         // on its own.
-        if (polled.reviewOutcome === 'pending') {
-          setPubState((s) => ({ ...s, [id]: 'held' }));
+        if (outcome === 'held') {
+          setPubState((s) => ({ ...s, [id]: { s: 'held', note: publishNote(polled) } }));
           return;
         }
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-      setPubState((s) => ({ ...s, [id]: 'err' }));
+      setPubState((s) => ({ ...s, [id]: { s: 'err' } }));
     }
   }
 
@@ -301,6 +319,7 @@ export function Shelf() {
           <div className="shelfgrid">
             {shown.map((m) => {
               const listed = m.access === 'public';
+              const pub = pubState[m.intellaId];
               return (
                 <div key={m.intellaId} className="modelcard">
                   <div className="mc-sample" style={{ background: tileBg(m.intellaId) }}>
@@ -326,24 +345,28 @@ export function Shelf() {
                       <Link className="btn ghost" to={resolveUseInFlowTarget(m)}>Use in a flow</Link>
                       <Link className="btn accent" to="/collections"><Ic name="hexagon" /> Collection</Link>
                       <HoldingToggle kind="model" assetId={m.intellaId} projectId={target} />
-                      {!listed && pubState[m.intellaId] !== 'pending' && pubState[m.intellaId] !== 'held' && (
+                      {!listed && pub?.s !== 'pending' && pub?.s !== 'held' && pub?.s !== 'refused' && (
                         <button
                           className="btn ghost"
                           onClick={() => publishModel(m.intellaId)}
-                          disabled={pubState[m.intellaId] === 'busy'}
+                          disabled={pub?.s === 'busy'}
                           title="List this model publicly and make it eligible for royalty when others use it"
                         >
-                          {pubState[m.intellaId] === 'busy' ? 'publishing…' : pubState[m.intellaId] === 'err' ? 'publish failed — retry' : 'Publish'}
+                          {pub?.s === 'busy' ? 'publishing…' : pub?.s === 'err' ? 'publish failed — retry' : 'Publish'}
                         </button>
                       )}
-                      {!listed && pubState[m.intellaId] === 'pending' && (
+                      {!listed && pub?.s === 'pending' && (
                         <span className="mc-meta mono" title="Still settling — this can take a few minutes for weight upload">publishing…</span>
                       )}
-                      {!listed && pubState[m.intellaId] === 'held' && (
+                      {!listed && pub?.s === 'held' && (
                         <span className="mc-meta mono" title="A moderator needs to clear this before it can go live">
-                          held for review
+                          held for review · {pub.note}
                           {admin && <> · <Link to="/admin/review">see admin/review</Link></>}
                         </span>
+                      )}
+                      {/* Terminal: no retry button, and the reason instead of a bare failure. */}
+                      {!listed && pub?.s === 'refused' && (
+                        <span className="pub-err mono">not published · {pub.note}</span>
                       )}
                       {admin && (
                         <button className="btn ghost" onClick={() => reclassify(m.intellaId)} disabled={licBusy === m.intellaId} title="Admin: re-derive license from the base model">

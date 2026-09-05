@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection } from '../lib/api';
-import type { PublishRequest } from '../lib/editio';
+import { publishNote, publishOutcome, type PublishRequest } from '../lib/editio';
 
 // Export & publish (editio-export-spec.md). Publishing is a CHOICE OF DESTINATION across
 // the private→public hemisphere spectrum.
@@ -18,7 +18,7 @@ type Job =
   | { s: 'idle' }
   | { s: 'busy'; editionId: string; kind: Kind }
   | { s: 'ready'; url: string; kind: Kind; editionId: string }
-  | { s: 'rejected' }
+  | { s: 'rejected'; msg: string }
   | { s: 'err'; msg: string };
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -61,7 +61,7 @@ export function EditioExport() {
         const { edition } = await api.getEdition((job as { editionId: string }).editionId);
         if (!live) return;
         if (edition.status === 'published' && edition.externalRef) { setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id }); return; }
-        if (edition.status === 'rejected') { setJob({ s: 'rejected' }); return; }
+        if (edition.status === 'rejected') { setJob({ s: 'rejected', msg: publishNote(edition) }); return; }
         if (edition.status === 'failed') { setJob({ s: 'err', msg: 'The publish failed. Approve some pieces in curation, then try again.' }); return; }
         t = setTimeout(tick, 2500);
       } catch (e) { if (live) setJob({ s: 'err', msg: msg(e) }); }
@@ -91,7 +91,7 @@ export function EditioExport() {
     try {
       const { edition } = await api.publish(body);
       if (edition.status === 'published' && edition.externalRef) setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id });
-      else if (edition.status === 'rejected') setJob({ s: 'rejected' });
+      else if (publishOutcome(edition) === 'refused') setJob({ s: 'rejected', msg: publishNote(edition) });
       else setJob({ s: 'busy', editionId: edition.id, kind });
     } catch (e) { setJob({ s: 'err', msg: msg(e) }); }
   }
@@ -167,7 +167,7 @@ export function EditioExport() {
                   </button>
                 </div>
               ) : job.s === 'rejected' ? (
-                <div className="warn">Hosting is held for content-safety review — public destinations open once scanning is live. (Your export-to-you download works now.)</div>
+                <div className="warn">This collection wasn’t published to hosting — {job.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
               ) : (
                 <>
                   <label className="ex-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand this is a public, temporary bridge — I’ll migrate to permanent storage</label>

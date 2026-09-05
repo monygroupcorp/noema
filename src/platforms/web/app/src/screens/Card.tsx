@@ -11,6 +11,7 @@ import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
 import { humanizeKey } from '../lib/labels';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { publishNote, publishOutcome } from '../lib/editio';
 import { Lightbox } from '../components/Lightbox';
 
 type Aditus = Record<string, unknown>;
@@ -170,7 +171,12 @@ export function Card() {
   const [pinned, setPinned] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   // Publish-to-feed state for the current result.
-  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'err'; msg?: string }>({ s: 'idle' });
+  // 'refused' is separate from 'err': the moderation gate declined this result, which is
+  // terminal and comes with a reason, where 'err' is a request that failed and can be retried.
+  // Before this, a refusal was reported as 'done' — the POST's returned edition was thrown
+  // away, so a publish the gate had already rejected told its author "In review", and they
+  // waited on a feed appearance that was never coming.
+  const [pub, setPub] = useState<{ s: 'idle' | 'busy' | 'done' | 'refused' | 'err'; msg?: string }>({ s: 'idle' });
   // The active anonymous purse (Vault "use this purse") this run will spend from, if any.
   // createRun() sends it as x-bursa-token; here we only surface it + offer a clear affordance.
   const [activePurse, setActivePurseState] = useState<string | null>(getActivePurse());
@@ -319,7 +325,10 @@ export function Card() {
   async function publishToFeed(actumId: string) {
     setPub({ s: 'busy' });
     try {
-      await api.publish({ artifact: { kind: 'actum', id: actumId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      const { edition } = await api.publish({ artifact: { kind: 'actum', id: actumId }, destination: 'feed', visibility: 'feed', custody: 'ours' });
+      if (publishOutcome(edition) === 'refused') { setPub({ s: 'refused', msg: publishNote(edition) }); return; }
+      // 'settling' and 'held' are both honestly "in review" here — the copy promises a feed
+      // appearance only once approved, which is true of either.
       setPub({ s: 'done' });
     } catch (e) {
       setPub({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
@@ -569,6 +578,8 @@ export function Card() {
                     <div className="pub-row">
                       {pub.s === 'done' ? (
                         <span className="pub-done"><Ic name="check" /> In review — track it in the <Link to="/feed">feed</Link>, where it appears once approved.</span>
+                      ) : pub.s === 'refused' ? (
+                        <span className="pub-err">Not published — {pub.msg}</span>
                       ) : (
                         <>
                           <button className="btn ghost" disabled={pub.s === 'busy'} onClick={() => publishToFeed(runId!)}>
