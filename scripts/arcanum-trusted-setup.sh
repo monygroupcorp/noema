@@ -44,7 +44,7 @@ compile_circuit() {
   echo ""
   echo "=== Compile circuit ==="
   if [ ! -d "node_modules/circomlib" ]; then
-    echo "ERROR: circomlib not found. Run: npm install --legacy-peer-deps"
+    echo "ERROR: circomlib not found. Run: npm ci"
     exit 1
   fi
   circom "$CIRCUIT_DIR/arcanum.circom" \
