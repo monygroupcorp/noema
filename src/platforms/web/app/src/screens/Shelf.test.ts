@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveUseInFlowTarget } from './Shelf';
+import { heldModelPublishStates, resolveUseInFlowTarget } from './Shelf';
+import type { Editio } from '../lib/editio';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
 // so this exercises the shelf's pure "Use in a flow" target resolution rather than a full
@@ -39,5 +40,58 @@ describe('resolveUseInFlowTarget — "Use in a flow" base-card resolution (noema
   it('falls back to a plain flux-schnell card (no params) for an unresolvable/unknown basis', () => {
     expect(resolveUseInFlowTarget({ basis: undefined, trigger: 'x', nomen: 'x' })).toBe('/card?id=flux-schnell');
     expect(resolveUseInFlowTarget({ basis: 'unknown-family', trigger: 'x', nomen: 'x' })).toBe('/card?id=flux-schnell');
+  });
+});
+
+// A moderation HOLD never settles on its own — only a reviewer clears it. Held state the shelf
+// learned while polling a publish attempt was component memory, so a reload dropped it and the
+// model card offered a plain "Publish" again. This seeds the same state from the caller's own
+// review queue, which is the server's record of the hold.
+const ed = (p: Partial<Editio>): Editio => ({
+  id: 'e1',
+  artifact: { kind: 'intella', id: 'm1' },
+  destination: 'huggingface',
+  visibility: 'unlisted',
+  custody: 'ours',
+  status: 'pending',
+  createdAt: '2026-09-05T00:00:00.000Z',
+  updatedAt: '2026-09-05T00:00:00.000Z',
+  ...p,
+});
+
+describe('heldModelPublishStates — a hold survives the reload that used to lose it', () => {
+  it('marks a held model promotion, carrying the server\'s author-safe reason', () => {
+    const held = heldModelPublishStates([
+      ed({ reviewOutcome: 'pending', moderationNote: 'Held for a moderator to look at.' }),
+    ]);
+    expect(held).toEqual({ m1: { s: 'held', note: 'Held for a moderator to look at.' } });
+  });
+
+  it('falls back to a reason rather than rendering a held model with none', () => {
+    const held = heldModelPublishStates([ed({ reviewOutcome: 'pending' })]);
+    expect(held.m1.note).toBe('Flagged by automated review.');
+  });
+
+  it('ignores held publications of anything that is not a model', () => {
+    const held = heldModelPublishStates([
+      ed({ artifact: { kind: 'actum', id: 'a1' }, visibility: 'feed', destination: 'feed', reviewOutcome: 'pending' }),
+      ed({ artifact: { kind: 'collectio', id: 'c1' }, reviewOutcome: 'pending' }),
+    ]);
+    expect(held).toEqual({});
+  });
+
+  it('ignores an adjudicated entry — only a still-pending review is a hold', () => {
+    expect(heldModelPublishStates([ed({ status: 'published', reviewOutcome: 'approved' })])).toEqual({});
+    expect(heldModelPublishStates([ed({ status: 'rejected', reviewOutcome: 'rejected' })])).toEqual({});
+    expect(heldModelPublishStates([ed({ status: 'pending' })])).toEqual({});
+  });
+
+  it('keeps the newest hold when a model has been put forth more than once', () => {
+    // The queue is newest-first (Editiones.listHeld).
+    const held = heldModelPublishStates([
+      ed({ id: 'new', reviewOutcome: 'pending', moderationNote: 'the live hold' }),
+      ed({ id: 'old', reviewOutcome: 'pending', moderationNote: 'an earlier hold' }),
+    ]);
+    expect(held.m1.note).toBe('the live hold');
   });
 });
