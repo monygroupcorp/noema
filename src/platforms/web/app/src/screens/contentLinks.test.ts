@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The marketing pages are markdown rendered by <Doc/>, so every link in them is a plain anchor
@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url';
 // type connects them. So this walks both and insists every internal link resolves — either to a
 // declared route or to one of the server paths below, which the SPA fallback never reaches
 // because Express registers them first.
+//
+// The walk is RECURSIVE because the guides live a directory down, in `content/blog/`. A flat
+// read of `content/` covered the six top-level pages and silently skipped every guide — the
+// exact blind spot this file exists to close, reopened by a folder.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONTENT = join(HERE, '..', 'content');
@@ -26,6 +30,17 @@ function declaredRoutes(): Set<string> {
   const routes = new Set<string>();
   for (const m of src.matchAll(/<Route\s+path="([^"]+)"/g)) routes.add(m[1]);
   return routes;
+}
+
+/** Every markdown file under `dir`, at any depth, as paths relative to `dir`. */
+function markdownUnder(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory()
+      ? markdownUnder(join(dir, e.name), join(prefix, e.name))
+      : e.name.endsWith('.md')
+        ? [join(prefix, e.name)]
+        : []
+  );
 }
 
 /** True when `link` is matched by a declared route pattern, `:param` segments included. */
@@ -49,7 +64,15 @@ describe('links in published marketing copy', () => {
     expect(routes.has('/features')).toBe(true);
   });
 
-  for (const file of readdirSync(CONTENT).filter((f) => f.endsWith('.md'))) {
+  // A file this walk misses is a file whose links nothing checks, and it fails silently — the
+  // suite still passes, just over less. So assert the reach, not only the result.
+  it('reaches the guides, which are a directory down', () => {
+    const found = markdownUnder(CONTENT);
+    expect(found).toContain(join('blog', 'train-a-model.md'));
+    expect(found.filter((f) => f.startsWith(`blog${sep}`)).length).toBeGreaterThan(0);
+  });
+
+  for (const file of markdownUnder(CONTENT)) {
     it(`${file} links only to paths that exist`, () => {
       const md = readFileSync(join(CONTENT, file), 'utf8');
       const links = [...md.matchAll(/\]\((\/[^)\s]*)\)/g)].map((m) => m[1]);
