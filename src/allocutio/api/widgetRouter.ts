@@ -20,6 +20,13 @@
 // platform-wide list, else `'self'` (see `frame()` below) — and the iframe posts only
 // non-secret messages (WIDGET_READY / GALLERY_LIGHTBOX). We deliberately do NOT set
 // X-Frame-Options — it cannot express an allowlist and would shadow the CSP.
+//
+// THE ACCESS CODE never reaches this server. It is a Bursa bearer token capped only by the
+// purse's remaining balance and carrying no expiry, so a copy of it is the purse; and the run
+// panel renders the same for every holder, so the server has no use for one. The gate hands the
+// code to the run panel inside the browser, and it leaves only as `x-bursa-token` on /v1/runs.
+// Links minted before this carried it as `?code=`; such a link is adopted once and scrubbed out
+// of the URL, and `Referrer-Policy: no-referrer` covers the one load that adopts it.
 
 import express, { type Router, type Request, type Response } from 'express'
 import type { Legatus, LegatusStore } from '../../types/legatus.js'
@@ -313,7 +320,30 @@ const RUN_SCRIPT = `(function(){
   // The purse run (§7): the widget holds a Bursa token (the access code) and runs the agent's
   // modus on it via the existing /v1/runs path — no wallet, no x402 (that's the machine surface).
   // Dispatch → stream the run's real Progressus (/v1/runs/:id/stream) → fetch the exitus.
-  var TOKEN=(document.getElementById('runwrap')||{}).getAttribute?document.getElementById('runwrap').getAttribute('data-code'):'';
+  //
+  // The code is held HERE, in the browser, and nowhere else: the gate hands it straight to the
+  // run panel with no navigation, so it never enters the URL, the address bar, a history entry,
+  // a bookmark, a Referer or a server log. A legacy ?code= link still works — it is adopted once
+  // and then scrubbed out of the URL. sessionStorage is a best-effort convenience for a reload;
+  // a partner iframe with storage blocked simply asks for the code again.
+  var TOKEN='', gate=document.getElementById('gate'), wrap=document.getElementById('runwrap');
+  var KEY='noema.widget.code:'+location.pathname;
+  function showGate(){ if(gate) gate.hidden=false; if(wrap) wrap.hidden=true;
+    // Focused here rather than by an autofocus attribute: the gate ships on every load, and
+    // autofocus would steal the partner page's scroll position from inside the iframe.
+    var gi=document.getElementById('gatecode'); if(gi) try{ gi.focus({preventScroll:true}); }catch(e){} }
+  function hold(c){ TOKEN=c; try{ sessionStorage.setItem(KEY,c); }catch(e){}
+    if(gate) gate.hidden=true; if(wrap) wrap.hidden=false; }
+  function adopt(){ var u=new URL(location.href), q=u.searchParams.get('code');
+    if(q&&q.trim()){ u.searchParams.delete('code');
+      try{ history.replaceState(null,'',u.pathname+u.search+u.hash); }catch(e){}
+      hold(q.trim()); return; }
+    var s=''; try{ s=sessionStorage.getItem(KEY)||''; }catch(e){}
+    if(s) hold(s); else showGate(); }
+  adopt();
+  var gform=document.getElementById('gateform'), ginp=document.getElementById('gatecode');
+  if(gform) gform.addEventListener('submit', function(e){ e.preventDefault();
+    var c=(ginp.value||'').trim(); if(c){ ginp.value=''; hold(c); } });
   function finishRun(id){ fetch('/v1/runs/'+encodeURIComponent(id),{headers:{'x-bursa-token':TOKEN}})
     .then(function(r){return r.json();}).then(function(run){ hideBar(); render(run&&(run.outputs||run.exitus)); btn.disabled=false; })
     .catch(function(){ hideBar(); status('Done.'); btn.disabled=false; }); }
@@ -331,7 +361,7 @@ const RUN_SCRIPT = `(function(){
       .catch(function(e){ hideBar(); status('Error: '+e.message); btn.disabled=false; }); }
   if(btn) btn.addEventListener('click', function(){
     var f=active(); if(!f) return; lastModus=f.getAttribute('data-modus'); lastInputs=collect(f);
-    if(!TOKEN){ status('No access code — reload with your code.'); return; }
+    if(!TOKEN){ showGate(); status('No access code — enter your code above.'); return; }
     btn.disabled=true; out.innerHTML=''; status('Dispatching…');
     fetch('/v1/runs',{method:'POST',headers:{'content-type':'application/json','x-bursa-token':TOKEN},body:JSON.stringify({modusId:lastModus,aditus:lastInputs})})
       .then(function(r){ return r.json().then(function(d){return{status:r.status,data:d};}); })
@@ -339,17 +369,6 @@ const RUN_SCRIPT = `(function(){
         if(!id){ status('Error: '+((p.data&&p.data.error&&p.data.error.message)||('status '+p.status))); btn.disabled=false; return; }
         streamRun(id); })
       .catch(function(e){ status('Error: '+e.message); btn.disabled=false; }); });
-  try{ parent.postMessage({type:'WIDGET_READY'},'*'); }catch(e){}
-  document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
-    if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
-})();`
-
-// The entrance gate — shown when the widget has no access code. Redeeming = navigating to
-// ?code=<token>, which reloads into the run panel holding that Bursa token.
-const ENTRANCE_JS = `(function(){
-  var form=document.getElementById('gateform'), inp=document.getElementById('gatecode');
-  if(form) form.addEventListener('submit', function(e){ e.preventDefault(); var c=(inp.value||'').trim();
-    if(c){ var u=new URL(location.href); u.searchParams.set('code', c); location.href=u.toString(); } });
   try{ parent.postMessage({type:'WIDGET_READY'},'*'); }catch(e){}
   document.addEventListener('click', function(ev){ var t=ev.target.closest&&ev.target.closest('.tile[data-url]');
     if(t){ try{ parent.postMessage({type:'GALLERY_LIGHTBOX',url:t.getAttribute('data-url')},'*'); }catch(e){} } });
@@ -368,6 +387,9 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`)
     res.setHeader('Cache-Control', 'no-store')
+    // A legacy ?code= link still lands here with a bearer token in the URL. `no-referrer` keeps
+    // that URL off every request the page then makes — the gallery's cross-origin media above all.
+    res.setHeader('Referrer-Policy', 'no-referrer')
   }
 
   // GET /widget/sdk.js — the browser SDK. Loaded via <script>, so no framing header.
@@ -450,39 +472,37 @@ export function createWidgetRouter(deps: WidgetRouterDeps): Router {
       }
     }
 
-    // The access code (a Bursa token) — from `?code=`. Present → the run panel (runs spend
-    // that purse via /v1/runs); absent → the entrance gate. The widget is for code/account
-    // holders (§7); x402 is the separate machine surface.
-    const code = typeof req.query.code === 'string' ? req.query.code : ''
+    // The access code is a Bursa BEARER token: its cap is the purse's whole remaining balance
+    // and it has no expiry (`Bursa`, src/types/bursa.ts) — only the owner revoking it ends it.
+    // So a code that leaks is the purse, until someone notices. Nothing on this route needs it:
+    // the run panel is identical for every holder, and the token is only ever presented as
+    // `x-bursa-token` on /v1/runs. It is therefore never read here and never rendered here —
+    // the server ships BOTH the gate and the (hidden) run panel, and the browser holds the code.
+    // The widget is for code/account holders (§7); x402 is the separate machine surface.
     let panel = ''
     let script = IFRAME_BRIDGE
     if (modi.length && deps.quoteImpetus) {
-      if (code) {
-        const quoteImpetus = deps.quoteImpetus
-        const panels = await Promise.all(modi.map(async (m, i) => {
-          const impetus = await quoteImpetus(m.id)
-          const price = `~${impetus.toString()} cr`
-          const fields = Object.entries(m.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
-          return {
-            chip: `<button class="modchip${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}">${esc(m.nomen)}</button>`,
-            form: `<form class="mform${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}" data-price="${esc(price)}" onsubmit="return false">${fields}</form>`,
-            price,
-          }
-        }))
-        const picker = modi.length > 1 ? `<div class="modpick">${panels.map((p) => p.chip).join('')}</div>` : ''
-        panel =
-          `<div class="run" id="runwrap" data-code="${esc(code)}">${picker}${panels.map((p) => p.form).join('')}` +
-          `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
-          `<div id="rstatus"></div><div id="rbar" class="bar"><span></span></div><div id="rresult" class="grid"></div></div>`
-        script = RUN_SCRIPT
-      } else {
-        panel =
-          `<div class="gate"><div class="kicker">Access</div><h3>Enter your access code</h3>` +
-          `<p>Paste the invite code the owner shared to run this agent on its balance.</p>` +
-          `<form id="gateform"><input id="gatecode" placeholder="access code" autocomplete="off" spellcheck="false" autofocus>` +
-          `<button type="submit">Continue</button></form></div>`
-        script = ENTRANCE_JS
-      }
+      const quoteImpetus = deps.quoteImpetus
+      const panels = await Promise.all(modi.map(async (m, i) => {
+        const impetus = await quoteImpetus(m.id)
+        const price = `~${impetus.toString()} cr`
+        const fields = Object.entries(m.aditus).map(([name, porta]) => fieldHtml(name, porta)).join('')
+        return {
+          chip: `<button class="modchip${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}">${esc(m.nomen)}</button>`,
+          form: `<form class="mform${i === 0 ? ' active' : ''}" data-modus="${esc(m.id)}" data-price="${esc(price)}" onsubmit="return false">${fields}</form>`,
+          price,
+        }
+      }))
+      const picker = modi.length > 1 ? `<div class="modpick">${panels.map((p) => p.chip).join('')}</div>` : ''
+      panel =
+        `<div class="gate" id="gate"><div class="kicker">Access</div><h3>Enter your access code</h3>` +
+        `<p>Paste the invite code the owner shared to run this agent on its balance.</p>` +
+        `<form id="gateform"><input id="gatecode" placeholder="access code" autocomplete="off" spellcheck="false">` +
+        `<button type="submit">Continue</button></form></div>` +
+        `<div class="run" id="runwrap" hidden>${picker}${panels.map((p) => p.form).join('')}` +
+        `<button id="runbtn">Run · ${esc(panels[0].price)}</button>` +
+        `<div id="rstatus"></div><div id="rbar" class="bar"><span></span></div><div id="rresult" class="grid"></div></div>`
+      script = RUN_SCRIPT
     }
 
     const tiles = items.flatMap((i) => tilesFromOutput(i.output))
