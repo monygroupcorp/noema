@@ -11,8 +11,10 @@ import { publishNote, publishOutcome, type Editio } from '../lib/editio';
 // The models page, in two surfaces:
 //   1. the SHELF (train-shelf-spec.md) — the caller's own trained + imported models, from
 //      GET /v1/me/models. Cards show real provenance (base model, trigger, license, listing
-//      state). Royalty/run economics don't exist server-side yet (Tier B #5), so they're not
-//      shown — the shelf reflects only what the backend actually knows.
+//      state). No earnings are shown, and the reason is a READ gap, not a missing feature:
+//      `ledger/hooks/modelRoyalty.ts` does split a share of every run's spend across a published
+//      model's rights holders, but nothing serves an earner their accrued total, so there is
+//      nothing to render. The shelf reflects only what the backend will actually answer for.
 //   2. the CATALOG — everything the platform publicly carries, from GET /v1/models, browsable
 //      and sortable, collapsed by default and fetched only once expanded (the catalog grows;
 //      an unconditional fetch on every visit is waste). Catalog cards are read-only.
