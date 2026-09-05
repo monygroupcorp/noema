@@ -61,7 +61,9 @@ export function CanonicRun() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
+    // No id in the route is the third door to "Loading… and nothing else": returning early
+    // leaves `c` null and `err` null forever. There is no run to read, so say that.
+    if (!id) { setErr('this URL names no run'); return; }
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // The collection and the rarity table are fetched INDEPENDENTLY, not as one `Promise.all`.

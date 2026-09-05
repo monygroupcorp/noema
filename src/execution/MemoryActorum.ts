@@ -1,4 +1,4 @@
-import type { Actum } from '../types/actum.js'
+import type { Actum, ActumStatus } from '../types/actum.js'
 import type { Actorum } from '../types/cursus.js'
 
 export class MemoryActorum implements Actorum {
@@ -61,5 +61,15 @@ export class MemoryActorum implements Actorum {
 
   async findByCompositum(parentId: string): Promise<Actum[]> {
     return Array.from(this.store.values()).filter(a => a.compositum?.parentId === parentId)
+  }
+
+  async countByIdsWithStatus(ids: string[], statuses: ActumStatus[]): Promise<number> {
+    const wanted = new Set<string>(statuses)
+    let n = 0
+    for (const id of ids) {
+      const a = this.store.get(id)
+      if (a && wanted.has(a.status)) n++
+    }
+    return n
   }
 }

@@ -1486,12 +1486,26 @@ export class CrystalApi {
     return out
   }
 
-  /** Count a Collection's in-flight (nascens/agens) acta for its run-liveness display.
-   *  Same acta-scan shape as `getCollectionRarity`/`listCollectionPieces`. */
+  /**
+   * Count a Collection's in-flight (nascens/agens) acta for its run-liveness display.
+   *
+   * Counted IN THE STORE (`Actorum.countByIdsWithStatus`), because this read gates the run
+   * screen: `/collections/:id/run` shows "Loading…" until `getCollection` answers and polls it
+   * every 2.5 seconds thereafter. Walking the acta one `findById` at a time made the cost of
+   * answering scale with the size of the run being displayed — the largest collections, the ones
+   * whose progress most needs watching, were the slowest to draw and got slower as they grew.
+   *
+   * The per-actum scan survives as the fallback for a store with no counting read.
+   */
   private async _collectionInFlight(c: Collectio): Promise<number> {
+    if (c.acta.length === 0) return 0
+    const { actorum } = this.deps
+    if (actorum.countByIdsWithStatus) {
+      return actorum.countByIdsWithStatus(c.acta, ['nascens', 'agens'])
+    }
     let inFlight = 0
     for (const actumId of c.acta) {
-      const actum = await this.deps.actorum.findById(actumId)
+      const actum = await actorum.findById(actumId)
       if (!actum) continue
       if (actum.status === 'nascens' || actum.status === 'agens') inFlight++
     }
