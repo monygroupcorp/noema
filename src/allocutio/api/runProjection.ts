@@ -14,10 +14,14 @@ import type { Sodalitas } from '../../types/sodalitas.js'
 import type { Provincia } from '../../types/provincia.js'
 import type { ActumIndex } from '../../types/actumIndex.js'
 import type { Mandatum } from '../../types/mandatum.js'
+import type { Signum } from '../../types/significandi.js'
 import { IMPETUS_USD_RATE } from '../../ledger/rates.js'
+import { earningKind } from '../../ledger/earnings.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { failureStage } from '../../lib/retryVerdict.js'
-import type { Run, RunOrder, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun } from './types.js'
+import type {
+  Run, RunOrder, RunStatus, Collection, CollectionStatus, Team, Edition, Project, SettledRun, Earning,
+} from './types.js'
 
 /** Map the Latin ActumStatus onto the public English RunStatus. */
 const STATUS_MAP: Record<ActumStatus, RunStatus> = {
@@ -163,6 +167,29 @@ export function toSettledRun(entry: ActumIndex): SettledRun {
   }
   if (entry.settledAt !== undefined) out.settledAt = new Date(entry.settledAt).toISOString()
   if (entry.createdAt !== undefined) out.createdAt = new Date(entry.createdAt).toISOString()
+  return out
+}
+
+/**
+ * One ledger row → one public `Earning`. The mirror of `toSettledRun`: impetus as a string,
+ * USD derived on read at the platform reference rate, the timestamp as ISO-8601.
+ *
+ * The caller has already filtered to earning auctors, so `earningKind` resolves; a row whose
+ * auctor is not an earning is refused rather than reported under a guessed kind.
+ */
+export function toEarning(s: Signum): Earning {
+  const kind = earningKind(s.auctor)
+  if (!kind) throw new Error(`not an earning auctor: ${s.auctor}`)
+  const out: Earning = {
+    id: s.id,
+    kind,
+    impetus: s.valor.toString(),
+    usd: Number(s.valor) * IMPETUS_USD_RATE,
+    earnedAt: new Date(s.natum).toISOString(),
+  }
+  // hostCut/hospitium stamp the studio (Materia.id) they were served from; the royalty
+  // and referral streams carry none, and the field is simply absent there.
+  if (s.contextId !== undefined) out.studioId = s.contextId
   return out
 }
 

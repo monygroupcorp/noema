@@ -16,7 +16,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import express, { type Request, type Response, type Router } from 'express'
 
-import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage } from './types.js'
+import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage, EarningsView } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
 import type { FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
@@ -108,6 +108,8 @@ export interface ApiFacade {
   /** Cancel that order. Idempotent; null when the run has no order. */
   revokeRunOrder(auctor: AuctorKey, runId: string): Promise<RunOrder | null>
   listRuns(auctor: AuctorKey, opts: import('./CrystalApi.js').ListRunsOpts): Promise<RunsPage>
+  /** What the caller has earned — lifetime total, per-stream breakdown, and a page of payments. */
+  listEarnings(auctor: AuctorKey, opts: import('./CrystalApi.js').ListEarningsOpts): Promise<EarningsView>
   /** The caller's in-flight + settled runs as one newest-first projection, each with a door. */
   listActivity(auctor: AuctorKey, opts: import('./CrystalApi.js').ListActivityOpts): Promise<ActivityPage>
   listFlows(): Promise<unknown[]>
@@ -1125,6 +1127,18 @@ export function createApiRouter(deps: {
     const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
     const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
     res.json(await api.listActivity(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
+  }))
+
+  // GET /v1/me/earnings — what the caller has EARNED: lifetime total, the per-stream
+  // breakdown behind it (spell royalty, model royalty, host cut, host bonus, referral), and
+  // a newest-first page of the individual payments. Owner-scoped by the ledger's own identity
+  // key, cursor-paginated. `?cursor=` pages, `?limit=` sizes (1..100, default 20).
+  router.get('/me/earnings', wrap(async (req, res) => {
+    const auctor = await auth(req)
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined
+    res.json(await api.listEarnings(auctor, { ...(cursor ? { cursor } : {}), ...(limit !== undefined ? { limit } : {}) }))
   }))
 
   // GET /v1/data/datasets — the caller's datasets as the THIN `DatasetSummary[]` projection

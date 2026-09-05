@@ -93,6 +93,8 @@ function makeSignorum(): Signorum & { issued: Signum[] } {
     async lock() {},
     async release() {},
     async history() { return [] },
+    async earningTotals() { return [] },
+    async listEarnings() { return { entries: [] } },
     async settle() {},
     async sessionBudget() { throw new Error('not implemented') },
     async reserve() { throw new Error('not implemented') },

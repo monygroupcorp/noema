@@ -76,6 +76,8 @@ function makeSignorum() {
     lock: async () => {},
     release: async (ids: string[]) => { released.push(...ids) },
     history: async () => [],
+    earningTotals: async () => [],
+    listEarnings: async () => ({ entries: [] }),
     settle: async (ids: string[], actualImpetus: bigint, actumId: string) => { settled.push({ ids, actualImpetus, actumId }) },
     sessionBudget: unmodelled('Signorum', 'sessionBudget'),
     reserve: unmodelled('Signorum', 'reserve'),

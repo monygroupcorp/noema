@@ -1,12 +1,31 @@
 import { randomUUID } from 'node:crypto'
-import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus } from '../types/significandi.js'
+import type {
+  Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus,
+  EarningTotal, EarningsPage,
+} from '../types/significandi.js'
 import { transferVia } from './transfer.js'
+import { EARNING_AUCTORS } from './earnings.js'
 
 /**
  * Auctor stamped on BOTH halves of a note split at reserve time — the register that names the
  * operation, mirroring `settle:delta` on the overshoot refund. MongoSignorum uses the same value.
  */
 export const RESERVE_CHANGE_AUCTOR = 'reserve:change'
+
+/** The `${iso}|${id}` earnings cursor, read back. Mirrors MongoSignorum's decoder. */
+function decodeMemoryCursor(cursor: string): { natum: Date; id: string } | null {
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf8')
+    const sep = raw.lastIndexOf('|')
+    if (sep < 0) return null
+    const natum = new Date(raw.slice(0, sep))
+    const id = raw.slice(sep + 1)
+    if (Number.isNaN(natum.getTime()) || !id) return null
+    return { natum, id }
+  } catch {
+    return null
+  }
+}
 
 export class MemorySignorum implements Signorum {
   private readonly store = new Map<string, Signum>()
@@ -36,6 +55,41 @@ export class MemorySignorum implements Signorum {
 
   async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     return this.forIdentity(by)
+  }
+
+  /** Memory parity for the Mongo `$group`: the single-writer Map has no index, so the scan
+   *  IS the aggregation (as `history()` is the listing). Same allowlist, same all-status rule. */
+  async earningTotals(by: { animaId: string } | { commitment: string }): Promise<EarningTotal[]> {
+    const totals = new Map<string, EarningTotal>()
+    for (const s of this.earningsFor(by)) {
+      const t = totals.get(s.auctor) ?? { auctor: s.auctor, impetus: 0n, count: 0 }
+      totals.set(s.auctor, { auctor: s.auctor, impetus: t.impetus + s.valor, count: t.count + 1 })
+    }
+    return Array.from(totals.values())
+  }
+
+  async listEarnings(
+    by: { animaId: string } | { commitment: string },
+    opts: { limit: number; cursor?: string },
+  ): Promise<EarningsPage> {
+    const limit = Math.min(Math.max(Math.trunc(opts.limit) || 0, 1), 100)
+    // (natum desc, id desc) — the same deterministic order the Mongo cursor resumes.
+    const sorted = this.earningsFor(by).sort((a, b) =>
+      b.natum.getTime() - a.natum.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+
+    let rest = sorted
+    if (opts.cursor) {
+      const c = decodeMemoryCursor(opts.cursor)
+      if (c) rest = sorted.filter(s => s.natum.getTime() < c.natum.getTime()
+        || (s.natum.getTime() === c.natum.getTime() && s.id < c.id))
+    }
+
+    const entries = rest.slice(0, limit)
+    const last = entries[entries.length - 1]
+    const nextCursor = rest.length > limit && last
+      ? Buffer.from(`${last.natum.toISOString()}|${last.id}`, 'utf8').toString('base64url')
+      : undefined
+    return { entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
   async findByTestis(testis: string): Promise<Signum | null> {
@@ -235,6 +289,12 @@ export class MemorySignorum implements Signorum {
         : { animaId: first.animaId, forma: first.forma, valor: delta, auctor: 'settle:delta' }
       await this.issue(refund)
     }
+  }
+
+  /** The identity's rows minted by an earning hook — the allowlist filter both earning
+   *  reads share, so the totals and the statement can never disagree on what counts. */
+  private earningsFor(by: { animaId: string } | { commitment: string }): Signa {
+    return this.forIdentity(by).filter(s => EARNING_AUCTORS[s.auctor] !== undefined)
   }
 
   private forIdentity(by: { animaId: string } | { commitment: string }): Signa {

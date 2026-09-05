@@ -4,7 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
 import { useIdentity } from '../state/identity';
 import { counts, type Project } from '../lib/projects';
-import { api, type ActivityRow } from '../lib/api';
+import { api, type ActivityRow, type EarningKind, type EarningsView } from '../lib/api';
 import { activityDoorHref, activityRowLabel, partitionHomeActivity } from '../lib/muse';
 import { Ic } from '../lib/icons';
 
@@ -25,6 +25,26 @@ const ACTIVITY_ICON: Record<ActivityRow['kind'], string> = {
   decompose: 'workflow',
   generation: 'sparkles',
 };
+
+// The earner-facing name of each royalty/hosting stream, for the tile's sub-line. Keyed by
+// the API's own `kind` so a stream the backend adds names itself as soon as it pays.
+const EARNING_LABEL: Record<EarningKind, string> = {
+  'spell-royalty': 'spell royalties',
+  'model-royalty': 'model royalties',
+  'host-cut': 'host cut',
+  'host-bonus': 'host bonus',
+  referral: 'referrals',
+};
+
+// What the royalties tile says under the number. Before the read lands there is nothing to
+// claim, so it says nothing. Once it has, the streams that actually paid are named; an
+// account that has earned nothing yet is told what would pay it, not promised a future.
+export function royaltyFoot(e: EarningsView | null): string {
+  if (!e) return '';
+  const paid = e.streams.filter((s) => s.impetus !== '0');
+  if (!paid.length) return 'publish a flow or a model — every run that uses it pays you';
+  return `${paid.map((s) => EARNING_LABEL[s.kind]).join(' · ')} — credited to your balance`;
+}
 
 // The TEE roadmap line is not mode-gated (rth ruling, noema-344): every viewer — guest,
 // signed-in, or ZK-private — sees it, not only accounts already running in TEE mode.
@@ -54,10 +74,15 @@ export function Dashboard() {
   const { ident, execution } = useIdentity();
   const [credits, setCredits] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
+  const [earnings, setEarnings] = useState<EarningsView | null>(null);
 
   useEffect(() => {
     let live = true;
     api.meStatus().then((s) => { if (live && s?.balanceImpetus != null) setCredits(Number(s.balanceImpetus).toLocaleString()); }).catch(() => {});
+    // The royalties tile: what this account has been paid for its own published work. One row
+    // is page enough — the tile reads `lifetime`, which covers the whole history whatever the
+    // page size; the payments themselves are the API's, at GET /v1/me/earnings.
+    api.meEarnings({ limit: 1 }).then((e) => { if (live) setEarnings(e); }).catch(() => {});
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -89,8 +114,10 @@ export function Dashboard() {
             </div>
             <div className="ib-cell">
               <div className="ib-l">royalties · lifetime</div>
-              <div className="ib-n gold"><span className="gem">◈</span> —</div>
-              <div className="ib-sub">coming soon — payouts land with noesis</div>
+              <div className="ib-n gold">
+                <span className="gem">◈</span> {earnings ? Number(earnings.lifetime.impetus).toLocaleString() : '—'}
+              </div>
+              <div className="ib-sub">{royaltyFoot(earnings)}</div>
             </div>
           </div>
         </div>

@@ -44,7 +44,7 @@ import { aggregateStatus, materiaStudioStatus } from '../lexicon/status/aggregat
 import type { ModoStore } from '../../types/modo.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { dispatchInceptio, type DispatchDeps } from '../../execution/dispatchInceptio.js'
-import { toRun, toRunDetail, toRunOrder, toSettledRun, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
+import { toRun, toRunDetail, toRunOrder, toSettledRun, toEarning, toCollection, toTeam, toEdition, toProject } from './runProjection.js'
 import {
   HOURLY_CRON, ORDER_MAX_RUNS, ORDER_WINDOW_MS, TRAINING_MODUS_ID,
 } from '../../crystal/MandatumRunner.js'
@@ -57,15 +57,24 @@ import { resolveCanonVerb, type CanonVerb } from '../../crystal/verbResolver.js'
 import { resolvePinnedModel, type PinnedInput } from '../../crystal/pinnedModelResolver.js'
 import { computeRecipient } from '../../arcanum/prover.js'
 import { impetusForPodMs, usdMicroToImpetus, IMPETUS_USD_RATE } from '../../ledger/rates.js'
+import { earningKind, EARNING_KIND_ORDER, type EarningKind } from '../../ledger/earnings.js'
 import { fundingBps, applyFundingBps, DEFAULT_FUNDING_BPS } from '../../ledger/depositFunding.js'
 import type { AssetPricer } from '../../crystal/AssetPricer.js'
 import type {
   Run, RunOrder, Collection, CollectionPiece, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage,
-  ActivityKind, ActivityDoor, ActivityRow, ActivityPage,
+  ActivityKind, ActivityDoor, ActivityRow, ActivityPage, EarningsView, EarningStream,
 } from './types.js'
 
 /** Options for the owner's settled spend-history listing (`listRuns`). */
 export interface ListRunsOpts {
+  /** Opaque page cursor from a prior page; omit for the first page. */
+  cursor?: string
+  /** Page size (clamped 1..100; default 20). */
+  limit?: number
+}
+
+/** Options for the owner's earnings read (`listEarnings`). Mirrors `ListRunsOpts`. */
+export interface ListEarningsOpts {
   /** Opaque page cursor from a prior page; omit for the first page. */
   cursor?: string
   /** Page size (clamped 1..100; default 20). */
@@ -1259,6 +1268,61 @@ export class CrystalApi {
     if (!cfg || key === undefined) return undefined
     const expiresIn = cfg.presignTtlSeconds ?? PRIVATE_PRESIGN_TTL_SECONDS
     return (await cfg.store.getSignedDownloadUrl(key, { expiresIn }).catch(() => null)) ?? undefined
+  }
+
+  /**
+   * What the caller has EARNED — the read side of the royalty rails (`GET /v1/me/earnings`).
+   *
+   * Runs pay their author and their models' authors on every completion (spellRoyalty,
+   * modelRoyalty), a host on every guest gen served from their pod (hostCut, hospitium),
+   * and a referrer on a referred deposit (referralSplit). Every one of those lands as a
+   * ledger row on the earner. This is where the earner reads them back: the lifetime total,
+   * the per-stream breakdown behind it, and a newest-first page of the payments themselves.
+   *
+   * OWNER-SCOPED by construction — the ledger rows ARE keyed by identity, so the store's
+   * two queries are scoped to the caller's own `animaId` (or anon `commitment`) and can
+   * return no one else's earnings. A bursaToken caller has no ledger identity and never
+   * earns, so it gets an empty view rather than an error.
+   *
+   * SPENDING DOES NOT REDUCE IT: the totals sum every status, because a royalty the earner
+   * has since spent was still earned. This is an earnings statement, not a balance —
+   * `GET /v1/me/status` is the balance.
+   */
+  async listEarnings(auctor: AuctorKey, opts: ListEarningsOpts = {}): Promise<EarningsView> {
+    const empty: EarningsView = { lifetime: { impetus: '0', usd: 0 }, streams: [], earnings: [] }
+    if ('bursaToken' in auctor) return empty
+
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
+    const [totals, page] = await Promise.all([
+      this.deps.signorum.earningTotals(auctor),
+      this.deps.signorum.listEarnings(auctor, { limit, ...(opts.cursor ? { cursor: opts.cursor } : {}) }),
+    ])
+
+    // Fold the per-auctor totals onto their streams — modelRoyalty pays one row per payee
+    // weight, so two auctors could in principle map to one kind; the fold is what keeps the
+    // breakdown keyed by what the earner recognises rather than by the hook that minted it.
+    const byKind = new Map<EarningKind, EarningStream>()
+    let lifetime = 0n
+    for (const t of totals) {
+      const kind = earningKind(t.auctor)
+      if (!kind) continue
+      const prev = byKind.get(kind)
+      const impetus = (prev ? BigInt(prev.impetus) : 0n) + t.impetus
+      byKind.set(kind, {
+        kind,
+        impetus: impetus.toString(),
+        usd: Number(impetus) * IMPETUS_USD_RATE,
+        count: (prev?.count ?? 0) + t.count,
+      })
+      lifetime += t.impetus
+    }
+
+    return {
+      lifetime: { impetus: lifetime.toString(), usd: Number(lifetime) * IMPETUS_USD_RATE },
+      streams: EARNING_KIND_ORDER.map(k => byKind.get(k)).filter((s): s is EarningStream => !!s),
+      earnings: page.entries.map(toEarning),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    }
   }
 
   /** A run is owned by an auctor iff:

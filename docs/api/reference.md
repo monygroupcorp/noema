@@ -2166,6 +2166,143 @@ The caller's SETTLED spend history — per-run impetus cost (+ derived USD), set
 }
 ```
 
+### GET /v1/me/earnings
+
+What the caller has EARNED — royalties on their flows and models, cuts and bonuses on gens served from their pods, referral shares. Returns the lifetime total, the per-stream breakdown, and a newest-first page of the individual payments. Owner-scoped by the ledger's own identity key, cursor-paginated. Sums every status: a royalty since spent was still earned.
+
+- **Auth:** required
+
+**Query parameters:**
+
+- `cursor` (string) — Opaque page cursor: pass the `nextCursor` from the previous response to fetch the next page of payments.
+- `limit` (integer) — Page size. Clamped to 1..100; defaults to 20.
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "What the caller has earned: the lifetime total, the per-stream breakdown behind it, and a page of the individual payments. `lifetime` and `streams` cover the caller's whole history, not just this page. Every total sums earnings of EVERY status — a royalty since spent was still earned — so this is a statement of earnings, not a balance (GET /v1/me/status is the balance).",
+  "properties": {
+    "lifetime": {
+      "type": "object",
+      "description": "Everything the caller has ever earned, across every stream.",
+      "properties": {
+        "impetus": {
+          "type": "string",
+          "description": "Total impetus earned, serialised as a string."
+        },
+        "usd": {
+          "type": "number",
+          "description": "Total USD, derived at the platform reference rate."
+        }
+      },
+      "required": [
+        "impetus",
+        "usd"
+      ]
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One stream's lifetime contribution to the caller's earnings.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spell-royalty",
+              "model-royalty",
+              "host-cut",
+              "host-bonus",
+              "referral"
+            ],
+            "description": "The stream."
+          },
+          "impetus": {
+            "type": "string",
+            "description": "Everything this stream has ever paid the caller, as a string."
+          },
+          "usd": {
+            "type": "number",
+            "description": "Derived USD at the platform reference rate."
+          },
+          "count": {
+            "type": "number",
+            "description": "How many payments make up the total."
+          }
+        },
+        "required": [
+          "kind",
+          "impetus",
+          "usd",
+          "count"
+        ]
+      },
+      "description": "The streams that have paid, in a stable display order. A stream that never paid is absent."
+    },
+    "earnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One payment the caller RECEIVED because someone else ran something.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ledger row id — also the page cursor's tiebreak."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spell-royalty",
+              "model-royalty",
+              "host-cut",
+              "host-bonus",
+              "referral"
+            ],
+            "description": "Which stream paid: a royalty on the caller's flow (spell-royalty) or on a model of theirs a run used (model-royalty), a cut of a gen served on their pod (host-cut) or the ambassador bonus on it (host-bonus), or a share of a referred account's deposit (referral)."
+          },
+          "impetus": {
+            "type": "string",
+            "description": "Impetus earned by this row, serialised as a string."
+          },
+          "usd": {
+            "type": "number",
+            "description": "Derived USD at the platform reference rate."
+          },
+          "earnedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was earned, ISO-8601."
+          },
+          "studioId": {
+            "type": "string",
+            "description": "The studio it was served from, on the hosting streams that carry one."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "impetus",
+          "usd",
+          "earnedAt"
+        ]
+      },
+      "description": "This page of payments, newest first."
+    },
+    "nextCursor": {
+      "type": "string",
+      "description": "Opaque cursor for the next page; absent on the last page."
+    }
+  },
+  "required": [
+    "lifetime",
+    "streams",
+    "earnings"
+  ]
+}
+```
+
 ### GET /v1/me/activity
 
 The caller's activity — in-flight and settled runs in ONE newest-first projection, each row carrying its kind and a door to the artifact it produced. Owner-scoped (identified or anon-commitment), cursor-paginated. In-flight rows ride the first page; the cursor pages settled history.

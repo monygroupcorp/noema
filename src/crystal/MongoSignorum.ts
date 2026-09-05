@@ -1,8 +1,12 @@
 import { Collection, MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import type { Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus } from '../types/significandi.js'
+import type {
+  Signum, Signa, Signorum, Reservatio, Transferatio, SignumForma, SignumStatus,
+  EarningTotal, EarningsPage,
+} from '../types/significandi.js'
 import { transferVia } from '../ledger/transfer.js'
 import { RESERVE_CHANGE_AUCTOR } from '../ledger/MemorySignorum.js'
+import { EARNING_AUCTOR_IDS } from '../ledger/earnings.js'
 
 function toDoc(s: Partial<Signum>): Record<string, unknown> {
   const { valor, ...rest } = s
@@ -25,6 +29,26 @@ function fromDoc(doc: Record<string, unknown>): Signum {
 function identityQuery(by: { animaId: string } | { commitment: string }): Record<string, unknown> {
   if ('animaId' in by) return { animaId: by.animaId }
   return { testis: by.commitment, forma: 'arcanum' }
+}
+
+/** Opaque earnings cursor = the (natum, id) of the last row on the previous page. Base64url of
+ *  `${iso}|${id}`, enough to resume the deterministic (natum desc, id desc) sort with no dupes
+ *  and no skips — the same construction the settled-run cursor uses. */
+function encodeEarningCursor(natum: Date, id: string): string {
+  return Buffer.from(`${natum.toISOString()}|${id}`, 'utf8').toString('base64url')
+}
+function decodeEarningCursor(cursor: string): { natum: Date; id: string } | null {
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf8')
+    const sep = raw.lastIndexOf('|')
+    if (sep < 0) return null
+    const natum = new Date(raw.slice(0, sep))
+    const id = raw.slice(sep + 1)
+    if (Number.isNaN(natum.getTime()) || !id) return null
+    return { natum, id }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -298,6 +322,48 @@ export class MongoSignorum implements Signorum {
   async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     const docs = await this.col.find(identityQuery(by)).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
+
+  /** Grouped in the DATABASE, not over a loaded history: one `$group` per auctor across the
+   *  identity's earning rows. `valor` is stored as a string, so the sum runs through
+   *  `$toDecimal` (exact past 2^53) and comes back as an integer string to revive as a bigint. */
+  async earningTotals(by: { animaId: string } | { commitment: string }): Promise<EarningTotal[]> {
+    const rows = await this.col
+      .aggregate([
+        { $match: { ...identityQuery(by), auctor: { $in: [...EARNING_AUCTOR_IDS] } } },
+        { $group: { _id: '$auctor', total: { $sum: { $toDecimal: '$valor' } }, count: { $sum: 1 } } },
+      ])
+      .toArray()
+    return rows.map(r => ({
+      auctor: String(r._id),
+      impetus: BigInt(String(r.total).split('.')[0] ?? '0'),
+      count: Number(r.count ?? 0),
+    }))
+  }
+
+  async listEarnings(
+    by: { animaId: string } | { commitment: string },
+    opts: { limit: number; cursor?: string },
+  ): Promise<EarningsPage> {
+    const limit = Math.min(Math.max(Math.trunc(opts.limit) || 0, 1), 100)
+    const filter: Record<string, unknown> = {
+      ...identityQuery(by),
+      auctor: { $in: [...EARNING_AUCTOR_IDS] },
+    }
+    if (opts.cursor) {
+      const c = decodeEarningCursor(opts.cursor)
+      // Rows strictly after the cursor in (natum desc, id desc) order.
+      if (c) filter.$or = [{ natum: { $lt: c.natum } }, { natum: c.natum, id: { $lt: c.id } }]
+    }
+
+    // One extra row tells us whether another page exists without a second count query.
+    const docs = await this.col.find(filter).sort({ natum: -1, id: -1 }).limit(limit + 1).toArray()
+    const hasMore = docs.length > limit
+    const entries = (hasMore ? docs.slice(0, limit) : docs).map(d => fromDoc(d as Record<string, unknown>))
+
+    const last = entries[entries.length - 1]
+    const nextCursor = hasMore && last ? encodeEarningCursor(new Date(last.natum), last.id) : undefined
+    return { entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
   async findByTestis(testis: string): Promise<Signum | null> {

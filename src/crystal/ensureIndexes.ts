@@ -23,6 +23,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // The identified path keys on animaId; the anonymous (arcanum) path keys on (testis,forma).
     db.collection('signa').createIndex({ animaId: 1, status: 1, valorNum: 1 }),
     db.collection('signa').createIndex({ testis: 1, forma: 1, status: 1, valorNum: 1 }, { sparse: true }),
+    // Earnings read (GET /v1/me/earnings): an earner's rows filtered by auctor and sorted
+    // newest-first. Both the grouped lifetime totals and the paged statement ride these, so
+    // neither has to load the identity's whole ledger and sum it in app memory. Identified
+    // earners key on animaId; an anonymous host's arcanum rows key on (testis, forma).
+    db.collection('signa').createIndex({ animaId: 1, auctor: 1, natum: -1 }),
+    db.collection('signa').createIndex({ testis: 1, forma: 1, auctor: 1, natum: -1 }, { sparse: true }),
     // Fiat funding rail (Stripe) idempotency: UNIQUE + PARTIAL on `testis` over stripe-purchase
     // signa ONLY. `testis` = the Stripe payment_intent id shared by a purchase's two webhook events
     // (checkout.session.completed + payment_intent.succeeded). This is the DURABLE cross-instance

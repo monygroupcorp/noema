@@ -122,6 +122,8 @@ function makeSignorum(): Signorum & { issued: Signum[] } {
     async lock() {},
     async release() {},
     async history({ animaId }: { animaId: string }) { return issued.filter(s => s.animaId === animaId) },
+    async earningTotals() { return [] },
+    async listEarnings() { return { entries: [] } },
     async settle() {},
     async sessionBudget() { throw new Error('not implemented') },
     async reserve() { throw new Error('not implemented') },
