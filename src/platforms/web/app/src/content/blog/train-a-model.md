@@ -82,8 +82,13 @@ close the tab — the finished model lands on your shelf either way.
 ## 5. Use it
 
 Trained models appear on your [shelf](/models), alongside anything you have imported, with the
-provenance the platform actually knows: base model, trigger word, license, listing state. Run-level
-royalty economics do not exist server-side yet, so the shelf does not display any.
+provenance the platform actually knows: base model, trigger word, license, listing state.
+
+Listing a model publicly also makes it royalty-eligible, and that part is real: when somebody else's
+run uses your model, a share of what that run spends is split across the model's rights holders when
+the run completes. What does not exist yet is anywhere to read it. Nothing returns what you have
+earned, so the shelf shows no earnings — not because nothing accrues, but because there is nothing
+to fetch. Until that lands, a listed model earns quietly.
 
 From there the model is a model. It runs from the catalogue, it runs from the canvas, and it runs
 over the API — see [composing a workflow](/blog/compose-a-workflow) and
