@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useLandingCatalog } from './landingCatalog';
+import { REPO } from '../lib/repo';
 import './landing-open.css';
-
-const REPO = 'https://github.com/monygroupcorp/noema';
 
 /**
  * The open-source block, and the page's second live-derived one.

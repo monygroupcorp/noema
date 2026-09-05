@@ -11,7 +11,9 @@ We also believe you shouldn't have to hand over your identity to use it. There i
 address anywhere in signing up: an account is a username and a password, and recovery runs
 through a wallet or a Telegram account you choose to bind. Funding with crypto today does leave a
 link — the depositing address reaches us and is retained for compliance, as the privacy policy
-says. The unlinkable bearer purse that removes that link unlocks after the trusted-setup ceremony.
+says. The unlinkable bearer purse breaks the other half of that link, between a spend and the
+account it came from; it unlocks after the trusted-setup ceremony. Keeping us from ever seeing the
+funding wallet at all is a further step, and it is not built.
 
 ## How we built it
 
@@ -19,9 +21,11 @@ Noema runs a curated set of open- and closed-source models across every modality
 — the privacy policy states exactly what is kept and why, including the parts we would rather be
 able to state differently.
 
-Purse credits are zero-knowledge proofs: we verify the math and cannot link that spend to you.
-That is anonymity about *who* you are — never a claim that the compute provider cannot see the
-work itself, which would require the hardware-sealed tier we have not shipped.
+Purse credits will be zero-knowledge proofs: we verify the math and cannot link that spend to
+you. The rail is written and it is switched off — until the ceremony concludes, the key it verifies
+against is one a single person holds, so minting a purse is refused rather than offered on trust.
+When it opens, that is anonymity about *who* you are — never a claim that the compute provider
+cannot see the work itself, which would require the hardware-sealed tier we have not shipped.
 
 ## What we are
 
