@@ -21,7 +21,7 @@ export function SiteFooter() {
           <h3>Company</h3>
           <Link to="/about">About</Link>
           <Link to="/ceremony">Ceremony</Link>
-          <Link to="/blog">Blog</Link>
+          <Link to="/blog">Guides</Link>
           <Link to="/partners">Partner with us</Link>
           <a href="#">Source · VPL</a>
         </div>
