@@ -1631,13 +1631,13 @@ test('caption command: a photo whose caption is /run … dispatches the command'
   assert.equal(state?.aditus?.prompt, 'a cat')
 })
 
-test('attached image fills entryImageUrl on the flow state', async () => {
+test('attached image fills the entry media on the flow state', async () => {
   const { allocutio, router } = makeAllocutio()
   await allocutio.receive(captionCmdUpdate(123, 456, '/run sd1-5', ['photo-lo', 'photo-hi']))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
-  assert.ok(state?.entryImageUrl?.endsWith('photo-hi'), 'highest-res attached photo becomes entryImageUrl')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('photo-hi'), 'highest-res attached photo becomes the entry media')
 })
 
 test('reply-to image: a text command replying to a photo sources the image', async () => {
@@ -1645,8 +1645,8 @@ test('reply-to image: a text command replying to a photo sources the image', asy
   await allocutio.receive(replyToPhotoCmdUpdate(123, 456, '/run sd1-5', ['rep-1']))
 
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
-  assert.ok(state?.entryImageUrl?.endsWith('rep-1'), 'replied-to photo becomes entryImageUrl')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('rep-1'), 'replied-to photo becomes the entry media')
 })
 
 test('attached photo takes precedence over a replied-to photo', async () => {
@@ -1665,8 +1665,110 @@ test('attached photo takes precedence over a replied-to photo', async () => {
     },
   })
   const enterCall = router.calls.find(c => c.method === 'enter')
-  const state = (enterCall!.args[5] as { state?: { entryImageUrl?: string } })?.state
-  assert.ok(state?.entryImageUrl?.endsWith('attached-hi'), 'attached photo wins over replied-to')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('attached-hi'), 'attached photo wins over replied-to')
+})
+
+// =============================================================================
+// Media ingest — every wrapper Telegram puts a file in, not only `photo`
+// =============================================================================
+
+/** A bare (no caption, no text) message carrying one media field. */
+function mediaMsgUpdate(userId: number, chatId: number, media: Record<string, unknown>, messageId = 1): TelegramUpdate {
+  return {
+    update_id: 8,
+    message: {
+      message_id: messageId,
+      from: { id: userId, username: 'tester' },
+      chat: { id: chatId, type: 'private' },
+      date: Math.floor(Date.now() / 1000),
+      ...media,
+    },
+  }
+}
+
+const BARE_INGEST: Array<{ label: string; media: Record<string, unknown>; fileId: string }> = [
+  { label: 'video', media: { video: { file_id: 'vid-1', mime_type: 'video/mp4' } }, fileId: 'vid-1' },
+  { label: 'animation (GIF)', media: { animation: { file_id: 'gif-1', mime_type: 'video/mp4' } }, fileId: 'gif-1' },
+  { label: 'audio', media: { audio: { file_id: 'aud-1', mime_type: 'audio/mpeg' } }, fileId: 'aud-1' },
+  { label: 'voice note', media: { voice: { file_id: 'voi-1', mime_type: 'audio/ogg' } }, fileId: 'voi-1' },
+  { label: 'uncompressed image sent as a document', media: { document: { file_id: 'doc-1', mime_type: 'image/png', file_name: 'x.png' } }, fileId: 'doc-1' },
+]
+
+for (const { label, media, fileId } of BARE_INGEST) {
+  test(`${label} while flow active fires prompt with file url`, async () => {
+    const { allocutio, router } = makeAllocutio()
+    await allocutio.receive(msgUpdate(123, 456, '/make'))
+    router.calls.length = 0
+
+    await allocutio.receive(mediaMsgUpdate(123, 456, media))
+
+    const handleCall = router.calls.find(c => c.method === 'handle')
+    assert.ok(handleCall, `router.handle should be called for ${label} with an active flow`)
+    const event = handleCall!.args[3] as { kind: string; text: string }
+    assert.equal(event.kind, 'prompt')
+    assert.ok(event.text.includes(fileId), `should resolve the URL from the ${label} file_id`)
+  })
+}
+
+test('a document that is not media advances nothing', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  router.calls.length = 0
+
+  await allocutio.receive(mediaMsgUpdate(123, 456, { document: { file_id: 'pdf-1', mime_type: 'application/pdf', file_name: 'contract.pdf' } }))
+
+  const handleCall = router.calls.find(c => c.method === 'handle')
+  assert.equal(handleCall, undefined, 'a PDF is not something any Porta can take')
+})
+
+test('a sticker advances nothing — no text, no media, no empty prompt', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  router.calls.length = 0
+
+  await allocutio.receive(mediaMsgUpdate(123, 456, { sticker: { file_id: 'stk-1' } }))
+
+  const handleCall = router.calls.find(c => c.method === 'handle')
+  assert.equal(handleCall, undefined, 'an empty prompt would fill the waiting field with nothing')
+})
+
+test('caption command: a video whose caption is /run … carries the video as entry media', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive({
+    update_id: 9,
+    message: {
+      message_id: 11,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      caption: '/run some-video-modus',
+      date: Math.floor(Date.now() / 1000),
+      video: { file_id: 'cap-vid', mime_type: 'video/mp4' },
+    },
+  })
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('cap-vid'), 'the attached video becomes the entry media')
+  assert.equal(state?.entryMediaType, 'video', 'and it is typed as a video, not an image')
+})
+
+test('reply-to video: a text command replying to a video sources the video', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive({
+    update_id: 10,
+    message: {
+      message_id: 12,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      text: '/run some-video-modus',
+      date: Math.floor(Date.now() / 1000),
+      reply_to_message: { message_id: 11, video: { file_id: 'rep-vid', mime_type: 'video/mp4' } },
+    },
+  })
+  const enterCall = router.calls.find(c => c.method === 'enter')
+  const state = (enterCall!.args[5] as { state?: { entryMediaUrl?: string; entryMediaType?: string } })?.state
+  assert.ok(state?.entryMediaUrl?.endsWith('rep-vid'), 'replied-to video becomes the entry media')
+  assert.equal(state?.entryMediaType, 'video')
 })
 
 // =============================================================================
