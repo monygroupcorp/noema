@@ -31,6 +31,7 @@ import { classifyError } from '../../lib/classifyError.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
 import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
 import { BulletinModelCatalog } from './BulletinModelCatalog.js'
+import { envelopeMedia, type EnvelopeMediaType } from './envelopeMedia.js'
 
 /** Infer the runtime shape from a studio's container image name (best-effort label for the
  *  loadout view). ComfyUI is the common one today; vLLM / llama.cpp / Diffusers are coming. */
@@ -607,28 +608,28 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
 
     if (text.startsWith('/')) {
-      // Capture an entry image from the command's envelope (the deprecated-bot UX):
-      // an attached photo takes precedence over a replied-to photo. Resolved to a
-      // download URL and threaded into the flow, where it pre-fills the image Porta.
-      const envelopePhoto = (message.photo && message.photo.length > 0)
-        ? message.photo
-        : message.reply_to_message?.photo
-      let entryImageUrl: string | undefined
-      if (envelopePhoto && envelopePhoto.length > 0) {
-        const largest = envelopePhoto[envelopePhoto.length - 1]  // highest res
-        entryImageUrl = (await this._resolveFileUrl(largest.file_id)) ?? undefined
+      // Capture entry media from the command's envelope (the deprecated-bot UX):
+      // attached media takes precedence over replied-to media. Resolved to a download
+      // URL and threaded into the flow, where it pre-fills the Porta of its own type.
+      const envelope = envelopeMedia(message) ?? envelopeMedia(message.reply_to_message)
+      let entryMedia: { url: string; type: EnvelopeMediaType } | undefined
+      if (envelope !== null) {
+        const url = await this._resolveFileUrl(envelope.fileId)
+        if (url !== null) entryMedia = { url, type: envelope.type }
       }
       // In a group, an unrecognised `/command` is almost always another bot's — answering
       // it makes us the bot that interrupts every other bot's conversation. Stay silent
       // unless the message named us (`/foo@thisbot`, an @-mention, or a reply to us).
       const silentOnUnknown = message.chat.type !== 'private' && !this._isAddressedToBot(message)
-      await this._handleCommand(userId, chatId, text, message.message_id, entryImageUrl, silentOnUnknown)
+      await this._handleCommand(userId, chatId, text, message.message_id, entryMedia, silentOnUnknown)
     } else {
-      // Photo message while flow active → resolve file URL → prompt event
-      if (message.photo && message.photo.length > 0) {
+      // Media message while flow active → resolve file URL → prompt event. The URL
+      // fills the next required field, whatever its type: a bare message answers the
+      // question the flow just asked, and the flow is the one that knows what it asked.
+      const bare = envelopeMedia(message)
+      if (bare !== null) {
         if (this.router.hasContext('telegram', userId, String(chatId))) {
-          const largest = message.photo[message.photo.length - 1]  // highest res
-          const fileUrl = await this._resolveFileUrl(largest.file_id)
+          const fileUrl = await this._resolveFileUrl(bare.fileId)
           if (fileUrl) {
             await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text: fileUrl })
           }
@@ -642,6 +643,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       if (message.chat.type !== 'private' && !this._isAddressedToBot(message)) {
         return
       }
+      // A message with neither text nor media — a sticker, a location, a PDF — carries
+      // nothing a Porta can hold. Routing it anyway would fill the field the flow is
+      // waiting on with the empty string and walk on to the next one.
+      if (text === '') return
       if (this.router.hasContext('telegram', userId, String(chatId))) {
         await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text })
       }
@@ -665,7 +670,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // Command handler
   // -------------------------------------------------------------------------
 
-  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number, entryImageUrl?: string, silentOnUnknown = false): Promise<void> {
+  private async _handleCommand(userId: string, chatId: number, text: string, messageId?: number, entryMedia?: { url: string; type: EnvelopeMediaType }, silentOnUnknown = false): Promise<void> {
     // Reaction-prep: 🤔 on receipt + remember the command message so the Stream
     // registration can later land the 👌/🔥 on it. The command surface itself lives
     // in CommandRouter.
@@ -675,7 +680,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       void this._react(chatId, messageId, REACTION.thinking)
       this.lastCommandMessageIds.set(`telegram:${userId}`, messageId)
     }
-    await this.commands.dispatch(userId, chatId, text, messageId, entryImageUrl, { silentOnUnknown })
+    await this.commands.dispatch(userId, chatId, text, messageId, entryMedia, { silentOnUnknown })
   }
 
   // -------------------------------------------------------------------------

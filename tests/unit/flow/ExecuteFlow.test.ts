@@ -900,12 +900,12 @@ test('execute gating: a:execute with a required field empty does NOT submit (val
 test('entry image maps onto the image Porta → counts as filled, not re-requested', async () => {
   const flow = new ExecuteFlow(depsFor(makeImageModus()))
   // Only the image is required; it arrives via the envelope → should fast-path submit.
-  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://img/x.png', entryMediaType: 'image', browsePageIndex: 0 } })
   const step = await flow.enter(ctx)
   const p = step.primitives[0]
   assert.ok(p.kind === 'Result' || p.kind === 'Stream', `image filled → submit, got ${p.kind}`)
   const state = ctx.state as { aditus: Record<string, unknown> }
-  assert.equal(state.aditus.image, 'https://img/x.png', 'image Porta pre-filled from entryImageUrl')
+  assert.equal(state.aditus.image, 'https://img/x.png', 'image Porta pre-filled from entry media')
 })
 
 test('entry image with another missing required → gap-fill asks only for the other field', async () => {
@@ -916,7 +916,7 @@ test('entry image with another missing required → gap-fill asks only for the o
     },
   })
   const flow = new ExecuteFlow(depsFor(modus))
-  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://img/x.png', entryMediaType: 'image', browsePageIndex: 0 } })
   const step = await flow.enter(ctx)
   const p = step.primitives[0]
   assert.equal(p.kind, 'Form')
@@ -931,11 +931,47 @@ test('entry image with another missing required → gap-fill asks only for the o
 
 test('entry image with no image Porta is ignored', async () => {
   const flow = new ExecuteFlow(depsFor(makeCardModus()))  // no image Porta
-  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryImageUrl: 'https://img/x.png', browsePageIndex: 0 } })
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://img/x.png', entryMediaType: 'image', browsePageIndex: 0 } })
   const step = await flow.enter(ctx)
   const state = ctx.state as { aditus: Record<string, unknown> }
-  assert.equal(Object.keys(state.aditus).length, 0, 'no image Porta → entry image ignored')
+  assert.equal(Object.keys(state.aditus).length, 0, 'no image Porta → entry media ignored')
   assert.equal(step.primitives[0].kind, 'Form', 'falls into the cold card')
+})
+
+test('entry video maps onto the video Porta, not the image one', async () => {
+  const modus = makeModus({
+    aditus: {
+      image: { type: 'image', required: false, description: 'A still' },
+      video: { type: 'video', required: true, description: 'Video clip to analyze' },
+    },
+  })
+  const flow = new ExecuteFlow(depsFor(modus))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://vid/x.mp4', entryMediaType: 'video', browsePageIndex: 0 } })
+  const step = await flow.enter(ctx)
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.video, 'https://vid/x.mp4', 'video Porta pre-filled from entry media')
+  assert.equal(state.aditus.image, undefined, 'the image Porta is left alone')
+  const p = step.primitives[0]
+  assert.ok(p.kind === 'Result' || p.kind === 'Stream', `only required field filled → submit, got ${p.kind}`)
+})
+
+test('entry audio maps onto the audio Porta', async () => {
+  const modus = makeModus({
+    aditus: { ref_audio: { type: 'audio', required: true, description: 'Reference audio' } },
+  })
+  const flow = new ExecuteFlow(depsFor(modus))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://aud/x.ogg', entryMediaType: 'audio', browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.ref_audio, 'https://aud/x.ogg', 'audio Porta pre-filled from entry media')
+})
+
+test('entry video with only an image Porta fills nothing', async () => {
+  const flow = new ExecuteFlow(depsFor(makeImageModus()))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, entryMediaUrl: 'https://vid/x.mp4', entryMediaType: 'video', browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.image, undefined, 'a video must not be poured into an image Porta')
 })
 
 test('Mod • → Add: state.pinnedModels flows through _submit to inceptor.initiate', async () => {

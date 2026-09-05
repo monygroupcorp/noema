@@ -7,23 +7,38 @@
 
 import type { Intent, Platform, AuctorKey, PrimitiveEvent, FlowContext, Step, Resolution } from '../../flow/types.js'
 
+/**
+ * The media fields a message can carry. Telegram uses a different field per wrapper
+ * for what is often the same file — an image is `photo` when compressed and
+ * `document` when sent as a file, a GIF is an `animation`, a recorded note a
+ * `voice`. `envelopeMedia` maps them onto the Porta types the flow engine knows.
+ */
+export interface TelegramMedia {
+  /** One entry per size, ascending — the last is the highest resolution. */
+  photo?: Array<{ file_id: string; width: number; height: number }>
+  video?: { file_id: string; mime_type?: string }
+  animation?: { file_id: string; mime_type?: string }
+  audio?: { file_id: string; mime_type?: string }
+  voice?: { file_id: string; mime_type?: string }
+  /** The catch-all wrapper: media sent uncompressed, but also a PDF or a zip. */
+  document?: { file_id: string; mime_type?: string; file_name?: string }
+}
+
 /** Minimal typing of the Telegram webhook Update objects we consume. */
 export interface TelegramUpdate {
   update_id: number
-  message?: {
+  message?: TelegramMedia & {
     message_id: number
     from?: { id: number; username?: string; first_name?: string }
     chat: { id: number; type: string }
     text?: string
-    /** A command can ride an attached photo's caption — a different field from `text`. */
+    /** A command can ride attached media's caption — a different field from `text`. */
     caption?: string
     date: number
-    photo?: Array<{ file_id: string; width: number; height: number }>
-    reply_to_message?: {
+    reply_to_message?: TelegramMedia & {
       message_id: number
       /** Who sent the message being replied to — used to detect a reply to the bot itself. */
       from?: { id: number; username?: string }
-      photo?: Array<{ file_id: string; width: number; height: number }>
     }
   }
   callback_query?: {

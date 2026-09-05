@@ -34,12 +34,14 @@ interface ExecuteFlowState {
    */
   editingField?: string
   /**
-   * An entry image sourced from the Telegram envelope (attached photo / replied-to
-   * photo). Mapped onto the first `type:'image'` Porta in `enter`, so the image is
-   * neither re-requested (gap-fill) nor shown as unfilled (card). A parameter, not
-   * new vocabulary.
+   * Entry media sourced from the Telegram envelope (attached or replied-to photo,
+   * video, clip or file). Mapped onto the first Porta of the matching type in `enter`,
+   * so the media is neither re-requested (gap-fill) nor shown as unfilled (card).
+   * A parameter, not new vocabulary.
    */
-  entryImageUrl?: string
+  entryMediaUrl?: string
+  /** The Porta type `entryMediaUrl` fills: 'image', 'video' or 'audio'. */
+  entryMediaType?: string
   actumId?: string
   result?: Record<string, unknown>
   browsePageIndex: number
@@ -153,12 +155,13 @@ export class ExecuteFlow implements Flow {
       ctx.state = state
       const modus = await this._resolveModus(state)
 
-      // Map an envelope-borne entry image onto the first image Porta, so it counts
-      // as filled (neither re-requested nor shown as unfilled). No image Porta → ignore.
-      if (existing.entryImageUrl) {
-        const imageKey = Object.entries(modus.aditus).find(([, p]) => p.type === 'image')?.[0]
-        if (imageKey && !(imageKey in state.aditus)) {
-          state.aditus[imageKey] = existing.entryImageUrl
+      // Map envelope-borne entry media onto the first Porta of its own type, so it counts
+      // as filled (neither re-requested nor shown as unfilled). A video does not belong in
+      // an image Porta, so a modus with no Porta of that type ignores the media entirely.
+      if (existing.entryMediaUrl && existing.entryMediaType) {
+        const key = Object.entries(modus.aditus).find(([, p]) => p.type === existing.entryMediaType)?.[0]
+        if (key && !(key in state.aditus)) {
+          state.aditus[key] = existing.entryMediaUrl
         }
       }
 

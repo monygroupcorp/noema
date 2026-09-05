@@ -1,4 +1,5 @@
 import { inlineKeyboard, btn } from '../telegramRender.js'
+import type { EnvelopeMediaType } from '../envelopeMedia.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
 import { CANON_VERBS } from '../../../crystal/canonVerbs.js'
@@ -109,14 +110,17 @@ export class CommandRouter {
     chatId: number,
     text: string,
     messageId?: number,
-    entryImageUrl?: string,
+    entryMedia?: { url: string; type: EnvelopeMediaType },
     opts?: { silentOnUnknown?: boolean },
   ): Promise<void> {
     const cmd = parseCommand(text)
     const ack = () => { if (messageId !== undefined) this.deps.ack(chatId, messageId) }
-    // An entry image (attached photo / replied-to photo) rides into the flow state on
-    // the verbs that accept one; ExecuteFlow maps it onto the first image Porta.
-    const entry = entryImageUrl !== undefined ? { entryImageUrl } : {}
+    // Entry media (attached / replied-to photo, video, clip or file) rides into the flow
+    // state on the verbs that accept it; ExecuteFlow maps it onto the first Porta whose
+    // type matches.
+    const entry = entryMedia !== undefined
+      ? { entryMediaUrl: entryMedia.url, entryMediaType: entryMedia.type }
+      : {}
 
     switch (cmd) {
       case '/start': {
