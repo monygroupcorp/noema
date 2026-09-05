@@ -29,6 +29,8 @@
 //   CONCIERGE_GYM_BRAIN_MODEL      model under test,      default qwen3.8:27b
 //   CONCIERGE_GYM_ADVERSARY_MODEL  user-simulator + judge, default escha-qwen38:27b
 //
+// CONCIERGE_GYM_RUNS_DIR overrides where the JSONL transcripts land (see RUNS_DIR).
+//
 // `--brain openrouter` swaps the brain back to the real, BILLED provider for a
 // parity spot-check. It refuses to start without `--budget-tokens N` and aborts
 // the run the moment the summed token usage crosses N. The adversary and the
@@ -85,7 +87,15 @@ const DEFAULT_MAX_TURNS = 6
 
 const DECKS_DIR = path.join(process.cwd(), 'scripts', 'gym-decks')
 const REGRESSION_PATH = path.join(DECKS_DIR, 'regression.json')
-const RUNS_DIR = path.join(process.cwd(), 'gym-runs')
+/**
+ * Where the transcript corpus is written. A run's transcripts are a corpus we keep and
+ * train on, so the destination has to be able to sit OUTSIDE the checkout: a worktree is
+ * deleted when its branch is done, and anything under `gym-runs/` goes with it. Set
+ * `CONCIERGE_GYM_RUNS_DIR` to an absolute path to collect runs somewhere durable; the
+ * default keeps them in the ignored in-repo directory, so an unconfigured run behaves
+ * exactly as before.
+ */
+const RUNS_DIR = process.env.CONCIERGE_GYM_RUNS_DIR ?? path.join(process.cwd(), 'gym-runs')
 
 // -----------------------------------------------------------------------------
 // Decks — data, not code. One JSON file per persona under scripts/gym-decks/.
@@ -720,7 +730,7 @@ async function runSmoke(): Promise<number> {
 
   // --- (C) the transcript writer, exercised on the faked session ---
   const dir = writeTranscripts([session])
-  console.log(`smoke: transcripts written under ${path.relative(process.cwd(), dir)}`)
+  console.log(`smoke: transcripts written under ${displayPath(dir)}`)
 
   console.log('')
   console.log(failures === 0 ? 'smoke: PASS' : `smoke: FAIL (${failures} assertion(s))`)
@@ -728,9 +738,16 @@ async function runSmoke(): Promise<number> {
 }
 
 // -----------------------------------------------------------------------------
-// Transcript corpus — JSONL per session under gym-runs/<date>/ (gitignored). Raw
-// runs are never committed; only the sanitized regression entries are.
+// Transcript corpus — JSONL per session under <runs dir>/<date>/, the in-repo default
+// being the gitignored gym-runs/. Raw runs are never committed; only the sanitized
+// regression entries are.
 // -----------------------------------------------------------------------------
+/** Relative to the checkout while the runs dir is inside it; absolute once it is not. */
+function displayPath(p: string): string {
+  const rel = path.relative(process.cwd(), p)
+  return rel.startsWith('..') ? p : rel
+}
+
 function writeTranscripts(sessions: Session[]): string {
   const day = new Date().toISOString().slice(0, 10)
   const dir = path.join(RUNS_DIR, day)
@@ -909,7 +926,7 @@ async function main(): Promise<void> {
 
   const dir = writeTranscripts(sessions)
   console.log('')
-  console.log(`transcripts: ${path.relative(process.cwd(), dir)}`)
+  console.log(`transcripts: ${displayPath(dir)}`)
   console.log(`tokens: ${meter.total}${meter.limit !== undefined ? ` / ${meter.limit}` : ''}`)
   if (aborted) console.log(`run aborted: ${aborted}`)
 
