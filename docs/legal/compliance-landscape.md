@@ -102,9 +102,9 @@ This is where anonymity collides hardest with law. Structure determines exposure
   tier would further reduce it, but it is in development — do not count it yet.)
 - Document "we don't retain content" as a formal posture — it's a selling point to enterprise
   privacy buyers (medical/legal), not just a principle.
-- **Healthcare:** serving PHI makes us a HIPAA **Business Associate** → sign **BAAs**. No-retention
-  is today's technical safeguard (the sealed TEE tier is pending); the BAA is the legal
-  instrument we cannot skip.
+- **Healthcare:** out of scope. Serving PHI would make us a HIPAA **Business Associate**, which
+  requires a **BAA** we do not offer, so the Terms exclude regulated workloads outright. Re-opening
+  the vertical means signing BAAs first, not advertising one in advance.
 - **Legal vertical:** confidentiality / privilege expectations — the no-retention posture maps
   reasonably, but contracts must reflect it and must not promise the undelivered sealed tier.
 

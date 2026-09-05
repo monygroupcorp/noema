@@ -48,7 +48,7 @@ The product thesis as a long-form piece: why a curated catalog plus a concierge 
 Short post on what third-party analytics leaks, why we chose not to, what we do instead for product insight. Practical and specific.
 
 **7. "The GDPR compliance advantage of not collecting data"**
-For enterprise buyers: our small data footprint means a small compliance surface. PHI workloads, legal privilege, GDPR. Positions the BAA offering.
+For enterprise buyers: our small data footprint means a small compliance surface. GDPR and CCPA exposure scales with the personal data a service holds, and we hold almost none. Makes no regulated-workload claim: we do not offer a BAA.
 
 ---
 
@@ -60,4 +60,3 @@ For enterprise buyers: our small data footprint means a small compliance surface
 | "AI privacy Venice alternative" | Commercial | Post 2 |
 | "anonymous AI generation" | Informational | Post 4 |
 | "zero knowledge AI billing" | Informational | Post 1 |
-| "HIPAA compliant AI" | Commercial | Post 7 |
