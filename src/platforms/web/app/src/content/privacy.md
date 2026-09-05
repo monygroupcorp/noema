@@ -67,14 +67,14 @@ A run is one piece of work you asked for. When it settles, we keep its record:
 
 | Data | Why we keep it | Retention |
 |---|---|---|
-| The inputs you submitted | Your run history — so you can see and reuse what you asked for | Until you erase your account |
-| The outputs produced | Your run history — so your results stay available to you | Until you erase your account |
-| Run id, start / end timestamps | Billing reconciliation and your history | Until you erase your account |
+| The inputs you submitted | Your run history — so you can see and reuse what you asked for | Retained; erasure anonymizes it rather than deleting it (Section 8) |
+| The outputs produced | Your run history — so your results stay available to you | Retained; erasure anonymizes it rather than deleting it (Section 8) |
+| Run id, start / end timestamps | Billing reconciliation and your history | Retained; erasure anonymizes it rather than deleting it (Section 8) |
 | Compute consumed and credit charged | Billing; part of the append-only spend ledger | Retained (Section 7) |
 
 This is a deliberate design: a spend history is worth little if the thing you spent on is gone. The record is visible to you in the product, and to us — we can technically read it. It is not used to train models and it is not shared beyond the processors in Section 5.
 
-We do not currently operate an automatic expiry window on run records. When that machinery ships, this section will state the window; until then the honest statement is: retained until account erasure.
+We operate no automatic expiry window on run records, and erasing your account does not delete them — it severs them from you (Section 8). The honest statement is: a run record is retained, and after erasure it carries no field that points at a person. When an expiry window ships, this section will state it.
 
 **IP addresses:** used in memory for rate limiting, in a rolling fifteen-minute window. They are not written to the database.
 
@@ -94,7 +94,7 @@ We are building a hardware-sealed private-compute tier in which a tunnel runs di
 
 ### 2f. Reports you file
 
-If you file a bug report, feature request, or feedback from inside the product, we store what you wrote along with the route you were on, the run it concerned (if any), your browser's user-agent string, and the error your client surfaced. Reports are tied to the account or purse that filed them. They stay in our own database — no report is forwarded to a third-party tracker or issue service. Retention: until the report is handled, or until you erase your account.
+If you file a bug report, feature request, or feedback from inside the product, we store what you wrote along with the route you were on, the run it concerned (if any), your browser's user-agent string, and the error your client surfaced. Reports are tied to the account or purse that filed them. They stay in our own database — no report is forwarded to a third-party tracker or issue service. Retention: a report is retained; closing it does not delete it, and erasing your account severs it from you rather than removing it (Section 8).
 
 ### 2g. Usage and error logs
 
@@ -173,11 +173,12 @@ We screen for child sexual abuse material at the trust boundary. The enforced po
 | Data type | Retention |
 |---|---|
 | Account credentials and profile | Until you erase your account |
-| Run records (inputs, outputs, timestamps) | Until you erase your account |
-| Generated media in object storage | Until you erase your account |
+| Run records (inputs, outputs, timestamps) | Retained; erasure anonymizes rather than deletes (Section 8) |
+| Generated media in object storage | Retained; erasure does not remove it |
+| Reports you file | Retained; erasure anonymizes rather than deletes (Section 8) |
 | Credit ledger, deposits, and payment records | Retained — the ledger is append-only and is never rewritten. After erasure it carries no identifying fields (Section 8) |
 | Account anchor after erasure | Pseudonymized shell, 7 years, for financial-record and dispute-resolution duties |
-| In-progress workflow state | 24 hours from last update (automatic expiry) |
+| In-progress workflow state | 30 days from last update (automatic expiry) |
 | Sign-in links and short-lived secrets | Expire at their own stated expiry (automatic) |
 | Data-export bundles | Private bucket; the download link expires 15 minutes after it is issued |
 | IP addresses | Not stored |
@@ -204,9 +205,9 @@ Depending on your jurisdiction, you may have the right to:
 
 1. Your live sessions are revoked immediately.
 2. Your account record is stripped of its identifying fields — name, credentials, wallet — and marked erased. What remains is an opaque id with nothing in it that points to a person.
-3. Identity and content collections are deleted outright: profiles, credentials, preferences, memory, projects, requests, and your chat conversations and their messages.
+3. Identity and content collections are deleted outright: profiles, credentials, preferences, memory, projects, wallet-link requests, and your chat conversations and their messages.
 4. The financial ledger — credits, payments, deposits, revenue — is **not** modified. It is append-only by design. Those rows keep the opaque account id, which after step 2 identifies nobody.
-5. Run records and any works you published keep the same opaque id, for the same reason. Published works stay live and are shown as authored by an anonymous creator.
+5. Run records, the media they produced, the reports you filed, and any works you published keep the same opaque id, for the same reason. Published works stay live and are shown as authored by an anonymous creator.
 
 We state this plainly rather than promise a deletion we do not perform: erasure severs the person from the record, and the anonymized financial and run rows remain.
 

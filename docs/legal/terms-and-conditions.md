@@ -103,15 +103,3 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 
 Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
 acceptance. Material changes will be notified by in-app notice.
-
----
-
-### Counsel review checklist
-- [ ] Confirm closed-loop credit framing holds in target jurisdictions (avoids MSB/MTL).
-- [ ] Confirm token absence / credit characterization avoids securities treatment.
-- [ ] Validate CSAM reporting + retention language against §2258A / REPORT Act.
-- [ ] Validate flow-down license language per model in the register.
-- [ ] Arbitration / class-action waiver clause (jurisdiction-dependent).
-- [ ] DMCA agent registration + takedown procedure.
-- [ ] Settle the aggregate-liability lookback period (the draft's bracketed window was removed
-      rather than guessed).
