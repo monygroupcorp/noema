@@ -536,6 +536,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const deployments = new MongoDeploymentum(deploymentsCol)
 
   // ── Execution rail ─────────────────────────────────────────────────────────
+  // The private-outputs store (noema-347). One client for the dedicated bucket, shared by the
+  // dispatch site — which presigns a chained private INPUT for the pod — and the host-side
+  // writers further down. Absent → private generation is dark on this deployment.
+  const privateOutputsStore = config.privateOutputsR2 ? new R2Uploader(config.privateOutputsR2) : undefined
   const cursorum = new SimpleCursorum()
   let conductor: Conductor | undefined
 
@@ -576,6 +580,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
         // Private generation (noema-347): both are required for a run to dispatch private — the
         // bucket to write to, and the preferences to read the caller's choice from.
         ...(config.privateOutputsR2 ? { privateOutputsR2: config.privateOutputsR2 } : {}),
+        ...(privateOutputsStore ? {
+          presignPrivateInput: (key: string, opts: { expiresIn: number }) =>
+            privateOutputsStore.getSignedDownloadUrl(key, opts),
+        } : {}),
         ...(config.consuetudinum ? { consuetudinum: config.consuetudinum } : {}),
         deployments,
         hospitia,
@@ -696,20 +704,19 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // ON the host, so they need R2 to host the result — gate registration on it.
   if (config.runpodR2) {
     const uploader = new R2Uploader(config.runpodR2)
-    // The private-outputs store for host-side writers — a SEPARATE bucket, never a view of the
-    // public one. Absent → a private run refuses host-side compositing rather than writing public.
-    const privateUploader = config.privateOutputsR2 ? new R2Uploader(config.privateOutputsR2) : undefined
+    // The host-side writers take the private-outputs store as a SEPARATE bucket, never a view of
+    // the public one. Absent → a private run refuses to composite rather than writing public.
     cursorum.register('composite', new LayerCompositeCursor({
       engine: new JimpLayerCompositeEngine(),
       fetcher: httpMediaFetcher,
       uploader,
-      ...(privateUploader ? { privateUploader } : {}),
+      ...(privateOutputsStore ? { privateUploader: privateOutputsStore } : {}),
     }))
     cursorum.register('ffmpeg', new FfmpegCursor({
       engine: new SpawnFfmpegEngine(),
       fetcher: httpMediaFetcher,
       uploader,
-      ...(privateUploader ? { privateUploader } : {}),
+      ...(privateOutputsStore ? { privateUploader: privateOutputsStore } : {}),
     }))
     // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
     publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))

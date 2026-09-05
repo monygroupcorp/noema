@@ -22,6 +22,7 @@ import { ApiError } from '../../../src/allocutio/api/errors.js'
 import { handleExecutionWebhook } from '../../../src/api/webhooks/executionWebhook.js'
 import { createVestigiumFromActum } from '../../../src/execution/hooks/vestigiumHook.js'
 import { RunPodCursor } from '../../../src/crystal/RunPodCursor.js'
+import { PROVISION_BUDGET_MS } from '../../../src/crystal/SecurePodClient.js'
 import type { RunPodClient } from '../../../src/crystal/RunPodCursor.js'
 import type { R2Config } from '../../../src/crystal/comfyrunnerClient.js'
 import {
@@ -48,6 +49,9 @@ const PRIVATE_R2: R2Config = {
 }
 
 const PUBLIC_URL = 'https://cdn.example/outputs/1700000000000-out.png'
+
+/** The cursor's own default job ceiling, the second half of a run's wall-clock budget. */
+const DEFAULT_MAX_JOB_SECONDS = 1800
 
 function makeModus(over: Partial<Modus> = {}): Modus {
   return {
@@ -84,32 +88,77 @@ function recordingClient() {
   return { client, seen }
 }
 
+/** The owner-hashed prefix `purse-token-1`'s private outputs are written under. Derived from the
+ *  scheme rather than imported, so an assertion is about the scheme and not about the
+ *  implementation agreeing with itself. */
+function ownPrefix(bursaToken = 'purse-token-1'): string {
+  const ownerKey = 'bursa:' + createHash('sha256').update(bursaToken).digest('hex')
+  return `private-outputs/${createHash('sha256').update(ownerKey).digest('hex').slice(0, 16)}/`
+}
+
 async function dispatchWith(opts: {
   generatio?: Generatio
   privateOutputsR2?: R2Config
-}): Promise<{ actum: Actum; submitted: { r2?: R2Config } }> {
+  /** Run inputs, when the test is about what the caller passed in. */
+  aditus?: Record<string, unknown>
+  /** Omit the purse token, leaving the run with no resolvable owner. */
+  unowned?: boolean
+  /** Absent → the deployment cannot presign, as on one with no private bucket. */
+  presignPrivateInput?: (key: string, o: { expiresIn: number }) => Promise<string>
+}): Promise<{
+  actum: Actum
+  submitted: { r2?: R2Config }
+  /** The inputs the compiler was handed — the pod's view, which may differ from the record's. */
+  compiled: Record<string, unknown>
+  /** Compiled specs persisted by hash, the durable record of what was dispatched. */
+  deployments: Array<{ spec: Record<string, unknown> }>
+}> {
   const modorum = new MemoryModorum()
   await modorum.register(makeModus())
   const actorum = new MemoryActorum()
-  const created = await actorum.create(makeActum({ bursaToken: 'purse-token-1' }))
+  const created = await actorum.create(makeActum({
+    ...(opts.unowned ? {} : { bursaToken: 'purse-token-1' }),
+    ...(opts.aditus ? { aditus: opts.aditus } : {}),
+  }))
   const { client, seen } = recordingClient()
 
+  let compiled: Record<string, unknown> = {}
+  const deployments: Array<{ spec: Record<string, unknown> }> = []
   const cursor = new RunPodCursor(
     client,
-    async () => ({ hash: 'sha256:deadbeef', input: { workflow: {}, models: [] } }),
+    // The compiler folds the run's inputs into the spec, as the real one does — so a spec that is
+    // stored carries whatever the pod was told to fetch.
+    async (_m, a) => { compiled = a; return { hash: 'sha256:deadbeef', input: { workflow: {}, models: [], inputs: a } } },
     modorum,
     actorum,
     {
       webhookUrl: 'https://host.example/webhooks/runpod',
+      deployments: {
+        async upsert(d) { deployments.push(d as { spec: Record<string, unknown> }) },
+        async find() { return null },
+      },
       consuetudinum: { async resolveGeneratio() { return opts.generatio } },
       ...(opts.privateOutputsR2 ? { privateOutputsR2: opts.privateOutputsR2 } : {}),
+      ...(opts.presignPrivateInput ? { presignPrivateInput: opts.presignPrivateInput } : {}),
     },
   )
 
   await cursor.run(created)
   const after = await actorum.findById(created.id)
   assert.ok(after)
-  return { actum: after, submitted: seen[0] ?? {} }
+  return { actum: after, submitted: seen[0] ?? {}, compiled, deployments }
+}
+
+/** A presigner that records what it was asked for and mints a distinguishable link. */
+function recordingPresigner() {
+  const calls: Array<{ key: string; expiresIn: number }> = []
+  return {
+    calls,
+    presign: async (key: string, o: { expiresIn: number }) => {
+      calls.push({ key, expiresIn: o.expiresIn })
+      return `https://private.example/${key}?sig=minted-${calls.length}`
+    },
+  }
 }
 
 // ── 4. An absent preference generates PUBLIC ─────────────────────────────────
@@ -150,6 +199,141 @@ test('privateOutputs:true with no private bucket configured generates PUBLIC rat
   const { actum, submitted } = await dispatchWith({ generatio: { privateOutputs: true } })
   assert.equal(actum.executio?.privateOutputs, undefined)
   assert.equal(submitted.r2, undefined, 'never the public bucket under a private key scheme')
+})
+
+// ── Chaining: a private output used as an INPUT (phase 3) ──────────────────
+//
+// A pod cannot read a `noema-private://` marker — the bucket it names has no public binding.
+// So a chained private input is presigned at dispatch, for the pod alone, and only for a caller
+// whose own namespace the object lives in.
+
+test('a chained private input reaches the pod as a link, while the record keeps the marker', async () => {
+  const { presign, calls } = recordingPresigner()
+  const key = `${ownPrefix()}seed.png`
+  const { actum, compiled } = await dispatchWith({
+    aditus: { prompt: 'again, colder', image: privateMarker(key) },
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+
+  assert.equal(calls.length, 1, 'the marker was resolved once')
+  assert.equal(calls[0].key, key, 'presigned the object the marker names, not the marker itself')
+  assert.match(String(compiled.image), /^https:\/\/private\.example\//, 'the pod is handed a fetchable link')
+  assert.equal(compiled.prompt, 'again, colder', 'every other input passes through untouched')
+
+  // The link is minted for this dispatch and nothing else: the durable record still holds the
+  // marker, so no stored row carries a handle to a private object.
+  assert.equal(actum.aditus.image, privateMarker(key))
+})
+
+test('a chained private input is resolved inside a list, keeping its shape and order', async () => {
+  const { presign } = recordingPresigner()
+  const { compiled } = await dispatchWith({
+    aditus: { images: [PUBLIC_URL, privateMarker(`${ownPrefix()}a.png`), privateMarker(`${ownPrefix()}b.png`)] },
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+
+  const images = compiled.images as string[]
+  assert.equal(images.length, 3)
+  assert.equal(images[0], PUBLIC_URL, 'a public input is left alone')
+  assert.match(images[1], /a\.png/)
+  assert.match(images[2], /b\.png/)
+  for (const url of images) assert.ok(!isPrivateMarker(url), 'no marker survives into the job body')
+})
+
+test('the spec of a chained run is not kept, so no stored row carries the link', async () => {
+  const { presign } = recordingPresigner()
+  const chained = await dispatchWith({
+    aditus: { image: privateMarker(`${ownPrefix()}seed.png`) },
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+  assert.equal(chained.deployments.length, 0, 'a spec holding a minted link is never persisted')
+  assert.ok(chained.actum.deploymentHash, 'the dispatch stays traceable by hash')
+
+  // The skip is narrow: an ordinary run's spec is still recorded.
+  const plain = await dispatchWith({ aditus: { image: PUBLIC_URL }, privateOutputsR2: PRIVATE_R2 })
+  assert.equal(plain.deployments.length, 1)
+})
+
+test('the link handed to the pod cannot outlive the run it was minted for', async () => {
+  const { presign, calls } = recordingPresigner()
+  await dispatchWith({
+    aditus: { image: privateMarker(`${ownPrefix()}seed.png`) },
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+
+  // The run's own wall-clock budget: the pod provisioning window plus the job window. A link
+  // that lapses later than that is readable after the run that justified it has ended.
+  const runBudgetSeconds = PROVISION_BUDGET_MS / 1000 + DEFAULT_MAX_JOB_SECONDS
+  assert.ok(calls[0].expiresIn > 0, 'a link that has already expired is no use to the pod')
+  assert.ok(calls[0].expiresIn <= runBudgetSeconds, `link TTL ${calls[0].expiresIn}s outlives the run's ${runBudgetSeconds}s budget`)
+})
+
+test('a run fed a private input writes private, even with the preference off', async () => {
+  const { presign } = recordingPresigner()
+  const { actum, submitted } = await dispatchWith({
+    aditus: { image: privateMarker(`${ownPrefix()}seed.png`) },
+    generatio: { style: 'cinematic' },       // private generation is NOT on
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+
+  // Bytes read out of the private bucket must not come back out of a public one.
+  assert.equal(actum.executio?.privateOutputs, true, 'the chained run is stamped private')
+  assert.equal(submitted.r2?.bucket, PRIVATE_R2.bucket)
+  assert.equal(submitted.r2?.publicUrl, undefined)
+  assert.equal(submitted.r2?.keyPrefix, ownPrefix())
+})
+
+test("a private output of another account is refused as an input, not presigned", async () => {
+  const { presign, calls } = recordingPresigner()
+  await assert.rejects(
+    dispatchWith({
+      aditus: { image: privateMarker('private-outputs/00112233445566ff/someone-elses.png') },
+      privateOutputsR2: PRIVATE_R2,
+      presignPrivateInput: presign,
+    }),
+    /another account/,
+  )
+  assert.equal(calls.length, 0, 'nothing was minted for an object the caller has no claim on')
+})
+
+test('a run with no resolvable owner cannot chain a private input', async () => {
+  const { presign, calls } = recordingPresigner()
+  await assert.rejects(
+    dispatchWith({
+      aditus: { image: privateMarker(`${ownPrefix()}seed.png`) },
+      unowned: true,
+      privateOutputsR2: PRIVATE_R2,
+      presignPrivateInput: presign,
+    }),
+    /no owner/,
+  )
+  assert.equal(calls.length, 0)
+})
+
+test('chaining is refused where the deployment has no private-outputs store', async () => {
+  await assert.rejects(
+    dispatchWith({ aditus: { image: privateMarker(`${ownPrefix()}seed.png`) } }),
+    /no private-outputs store/,
+  )
+})
+
+test('a run with no private input dispatches exactly as before', async () => {
+  const { presign, calls } = recordingPresigner()
+  const { actum, submitted, compiled } = await dispatchWith({
+    aditus: { prompt: 'a still life', image: PUBLIC_URL },
+    privateOutputsR2: PRIVATE_R2,
+    presignPrivateInput: presign,
+  })
+
+  assert.equal(calls.length, 0, 'nothing to resolve')
+  assert.equal(compiled.image, PUBLIC_URL)
+  assert.equal(actum.executio?.privateOutputs, undefined)
+  assert.equal(submitted.r2, undefined)
 })
 
 // ── 1. A private run's persisted exitus carries no fetchable URL ──────────────
