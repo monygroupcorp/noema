@@ -4,6 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary, type Tractus, type TractusValor } from '../lib/api';
 import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
+import { axisSplice, SPLICE_WHEN } from '../lib/collections';
 
 // Traits garden (editio-garden-spec.md) — author the axes of variation. Each axis is a
 // Tractus (an input port to vary), each card a TractusValor (value + label + weight). Wired
@@ -159,7 +160,14 @@ export function TraitsGarden() {
                   {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> remove axis</button>}
                 </div>
                 <div className="gt-sub mono">
-                  varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b> · the value is spliced into the flow
+                  varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b>
+                </div>
+                {/* What this axis actually does to a piece — derived from the assembly path
+                    (TraitMixer + CollectioCursor), not described from memory, so the routes a
+                    value can take stay distinguishable as the author edits the grid. */}
+                <div className="gt-splice">
+                  <div className="gt-splice-what">{axisSplice(cat, c.basePrompt).line}</div>
+                  <div className="gt-splice-when">{SPLICE_WHEN}</div>
                 </div>
                 <div className="gt-grid">
                   {cat.valores.map((v, j) => (

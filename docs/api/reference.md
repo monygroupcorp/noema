@@ -8260,6 +8260,10 @@ Promote a Muse session the caller owns into a DRAFT collection: the fragments st
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
         },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+        },
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
@@ -9545,6 +9549,10 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
         },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+        },
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
@@ -9819,6 +9827,10 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
         },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+        },
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
@@ -10009,6 +10021,10 @@ Freeze a DRAFT Collection’s tractus and start the run — pins provenance to t
             ]
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
         },
         "reviewEnabled": {
           "type": "boolean",
@@ -10208,6 +10224,10 @@ List the authenticated caller's Collections (owner-scoped) — the ones they fun
             },
             "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
           },
+          "basePrompt": {
+            "type": "string",
+            "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+          },
           "reviewEnabled": {
             "type": "boolean",
             "description": "Whether each piece is held for review before it counts."
@@ -10403,6 +10423,10 @@ Fetch one Collection by id — status, cost, and the piece counters. Every dispa
             ]
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
         },
         "reviewEnabled": {
           "type": "boolean",
@@ -10767,6 +10791,10 @@ Extend a Collection — raise the target by `count` and dispatch the new pieces 
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
         },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+        },
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
@@ -10957,6 +10985,10 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
             ]
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
         },
         "reviewEnabled": {
           "type": "boolean",
@@ -11149,6 +11181,10 @@ Resume a paused Collection — continue dispatching toward the target. Owner-sco
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
         },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
+        },
         "reviewEnabled": {
           "type": "boolean",
           "description": "Whether each piece is held for review before it counts."
@@ -11339,6 +11375,10 @@ Cancel a Collection (owner-scoped, idempotent): stop dispatching, mark it cancel
             ]
           },
           "description": "The trait axes + values (the parameter grid) — exposed for the garden/rules authoring surfaces. Frozen once fired."
+        },
+        "basePrompt": {
+          "type": "string",
+          "description": "The collection’s base prompt as authored. It selects how traits reach the prompt, for the prompt as a WHOLE: a base prompt containing `{{` anywhere is in token mode, where a `{{porta}}` is replaced in place by the winning value’s prompt fragment and an axis with no token of its own reaches the prompt not at all; any other base prompt is in join mode, where fragments are appended to it in axis order. Absent when the collection has no base prompt."
         },
         "reviewEnabled": {
           "type": "boolean",

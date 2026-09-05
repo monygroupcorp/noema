@@ -198,6 +198,10 @@ export function toCollection(c: Collectio): Collection {
   if (c.nomen !== undefined) out.nomen = c.nomen
   if (c.owners !== undefined) out.owners = c.owners
   if (c.tractus !== undefined) out.tractus = c.tractus
+  // `_basePrompt` is the one aditusBase key the authoring screens need (see Collection.basePrompt);
+  // the rest of the base aditus stays server-side.
+  const basePrompt = c.aditusBase?._basePrompt
+  if (typeof basePrompt === 'string') out.basePrompt = basePrompt
   if (c.reviewEnabled !== undefined) out.reviewEnabled = c.reviewEnabled
   if (c.pausatum !== undefined) out.paused = true
   if (c.impetusTotal !== undefined) out.cost = c.impetusTotal.toString()

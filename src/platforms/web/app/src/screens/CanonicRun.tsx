@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection, type RarityReport } from '../lib/api';
-import { COLL_STATUS_LABEL } from '../lib/collections';
+import { COLL_STATUS_LABEL, spliceMechanismLine } from '../lib/collections';
 
 // Canonic run — the live view of a collection's batch generation. A collection fires the
 // moment it's created, so this SHOWS the run (progress + realized-vs-target rarity) and offers
@@ -160,6 +160,11 @@ export function CanonicRun() {
               style={i < lit ? { background: `radial-gradient(120% 100% at 50% 30%, ${SEG[i % SEG.length]}, #14171c)` } : undefined} />
           ))}
         </div>
+
+        {/* The run screen is where the trait→piece mechanism actually executes, and it had no
+            plain-language account of it at all. Derived from the collection's own axes and base
+            prompt, so it describes THIS run rather than collections in general. */}
+        <div className="cr-splice">{spliceMechanismLine(c.tractus, c.basePrompt)}</div>
 
         <div className="cr-dist">
           <div className="cr-dist-head">

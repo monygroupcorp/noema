@@ -270,6 +270,15 @@ export interface Collection {
   /** The trait axes + values (the parameter grid). Exposed so the garden/rules
    *  authoring surfaces can read + edit them; frozen once the collection is fired. */
   tractus?: import('../../types/collectio.js').Tractus[]
+  /** The collection's base prompt (`aditusBase._basePrompt`), as the author wrote it.
+   *  Exposed because it selects how traits reach the prompt, and it does so for the prompt
+   *  as a WHOLE rather than per axis: a base prompt containing `{{` anywhere is in TOKEN
+   *  mode, where a `{{porta}}` is replaced in place by the winning value's prompt fragment
+   *  and an axis with no token of its own reaches the prompt not at all; any other base
+   *  prompt is in JOIN mode, where fragments are appended in axis order. The authoring
+   *  screens explain which an axis does and cannot tell without this. Absent when there
+   *  is no base prompt. */
+  basePrompt?: string
   /** Whether each piece is held for review before it counts (see Collectio.reviewEnabled). */
   reviewEnabled?: boolean
   /** Dispatching new pieces is held (in-flight pieces still finish). Present + `true`

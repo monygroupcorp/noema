@@ -286,3 +286,35 @@ test('toCollection: a run with everything still held reports its work, not zero'
   assert.equal(col.completed, 0, 'nothing is accepted yet')
   assert.equal(col.pendingReview, 9, 'but nine pieces exist and the record says so')
 })
+
+// The base prompt is half the trait→prompt rule: a base prompt carrying `{{porta}}` has that
+// token REPLACED by the winning value's prompt fragment (TraitMixer's token mode), and one
+// carrying no token has fragments APPENDED instead. The authoring screens explain which of the
+// two an axis does, and cannot tell them apart without it — so it is projected, and only it:
+// the rest of the base aditus stays server-side.
+
+test('toCollection: projects the base prompt the author wrote', () => {
+  const col = toCollection(makeCollectio({ aditusBase: { _basePrompt: 'a lighthouse, {{style}}' } }))
+  assert.equal(col.basePrompt, 'a lighthouse, {{style}}')
+})
+
+test('toCollection: a collection with no base prompt carries no basePrompt field', () => {
+  assert.equal(toCollection(makeCollectio({ aditusBase: {} })).basePrompt, undefined)
+})
+
+test('toCollection: the rest of the base aditus is not projected', () => {
+  const col = toCollection(makeCollectio({
+    aditusBase: { _basePrompt: 'a lighthouse', steps: 30, negative: 'blurry', checkpointRef: 'private-model-id' },
+  }))
+  assert.equal(col.basePrompt, 'a lighthouse')
+  assert.deepEqual(
+    Object.keys(col).filter((k) => ['steps', 'negative', 'checkpointRef', 'aditusBase'].includes(k)),
+    [],
+    'only the base prompt crosses the projection',
+  )
+})
+
+test('toCollection: a non-string base prompt is dropped rather than projected raw', () => {
+  const col = toCollection(makeCollectio({ aditusBase: { _basePrompt: { nested: 'object' } } }))
+  assert.equal(col.basePrompt, undefined)
+})

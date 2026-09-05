@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
 import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
+import { axisSplice } from '../lib/collections';
 
 // Product of per-axis value counts — how many pieces the canonic run would generate.
 const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
@@ -87,6 +88,9 @@ export function TraitRules() {
         ) : axes.map((a, i) => (
           <div key={i} className="rr-axis">
             <div className="rr-axis-h"><b>{a.label || a.porta}</b> <span className="mono rl-hint">{a.valores.length} values</span></div>
+            {/* The axis header prints the port; this says what the port does with the value
+                a rule lets through — the same derived line the garden shows. */}
+            <div className="rr-axis-splice mono">{axisSplice(a, c.basePrompt).line}</div>
             {a.valores.map((v, j) => (
               <div key={j} className="rr-row">
                 <span className="rr-name">{label(v)}</span>
