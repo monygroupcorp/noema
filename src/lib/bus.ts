@@ -40,6 +40,12 @@ export interface BusEvents {
   /** Idle reaper terminated a warm pod — lets the UI freeze its bulletin to a receipt. */
   'pod.reaped':      [data: { externusId: string }]
   /**
+   * A warm pod finished a job and went back to idle — it is free NOW, before the next
+   * caller happens to look for it. `imageRef` is what makes the event actionable: the
+   * warm-pod line is per-image, so this says which line just gained capacity.
+   */
+  'pod.idle':        [data: { materiaId: string; imageRef?: string }]
+  /**
    * A cold pod just parked warm: Materia + (optionally) Hospitium were just created.
    * Subscribers handle late-binding hosting metadata that depends on platform state —
    * notably, resolving the group chat's admin set into the Hospitium when groupChatId

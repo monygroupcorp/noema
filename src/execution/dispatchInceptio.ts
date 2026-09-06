@@ -13,7 +13,7 @@
 // =============================================================================
 
 import type { Actum } from '../types/actum.js'
-import type { Modorum } from '../types/modus.js'
+import type { Modorum, Modus } from '../types/modus.js'
 import type { Cursorum, ActumCompletor, CursorResult, Inceptio } from '../types/cursus.js'
 import type { ActumInceptor } from './ActumInceptor.js'
 import type { ActumIndexStore } from '../types/actumIndex.js'
@@ -41,6 +41,38 @@ export interface DispatchDeps {
   compositusCursor?: {
     start(inceptio: Inceptio, modus: import('../types/modus.js').Modus): Promise<Actum>
   }
+  /**
+   * The warm-pod line. When present, a cursor refusing a run because the warm pool it
+   * elected to wait for is empty puts the run in the line instead of failing it (see
+   * the catch in `runDispatch`). Absent → that refusal settles the run exactly as any
+   * other dispatch failure does, which is what happened before the line existed.
+   */
+  queue?: QueueGate
+}
+
+/**
+ * QueueGate — the two questions the dispatch asks the warm-pod line, and nothing else.
+ *
+ * Declared structurally here rather than imported, so the execution rail keeps its one
+ * direction of dependency: the concrete `Vocator` lives in the crystal rail and knows
+ * about pods, images and the cursor error that names them; this rail knows only that
+ * some refusals mean "wait", and that something is willing to hold the run until then.
+ */
+export interface QueueGate {
+  /**
+   * The image ref this error says the run is waiting for, or null when the error is not
+   * a wait-for-a-pod refusal at all. Every other error is a failure and settles the run
+   * — the gate never widens that.
+   */
+  imageAwaited(err: unknown): string | null
+  /** Take the run into the line for `imageRef`. A throw here settles the run. */
+  enqueue(actum: Actum, imageRef: string): Promise<void>
+  /**
+   * Where a run stands, or null when it holds no place. Read by the facades so a run
+   * that queued can be DESCRIBED as queued — a caller told "executing" about a run that
+   * is actually waiting has been told the wrong thing, however briefly.
+   */
+  place(actumId: string): Promise<{ place: number; depth: number } | null>
 }
 
 /**
@@ -147,23 +179,23 @@ async function runDispatch(
 
   let cursorResult: CursorResult
   try {
-    // Reuse the modus already fetched in step 0 when it matches the locked version (the
-    // common path); only re-fetch if it somehow differs.
-    const modus = (target && target.versio === actum.modusVersiono)
-      ? target
-      : await modorum.find(actum.modusId, actum.modusVersiono)
-    if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
-
-    const cursor = cursorum.resolve(modus)
-
-    // Run — propagate identity + actum id through the trace context so the cursor (and
-    // anything downstream) can read them without putting identity on any durable schema
-    // (Materia/Modo/Actum stay identity-blind).
-    cursorResult = await withTrace(
-      makeTraceContext({ ...getTrace(), animaId, commitment, actumId: actum.id }),
-      () => cursor.run(actum),
-    )
+    cursorResult = await runCursor(deps, actum, { animaId, commitment }, target ?? undefined)
   } catch (err) {
+    // A refusal that means "no warm pod, YET" is not a failure. The payer elected to
+    // wait for warm capacity rather than pay for a cold start, so the honest answer to
+    // an empty pool is to hold the run until one frees — not to settle it and make the
+    // user ask again. The run stays `nascens` with its signa locked, exactly as it
+    // stands between initiation and dispatch on any other rail, and the line's own
+    // caller dispatches it when a pod falls idle.
+    //
+    // Only the gate decides which refusals qualify, and only when a line is wired.
+    // Everything else — and a line that cannot take the run — settles below, so no
+    // failure the dispatch used to report becomes a silent wait.
+    const imageRef = deps.queue?.imageAwaited(err) ?? null
+    if (imageRef !== null) {
+      const queued = await deps.queue!.enqueue(actum, imageRef).then(() => true, () => false)
+      if (queued) return { actum }
+    }
     await completor.fail(actum, (err as Error)?.message ?? String(err)).catch(() => {})
     throw markDispatchFailure(err, actum.id)
   }
@@ -180,6 +212,67 @@ async function runDispatch(
   }
 
   // 4b. Async: leave pending — the completion webhook finishes it.
+  return { actum }
+}
+
+/**
+ * Resolve the actum's modus + cursor and run it under a trace context — the half of the
+ * dispatch that is identical whether the run is reaching a cursor for the first time or
+ * being called out of the warm-pod line minutes later.
+ *
+ * `hint` is the modus the caller already read (the common path on a first dispatch);
+ * it is used only when it matches the version locked onto the actum.
+ */
+async function runCursor(
+  deps: Pick<DispatchDeps, 'modorum' | 'cursorum'>,
+  actum: Actum,
+  owner: { animaId?: string; commitment?: string },
+  hint?: Modus,
+): Promise<CursorResult> {
+  const { modorum, cursorum } = deps
+  const modus = (hint && hint.versio === actum.modusVersiono)
+    ? hint
+    : await modorum.find(actum.modusId, actum.modusVersiono)
+  if (!modus) throw new Error(`Modus '${actum.modusId}' not found after initiation`)
+
+  const cursor = cursorum.resolve(modus)
+
+  // Propagate identity + actum id through the trace context so the cursor (and anything
+  // downstream) can read them without putting identity on any durable schema
+  // (Materia/Modo/Actum stay identity-blind).
+  return withTrace(
+    makeTraceContext({ ...getTrace(), ...owner, actumId: actum.id }),
+    () => cursor.run(actum),
+  )
+}
+
+/**
+ * Dispatch an actum that already exists — the second half of a run that was admitted
+ * earlier and has been waiting in the warm-pod line. Its signa are already locked and
+ * its record is already written, so there is no initiation to redo: this resolves the
+ * cursor and runs it, and nothing else.
+ *
+ * NO OWNER IS THREADED, and that is not an oversight. An Actum is identity-blind by
+ * construction and the line is too, so by the time a freed pod calls a waiting run
+ * there is no caller left to resolve — which is exactly the situation the completion
+ * WEBHOOK is already in, and the webhook is what finishes these runs: the queue holds
+ * pod-rail work, which is async. A sync cursor reaching here would complete without a
+ * vestigium (the indexing skips on an absent auctor, as it does for the anonymous
+ * rails) rather than complete wrongly.
+ *
+ * Throws exactly what the cursor throws — including the empty-pool refusal, which the
+ * caller reads as "still nothing free" and puts the run back in the line. Settlement
+ * is the caller's decision here, not this function's.
+ */
+export async function dispatchQueuedActum(
+  deps: Pick<DispatchDeps, 'modorum' | 'cursorum' | 'completor'>,
+  actum: Actum,
+): Promise<{ actum: Actum; exitus?: Record<string, unknown> }> {
+  const cursorResult = await runCursor(deps, actum, {})
+  if (cursorResult.kind === 'sync') {
+    const completed = await deps.completor.complete(actum, cursorResult.exitus)
+    return { actum: completed, exitus: completed.exitus ?? {} }
+  }
   return { actum }
 }
 

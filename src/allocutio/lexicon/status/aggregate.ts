@@ -38,6 +38,10 @@ export interface StatusAggregateDeps {
    *  (the canonical studio handle — what `POST /v1/runs { studioId }` targets, ADR-0006);
    *  absent → falls back to the Materia id. */
   modos?: ModoStore
+  /** Optional warm-pod line. When present, a gen waiting for a pod carries the place it
+   *  holds, so `/status` answers "where am I?" without the user opening the run. Absent →
+   *  a queued gen reads as pending, exactly as it did before the line existed. */
+  vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
 }
 
 export interface StatusAggregateInput {
@@ -122,12 +126,20 @@ async function buildGens(deps: StatusAggregateDeps, actumIds: string[]): Promise
       ? Date.now() - new Date(a.inceptum).getTime()
       : undefined
 
+    // The place is asked for only while a gen could plausibly be in a line — a run that
+    // has reached a pod is running, not waiting — and an unanswerable store leaves the
+    // field absent rather than reporting a place the user does not hold.
+    const queue = a.status === 'nascens'
+      ? await deps.vocator?.place(a.id).catch(() => null) ?? null
+      : null
+
     rows.push({
       actumId: a.id,
       modusLabel,
       studio,
       status: a.status,
       ...(elapsedMs !== undefined ? { elapsedMs } : {}),
+      ...(queue ? { queue } : {}),
     })
   }
   return rows

@@ -69,6 +69,14 @@ export interface Run {
   modusVersion?: string
   /** The standing order this run belongs to, when it has one (training runs). */
   order?: RunOrder
+  /**
+   * Where a run that is WAITING FOR A WARM POD stands in line. Present only while the
+   * run is actually queued: a run dispatching straight onto a pod never has it, and it
+   * is gone the moment the run is called forward. `place` is 1-based and counts only
+   * the runs waiting on the same substrate image — the line a run is in is the line for
+   * the image it needs, not a single global one.
+   */
+  queue?: { place: number; depth: number }
 }
 
 /**

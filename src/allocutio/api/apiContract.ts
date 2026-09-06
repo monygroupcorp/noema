@@ -150,6 +150,18 @@ const RunSchema: JsonSchema = {
       description:
         'The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order.',
     },
+    queue: {
+      type: 'object',
+      properties: {
+        place: { type: 'number', description: "1-based position in the line, 1 being next." },
+        depth: { type: 'number', description: 'How many runs are waiting on the same image, this one included.' },
+      },
+      required: ['place', 'depth'],
+      description:
+        'Where a run waiting for a warm pod stands in line. Present only while the run is ' +
+        'queued — a run that dispatched straight onto a pod never carries it, and it is gone ' +
+        'once the run is called forward. The line is per substrate image, not global.',
+    },
   },
   required: ['id', 'status', 'modusId'],
 }

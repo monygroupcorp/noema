@@ -446,11 +446,15 @@ export class RunPodCursor implements Cursor {
 
 /**
  * Thrown when an economy-strategy job finds no warm pod in the economy pool.
- * Callers should hold the job and retry when a pod becomes available,
- * rather than silently upgrading the user to a full cold-start.
+ * The job is held and dispatched when a pod becomes available rather than the
+ * user being silently upgraded to a full cold-start — `Vocator` is what holds it.
+ *
+ * `imageRef` is carried as a FIELD, not only inside the message: it is the match
+ * key the run waits under, and the line reads it as data rather than parsing it
+ * back out of a sentence.
  */
 export class EconomyUnavailableError extends Error {
-  constructor(imageRef: string) {
+  constructor(readonly imageRef: string) {
     super(`No economy-pool pod available for image '${imageRef}' — job not dispatched`)
     this.name = 'EconomyUnavailableError'
   }

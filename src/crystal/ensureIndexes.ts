@@ -11,6 +11,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('acta').createIndex({ externusJobId: 1 }, { sparse: true }),
     db.collection('acta').createIndex({ status: 1, expirat: 1 }),
 
+    // loci — the warm-pod line. `actumId` unique: a run holds one place, which is what
+    // makes `enqueue` idempotent. The compound key is what `claim` sorts on — the oldest
+    // unclaimed place for one image — and what `place` counts against.
+    db.collection('loci').createIndex({ actumId: 1 }, { unique: true }),
+    db.collection('loci').createIndex({ imageRef: 1, vocatum: 1, admissum: 1 }),
+
     // modi — modus/spell registry
     db.collection('modi').createIndex({ id: 1, versio: 1 }, { unique: true }),
 

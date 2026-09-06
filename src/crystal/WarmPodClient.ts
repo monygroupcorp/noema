@@ -9,6 +9,7 @@ import type { ModelInstallClient, InstallProgress } from './ModelInstaller.js'
 import { makeLogger } from '../lib/logger.js'
 import { getTrace } from '../lib/trace.js'
 import { recordProgressus } from '../execution/progressusSink.js'
+import { bus } from '../lib/bus.js'
 import { coldStartProgressus } from '../execution/progressus.js'
 
 const log = makeLogger('cursor:runpod:warm')
@@ -199,6 +200,13 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
         patch.warmUntil = stored && stored > floor ? stored : floor
       }
       await this.materiae.update(id, patch).catch(() => {})
+      // A pod going back to idle is the moment the warm-pod line has been waiting for.
+      // Announced here rather than discovered by a poll, so a run that queued because
+      // this pod was busy starts the instant it stops being busy. Only a pod that is
+      // actually reusable is announced — a terminated one is not capacity.
+      if (nextStatus === 'idle') {
+        bus.emit('pod.idle', { materiaId: id, ...(this.materia.imageRef ? { imageRef: this.materia.imageRef } : {}) })
+      }
     }
   }
 
