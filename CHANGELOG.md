@@ -1,5 +1,46 @@
 # Changelog
 
+## [5.28.0](https://github.com/monygroupcorp/noema/compare/v5.27.0...v5.28.0) (2026-09-06)
+
+
+### Features
+
+* a private output can be published and delivered ([#578](https://github.com/monygroupcorp/noema/issues/578)) ([cbf411e](https://github.com/monygroupcorp/noema/commit/cbf411e04945e31369703f24d2add646d316a44a))
+* **api:** a royalty earner can read what they have earned ([#579](https://github.com/monygroupcorp/noema/issues/579)) ([0cab8eb](https://github.com/monygroupcorp/noema/commit/0cab8eb1f9b26eab8e35466480138912f5367b9e))
+* **blog:** the guides page ships its first three guides ([#557](https://github.com/monygroupcorp/noema/issues/557)) ([5442d8b](https://github.com/monygroupcorp/noema/commit/5442d8b2f71e75fe1683dc816fbce2ea2dd4eadb))
+* **collections:** explain how a trait reaches a piece, from the code that does it ([#564](https://github.com/monygroupcorp/noema/issues/564)) ([96f3193](https://github.com/monygroupcorp/noema/commit/96f31938ad20de2dbda8f696549bde4fb5f5c14c))
+* let a private output be used as an input to a new run ([#559](https://github.com/monygroupcorp/noema/issues/559)) ([93375aa](https://github.com/monygroupcorp/noema/commit/93375aab13873291aefc12d01b8de7b5e4233ecd))
+* **partner:** make the partner intake queue reviewable by a real login ([#548](https://github.com/monygroupcorp/noema/issues/548)) ([1a3b8c8](https://github.com/monygroupcorp/noema/commit/1a3b8c8c1094b9d02339cd7236979d3640cde3a5))
+* **partner:** tell an applicant where their partner application stands ([#558](https://github.com/monygroupcorp/noema/issues/558)) ([b5088b7](https://github.com/monygroupcorp/noema/commit/b5088b7c0b64ab163b47763d208028b623a189c8))
+* **runs:** a run with no warm pod waits in line instead of being refused ([#581](https://github.com/monygroupcorp/noema/issues/581)) ([08da8b9](https://github.com/monygroupcorp/noema/commit/08da8b9433864213fa8b4db72a3b3b88b27c9eb8))
+* **telegram:** accept a round video note, and a file whose sender named no MIME type ([#566](https://github.com/monygroupcorp/noema/issues/566)) ([6cb1ad4](https://github.com/monygroupcorp/noema/commit/6cb1ad47fee6a5f4786120c16305f65c60a19163))
+* **telegram:** accept media in every wrapper Telegram sends it in ([#562](https://github.com/monygroupcorp/noema/issues/562)) ([15a28fa](https://github.com/monygroupcorp/noema/commit/15a28fa4ed3f5afd5424da502f3957668157b0b4))
+* **web:** tell a publisher when the moderation gate refused their publish ([#552](https://github.com/monygroupcorp/noema/issues/552)) ([605c48f](https://github.com/monygroupcorp/noema/commit/605c48fb46820f18bf54ee5874f5d5d4d6d4b127))
+
+
+### Bug Fixes
+
+* **arcanum:** denominate every anonymous note in impetus at issuance ([#553](https://github.com/monygroupcorp/noema/issues/553)) ([54a6faf](https://github.com/monygroupcorp/noema/commit/54a6faf05e76085ad2dc84fdf9cea8cf3ae933f4))
+* **blog:** the training guide stops denying a royalty the ledger pays ([#574](https://github.com/monygroupcorp/noema/issues/574)) ([6e86581](https://github.com/monygroupcorp/noema/commit/6e86581676894d339d42cdd976a5e522c638427f))
+* **build:** a fresh clone installs with npm ci ([#576](https://github.com/monygroupcorp/noema/issues/576)) ([713bffc](https://github.com/monygroupcorp/noema/commit/713bffc3450efe13deb4804570bab918136435a7))
+* **ceremony:** bind each contribution to the key the sequencer handed out ([#582](https://github.com/monygroupcorp/noema/issues/582)) ([bbe35f1](https://github.com/monygroupcorp/noema/commit/bbe35f1197517451030147fb9b0d16eca47f76e0))
+* **compliance:** make OFAC deposit screening's on/off state visible and consistent ([#551](https://github.com/monygroupcorp/noema/issues/551)) ([faacd68](https://github.com/monygroupcorp/noema/commit/faacd68cd8dbe3a4b21ecdd8ab6c353e57c3b6eb))
+* **crystal:** a drained studio stops billing even if it never returns to idle ([#577](https://github.com/monygroupcorp/noema/issues/577)) ([1e7e967](https://github.com/monygroupcorp/noema/commit/1e7e9676849e48cfe440a2a661ce17aa8d9a7e11))
+* **landing:** say only what the running platform backs today ([#560](https://github.com/monygroupcorp/noema/issues/560)) ([fde5922](https://github.com/monygroupcorp/noema/commit/fde592243ac6b92ea2496304fc1ff9822c577aab))
+* **landing:** show the plates at the shape they were made at ([#580](https://github.com/monygroupcorp/noema/issues/580)) ([23d3ece](https://github.com/monygroupcorp/noema/commit/23d3ecebb308e3f4d6030d4e07f7d2ef953fd93d))
+* **landing:** stop offering the anonymous purse on pages that cannot see the switch ([#575](https://github.com/monygroupcorp/noema/issues/575)) ([5c5c18f](https://github.com/monygroupcorp/noema/commit/5c5c18fc451b3f21be38baa0dacebc179500be72))
+* **ledger:** pay royalties on every completion rail, not just the webhook ([#554](https://github.com/monygroupcorp/noema/issues/554)) ([62d4de3](https://github.com/monygroupcorp/noema/commit/62d4de39692dca38e640e80399b6c0d1ffd547d9))
+* **legal:** stop offering a BAA we do not provide ([#550](https://github.com/monygroupcorp/noema/issues/550)) ([b716a07](https://github.com/monygroupcorp/noema/commit/b716a07e5067f8f4d86d8d0c6943f0f3c5006a65))
+* **purse:** a revoked or redeemed purse code stops working, not just stops paying ([#561](https://github.com/monygroupcorp/noema/issues/561)) ([afd18ed](https://github.com/monygroupcorp/noema/commit/afd18ed1c9042d48c7e66a7d3b93e6ca6c279be2))
+* **shelf:** a model held for moderation review still says so after a reload ([#570](https://github.com/monygroupcorp/noema/issues/570)) ([80433b4](https://github.com/monygroupcorp/noema/commit/80433b44dae398cdbda0e7dff03c14215c9d7138))
+* **widget:** keep the embed access code out of the URL ([#572](https://github.com/monygroupcorp/noema/issues/572)) ([a3ebe2f](https://github.com/monygroupcorp/noema/commit/a3ebe2f4f046dc230732b5ea85782d6a8a1ef7d7))
+
+
+### Performance Improvements
+
+* **collections:** count a run's pieces in flight instead of walking them ([#573](https://github.com/monygroupcorp/noema/issues/573)) ([b1e780e](https://github.com/monygroupcorp/noema/commit/b1e780e1da4852f53e483a9f9fc531775c73401e))
+* **collections:** scope and page the collection listing in the database ([#556](https://github.com/monygroupcorp/noema/issues/556)) ([24585a0](https://github.com/monygroupcorp/noema/commit/24585a0de23c5cad23cd6a03810a8869c85b112a))
+
 ## [5.27.0](https://github.com/monygroupcorp/noema/compare/v5.26.0...v5.27.0) (2026-09-04)
 
 
