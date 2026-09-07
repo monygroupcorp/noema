@@ -81,6 +81,12 @@ the same handle:
 
 On `complete`, read the outputs. On `failed`, read the failure's code and message.
 
+A `pending` run that is not moving may be in a line rather than stalled. A run that found no warm
+machine waits for one instead of being refused, and while it waits the handle carries
+`queue: { place, depth }` — its 1-based position and how many runs are ahead of it plus itself. The
+line is per machine image, not one global queue, and the field is gone the moment the run is called
+forward. Report it rather than leaving someone watching a `pending` that sits still.
+
 ## Two kinds of error, and why the difference matters
 
 This trips people up, so it is worth being explicit.

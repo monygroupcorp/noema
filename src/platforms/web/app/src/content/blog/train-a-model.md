@@ -84,11 +84,17 @@ close the tab — the finished model lands on your shelf either way.
 Trained models appear on your [shelf](/models), alongside anything you have imported, with the
 provenance the platform actually knows: base model, trigger word, license, listing state.
 
-Listing a model publicly also makes it royalty-eligible, and that part is real: when somebody else's
-run uses your model, a share of what that run spends is split across the model's rights holders when
-the run completes. What does not exist yet is anywhere to read it. Nothing returns what you have
-earned, so the shelf shows no earnings — not because nothing accrues, but because there is nothing
-to fetch. Until that lands, a listed model earns quietly.
+Listing a model publicly also makes it royalty-eligible: when somebody else's run uses your model, a
+share of what that run spends is split across the model's rights holders when the run completes.
+
+You can read what that has come to. Your [dashboard](/app) carries a lifetime royalties figure, and
+`GET /v1/me/earnings` serves the same thing in full — the lifetime total, the breakdown by stream
+(model royalty, spell royalty, host cut, host bonus, referrals), and a paged statement of the
+individual payments, newest first.
+
+What a payment does not carry is which model earned it. The streams tell you that model royalties
+paid you and how much in total; nothing attributes a row to one model on your shelf. So the shelf
+still shows no per-model figure — the total is readable, the split behind it is not.
 
 From there the model is a model. It runs from the catalogue, it runs from the canvas, and it runs
 over the API — see [composing a workflow](/blog/compose-a-workflow) and
