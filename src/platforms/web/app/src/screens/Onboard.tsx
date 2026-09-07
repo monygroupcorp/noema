@@ -65,6 +65,10 @@ export function Onboard() {
           <>
             <h1 className="auth-display">Make anything.<br />Anonymously.</h1>
             <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
+            {/* Someone sent here mid-task did not come looking for a front door. Say that the
+                task is still waiting, so the door reads as a step in what they were doing
+                rather than the start of something else. */}
+            {next && <p className="auth-sub">Whichever you choose, we take you straight back to what you were doing.</p>}
           </>
         )}
       </header>
