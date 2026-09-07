@@ -1317,7 +1317,7 @@ const EditionSchema: JsonSchema = {
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
     status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
     reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'], description: 'Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path.' },
-    moderationNote: { type: 'string', description: "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
+    moderationNote: { type: 'string', description: "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
     externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
     owners: {
       type: 'array',

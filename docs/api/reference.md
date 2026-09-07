@@ -11868,7 +11868,7 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12010,7 +12010,7 @@ The human-review queue: publications the moderation gate HELD for review (spec �
           },
           "moderationNote": {
             "type": "string",
-            "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+            "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
           },
           "externalRef": {
             "type": "string",
@@ -12151,7 +12151,7 @@ Fetch one publication (author-scoped). Poll it to watch a `pending` settle land 
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12357,7 +12357,7 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12542,7 +12542,7 @@ Clear a moderation HOLD so the held publication re-settles and publishes (spec �
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12682,7 +12682,7 @@ Decline a held publication → terminal `rejected` (spec §4). Restricted to the
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",

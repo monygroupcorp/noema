@@ -418,10 +418,12 @@ export interface Edition {
    *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
    *  on the normal path. */
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
-  /** Present when the moderation gate HELD or REJECTED this publication. A generic,
-   *  author-safe message — NEVER the classifier's raw verdict text (which may describe
-   *  detection internals). A platform admin sees the raw reason via
-   *  `GET /v1/editiones/:id/moderation` instead. Absent when never flagged. */
+  /** Present when the moderation gate HELD or REJECTED this publication. An author-safe
+   *  message derived from the verdict's category (`publisherModerationNote`, runProjection),
+   *  so a hold, a content refusal and "public publishing is closed" do not all read alike —
+   *  but NEVER the classifier's raw verdict text (which may describe detection internals).
+   *  A platform admin sees the raw reason via `GET /v1/editiones/:id/moderation` instead.
+   *  Absent when never flagged. */
   moderationNote?: string
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string

@@ -69,7 +69,7 @@ describe('heldModelPublishStates — a hold survives the reload that used to los
 
   it('falls back to a reason rather than rendering a held model with none', () => {
     const held = heldModelPublishStates([ed({ reviewOutcome: 'pending' })]);
-    expect(held.m1.note).toBe('Flagged by automated review.');
+    expect(held.m1.note).toBe('Held for a person to review before it goes live.');
   });
 
   it('ignores held publications of anything that is not a model', () => {

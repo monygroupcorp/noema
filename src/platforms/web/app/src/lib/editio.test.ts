@@ -49,11 +49,20 @@ describe('publishOutcome — the one axis a publisher is told about', () => {
 
 describe('publishNote — a refusal is never explained by nothing', () => {
   it('uses the server note when the API sends one', () => {
-    expect(publishNote(ed({ status: 'rejected', moderationNote: 'Flagged by automated review.' })))
-      .toBe('Flagged by automated review.');
+    expect(publishNote(ed({ status: 'rejected', moderationNote: 'Automated review flagged something in this content, so it was not published.' })))
+      .toBe('Automated review flagged something in this content, so it was not published.');
   });
 
-  it('falls back when the API build predates the field', () => {
-    expect(publishNote(ed({ status: 'rejected' }))).toBe('Flagged by automated review.');
+  it('falls back when the API build predates the field, and tells a hold from a refusal', () => {
+    expect(publishNote(ed({ status: 'rejected' }))).toBe('Refused by automated review.');
+    expect(publishNote(ed({ status: 'pending', reviewOutcome: 'pending' })))
+      .toBe('Held for a person to review before it goes live.');
+  });
+
+  it('never invents a finding the server did not report', () => {
+    // The old fallback said "Flagged by automated review." for everything, including a hold
+    // under the blanket manual-review posture, where nothing had been inspected at all.
+    expect(publishNote(ed({ status: 'pending', reviewOutcome: 'pending' })))
+      .not.toContain('Flagged');
   });
 });

@@ -26,9 +26,9 @@ export interface Editio {
   externalRef?: string;                       // feed post id / HF repo / token id / R2 url
   status: EditioStatus;
   reviewOutcome?: ReviewOutcome;              // present only for a moderation-gate HELD item
-  // Present whenever the moderation gate held OR refused this publication. Deliberately
-  // generic ('Flagged by automated review.') — the classifier's raw verdict text is admin-
-  // only (GET /v1/editiones/:id/moderation) and never reaches this projection.
+  // Present whenever the moderation gate held OR refused this publication. Author-safe
+  // wording derived server-side from the verdict's category — the classifier's raw verdict
+  // text is admin-only (GET /v1/editiones/:id/moderation) and never reaches this projection.
   moderationNote?: string;
   createdAt: string;                          // ISO
   updatedAt: string;                          // ISO
@@ -111,6 +111,12 @@ export function publishOutcome(e: Editio): PublishOutcome {
 }
 
 // The reason line shown to the publisher of a held or refused publication. The server sends
-// its own wording on `moderationNote`; the fallback covers an API build older than the field
-// (the note is what makes a refusal explicable at all, so never render nothing).
-export const publishNote = (e: Editio) => e.moderationNote ?? 'Flagged by automated review.';
+// its own wording on `moderationNote`, derived from the gate's verdict, so a hold and a
+// refusal do not read alike. The fallback covers an API build older than the field, and says
+// only what the outcome itself proves — the note is what makes a refusal explicable at all,
+// so never render nothing, and never claim a finding the server did not report.
+export const publishNote = (e: Editio) =>
+  e.moderationNote ??
+  (publishOutcome(e) === 'held'
+    ? 'Held for a person to review before it goes live.'
+    : 'Refused by automated review.');
