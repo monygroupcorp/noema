@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Sponsorship, type SubsidyCadence } from '../lib/api';
@@ -12,6 +14,11 @@ const fmt = (v?: string) => (v == null ? '—' : Number(v).toLocaleString());
 
 export function Sponsorships() {
   const { session, ready } = useSession();
+  // Where the door hands this visitor back once their session is live: the page they were
+  // already on. Turning someone away for want of an account should not also cost them the
+  // walk back to what they were doing.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [list, setList] = useState<Sponsorship[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -69,7 +76,7 @@ export function Sponsorships() {
         </div></div>
 
         {!session && ready && (
-          <div className="warn">Sponsorships need an identified account with a fundable pool. <a href="/onboard">Sign in</a> to pledge.</div>
+          <div className="warn">Sponsorships need an identified account with a fundable pool. <Link to={doorPath(here)}>Sign in</Link> to pledge.</div>
         )}
 
         <div className="sectionhead">New pledge</div>

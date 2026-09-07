@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, ApiRequestError, type OwnPartnerRequest, type Partner as PartnerRecord, type SettledRun } from '../lib/api';
@@ -58,6 +59,11 @@ type Gate =
 
 export function Partner() {
   const { session, ready } = useSession();
+  // Where the door hands this visitor back once their session is live: the page they were
+  // already on. Turning someone away for want of an account should not also cost them the
+  // walk back to what they were doing.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [gate, setGate] = useState<Gate>('loading');
   const [partner, setPartner] = useState<PartnerRecord | null>(null);
   const [gateErr, setGateErr] = useState<string | null>(null);
@@ -174,7 +180,7 @@ export function Partner() {
             <div className="ico"><Ic name="circle-user" /></div>
             <div className="t">Sign in to continue</div>
             <div className="s">The partner dashboard is only available to a signed-in account.</div>
-            <Link className="btn" to="/onboard"><Ic name="circle-user" /> Sign in</Link>
+            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
           </div>
         )}
 

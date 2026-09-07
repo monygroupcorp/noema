@@ -1,3 +1,5 @@
+import { doorPath } from './entry';
+
 // The card rail's shared request shape. Both surfaces that can start a Stripe checkout — the
 // Funding page's pack row and the buy-credits modal reachable from the credits pill — build the
 // request here, so the two agree on where Stripe returns you and on who is allowed to start.
@@ -24,5 +26,5 @@ export function buildCheckoutRequest(packId: string, origin: string): { packId: 
 // They asked for a specific pack; sign-in hands them back to that exact purchase rather than
 // to a generic landing, so choosing the pack is not a step they repeat.
 export function signInThenBuy(packId: string): string {
-  return `/onboard?next=${encodeURIComponent(`/funding?pack=${packId}`)}`;
+  return doorPath(`/funding?pack=${packId}`);
 }

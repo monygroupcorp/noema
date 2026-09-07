@@ -105,6 +105,10 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
   const [cardBusy, setCardBusy] = useState<string | null>(null);
   const [cardErr, setCardErr] = useState<string | null>(null);
 
+  // The settle poll gives up after SETTLE_TIMEOUT_MS. It used to give up in silence, leaving
+  // line 04 claiming to still be polling every 15 seconds — so a deposit that never credits
+  // (an unlinked wallet's parks unattributed) looked exactly like one still on its way.
+  const [settleStalled, setSettleStalled] = useState(false);
   const [preBalance, setPreBalance] = useState<number | null>(null);
   const [newBalance, setNewBalance] = useState<number | null>(null);
   const [settledAt, setSettledAt] = useState<string | null>(null);
@@ -117,7 +121,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     setConnectErr(null);
     setLinkBusy(false); setLinkErr(null);
     setEthAmount(''); setQuote(null); setQuoteErr(null);
-    setTxHash(null); setSignErr(null); setConfirmed(false);
+    setTxHash(null); setSignErr(null); setConfirmed(false); setSettleStalled(false);
     setNewBalance(null); setSettledAt(null); setDepositStatus(null);
     if (!wallet) { setPhase('connect'); setGate('anon'); return; }
     checkGate(wallet.address).then((g) => setPhase(g === 'unlinked' ? 'gate-link' : 'amount'));
@@ -251,10 +255,16 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     if (phase !== 'settle') return;
     let live = true;
     const start = Date.now();
+    setSettleStalled(false);
     const finishSettled = (bal: number) => {
       setNewBalance(bal);
       setSettledAt(new Date().toISOString());
       setPhase('settled');
+    };
+    // Either poll again or stop and say we stopped — never stop quietly.
+    const again = () => {
+      if (Date.now() - start < SETTLE_TIMEOUT_MS) setTimeout(poll, SETTLE_POLL_MS);
+      else setSettleStalled(true);
     };
     const poll = () => {
       if (session) {
@@ -267,18 +277,18 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
               .catch(() => { if (live) setPhase('settled'); });
             return;
           }
-          if (Date.now() - start < SETTLE_TIMEOUT_MS) setTimeout(poll, SETTLE_POLL_MS);
+          again();
         }).catch(() => {
-          if (live && Date.now() - start < SETTLE_TIMEOUT_MS) setTimeout(poll, SETTLE_POLL_MS);
+          if (live) again();
         });
       } else {
         api.meStatus().then((s) => {
           if (!live) return;
           const bal = Number(s.balanceImpetus);
           if (preBalance == null || bal > preBalance) { finishSettled(bal); return; }
-          if (Date.now() - start < SETTLE_TIMEOUT_MS) setTimeout(poll, SETTLE_POLL_MS);
+          again();
         }).catch(() => {
-          if (live && Date.now() - start < SETTLE_TIMEOUT_MS) setTimeout(poll, SETTLE_POLL_MS);
+          if (live) again();
         });
       }
     };
@@ -458,7 +468,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
               {phase === 'settled'
                 ? `confirmed · ${settledAt ?? ''}`
                 : phase === 'settle'
-                ? `waiting for the credit to land — ${depositStatus ?? 'detectum'} · polling every 15s`
+                ? settleStalled
+                  ? `still not credited — ${depositStatus ?? 'detectum'} · stopped watching`
+                  : `waiting for the credit to land — ${depositStatus ?? 'detectum'} · polling every 15s`
                 : 'credits land automatically'}
             </span>
             {phase === 'settled' && <span className="bcm-tick success">—✓</span>}
@@ -505,6 +517,15 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
             </p>
             <button className="btn" onClick={doConnect}>Connect wallet</button>
             {connectErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{connectErr}</div>}
+          </div>
+        )}
+
+        {phase === 'settle' && settleStalled && (
+          <div className="bcm-amber-note">
+            The deposit is on the chain — we stopped watching for the credit after ten minutes,
+            not because it failed. Reopen this from the credits pill to see your balance.
+            {gate === 'unlinked' && ' This wallet is not linked to your account, so the deposit parks unattributed until it is — link it and it credits.'}
+            {txHash && <> Transaction {shortAddr(txHash)}.</>}
           </div>
         )}
 

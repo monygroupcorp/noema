@@ -6,6 +6,7 @@ import { api, ApiRequestError, type DepositConfig, type Pack } from '../lib/api'
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
+import { doorPath } from '../lib/entry';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
@@ -87,7 +88,7 @@ export function Funding() {
   // Fiat/card rail — Stripe Checkout redirect + post-return credit poll.
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
-  const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout'>('idle');
+  const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout' | 'cancelled'>('idle');
 
   // Invite code → balance. Someone mints a purse from their balance and sends you the token;
   // redeeming moves its whole remaining balance onto your account, once.
@@ -182,23 +183,34 @@ export function Funding() {
   // is not proof of a landed credit. Strip the flag so a refresh doesn't re-poll.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') !== 'success') return;
+    const flag = params.get('checkout');
+    if (flag !== 'success' && flag !== 'cancel') return;
+    // Strip the flag either way, so a refresh neither re-polls nor re-announces an old return.
     window.history.replaceState({}, '', window.location.pathname);
+    // Backing out of Stripe returns here too, and used to return in silence. Say it: nothing
+    // was charged, and the packs above are still there.
+    if (flag === 'cancel') { setCheckoutStatus('cancelled'); return; }
     let live = true;
     setCheckoutStatus('polling');
     const start = Date.now();
     const timeoutMs = 5 * 60_000;
     let baseline: number | null = null;
+    // Every way out of this loop lands on a state the page has words for — settled, or timeout.
+    // Stopping on a run of failed reads without saying so left the visitor watching "waiting for
+    // the credit to land" with nothing behind it.
+    const again = () => {
+      if (Date.now() - start < timeoutMs) setTimeout(poll, 3000);
+      else setCheckoutStatus('timeout');
+    };
     const poll = () => {
       api.meStatus().then((s) => {
         if (!live) return;
         const bal = Number(s.balanceImpetus);
         if (baseline == null) { baseline = bal; }
         else if (bal > baseline) { setCheckoutStatus('settled'); return; }
-        if (Date.now() - start < timeoutMs) setTimeout(poll, 3000);
-        else setCheckoutStatus('timeout');
+        again();
       }).catch(() => {
-        if (live && Date.now() - start < timeoutMs) setTimeout(poll, 3000);
+        if (live) again();
       });
     };
     poll();
@@ -301,6 +313,22 @@ export function Funding() {
               {checkoutStatus === 'settled' && (
                 <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
                   Credited — your balance is updated.
+                </div>
+              )}
+              {checkoutStatus === 'timeout' && (
+                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
+                  <WarnIc />
+                  <span>
+                    Stripe sent you back as paid, but the credit has not landed here yet. It is
+                    credited by a webhook, so it can arrive after this page stops watching —
+                    reload in a few minutes. If it is still missing, send us the Stripe receipt
+                    and we will place it by hand.
+                  </span>
+                </div>
+              )}
+              {checkoutStatus === 'cancelled' && (
+                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
+                  Checkout cancelled — nothing was charged. Pick a pack whenever you're ready.
                 </div>
               )}
             </div>
@@ -523,8 +551,11 @@ export function Funding() {
                 <div className="warn fund-warn">
                   <WarnIc />
                   <span>
-                    Redeeming a code needs an account — <Link to="/onboard">sign in</Link> first,
-                    then come back and paste it here.
+                    {/* Back to the bare page, deliberately: this URL may still carry a ?pack= that
+                        an anon visitor never chose to buy, and returning to it would start that
+                        checkout the moment they signed in. */}
+                    Redeeming a code needs an account — <Link to={doorPath('/funding')}>sign in</Link> first.
+                    You land back on this page with the box ready.
                   </span>
                 </div>
               )}

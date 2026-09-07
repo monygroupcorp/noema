@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type PartnerRequest, type PartnerRequestStatus } from '../lib/api';
@@ -35,6 +36,11 @@ function fmtDate(iso: string): string {
 
 export function AdminPartnerRequests() {
   const { session, ready } = useSession();
+  // Where the door hands this visitor back once their session is live: the page they were
+  // already on. Turning someone away for want of an account should not also cost them the
+  // walk back to what they were doing.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [admin, setAdmin] = useState(false);
   const [tab, setTab] = useState<PartnerRequestStatus | 'all'>('pending');
   const [items, setItems] = useState<PartnerRequest[] | null>(null);
@@ -83,7 +89,7 @@ export function AdminPartnerRequests() {
           <div className="empty">
             <div className="t">Sign in to continue</div>
             <div className="s">This surface is restricted to the platform administrator.</div>
-            <Link className="btn" to="/onboard"><Ic name="circle-user" /> Sign in</Link>
+            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
           </div>
         )}
 

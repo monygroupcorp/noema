@@ -5,6 +5,7 @@ import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
 import { ceremony, type CeremonyStatus, type ContributePhase } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
+import { entryPath } from '../lib/entry';
 import './landing.css';
 import './ceremony.css';
 
@@ -231,7 +232,7 @@ export function Ceremony() {
         <div className="right">
           <Link className="btn-ghost" to="/about">About</Link>
           <Link className="btn-ghost" to="/pricing">Pricing</Link>
-          <Link className="btn" to="/onboard">Open app</Link>
+          <Link className="btn" to={entryPath()}>Open app</Link>
         </div>
       </nav>
 
