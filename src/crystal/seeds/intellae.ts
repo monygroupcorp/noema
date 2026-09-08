@@ -301,9 +301,9 @@ export const INTELLA_FLUX_KONTEXT_DEV: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/flux1-kontext-dev_ComfyUI', branch: 'main', filename: 'diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/flux1-kontext-dev_ComfyUI', branch: 'main', filename: 'split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/flux1-kontext-dev.safetensors',
@@ -360,9 +360,9 @@ export const INTELLA_QWEN3_8B_FLUX2: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/text_encoders/qwen_3_8b_fp8mixed.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/flux2-klein-9B', branch: 'main', filename: 'text_encoders/qwen_3_8b_fp8mixed.safetensors' },
+      meta: { repo: 'Comfy-Org/flux2-klein-9B', branch: 'main', filename: 'split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors' },
     },
   ],
   dest: 'text_encoders/qwen_3_8b_fp8mixed.safetensors',
@@ -388,9 +388,9 @@ export const INTELLA_QWEN3_4B_FLUX2: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/text_encoders/qwen_3_4b.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/vae-text-encorder-for-flux-klein-4b', branch: 'main', filename: 'text_encoders/qwen_3_4b.safetensors' },
+      meta: { repo: 'Comfy-Org/vae-text-encorder-for-flux-klein-4b', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
     },
   ],
   dest: 'text_encoders/qwen_3_4b.safetensors',
@@ -453,9 +453,9 @@ export const INTELLA_ZIMAGE_TURBO: Intella = {
     },
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/diffusion_models/z_image_turbo_bf16.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'diffusion_models/z_image_turbo_bf16.safetensors' },
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
     },
   ],
   dest: 'diffusion_models/z_image_turbo_bf16.safetensors',
@@ -482,9 +482,9 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
     },
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/text_encoders/qwen_3_4b.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'text_encoders/qwen_3_4b.safetensors' },
+      meta: { repo: 'Comfy-Org/z_image_turbo', branch: 'main', filename: 'split_files/text_encoders/qwen_3_4b.safetensors' },
     },
   ],
   dest: 'clip/qwen_3_4b.safetensors',
@@ -859,9 +859,9 @@ export const INTELLA_GEMMA_3_12B: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/text_encoders/gemma_3_12B_it.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'text_encoders/gemma_3_12B_it.safetensors' },
+      meta: { repo: 'Comfy-Org/ltx-2', branch: 'main', filename: 'split_files/text_encoders/gemma_3_12B_it.safetensors' },
     },
   ],
   dest: 'text_encoders/gemma_3_12B_it.safetensors',
@@ -988,9 +988,9 @@ export const INTELLA_UMT5_XXL: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors' },
     },
   ],
   dest: 'clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
@@ -1013,9 +1013,9 @@ export const INTELLA_WAN21_VAE: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/vae/wan_2.1_vae.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'vae/wan_2.1_vae.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged', branch: 'main', filename: 'split_files/vae/wan_2.1_vae.safetensors' },
     },
   ],
   dest: 'vae/wan_2.1_vae.safetensors',

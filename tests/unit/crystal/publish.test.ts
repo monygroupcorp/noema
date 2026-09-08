@@ -12,7 +12,7 @@ import { MintAdapter, MarketplaceAdapter } from '../../../src/crystal/MintAdapte
 import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 import type { Collectio } from '../../../src/types/collectio.js'
 import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
-import { type ModerationGate, permissiveModerationGate } from '../../../src/crystal/ModerationGate.js'
+import { type ModerationGate, type ModerationVerdict, permissiveModerationGate } from '../../../src/crystal/ModerationGate.js'
 import type { Intella } from '../../../src/types/intelligendi.js'
 import type { Editio, Editiones, Editionum, ArtifactRef, FeedFilter } from '../../../src/types/editio.js'
 
@@ -774,18 +774,69 @@ test('hold: the gate logs the verdict (editioId, artifactRef, reason, hold) on t
   assert.equal(line?.hold, true)
 })
 
-test('review queue: a held item carries a generic moderationNote, never the raw reason', async () => {
-  const gate: ModerationGate = { async scan() { return { ok: false, hold: true, reason: 'raw classifier internals: score=0.94 model=nsfw-v3' } } }
+test('review queue: a held item carries an author-safe moderationNote, never the raw reason', async () => {
+  const gate: ModerationGate = { async scan() { return { ok: false, hold: true, category: 'content', reason: 'raw classifier internals: score=0.94 model=nsfw-v3' } } }
   const { api, flush } = makeApi({ gate })
   await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
   await flush()
 
   const [held] = await api.listHeldEditions(anima1)
-  assert.equal(held.moderationNote, 'Flagged by automated review.')
+  assert.equal(held.moderationNote, 'Automated review sent this to a person to look at before it goes live.')
   assert.ok(
     !JSON.stringify(held).includes('raw classifier internals'),
     'the review queue projection (author-reachable) must never carry the raw classifier text',
   )
+})
+
+test('the publisher is told a hold apart from a refusal, and neither claims a finding the gate did not make', async () => {
+  // Four gates, four verdicts, four notes. Before the category existed every one of these
+  // said "Flagged by automated review." — including the two where nothing was inspected.
+  const cases: Array<{ verdict: ModerationVerdict; note: string }> = [
+    {
+      verdict: { ok: false, category: 'unavailable', reason: 'content moderation is not yet configured' },
+      note: 'Public publishing is closed right now, so this was never checked. Nothing was found in your content.',
+    },
+    {
+      verdict: { ok: false, hold: true, category: 'review', reason: 'held for manual review' },
+      note: 'Waiting for a person to look at it before it goes live. Nothing was flagged in the content itself — every public publish is being reviewed by hand right now.',
+    },
+    {
+      verdict: { ok: false, category: 'content', reason: 'classifier match' },
+      note: 'Automated review flagged something in this content, so it was not published.',
+    },
+    // No category at all — a gate that predates the field. The note claims only what the
+    // verdict's own `hold` establishes, and never a finding.
+    { verdict: { ok: false, reason: 'no category set' }, note: 'Refused by automated review.' },
+  ]
+
+  for (const c of cases) {
+    const gate: ModerationGate = { async scan() { return c.verdict } }
+    const { api, flush } = makeApi({ gate })
+    const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+    await flush()
+    const got = await api.getEdition(anima1, ed.id)
+    assert.equal(got.moderationNote, c.note, `note for ${JSON.stringify(c.verdict)}`)
+  }
+})
+
+test('an identical re-publish reuses the cached verdict and still explains itself the same way', async () => {
+  // The verdict cache is what a second publish of the same media reads instead of re-scanning.
+  // If the category did not round-trip through it, the re-publish would fall back to the
+  // categoryless wording and tell the publisher less than the first attempt did.
+  let scans = 0
+  const gate: ModerationGate = {
+    async scan() { scans++; return { ok: false, category: 'content', reason: 'classifier match' } },
+  }
+  const { api, flush } = makeApi({ gate, verdictCache: memCache() })
+  const first = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+  const second = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  assert.equal(scans, 1, 'the second publish must hit the cache, not re-scan')
+  const note = 'Automated review flagged something in this content, so it was not published.'
+  assert.equal((await api.getEdition(anima1, first.id)).moderationNote, note)
+  assert.equal((await api.getEdition(anima1, second.id)).moderationNote, note)
 })
 
 test('admin moderation read: surfaces the RAW reason for a terminal rejected item (no queue entry otherwise)', async () => {

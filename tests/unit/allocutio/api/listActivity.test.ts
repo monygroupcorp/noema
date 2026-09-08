@@ -49,7 +49,11 @@ interface Fixture {
   inFlight?: ActumIndex[]
   settled?: ActumIndex[]
   nextCursor?: string
-  acta?: Record<string, { aditus?: Record<string, unknown>; exitus?: Record<string, unknown> }>
+  acta?: Record<string, { status?: string; aditus?: Record<string, unknown>; exitus?: Record<string, unknown> }>
+  /** The warm-pod line, when one is wired. Keyed by actum id; a missing key is a run not waiting. */
+  queue?: Record<string, { place: number; depth: number }>
+  /** A line that cannot answer at all — the store is down, or the read throws. */
+  queueThrows?: boolean
 }
 
 /** A CrystalApi wired to in-memory index + actum doubles, owner-scoped by the index key. */
@@ -77,7 +81,18 @@ function apiFor(f: Fixture) {
       return a ? { id, ...a } : null
     },
   }
-  return { api: new CrystalApi({ actumIndex: index, actorum } as any), seen }
+  const asked: string[] = []
+  const vocator = (f.queue || f.queueThrows)
+    ? {
+        async place(actumId: string) {
+          asked.push(actumId)
+          if (f.queueThrows) throw new Error('line unavailable')
+          return f.queue?.[actumId] ?? null
+        },
+      }
+    : undefined
+  const api = new CrystalApi({ actumIndex: index, actorum, ...(vocator ? { vocator } : {}) } as any)
+  return { api, seen, asked }
 }
 
 test('activityKindFor maps the asset-producing flows and falls back to generation', () => {
@@ -201,4 +216,66 @@ test('listActivity degrades to an empty page when the wired index lacks settled 
   const page = await api.listActivity({ animaId: 'anima-1' })
   assert.deepEqual(page.activity, [])
   assert.equal(page.nextCursor, undefined)
+})
+
+// ---------------------------------------------------------------------------
+// The warm-pod line, as the activity list sees it (front: warm-pod-queue).
+//
+// This list is what someone opens when they come BACK to a run they walked away from,
+// which is precisely the run the line was built for. So the place has to be readable
+// here and not only from the run's own page — a run held in a line and reported as
+// running is the false position the whole feature exists to avoid.
+// ---------------------------------------------------------------------------
+
+test('an in-flight row waiting for a warm pod carries the place it holds', async () => {
+  const { api } = apiFor({
+    inFlight: [inFlightRow()],
+    acta: { 'act-live': {} },
+    queue: { 'act-live': { place: 2, depth: 5 } },
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].status, 'running')
+  assert.deepEqual(page.activity[0].queue, { place: 2, depth: 5 })
+})
+
+test('a run already on a pod carries no place, so the list does not invent a line', async () => {
+  // The common path: nothing was waiting, the run went straight onto a pod. An absent
+  // field is absent — the surfaces gate the whole waiting readout on it being there.
+  const { api } = apiFor({
+    inFlight: [inFlightRow()],
+    acta: { 'act-live': {} },
+    queue: {},
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].queue, undefined)
+})
+
+test('a settled row is never asked where it stands', async () => {
+  // A finished run holds no place, and asking would be one store read per row of
+  // history on every page of the list.
+  const { api, asked } = apiFor({
+    settled: [settledRow()],
+    acta: { 'act-done': { status: 'completus' } },
+    queue: { 'act-done': { place: 1, depth: 1 } },
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].status, 'settled')
+  assert.equal(page.activity[0].queue, undefined)
+  assert.deepEqual(asked, [])
+})
+
+test('a line that cannot answer leaves the field out rather than guessing a place', async () => {
+  const { api } = apiFor({
+    inFlight: [inFlightRow()],
+    acta: { 'act-live': {} },
+    queueThrows: true,
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].queue, undefined)
+})
+
+test('with no line wired at all the list reads exactly as it did before one existed', async () => {
+  const { api } = apiFor({ inFlight: [inFlightRow()], acta: { 'act-live': {} } })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].queue, undefined)
 })

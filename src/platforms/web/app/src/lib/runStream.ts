@@ -12,17 +12,17 @@ import { api, type Run as RunT, type SseHandle } from './api';
 // The terminal-announcement rule is a pure function and lives with the stream's other
 // pure rules in `./muse`, where the hermetic web tests gate it; this module owns the
 // React state and the SSE handle it is driven from.
-import { announceTerminal, phaseToStage } from './muse';
+import { announceTerminal, phaseToStage, queuePlace } from './muse';
 
 // The run readout's vocabulary — the coarse stages, the Phasis→stage mapping and the
 // active sub-line — is pure and lives in `./muse` alongside the rest of the stream's
 // pure rules, for the same reason `announceTerminal` does: that module is React-free,
 // so the hermetic web tests can import it and gate what it decides. It is re-exported
 // here so every surface that already reads the readout off this module keeps doing so.
-export { STAGE_LABELS, phaseToStage, measure } from './muse';
-export type { Phasis, Progressus } from './muse';
+export { STAGE_LABELS, phaseToStage, measure, queuePlace, queueLabel } from './muse';
+export type { Phasis, Progressus, QueuePlace } from './muse';
 
-import type { Progressus } from './muse';
+import type { Progressus, QueuePlace } from './muse';
 
 export interface RunEvent {
   kind: 'snapshot' | 'progress' | 'complete' | 'failed';
@@ -49,6 +49,13 @@ export interface RunStreamState {
   charged?: string;
   /** `now − createdAt` in whole seconds; 0 until the initial snapshot arrives. */
   elapsedSec: number;
+  /**
+   * Where the run stands in the warm-pod line, while it is in one — the whole of what a
+   * watching surface needs to say "you are waiting, not running" and to offer a way out.
+   * Absent the moment a pod takes the run, so an affordance gated on it cannot outlive
+   * the wait it belongs to. See `queuePlace` for what sets and clears it.
+   */
+  queue?: QueuePlace;
 }
 
 const POLL_MS = 1500;
@@ -73,12 +80,17 @@ export function useRunStream(id: string | undefined): RunStreamState {
 
     function applySnapshot(r: RunT) {
       if (r.createdAt) createdAtRef.current = r.createdAt;
+      const terminal = r.status === 'complete' ? 'complete' : r.status === 'failed' ? 'failed' : null;
       setState((s) => ({
         ...s,
         modusId: r.modusId,
         createdAt: r.createdAt,
-        ...(r.status === 'complete' ? { stageIdx: 5, terminal: 'complete', exitus: r.exitus ?? null } : {}),
-        ...(r.status === 'failed' ? { terminal: 'failed', error: r.failure?.message, charged: r.cost ?? '0' } : {}),
+        // A snapshot is the run as it stands, so the place it reports REPLACES what we
+        // held rather than merging with it: a snapshot without one is a run no longer in
+        // the line, which is exactly how a poll of a dispatched run reads.
+        queue: queuePlace(r.queue, undefined, terminal),
+        ...(terminal === 'complete' ? { stageIdx: 5, terminal, exitus: r.exitus ?? null } : {}),
+        ...(terminal === 'failed' ? { terminal, error: r.failure?.message, charged: r.cost ?? '0' } : {}),
       }));
     }
 
@@ -88,10 +100,13 @@ export function useRunStream(id: string | undefined): RunStreamState {
         if (!live || ticks++ > POLL_MAX_TICKS) return;
         api.getRun(runId).then(({ run: r }) => {
           if (!live) return;
-          if (r.status === 'complete' || r.status === 'failed') {
-            applySnapshot(r);
-            return;
-          }
+          // EVERY tick, not only the terminal one. This poll is what a watcher falls back
+          // to when the stream dies, and a run waiting for a warm pod moves while it waits:
+          // it advances up the line, and eventually leaves it. A poll that spoke only at
+          // the end would hold the last place it heard forever — showing a line to a run
+          // already generating, and offering to abandon work the payer is now paying for.
+          applySnapshot(r);
+          if (r.status === 'complete' || r.status === 'failed') return;
           setTimeout(poll, POLL_MS);
         }).catch(() => { if (live) setTimeout(poll, POLL_MS); });
       };
@@ -112,7 +127,12 @@ export function useRunStream(id: string | undefined): RunStreamState {
         return;
       }
       if (msg.kind === 'progress' && msg.progressus) {
-        setState((s) => ({ ...s, progressus: msg.progressus, stageIdx: phaseToStage(msg.progressus!.phase) }));
+        setState((s) => ({
+          ...s,
+          progressus: msg.progressus,
+          stageIdx: phaseToStage(msg.progressus!.phase),
+          queue: queuePlace(s.queue, msg.progressus, s.terminal),
+        }));
         return;
       }
       if (msg.kind === 'complete' || msg.kind === 'failed') {
@@ -122,6 +142,9 @@ export function useRunStream(id: string | undefined): RunStreamState {
         const measured = msg.kind === 'complete'
           ? { stageIdx: 5, costUsd: msg.costUsd, executionMs: msg.executionMs }
           : {};
+        // A run that has ended holds no place, whichever way it ended — including the
+        // cancel a waiting user just asked for, which arrives here as `failed`.
+        setState((s) => (s.queue ? { ...s, queue: undefined } : s));
         void announceTerminal(msg.kind, runId, api.getRun, (patch) => {
           if (live) setState((s) => ({ ...s, ...measured, ...patch }));
         });

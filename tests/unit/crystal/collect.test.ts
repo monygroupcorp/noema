@@ -458,3 +458,85 @@ test('collect({ teamId }): non-member cannot own-by-team', async () => {
     /not found/i,
   )
 })
+
+// =============================================================================
+// The dispatch budget is arithmetic, so what is written into it has to be a number.
+// `numerus + reiectae` is what CollectioCursor advances against; a NaN there is not a
+// cosmetic gap — the fan-out's `nextIndex < budget` guard is false forever, so the
+// collection re-opens to `agens`, reads as generating, and dispatches nothing for the
+// rest of its life. `POST /extend` reads its count as `Number(body.count)` and `PATCH
+// /tractus` reads supply as `Number(body.numerus)`, so an omitted or unparseable field
+// arrives as NaN, and `NaN <= 0` is false — it walks past the cursor's own guard.
+// =============================================================================
+
+/** A funded, fired collection to aim the malformed counts at. */
+async function firedCollection() {
+  const h = makeApi()
+  await h.modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await h.signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+  const col = await h.api.collect({ animaId: 'anima-1' }, {
+    modusId: 'sd1-5', total: 1,
+    aditusBase: { _basePrompt: 'a {{color}} cat' },
+    tractus: [{ porta: 'color', valores: [{ value: 'red', promptFragment: 'red' }] }],
+  })
+  return { ...h, col }
+}
+
+test('extendCollection(): a count that is not a number is refused, and the target is untouched', async () => {
+  const { api, collectiones, col } = await firedCollection()
+
+  // What `POST /v1/collectiones/:id/extend` produces from a body with no `count` at all.
+  await assert.rejects(
+    () => api.extendCollection({ animaId: 'anima-1' }, col.id, Number(undefined)),
+    /whole number of pieces/i,
+    'NaN is refused rather than added to the target',
+  )
+  await assert.rejects(() => api.extendCollection({ animaId: 'anima-1' }, col.id, Infinity), /whole number of pieces/i)
+  await assert.rejects(() => api.extendCollection({ animaId: 'anima-1' }, col.id, 2.5), /whole number of pieces/i)
+  await assert.rejects(() => api.extendCollection({ animaId: 'anima-1' }, col.id, 0), /whole number of pieces/i)
+  await assert.rejects(() => api.extendCollection({ animaId: 'anima-1' }, col.id, -5), /whole number of pieces/i)
+
+  const stored = await collectiones.find(col.id)
+  assert.equal(stored!.numerus, 1, 'the dispatch budget is the number it was before the malformed calls')
+})
+
+test('extendCollection(): a count that would push the target past exact arithmetic is refused', async () => {
+  const { api, collectiones, col } = await firedCollection()
+  await assert.rejects(
+    () => api.extendCollection({ animaId: 'anima-1' }, col.id, Number.MAX_SAFE_INTEGER),
+    /whole number of pieces/i,
+    'a count that is itself a safe integer is still refused when the SUM stops being one',
+  )
+  assert.equal((await collectiones.find(col.id))!.numerus, 1)
+})
+
+test('extendCollection(): the count check runs behind the gates — a stranger still reads "not found"', async () => {
+  const { api, col } = await firedCollection()
+  await assert.rejects(
+    () => api.extendCollection({ animaId: 'intruder' }, col.id, Number(undefined)),
+    /not found/i,
+    'a malformed count does not tell a non-owner the collection is there',
+  )
+})
+
+test('patchCollectionDraft(): a supply that is not a number is refused', async () => {
+  const { api, modorum, signorum, collectiones } = makeApi()
+  await modorum.register(atomic('sd1-5', 'fake', { prompt: { type: 'text', required: true } }, { image: { type: 'image' } }))
+  await signorum.issue({ animaId: 'anima-1', forma: 'minted', valor: 1000n, auctor: 'test' })
+  const draft = await api.collect({ animaId: 'anima-1' }, { draft: true, nomen: 'a draft' })
+  const authored = await api.patchCollectionDraft({ animaId: 'anima-1' }, draft.id, { numerus: 25 })
+  assert.equal(authored.total, 25, 'a whole supply is written as asked')
+
+  // What `PATCH /v1/collectiones/:id/tractus` produces from `{ numerus: "lots" }`.
+  await assert.rejects(
+    () => api.patchCollectionDraft({ animaId: 'anima-1' }, draft.id, { numerus: Number('lots') }),
+    /whole number of pieces/i,
+  )
+  await assert.rejects(() => api.patchCollectionDraft({ animaId: 'anima-1' }, draft.id, { numerus: -1 }), /whole number of pieces/i)
+  await assert.rejects(() => api.patchCollectionDraft({ animaId: 'anima-1' }, draft.id, { numerus: 1.5 }), /whole number of pieces/i)
+  assert.equal((await collectiones.find(draft.id))!.numerus, 25, 'the authored supply survived every refused patch')
+
+  // Zero is a real answer for a draft: the supply may not be decided yet.
+  const zeroed = await api.patchCollectionDraft({ animaId: 'anima-1' }, draft.id, { numerus: 0 })
+  assert.equal(zeroed.total, 0)
+})
