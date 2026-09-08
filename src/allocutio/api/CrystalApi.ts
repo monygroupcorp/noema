@@ -1564,6 +1564,12 @@ export class CrystalApi {
       }
     }
 
+    // The draft's supply reaches the same dispatch budget an extend does, by the other door:
+    // the route reads it as `Number(numerus)`, so an unparseable one arrives as NaN. Zero is
+    // allowed here — a draft may be authored before its supply is decided — where an extend
+    // of nothing is not a request anyone means to make.
+    if (patch.numerus !== undefined) this._assertPieceCount(patch.numerus, 'numerus', 0)
+
     const modusId = patch.modusId ?? c.modusId
     const tractus = patch.tractus ?? c.tractus
     const modus = modusId ? await this.deps.modorum.find(modusId) : null
@@ -1743,8 +1749,35 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
     }
+    // Checked after the gates, so a malformed count never tells a stranger whether the
+    // collection exists. An extend raises the dispatch budget, so the SUM has to stay exact
+    // too — a valid `addCount` on an already-large collection is still refused if it would
+    // push the target past where integer arithmetic holds.
+    this._assertPieceCount(addCount, 'count', 1)
+    this._assertPieceCount(c.numerus + addCount, 'the extended target', 1)
     await this.deps.collectioCursor?.extend(id, addCount)
     return toCollection((await this.deps.collectiones!.find(id))!)
+  }
+
+  /**
+   * A piece count that reaches the store, checked before it gets there.
+   *
+   * `numerus` is not a display field: `numerus + reiectae` is `CollectioCursor`'s dispatch
+   * budget, and the fan-out advances while `nextIndex < budget`. A non-number written into it
+   * makes that comparison false forever, so the collection reads as `agens`, shows as
+   * generating, and dispatches nothing — the failure `MongoCollectio`'s `fromDoc` already
+   * defends `reiectae` against, reached instead through the wire. `Number(undefined)` is `NaN`
+   * and `NaN <= 0` is false, so a request that simply omits the count walks past every
+   * downstream guard, which is why the check belongs here and not on the route: the HTTP
+   * router, the MCP tool and the concierge all arrive through this method.
+   *
+   * The upper bound is arithmetic, not policy: past `Number.MAX_SAFE_INTEGER` the budget sum
+   * stops being exact, and a piece index can no longer be told apart from its neighbour.
+   */
+  private _assertPieceCount(n: number, field: string, min: number): void {
+    if (!Number.isSafeInteger(n) || n < min) {
+      throw Errors.inputMalformed(`${field} must be a whole number of pieces, ${min} or more`)
+    }
   }
 
   /** Whether the caller is the concrete funding identity of a collection (its `by`). */

@@ -329,6 +329,48 @@ const authHeaders = (): Record<string, string> => {
 const readHeaders = (): Record<string, string> =>
   getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
 
+// ── Deadline for a read a screen is blocked on ─────────────────────────────
+// `fetch` has no timeout of its own. A request the network accepts and then never answers —
+// a socket a proxy holds open, a server that stops mid-response — leaves its promise pending
+// for as long as the tab lives. A screen that shows "Loading…" until that promise settles has
+// no error to print and no way out; it just sits there. That is the last door to the run
+// screen's "Loading… and nothing else", and unlike the others it cannot be closed at the
+// screen, because the screen never learns anything went wrong.
+//
+// So the deadline lives with the read: the request is aborted, and the silence becomes a
+// rejection carrying a sentence a person can act on. Reads only — a write must not be
+// retried on a guess about whether it landed.
+export const READ_TIMEOUT_MS = 20_000;
+export const READ_TIMEOUT_MESSAGE = 'the server did not answer — reload to try again';
+
+export async function withReadTimeout<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  ms: number = READ_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  // The deadline RACES the read rather than waiting for the abort to come back through it.
+  // Aborting alone would leave the guarantee resting on the read honouring the signal, which
+  // is the same bet — a read that ignores it hangs exactly as long as one with no deadline at
+  // all. So the abort frees the socket and the rejection settles the caller, independently.
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(READ_TIMEOUT_MESSAGE));
+    }, ms);
+  });
+  try {
+    return await Promise.race([read(controller.signal), deadline]);
+  } catch (err) {
+    // When the read loses the race it usually rejects first, with a DOMException whose message
+    // names neither the request nor anything the reader can do about it. Report the deadline.
+    if (controller.signal.aborted) throw new Error(READ_TIMEOUT_MESSAGE);
+    throw err;
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 // ── Fetch-based SSE reader ─────────────────────────────────────────────────
 // EventSource can't send auth headers, so authed SSE routes need a hand-rolled
 // reader over `fetch` + a `ReadableStream`. Surfaces the minimal shape callers
@@ -690,8 +732,10 @@ export const api = {
     return fetch(`/v1/collectiones${qs ? `?${qs}` : ''}`, { headers: readHeaders() })
       .then(j<{ collections: Collection[]; nextCursor?: string }>);
   },
-  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: readHeaders() })
-    .then(j<{ collection: Collection }>),
+  // Deadlined: every collection screen renders "Loading…" until this read answers, so a read
+  // that never answers is a screen with no way out. See `withReadTimeout`.
+  getCollection: (id: string) => withReadTimeout((signal) =>
+    fetch(`/v1/collectiones/${id}`, { headers: readHeaders(), signal }).then(j<{ collection: Collection }>)),
   createCollection: (body: CreateCollectionRequest) =>
     fetch('/v1/collectiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ collection: Collection }>),
