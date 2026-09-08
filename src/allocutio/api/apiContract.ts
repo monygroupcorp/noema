@@ -1359,6 +1359,7 @@ const EditionModerationSchema: JsonSchema = {
       description: 'The recorded verdict, or null when this Editio was never held or rejected.',
       properties: {
         reason: { type: 'string', description: "The classifier's raw verdict text." },
+        category: { type: 'string', enum: ['unavailable', 'review', 'content'], description: "The gate's author-safe category for the refusal, when it set one: unavailable (nothing was checked — no scanner configured) | review (routed to a person, nothing detected) | content (the scan matched the content itself). This is what `Edition.moderationNote` is projected from. Absent from a gate that sets none." },
         hold: { type: 'boolean', description: 'True only when this verdict HELD (vs. terminally rejected).' },
         scannedAt: { type: 'string', format: 'date-time' },
       },

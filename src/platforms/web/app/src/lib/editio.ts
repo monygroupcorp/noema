@@ -41,6 +41,17 @@ export interface Editio {
 export interface EditionPreviewItem { url: string; prompt?: string }
 export interface EditionPreview { mediaUrls: string[]; items?: EditionPreviewItem[] }
 
+// The `GET /v1/editiones/:id/moderation` response (admin-only) — the gate's RAW verdict for
+// one publication. This is the half that never reaches the author: `reason` is the scanner's
+// own words and may name a classifier or a score. A reviewer adjudicating a hold is exactly
+// who it was recorded for, so it is rendered on the review screen and nowhere else.
+export interface EditionModerationDetail {
+  id: string;
+  status: EditioStatus;
+  reviewOutcome?: ReviewOutcome;
+  moderation: { reason: string; category?: 'unavailable' | 'review' | 'content'; hold?: boolean; scannedAt: string } | null;
+}
+
 export interface FeedFilter {
   visibility?: EditioVisibility;
   destination?: string;

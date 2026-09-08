@@ -11,6 +11,7 @@
 import type { ModelRef } from '../../types/actum.js'
 import type { FailureStage } from '../../lib/retryVerdict.js'
 import type { EarningKind } from '../../ledger/earnings.js'
+import type { ModerationCategory } from '../../crystal/ModerationGate.js'
 
 export type { FailureStage, EarningKind }
 
@@ -446,8 +447,10 @@ export interface EditionModerationDetail {
   id: string
   status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
-  /** The recorded verdict, or null when this Editio was never held or rejected. */
-  moderation: { reason: string; hold?: boolean; scannedAt: string } | null
+  /** The recorded verdict, or null when this Editio was never held or rejected. The
+   *  `category` is the closed, author-safe half `Edition.moderationNote` is projected
+   *  from; a gate that sets none leaves it absent. */
+  moderation: { reason: string; category?: ModerationCategory; hold?: boolean; scannedAt: string } | null
 }
 
 /**

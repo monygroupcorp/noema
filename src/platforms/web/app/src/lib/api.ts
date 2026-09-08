@@ -2,7 +2,7 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
-import type { Editio, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
+import type { Editio, EditionModerationDetail, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
 
 // Querela — an in-app report (bug/feature/feedback), noema-100's backend contract
 // (src/types/Querela.ts). Mirrored here (not imported) — the web app doesn't import
@@ -735,6 +735,11 @@ export const api = {
   // approve/reject/confirm-csam); a non-admin caller is refused.
   getEditionPreview: (id: string) =>
     fetch(`/v1/editiones/${id}/preview`, { headers: readHeaders() }).then(j<EditionPreview>),
+  // GET /v1/editiones/:id/moderation — the gate's RAW verdict (why it held or refused).
+  // PLATFORM-ADMIN ONLY server-side. The author-facing wording is `Edition.moderationNote`;
+  // this is what the reviewer adjudicating the hold needs and the author must never see.
+  getEditionModeration: (id: string) =>
+    fetch(`/v1/editiones/${id}/moderation`, { headers: readHeaders() }).then(j<EditionModerationDetail>),
   // Clear a moderation hold → the item re-settles and publishes.
   approveEdition: (id: string) =>
     fetch(`/v1/editiones/${id}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),

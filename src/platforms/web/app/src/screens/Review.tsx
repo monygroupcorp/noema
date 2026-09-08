@@ -4,7 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
 import { useSession } from '../state/session';
-import type { Editio, EditionPreviewItem } from '../lib/editio';
+import { publishNote, type Editio, type EditionPreviewItem } from '../lib/editio';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 
 // Feed-review — the moderation held-queue (publishing spec §4). The moderation gate HOLDS
@@ -118,10 +118,24 @@ function ReviewRow({ editio, admin, onDone, onError }: {
 }) {
   const [busy, setBusy] = useState<null | 'approve' | 'reject' | 'csam'>(null);
   const [confirmCsam, setConfirmCsam] = useState(false);
+  // The gate's own words for WHY this was held. Admin-only, and the reason it was recorded:
+  // a reviewer deciding approve-or-reject was otherwise adjudicating on the media alone, with
+  // no sight of what the gate objected to. Unlike the preview this reveals no content, so it
+  // loads with the row. A miss (403, or a hold predating the record) simply shows nothing.
+  const [verdict, setVerdict] = useState<{ reason: string; category?: string } | null>(null);
   const [preview, setPreview] = useState<
     { url: string; kind: string } | { text: string } | { gallery: EditionPreviewItem[] } | 'none' | null
   >(null);
   const [revealing, setRevealing] = useState(false);
+
+  useEffect(() => {
+    if (!admin) return;
+    let live = true;
+    api.getEditionModeration(editio.id)
+      .then((d) => { if (live && d.moderation) setVerdict({ reason: d.moderation.reason, ...(d.moderation.category ? { category: d.moderation.category } : {}) }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [admin, editio.id]);
 
   // Reveal the held content on demand. An `actum` (a generation run) resolves via the run
   // endpoint, same as always. Any OTHER kind — an `intella` model promotion is the case
@@ -175,6 +189,13 @@ function ReviewRow({ editio, admin, onDone, onError }: {
           {editio.license && <> · {editio.license}</>}
         </div>
 
+        {/* The gate's raw verdict — admin-only, and never rendered on the author's branch below. */}
+        {admin && verdict && (
+          <div className="sub mono" style={{ fontSize: 'var(--fs-xs)' }}>
+            gate: {verdict.reason}{verdict.category ? ` · ${verdict.category}` : ''}
+          </div>
+        )}
+
         {/* Content preview — off by default; revealed on click. */}
         {preview === null ? (
           <button className="btn-ghost" style={{ alignSelf: 'flex-start' }} disabled={revealing} onClick={reveal}>
@@ -222,7 +243,7 @@ function ReviewRow({ editio, admin, onDone, onError }: {
           )}
         </div>
       ) : (
-        <div className="sub">Awaiting a moderator’s decision.</div>
+        <div className="sub">{publishNote(editio)}</div>
       )}
     </div>
   );
