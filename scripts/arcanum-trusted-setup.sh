@@ -13,7 +13,7 @@
 # PREREQUISITES:
 #   npm install -g circom        # circuit compiler (Rust-based)
 #   npm install -g snarkjs       # proof system CLI
-#   npm install                  # installs circomlib (needed for circuit includes)
+#   npm ci                       # installs circomlib (needed for circuit includes)
 # =============================================================================
 
 set -euo pipefail

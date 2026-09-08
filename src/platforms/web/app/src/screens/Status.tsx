@@ -4,7 +4,7 @@ import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
 import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
-import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivity } from '../lib/muse';
+import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivity, queueLabel } from '../lib/muse';
 
 const IMPETUS_USD = 0.000337;
 
@@ -19,6 +19,10 @@ export function Status() {
   const [spendCursor, setSpendCursor] = useState<string | undefined>(undefined);
   const [spendLoaded, setSpendLoaded] = useState(false);
   const [spendLoading, setSpendLoading] = useState(false);
+  // Runs the caller has given up from this page while they waited for a pod. Kept locally
+  // because the activity poll is on its own clock: without it the row a user just released
+  // would sit there claiming to be waiting until the next tick came round.
+  const [stopped, setStopped] = useState<Record<string, 'busy' | 'done'>>({});
 
   useEffect(() => {
     let live = true;
@@ -66,6 +70,39 @@ export function Status() {
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
+  // Stop waiting: the way out of the warm-pod line, from the list someone comes back to.
+  // The reservation is released rather than charged, so a run given up before it ever
+  // reached a pod costs nothing.
+  const stopWaiting = (actumId: string) => {
+    setStopped((s) => ({ ...s, [actumId]: 'busy' }));
+    api.cancelRun(actumId)
+      .then(() => setStopped((s) => ({ ...s, [actumId]: 'done' })))
+      .catch(() => setStopped((s) => { const { [actumId]: _drop, ...rest } = s; return rest; }));
+  };
+
+  // What an in-flight row says on its right-hand side. A run holding a place in the warm-pod
+  // line is NOT running, and saying "running" about it is the one thing this page must not do
+  // — it is the page a user opens precisely because they walked away from the run.
+  const runningRight = (row: ActivityRow) => {
+    const elapsed = row.createdAt ? `${fmtElapsed(Date.now() - new Date(row.createdAt).getTime())} ago` : 'running';
+    if (!row.queue) return elapsed;
+    const state = stopped[row.actumId];
+    if (state === 'done') return 'stopped · refunded';
+    return (
+      <>
+        {queueLabel(row.queue)}
+        {' '}
+        <button
+          className="btn-ghost"
+          disabled={state === 'busy'}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); stopWaiting(row.actumId); }}
+        >
+          {state === 'busy' ? 'Stopping…' : 'Stop waiting'}
+        </button>
+      </>
+    );
+  };
+
   // One row's link: a generation's door is a raw media URL (a plain external anchor,
   // never a router Link), training/caption/decompose door through the source dataset
   // (a real in-app route), and a door-less row renders without a link at all.
@@ -111,8 +148,7 @@ export function Status() {
           </div>
         ) : (
           <div className="list">
-            {running.slice(0, 8).map((row) =>
-              activityRow(row, row.createdAt ? `${fmtElapsed(Date.now() - new Date(row.createdAt).getTime())} ago` : 'running'))}
+            {running.slice(0, 8).map((row) => activityRow(row, runningRight(row)))}
           </div>
         )}
 

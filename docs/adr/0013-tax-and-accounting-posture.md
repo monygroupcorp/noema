@@ -58,7 +58,7 @@ basis**, using a documented lot-selection method (**[CPA]**: FIFO vs specific-ID
 a **second** taxable event distinct from the revenue in §2. Requires per-lot inventory of
 inbound crypto.
 
-### 4. Revenue recognition follows the closed-loop refundability design. **[CPA]**
+### 4. Revenue recognition follows the closed-loop refundability design. **[CPA]** *(amended 2026-09-08 — see the amendment at the end of this section)*
 
 The classification of received funds is downstream of one product decision:
 
@@ -69,9 +69,32 @@ The classification of received funds is downstream of one product decision:
 - **If credits were ever refundable/withdrawable** → we would be **custodying user funds**
   → segregated/**trust accounting** (off our P&L) *and* MSB/money-transmitter exposure.
 
-Decision: **commit to non-refundable closed-loop credits** so the accounting is
+Decision: **commit to closed-loop, non-withdrawable credits** so the accounting is
 deferred-revenue, not fiduciary trust. **[CPA]** to confirm recognition timing
 (on-sale vs on-consumption of credits).
+
+**Amended 2026-09-08 — what shipped is a bounded refund, not "non-refundable".** This ADR
+was written asserting non-refundable credits. The policy actually ratified and shipped
+(noema-082) is **14 days, unused balance only**: unused credits are refundable within 14
+days of purchase, and once credits are spent the spent portion is not. It is enforced, not
+just published — the Stripe refund path claws back the credited amount and treats a refund
+past 14 days (anchored to the charge's own `created`) as a terminal no-op
+(`src/api/webhooks/stripeWebhook.ts`) — and it is what the Terms and the pricing page say.
+
+**What did not change is the load-bearing half.** The MSB/securities posture in §4c-0 rests
+on credits being **non-withdrawable to cash and non-transferable**, and they still are: a
+refund reverses a *purchase* back to its original payment method within a fixed window, it
+is not a withdrawal rail, and nothing spent or earned in credits can be cashed out. So the
+pole this design sits on is still the first bullet above, not the second — we are not
+custodying user funds.
+
+**What it does change is the recognition question, and it is now sharper than "on-sale vs
+on-consumption". [CPA]:** for the first 14 days an unspent balance is refundable, which is
+the classic argument for deferring recognition until the window closes or the credits are
+consumed, whichever comes first. Confirm the treatment, and confirm whether the bounded
+window disturbs the deferred-revenue-not-trust conclusion at all (we read it as not, on the
+non-withdrawable ground above — that reading is exactly what needs a professional's
+signature, not ours).
 
 ### 4b. Referral is gross revenue + a promotional rebate (superseded by §4c decision). **[CPA]**
 
@@ -230,8 +253,9 @@ reporting, not the top line. No anon deposit may bypass the FMV stamp.
   2. **[CPA]** Crypto lot method (FIFO vs specific-ID) and disposal accounting.
   3. **[CPA]** Entity, jurisdiction, and whether digital-goods **sales tax / VAT** applies
      to credit sales (varies by buyer location — a large open question for a global user base).
-  4. **[CPA/counsel]** Confirm the closed-loop non-refundable design holds the MSB/securities
-     line *and* the deferred-revenue treatment simultaneously.
+  4. **[CPA/counsel]** Confirm the closed-loop, non-withdrawable design — with the shipped
+     14-day unused-balance refund window (§4) — holds the MSB/securities line *and* the
+     deferred-revenue treatment simultaneously.
   5. Choose the FMV price oracle / source of record and log it per event.
   6. Build the USD financial ledger + rollup; wire the FMV stamp into every deposit path.
 - **Not tax advice.** This ADR captures the data model and the decisions to bring to a
