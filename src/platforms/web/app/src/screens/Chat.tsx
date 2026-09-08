@@ -6,13 +6,11 @@ import { isExampleCleared, clearExample } from '../lib/chatExample';
 import { api, newTurnKey, type ConciergeProposal, type ConciergeReply, type ColloquiumSummary } from '../lib/api';
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
+import { WriteProposalCard } from '../components/WriteProposalCard';
+import { commitMemoryDelta } from '../lib/conciergeMemory';
 
-// NAVIGATE (noema-367): `destination` isn't part of `lib/api.ts`'s ConciergeReply
-// shape yet (that file deliberately holds local types, not a backend import — see
-// `git log -- src/platforms/web/app/src/lib/api.ts`), so it's widened locally here
-// rather than by editing that shared file. Belt-and-suspenders: render only when
-// the path is in-app (starts with "/"); the agent-side allowlist is the real gate.
-type ReplyWithDestination = ConciergeReply & { destination?: { path: string; label: string } };
+// NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
+// (starts with "/"); the agent-side allowlist is the real gate.
 function DestinationLink({ destination, onGo }: { destination: { path: string; label: string }; onGo: (path: string) => void }) {
   if (!destination.path.startsWith('/')) return null;
   return (
@@ -123,17 +121,43 @@ function threadTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
-// One agent Dictum's corpus → a rendered body: a serialized proposal (JSON with kind:'proposal',
-// see colloquiaRouter.dictumCorpus) round-trips to a ProposalCard; anything else is a plain reply.
-function hydrateAgentBody(corpus: string, onAdjust: (priorRunId: string | undefined) => void): ReactNode {
+// One agent Dictum's corpus → a rendered body. colloquiaRouter.dictumCorpus serializes a turn
+// that carries structure — a proposal, or a reply with a destination or an un-GO'd write card —
+// and leaves a plain reply as plain text, so both shapes arrive here and both round-trip. A
+// resumed thread must still show a write card the user never confirmed; dropping it would
+// strand the confirmation the whole ladder is built on.
+function hydrateAgentBody(
+  corpus: string,
+  onAdjust: (priorRunId: string | undefined) => void,
+  onGo: (path: string) => void,
+  turnKey?: string,
+): ReactNode {
   try {
     const parsed = JSON.parse(corpus) as { kind?: string } & Record<string, unknown>;
     if (parsed && parsed.kind === 'proposal') {
       const proposal = { ...parsed, tokenUsage: (parsed.tokenUsage as ConciergeProposal['tokenUsage']) ?? { totalTokens: 0 } } as unknown as ConciergeProposal;
       return <ProposalCard proposal={proposal} onAdjust={onAdjust} />;
     }
+    if (parsed && parsed.kind === 'reply' && typeof parsed.text === 'string') {
+      return replyBody({ ...parsed, tokenUsage: { totalTokens: 0 } } as unknown as ConciergeReply, onGo, turnKey);
+    }
   } catch { /* not JSON — a plain text reply */ }
   return corpus;
+}
+
+// A reply's rendered body: the text, then whatever the agent attached to it — a destination the
+// user may click, a write it is asking the user to confirm. Both are already validated
+// server-side; neither does anything until the user acts. `turnKey` is the turn's own idempotency
+// key, carried so a write card the user already pressed comes back settled on a resume instead of
+// offering a second GO.
+function replyBody(reply: ConciergeReply, onGo: (path: string) => void, turnKey?: string): ReactNode {
+  return (
+    <>
+      {reply.text}
+      {reply.destination && <DestinationLink destination={reply.destination} onGo={onGo} />}
+      {reply.write && <WriteProposalCard write={reply.write} confirmKey={turnKey} />}
+    </>
+  );
 }
 
 // Inline styles for the history drawer (noema-111). The chat stylesheet (styles/app.css)
@@ -219,7 +243,7 @@ export function Chat() {
         .map((d) =>
           d.genus === 'user'
             ? { who: 'you', body: d.corpus }
-            : { who: 'concierge', body: hydrateAgentBody(d.corpus, adjust) },
+            : { who: 'concierge', body: hydrateAgentBody(d.corpus, adjust, navigate, d.turnKey) },
         );
       clearExample();
       setMsgs(hydrated);
@@ -284,8 +308,11 @@ export function Chat() {
         setColloquiumId(cid);
         createdThread = true;
       }
+      // Held, not inlined: it is this turn's identity, and the write card is keyed by it so a
+      // resume of this same thread does not offer a second GO on a write already performed.
+      const turnKey = newTurnKey();
       const { result } = await api.postDictum(cid, {
-        turnKey: newTurnKey(),
+        turnKey,
         message: v,
         ...(priorRunId ? { priorRunId } : {}),
       });
@@ -293,19 +320,13 @@ export function Chat() {
         ...m,
         result.kind === 'proposal'
           ? { who: 'concierge', body: <ProposalCard proposal={result as ConciergeProposal} onAdjust={adjust} /> }
-          : {
-              who: 'concierge',
-              body: (
-                <>
-                  {result.text}
-                  {(result as ReplyWithDestination).destination && (
-                    <DestinationLink destination={(result as ReplyWithDestination).destination!} onGo={navigate} />
-                  )}
-                </>
-              ),
-              prov: [provFor(sel, 'text')],
-            },
+          : { who: 'concierge', body: replyBody(result, navigate, turnKey), prov: [provFor(sel, 'text')] },
       ]);
+      // The turn-end memory delta (the author ladder). Applied HERE, by the client, once, after
+      // the turn has rendered — the server wrote nothing on the agent's behalf. Fire-and-forget:
+      // commitMemoryDelta swallows its own failures, because losing a remembered line must never
+      // fail the turn that produced it. What lands is visible and editable on /preferences.
+      if (result.memoryDelta) void commitMemoryDelta(result.memoryDelta);
       // A new thread now exists (or an existing one advanced) — refresh history so it lists.
       if (createdThread) void refreshThreads();
     } catch (e) {

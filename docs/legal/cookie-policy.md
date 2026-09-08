@@ -39,6 +39,7 @@ The rest of what the app remembers lives in your browser's `localStorage`. It st
 | `noema-onboarded` | Whether you have completed onboarding. |
 | `noema-chat-example-cleared` | Whether you dismissed the example prompt in chat. |
 | `concierge-seen:<route>` | Which routes this browser has already seen the assistant panel announce itself on, so it never re-fires on a repeat visit. One entry per route you have visited. |
+| `noema-concierge-writes-confirmed` | Which assistant write confirmations you have already pressed GO on in this browser, so resuming that conversation shows the card settled instead of offering to run the same write a second time. A short list of turn identifiers, most recent 200. |
 
 ## What we do not use
 
