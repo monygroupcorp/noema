@@ -64,8 +64,8 @@ beyond what these controls require.
   terminating at a single-tenant compute instance. This is network isolation only: the
   infrastructure provider hosting the instance can technically access its memory, so do not treat
   a session as sealed from the compute provider. We keep the record of each run — the inputs you
-  submitted and the outputs they produced — as your own history, until you erase your account. We
-  do not train models on it. The Privacy Policy sets out what is held and for how long.
+  submitted and the outputs they produced — as your own history. Erasing your account severs
+  that record from you rather than deleting it. We do not train models on it. The Privacy Policy sets out what is held and for how long.
 - In **bot-mediated (Simple Case)** sessions, we act as your client and necessarily process
   your prompts, outputs, and identity to deliver the Service.
 - The Service is **not offered for regulated workloads**. We do not act as a HIPAA Business

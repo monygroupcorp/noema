@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
-import { api } from '../lib/api';
+import { api, type ArcanumConfig } from '../lib/api';
+import { purseIsOff } from '../lib/purseSwitch';
 
 /**
  * What anonymity the platform actually gives you, gated on whether it gives it yet.
@@ -14,20 +15,20 @@ import { api } from '../lib/api';
  * /features, /pricing and the privacy policy all say plainly. The loudest page on the site was
  * the one page contradicting them.
  *
- * So it reads the switch, the way Pricing.tsx does: `enabled` from GET /arcanum/config. Unknown
- * and unreachable both read as off, because the honest failure for a privacy claim is to
- * under-claim, never to promise a protection we cannot confirm is switched on.
+ * So it reads the switch: `enabled` from GET /arcanum/config, through the shared `purseIsOff`,
+ * where the rule that unknown and unreachable both read as off is stated once for every page
+ * that makes the offer.
  */
 export function LandingAnon() {
-  // null = not yet known, and treated exactly like off until it is.
-  const [purseEnabled, setPurseEnabled] = useState<boolean | null>(null);
-  const purseOff = purseEnabled !== true;
+  // null = not yet known, and `purseIsOff` treats that exactly like off until it is.
+  const [purse, setPurse] = useState<ArcanumConfig | null>(null);
+  const purseOff = purseIsOff(purse);
 
   useEffect(() => {
     let live = true;
     api.arcanum.config()
-      .then((c) => { if (live) setPurseEnabled(c.enabled === true); })
-      .catch(() => { if (live) setPurseEnabled(false); });
+      .then((c) => { if (live) setPurse(c); })
+      .catch(() => {});
     return () => { live = false; };
   }, []);
 

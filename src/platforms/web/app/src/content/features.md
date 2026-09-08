@@ -12,8 +12,9 @@ shape of it and does not keep a second list.
 Chat and reasoning route out to external language-model providers — OpenRouter and Venice — so
 their frontier and open-weight models are reachable from the same API and the same canvas as the
 image and video work. Vision-language models run on our own compute instead: image, video or audio
-in, text out. We never train on your prompts or outputs. Run records are kept until you erase your
-account, and the privacy policy says exactly what is kept and why.
+in, text out. We never train on your prompts or outputs. Run records are retained, and erasing
+your account severs them from you rather than deleting them; the privacy policy says exactly what
+is kept and why.
 
 **Runs on:** external LLM providers for chat; our own GPU pods for the vision-language models.
 
@@ -24,7 +25,7 @@ account, and the privacy policy says exactly what is kept and why.
 
 **The best open image models, composed.**
 
-FLUX Schnell and other leading image models. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
+FLUX Schnell and other leading image models. We never train on your prompts or outputs. Run records are retained, and erasing your account severs them from you rather than deleting them; the privacy policy says exactly what is kept and why.
 
 **Runs on:** FLUX.1 Schnell, SDXL, and others via ComfyUI workflows.
 
@@ -35,7 +36,7 @@ FLUX Schnell and other leading image models. We never train on your prompts or o
 
 **Frame by frame, in one flow.**
 
-Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We never train on your prompts or outputs. Run records are kept until you erase your account, and the privacy policy says exactly what is kept and why.
+Text-to-video and image-to-video generation through the same composable workflow system. Chain image generation into video as a single composed flow — or run video standalone. We never train on your prompts or outputs. Run records are retained, and erasing your account severs them from you rather than deleting them; the privacy policy says exactly what is kept and why.
 
 [Generate video →](/catalog)
 
@@ -46,8 +47,8 @@ Text-to-video and image-to-video generation through the same composable workflow
 
 Text-to-music generation, and audio understanding that turns a track back into a description you
 can work with. Describe what you want; get a finished output. We never train on your productions.
-Run records are kept until you erase your account, and the privacy policy says exactly what is kept
-and why.
+Run records are retained, and erasing your account severs them from you rather than deleting them;
+the privacy policy says exactly what is kept and why.
 
 [Make audio →](/catalog)
 

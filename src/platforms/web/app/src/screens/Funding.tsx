@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, ApiRequestError, type DepositConfig, type Pack } from '../lib/api';
+import { api, ApiRequestError, type ArcanumConfig, type DepositConfig, type Pack } from '../lib/api';
+import { purseIsOff } from '../lib/purseSwitch';
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { Hemisphere, Meter } from './IdentityMeter';
@@ -84,10 +85,12 @@ export function Funding() {
   const [copied, setCopied] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
   // ANON_PURSE_ENABLED (noema-131): the ZK bearer purse is gated off for v1 (forgeable dev key
-  // until the ceremony runs). null = not yet known; false = show the purse section as coming-soon.
+  // until the ceremony runs). null = not yet known, which `purseIsOff` reads as off, as it reads
+  // an unreachable config — this page is the one the others send a visitor to with "how purse
+  // works", so it must not be the one page offering a mint the server refuses.
   // This gates ONLY the purse step — card, wallet, and the shielded-wallet anonymity story stay.
-  const [purseEnabled, setPurseEnabled] = useState<boolean | null>(null);
-  const purseOff = purseEnabled === false;
+  const [purse, setPurse] = useState<ArcanumConfig | null>(null);
+  const purseOff = purseIsOff(purse);
 
   // Fiat/card rail — Stripe Checkout redirect + post-return credit poll.
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
@@ -147,8 +150,9 @@ export function Funding() {
   useEffect(() => {
     let live = true;
     api.getDepositConfig().then((c) => { if (live) setCfg(c); }).catch(() => {});
-    // GET /arcanum/config returns `enabled` (ANON_PURSE_ENABLED, noema-131); read it defensively.
-    api.arcanum.config().then((c) => { if (live) setPurseEnabled((c as { enabled?: boolean }).enabled === true); }).catch(() => { if (live) setPurseEnabled(false); });
+    // GET /arcanum/config returns `enabled` (ANON_PURSE_ENABLED, noema-131). A failed fetch
+    // leaves the config null, which reads as off — see purseSwitch.ts.
+    api.arcanum.config().then((c) => { if (live) setPurse(c); }).catch(() => {});
     api.listPacks().then((p) => {
       if (!live) return;
       setPacks(p);
