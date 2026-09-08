@@ -67,6 +67,30 @@ export interface WidgetRouterDeps {
   limit?: number
 }
 
+// ── The framing allowlist ────────────────────────────────────────────────────
+// The whole of the embed surface's framing defence resolves through these two, so they
+// live beside the `frame()` that renders them rather than being re-typed at each caller:
+// the server, the embed sandbox and this router's own tests all read the allowlist here,
+// and a deployment's posture cannot drift from what the tests assert.
+
+/**
+ * Parse the platform-wide allowlist out of its environment value (`WIDGET_FRAME_ANCESTORS`,
+ * space- or comma-separated). Unset or empty yields an EMPTY list, which `frame()` renders as
+ * `'self'` — meaning no partner site may frame the embed at all. Empty is the closed default,
+ * not the open one.
+ */
+export function parseFrameAncestors(value: string | undefined): string[] {
+  return (value ?? '').split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+}
+
+/**
+ * The platform's `deps.frameAncestors`: a partner's own `Legatus.frameAncestors` wins where one
+ * is set, and every other agent falls back to the platform-wide list unchanged.
+ */
+export function frameAncestorsFor(platform: string[]): (legatus: Legatus | undefined) => string[] {
+  return (legatus) => (legatus?.frameAncestors?.length ? legatus.frameAncestors : platform)
+}
+
 // ── HTML/URL safety ──────────────────────────────────────────────────────────
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))

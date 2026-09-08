@@ -14,15 +14,15 @@
 //   • a stub x402 endpoint so the paid run returns a fake image instead of 500ing.
 // This shows how it DISPLAYS; it does not move any real money.
 //
-// FRAMING is read from `WIDGET_FRAME_ANCESTORS` exactly as `src/index.ts` reads it, and
-// falls back to `'self'` exactly as the router does — so the sandbox's default reproduces
-// a deployment that has never set the variable, where the second-origin page comes up
-// EMPTY. Name the partner origin to watch it fill:
+// FRAMING runs through the server's own allowlist parser and resolver, not a copy of them,
+// and falls back to `'self'` exactly as the router does — so the sandbox's default reproduces
+// a deployment that has never set `WIDGET_FRAME_ANCESTORS`, where the second-origin page comes
+// up EMPTY. Name the partner origin to watch it fill:
 //
 //   WIDGET_FRAME_ANCESTORS=http://localhost:4403 npx tsx scripts/widget-preview.ts
 
 import express from 'express'
-import { createWidgetRouter } from '../src/allocutio/api/widgetRouter.js'
+import { createWidgetRouter, parseFrameAncestors, frameAncestorsFor } from '../src/allocutio/api/widgetRouter.js'
 import { createAgentCardRouter } from '../src/allocutio/api/agentCardRouter.js'
 import { DEFAULT_X402_CONFIG, buildQuote, acceptFor, buildPaymentRequirements } from '../src/crystal/x402Pricing.js'
 import type { Legatus } from '../src/types/legatus.js'
@@ -35,10 +35,9 @@ const BASE = `http://localhost:${PORT}`
 const PARTNER_PORT = Number(process.env.PARTNER_PORT ?? PORT + 1)
 const PARTNER_BASE = `http://localhost:${PARTNER_PORT}`
 
-// Parsed the way `src/index.ts` parses it (space/comma separated), so a value that works here
-// works there. Empty → the router's own `'self'` default → no other site may frame the widget.
-const FRAME_ANCESTORS = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
-  .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+// The server's own parser, not a copy of it, so a value that works here works there. Empty →
+// the router's `'self'` default → no other site may frame the widget.
+const FRAME_ANCESTORS = parseFrameAncestors(process.env.WIDGET_FRAME_ANCESTORS)
 
 // ── Fake data ────────────────────────────────────────────────────────────────
 const legatus = {
@@ -92,7 +91,7 @@ app.use('/widget', createWidgetRouter({
   quoteImpetus: async (id) => (id === 'm2' ? 2400n : id === 'm3' ? 400n : 1200n),
   x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0x' + 'c'.repeat(40) },
   sessionAuth: true,            // sandbox-only: show the sign-in step (mocked endpoints below)
-  frameAncestors: () => FRAME_ANCESTORS,
+  frameAncestors: frameAncestorsFor(FRAME_ANCESTORS),
 }))
 
 // MOCK sign-in endpoints (sandbox only — prod serves none, so the widget shows connect-wallet
