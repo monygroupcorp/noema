@@ -11,6 +11,7 @@
 import type { ModelRef } from '../../types/actum.js'
 import type { FailureStage } from '../../lib/retryVerdict.js'
 import type { EarningKind } from '../../ledger/earnings.js'
+import type { ModerationCategory } from '../../crystal/ModerationGate.js'
 
 export type { FailureStage, EarningKind }
 
@@ -256,6 +257,12 @@ export interface ActivityRow {
   settledAt?: string
   /** The link to the run's artifact, when one is resolvable. */
   door?: ActivityDoor
+  /**
+   * Where an in-flight run WAITING FOR A WARM POD stands in line. Present only while it
+   * waits — the whole point of the line is that its runs are not watched, so the place has
+   * to be readable from the list someone comes back to, not only from the run they left.
+   */
+  queue?: { place: number; depth: number }
 }
 
 /** A page of the owner's activity — in-flight and settled runs, newest first. */
@@ -418,10 +425,12 @@ export interface Edition {
    *  pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent
    *  on the normal path. */
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
-  /** Present when the moderation gate HELD or REJECTED this publication. A generic,
-   *  author-safe message — NEVER the classifier's raw verdict text (which may describe
-   *  detection internals). A platform admin sees the raw reason via
-   *  `GET /v1/editiones/:id/moderation` instead. Absent when never flagged. */
+  /** Present when the moderation gate HELD or REJECTED this publication. An author-safe
+   *  message derived from the verdict's category (`publisherModerationNote`, runProjection),
+   *  so a hold, a content refusal and "public publishing is closed" do not all read alike —
+   *  but NEVER the classifier's raw verdict text (which may describe detection internals).
+   *  A platform admin sees the raw reason via `GET /v1/editiones/:id/moderation` instead.
+   *  Absent when never flagged. */
   moderationNote?: string
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
@@ -444,8 +453,10 @@ export interface EditionModerationDetail {
   id: string
   status: 'pending' | 'published' | 'rejected' | 'failed' | 'retracted'
   reviewOutcome?: 'pending' | 'approved' | 'rejected'
-  /** The recorded verdict, or null when this Editio was never held or rejected. */
-  moderation: { reason: string; hold?: boolean; scannedAt: string } | null
+  /** The recorded verdict, or null when this Editio was never held or rejected. The
+   *  `category` is the closed, author-safe half `Edition.moderationNote` is projected
+   *  from; a gate that sets none leaves it absent. */
+  moderation: { reason: string; category?: ModerationCategory; hold?: boolean; scannedAt: string } | null
 }
 
 /**

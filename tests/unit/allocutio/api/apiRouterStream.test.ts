@@ -22,6 +22,15 @@ const fakeRun: Run = {
   modusVersion: '1.0.0',
 }
 
+// A run admitted with no warm pod free: still `pending`, holding a place in the line for
+// the image it needs. `getRun` reports that place live, and the stream's opening snapshot
+// is the only way a watcher who arrives after the admission learns of it.
+const queuedRun: Run = {
+  id: 'r-queued', status: 'pending', modusId: 'flux-schnell',
+  aditus: { prompt: 'a cat' },
+  queue: { place: 3, depth: 7 },
+}
+
 // Only the methods the streaming routes reach are provided. `satisfies Partial<ApiFacade>`
 // signature-checks each of them against the real facade.
 function makeFakeApi() {
@@ -29,6 +38,7 @@ function makeFakeApi() {
     async invokeFlow(): Promise<Run> { return fakeRun },
     async getRun(_auctor: AuctorKey, id: string): Promise<Run> {
       if (id === 'r1') return fakeRun
+      if (id === 'r-queued') return queuedRun
       throw Errors.notFoundRun(id)
     },
     async listFlows(): Promise<unknown[]> { return [] },
@@ -302,6 +312,45 @@ test('router without a hub returns 501 on the stream route', async () => {
     })
     assert.equal(result.status, 501)
     assert.equal(result.body.error.code, 'internal.error')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('SSE snapshot carries the place a run holds in the warm-pod line', async () => {
+  // The line announces a place on the progress rail, but it announces it ONCE, when the run
+  // is admitted. Everything that watches a run later — a reload, a second tab, a stream
+  // opened minutes after the run was cast — joins on this snapshot, so a place left out of
+  // it is a waiting run reported as merely pending: the false position the line exists to
+  // avoid, and the state the offer to stop waiting is gated on.
+  const { server, url } = await makeServer(true)
+  try {
+    const { frames } = await collectSseFrames(
+      `${url}/v1/runs/r-queued/stream`,
+      { 'x-api-key': 'k' },
+      fs => fs.length >= 1,
+    )
+    const snap = frames[0] as any
+    assert.equal(snap.kind, 'snapshot')
+    assert.deepEqual(snap.run.queue, { place: 3, depth: 7 })
+    // Still lean: the place is the ONE field the wait added, not a door to the rest.
+    assert.equal(snap.run.aditus, undefined)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a run that never queued carries no queue field on the snapshot', async () => {
+  // Absent, not a zeroed place: the readout gates the whole waiting affordance on the
+  // field being there at all, so an empty object would put a run already on a pod in a line.
+  const { server, url } = await makeServer(true)
+  try {
+    const { frames } = await collectSseFrames(
+      `${url}/v1/runs/r1/stream`,
+      { 'x-api-key': 'k' },
+      fs => fs.length >= 1,
+    )
+    assert.equal((frames[0] as any).run.queue, undefined)
   } finally {
     await closeServer(server)
   }

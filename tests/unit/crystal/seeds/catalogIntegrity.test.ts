@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { CANONICAL_ESSENTIAE } from '../../../../src/crystal/seeds/essentiae.js'
 import { CANONICAL_FUNDAMENTA } from '../../../../src/crystal/seeds/fundamenta.js'
@@ -12,7 +12,10 @@ import { CANONICAL_INTELLAE } from '../../../../src/crystal/seeds/intellae.js'
 // both are plain strings, and both fail at provision time on a real pod if they are wrong.
 const WORKFLOWS = path.join(process.cwd(), 'src', 'crystal', 'workflows')
 
+const files = readdirSync(WORKFLOWS).filter(f => f.endsWith('.json'))
+
 const intellaIds = new Set(CANONICAL_INTELLAE.map(i => i.id))
+const intellaeById = new Map(CANONICAL_INTELLAE.map(i => [i.id, i]))
 const fundamentaById = new Map(CANONICAL_FUNDAMENTA.map(f => [f.id, f]))
 
 test('every Fundamentum base weight names a registered Intella', () => {
@@ -128,6 +131,37 @@ test("a slot-mapped knob's baked graph value is its declared default", () => {
       for (const seg of pointer.slice(1).split('/')) node = (node as Record<string, unknown>)?.[seg]
       assert.equal(node, porta.default,
         `'${e.id}' declares ${key}=${porta.default} but ${e.workflowTemplate} bakes ${JSON.stringify(node)} at ${pointer} — an omitted ${key} would run at the baked value`)
+    }
+  }
+})
+
+test("a manifest's download url is one the registry actually knows for that weight", () => {
+  // A template's `requiredModels[].url` reads like the address the pod will fetch from. It is
+  // not: `Compiler._resolveModels` looks the id up in the registry and, when the record carries
+  // any source at all, OVERWRITES both url and dest with `sources[0].uri` / `dest`. So the
+  // manifest entry is a fallback for an UNREGISTERED id, and for a registered one it is
+  // documentation — documentation that is either true or a lie about what the pod will pull.
+  //
+  // The lie is expensive and silent: the pod provisions, pulls every other weight, and dies at
+  // wget on the one address nobody could see was wrong, because the file beside the graph named
+  // the right one. Pinned here because the two drifted apart in exactly that direction — a sweep
+  // rewrote the registry's HuggingFace paths and left every manifest saying the old thing.
+  //
+  // Membership, not equality against `sources[0]`: a weight legitimately carries a mirror first
+  // and a HuggingFace fallback second, and a manifest naming either of them is telling the truth
+  // about where that weight lives. An id with no record is skipped — there the manifest url IS
+  // the address, which is the fallback path this rule does not govern.
+  for (const file of files) {
+    const t = JSON.parse(readFileSync(path.join(WORKFLOWS, file), 'utf8')) as {
+      requiredModels?: Array<{ id?: string; url?: string }>
+    }
+    for (const m of t.requiredModels ?? []) {
+      if (!m.id || !m.url) continue
+      const record = intellaeById.get(m.id)
+      if (!record) continue
+      const known = (record.sources ?? []).map(s => s.uri)
+      assert.ok(known.includes(m.url),
+        `${file} says '${m.id}' downloads from ${m.url}, but the registry — which wins at compile time — knows only ${known.join(', ')}`)
     }
   }
 })

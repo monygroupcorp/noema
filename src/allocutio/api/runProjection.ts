@@ -9,7 +9,7 @@
 
 import type { Actum, ActumStatus } from '../../types/actum.js'
 import type { Collectio, CollectioStatus } from '../../types/collectio.js'
-import type { Editio } from '../../types/editio.js'
+import type { Editio, EditioModeration } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
 import type { Provincia } from '../../types/provincia.js'
 import type { ActumIndex } from '../../types/actumIndex.js'
@@ -237,6 +237,35 @@ export function toCollection(c: Collectio): Collection {
   return out
 }
 
+/**
+ * What the publisher is told about a refused or held publication. Pure.
+ *
+ * The gate's own `reason` is admin-only: it may name a classifier, a score, or a
+ * hashset, and a publisher reading that learns how to evade it. So the verdict also
+ * carries a closed `category` (crystal/ModerationGate `ModerationCategory`), and this
+ * is where a category becomes a sentence.
+ *
+ * One sentence for every case was the bug this replaces: "Flagged by automated review."
+ * went out for a hold under the blanket manual-review posture (nothing was inspected)
+ * and for a refusal with no scanner configured at all (nothing was inspected either) —
+ * telling the publisher their content had been flagged when it had not been looked at.
+ * Each arm below says only what its verdict actually establishes, and no arm claims a
+ * finding unless the gate reported one.
+ */
+export function publisherModerationNote(m: EditioModeration): string {
+  if (m.category === 'unavailable') {
+    return 'Public publishing is closed right now, so this was never checked. Nothing was found in your content.'
+  }
+  if (m.hold === true) {
+    return m.category === 'review'
+      ? 'Waiting for a person to look at it before it goes live. Nothing was flagged in the content itself — every public publish is being reviewed by hand right now.'
+      : 'Automated review sent this to a person to look at before it goes live.'
+  }
+  return m.category === 'content'
+    ? 'Automated review flagged something in this content, so it was not published.'
+    : 'Refused by automated review.'
+}
+
 /** Project an Editio onto its public, JSON-safe Edition shape. Pure. */
 export function toEdition(e: Editio): Edition {
   const out: Edition = {
@@ -250,10 +279,10 @@ export function toEdition(e: Editio): Edition {
     updatedAt: e.mutatum.toISOString(),
   }
   if (e.reviewOutcome !== undefined) out.reviewOutcome = e.reviewOutcome
-  // Generic, author-safe note only — the raw classifier text (`e.moderation.reason`)
-  // stays admin-only (`CrystalApi.getEditionModeration`), never reaches this public
+  // Author-safe note only — the raw classifier text (`e.moderation.reason`) stays
+  // admin-only (`CrystalApi.getEditionModeration`), never reaches this public
   // projection (docs/spec/moderation-reject-reason.md §3(a) privacy note).
-  if (e.moderation !== undefined) out.moderationNote = 'Flagged by automated review.'
+  if (e.moderation !== undefined) out.moderationNote = publisherModerationNote(e.moderation)
   if (e.externalRef !== undefined) out.externalRef = e.externalRef
   if (e.owners !== undefined) out.owners = e.owners
   if (e.license !== undefined) out.license = e.license

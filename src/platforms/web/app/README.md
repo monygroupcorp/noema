@@ -9,7 +9,7 @@ Vite + React + TypeScript. Talks to the crystal `/v1` API same-origin in prod.
 ## Run it
 
 ```bash
-npm install
+npm ci
 npm run dev            # http://localhost:5174  (host:true → reachable over Tailscale)
 ```
 
