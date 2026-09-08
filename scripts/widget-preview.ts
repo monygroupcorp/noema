@@ -9,8 +9,17 @@
 //   • a demo "partner page" at /  that loads /widget/sdk.js and mounts the widget +
 //     gallery exactly like a real embedder would — with a MOCK wallet so you can click
 //     Run and watch the whole 402 → sign → result flow render;
+//   • THE SAME PAGE on a second origin (localhost:4403), because a partner embeds from
+//     their own domain and the same-origin copy can never exercise `frame-ancestors`;
 //   • a stub x402 endpoint so the paid run returns a fake image instead of 500ing.
 // This shows how it DISPLAYS; it does not move any real money.
+//
+// FRAMING is read from `WIDGET_FRAME_ANCESTORS` exactly as `src/index.ts` reads it, and
+// falls back to `'self'` exactly as the router does — so the sandbox's default reproduces
+// a deployment that has never set the variable, where the second-origin page comes up
+// EMPTY. Name the partner origin to watch it fill:
+//
+//   WIDGET_FRAME_ANCESTORS=http://localhost:4403 npx tsx scripts/widget-preview.ts
 
 import express from 'express'
 import { createWidgetRouter } from '../src/allocutio/api/widgetRouter.js'
@@ -21,6 +30,15 @@ import type { Modus } from '../src/types/modus.js'
 
 const PORT = Number(process.env.PORT ?? 4402)
 const BASE = `http://localhost:${PORT}`
+// The partner's own domain. A different port is a different origin to the browser, which is
+// all `frame-ancestors` judges — so this is a faithful stand-in for a real embedder's site.
+const PARTNER_PORT = Number(process.env.PARTNER_PORT ?? PORT + 1)
+const PARTNER_BASE = `http://localhost:${PARTNER_PORT}`
+
+// Parsed the way `src/index.ts` parses it (space/comma separated), so a value that works here
+// works there. Empty → the router's own `'self'` default → no other site may frame the widget.
+const FRAME_ANCESTORS = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
+  .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
 
 // ── Fake data ────────────────────────────────────────────────────────────────
 const legatus = {
@@ -59,8 +77,8 @@ const feedItems = DEMO_IMAGES.map((url, i) => ({
 
 const app = express()
 
-// The real widget surface, wired with fakes. frameAncestors 'self' lets the same-origin
-// demo page embed the iframe.
+// The real widget surface, wired with fakes. The same-origin demo page is framed under any
+// allowlist (`'self'` covers it); the partner-origin one only when FRAME_ANCESTORS names it.
 app.use('/widget', createWidgetRouter({
   legati: { findByAgentId: async (id) => (id === 'camel42' ? legatus : null), listByCollection: async () => [legatus] },
   feed: async () => feedItems,
@@ -74,7 +92,7 @@ app.use('/widget', createWidgetRouter({
   quoteImpetus: async (id) => (id === 'm2' ? 2400n : id === 'm3' ? 400n : 1200n),
   x402Config: { ...DEFAULT_X402_CONFIG, payTo: '0x' + 'c'.repeat(40) },
   sessionAuth: true,            // sandbox-only: show the sign-in step (mocked endpoints below)
-  frameAncestors: () => ["'self'"],
+  frameAncestors: () => FRAME_ANCESTORS,
 }))
 
 // MOCK sign-in endpoints (sandbox only — prod serves none, so the widget shows connect-wallet
@@ -179,8 +197,13 @@ app.get('/v1/runs/:id/stream', (_req, res) => {
 })
 
 // A demo partner page: loads the SDK, mounts the widget + gallery, injects a MOCK wallet.
-app.get('/', (_req, res) => {
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8">
+// `origin` is where NOEMA lives as seen from THIS page: '' when the page is served by the
+// sandbox itself, the absolute BASE when it is served from the partner's own domain. The SDK
+// derives its own base from its <script> src (widgetSdk.ts `_scriptOrigin`), so one absolute
+// src is all a cross-origin embedder has to get right.
+function demoPage(origin: string): string {
+  const framed = origin === '' || FRAME_ANCESTORS.length > 0
+  return `<!doctype html><html><head><meta charset="utf-8">
 <title>NOEMA widget sandbox</title>
 <style>
   body { margin:0; background:#f4f4f6; color:#222; font-family:system-ui,sans-serif; }
@@ -195,18 +218,21 @@ app.get('/', (_req, res) => {
   .links { padding:8px 20px 20px; font-size:12px; color:#888; }
   .links a { color:#7c5cff; }
 </style></head><body>
-<header><h1>NOEMA widget sandbox</h1>
-<div class="sub">The real /widget surface with fake data + a mock wallet — click <b>Run</b> to watch the 402 → sign → result flow.</div></header>
+<header><h1>NOEMA widget sandbox${origin ? ' — the partner\u2019s own site' : ''}</h1>
+<div class="sub">The real /widget surface with fake data + a mock wallet — click <b>Run</b> to watch the 402 → sign → result flow.</div>
+<div class="sub">This page is <b>${origin ? PARTNER_BASE : BASE}</b>; NOEMA is <b>${BASE}</b>. Allowlist:
+<b>${FRAME_ANCESTORS.length ? FRAME_ANCESTORS.join(' ') : "'self'  (unset — no other origin may frame)"}</b>${
+  framed ? '' : ' — the mounts below stay EMPTY, which is what a partner sees today.'}</div></header>
 <div class="cols">
   <div class="card agent"><h2>Noema.init — per-agent widget (camel42)</h2><div id="agent" class="mount"></div></div>
   <div class="card gallery"><h2>Noema.initGallery — collection gallery</h2><div id="gallery" class="mount"></div></div>
 </div>
 <div class="links">
   Raw views:
-  <a href="/widget/camel42" target="_blank">/widget/camel42</a> ·
-  <a href="/widget/gallery/0xdemo" target="_blank">/widget/gallery/0xdemo</a> ·
-  <a href="/widget/sdk.js" target="_blank">/widget/sdk.js</a> ·
-  <a href="/.well-known/agent-card.json" target="_blank">agent-card.json</a>
+  <a href="${origin}/widget/camel42" target="_blank">/widget/camel42</a> ·
+  <a href="${origin}/widget/gallery/0xdemo" target="_blank">/widget/gallery/0xdemo</a> ·
+  <a href="${origin}/widget/sdk.js" target="_blank">/widget/sdk.js</a> ·
+  <a href="${origin}/.well-known/agent-card.json" target="_blank">agent-card.json</a>
 </div>
 <script>
   // A MOCK wallet so the pay flow completes without a real provider.
@@ -218,15 +244,27 @@ app.get('/', (_req, res) => {
     },
   };
 </script>
-<script src="/widget/sdk.js"></script>
+<script src="${origin}/widget/sdk.js"></script>
 <script>
   Noema.init({ agentId: 'camel42', container: document.getElementById('agent'),
     getProvider: function () { return mockWallet; }, onEvent: function (e) { console.log('[agent]', e); } });
   Noema.initGallery({ collectionAddress: '0xdemo', container: document.getElementById('gallery') });
 </script>
-</body></html>`)
-})
+</body></html>`
+}
+
+app.get('/', (_req, res) => { res.type('html').send(demoPage('')) })
+
+// The partner's own site. Serves the identical page from a DIFFERENT origin, so the only
+// thing that changes is whether `frame-ancestors` lets the iframes in. Nothing of NOEMA is
+// mounted here — a partner runs their own server, and so does this.
+const partner = express()
+partner.get('/', (_req, res) => { res.type('html').send(demoPage(BASE)) })
 
 app.listen(PORT, () => {
-  console.log(`\n  NOEMA widget sandbox → ${BASE}\n  (Ctrl-C to stop)\n`)
+  const list = FRAME_ANCESTORS.length ? FRAME_ANCESTORS.join(' ') : "'self' (unset)"
+  console.log(`\n  NOEMA widget sandbox  → ${BASE}          same origin, always frames`)
+  console.log(`  the partner's own site → ${PARTNER_BASE}          frames only if allowlisted`)
+  console.log(`  frame-ancestors: ${list}\n  (Ctrl-C to stop)\n`)
 })
+partner.listen(PARTNER_PORT)
