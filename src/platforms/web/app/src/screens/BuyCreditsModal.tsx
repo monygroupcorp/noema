@@ -161,7 +161,11 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     setCardErr(null);
     if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId)); return; }
     setCardBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
+    // The page they were on when they reached for credits. This modal opens from the top-bar
+    // pill, so that is usually somewhere mid-task — Stripe returns everyone to /funding, and
+    // this is what lets that page offer the way back.
+    const returnTo = window.location.pathname + window.location.search;
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, returnTo))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCardErr(e instanceof Error ? e.message : String(e)); setCardBusy(null); });
   }

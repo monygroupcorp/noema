@@ -7,6 +7,7 @@ import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { doorPath } from '../lib/entry';
+import { safeNext } from './Onboard';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
@@ -89,6 +90,9 @@ export function Funding() {
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout' | 'cancelled'>('idle');
+  // The page the buyer was on when they reached for credits, carried through Stripe by
+  // buildCheckoutRequest. Stripe returns everyone here; this is how they get back.
+  const [backTo, setBackTo] = useState<string | null>(null);
 
   // Invite code → balance. Someone mints a purse from their balance and sends you the token;
   // redeeming moves its whole remaining balance onto your account, once.
@@ -185,6 +189,9 @@ export function Funding() {
     const params = new URLSearchParams(window.location.search);
     const flag = params.get('checkout');
     if (flag !== 'success' && flag !== 'cancel') return;
+    // Read the return target before the query goes: `safeNext` is the door's own guard, and
+    // this value is in the same position — handed back to us through a URL Stripe redirects to.
+    setBackTo(safeNext(params.get('back')));
     // Strip the flag either way, so a refresh neither re-polls nor re-announces an old return.
     window.history.replaceState({}, '', window.location.pathname);
     // Backing out of Stripe returns here too, and used to return in silence. Say it: nothing
@@ -313,6 +320,7 @@ export function Funding() {
               {checkoutStatus === 'settled' && (
                 <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
                   Credited — your balance is updated.
+                  {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
                 </div>
               )}
               {checkoutStatus === 'timeout' && (
@@ -323,12 +331,14 @@ export function Funding() {
                     credited by a webhook, so it can arrive after this page stops watching —
                     reload in a few minutes. If it is still missing, send us the Stripe receipt
                     and we will place it by hand.
+                    {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
                   </span>
                 </div>
               )}
               {checkoutStatus === 'cancelled' && (
                 <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
                   Checkout cancelled — nothing was charged. Pick a pack whenever you're ready.
+                  {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
                 </div>
               )}
             </div>
