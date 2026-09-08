@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import {
   api, SecretsUnavailableError, SECRET_PROVIDERS, SECRET_PROVIDER_LABEL,
@@ -7,6 +8,7 @@ import {
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { connectWallet } from '../lib/wallet';
+import { doorPath } from '../lib/entry';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -90,6 +92,9 @@ export function Profile() {
 // leftover credits back to your balance; revoke drains + retires the token. Identified
 // accounts only — the backend refuses anonymous/purse callers, so we gate on a real session.
 function Purses({ signedIn }: { signedIn: boolean }) {
+  // Where the door hands this visitor back once their session is live.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [purses, setPurses] = useState<Purse[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [credits, setCredits] = useState('');
@@ -138,7 +143,10 @@ function Purses({ signedIn }: { signedIn: boolean }) {
     return (
       <>
         <div className="sectionhead">Purses</div>
-        <div className="sub">Sign in to a named account to mint shareable purses — a bearer token others can spend on your credits. Anonymous sessions can’t own purses.</div>
+        <div className="sub">
+          <Link to={doorPath(here)}>Sign in</Link> to a named account to mint shareable purses — a bearer
+          token others can spend on your credits. Anonymous sessions can’t own purses.
+        </div>
       </>
     );
   }
@@ -213,12 +221,18 @@ function daysUntil(iso?: string): number | null {
 // deep link → the bot re-points your Telegram persona at this account. Both then let you
 // log straight in from the sign-in screen (wallet sig / bot `/recover` code).
 function BackupRecovery({ signedIn }: { signedIn: boolean }) {
+  // Where the door hands this visitor back once their session is live.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const anyLinked = signedIn;
   return (
     <>
       <div className="sectionhead">Account backup &amp; recovery</div>
       {!anyLinked ? (
-        <div className="sub">Sign in to a username account to add a wallet or Telegram backup — it’s how you get back in if you forget your password. There’s no email reset.</div>
+        <div className="sub">
+          <Link to={doorPath(here)}>Sign in</Link> to a username account to add a wallet or Telegram backup
+          — it’s how you get back in if you forget your password. There’s no email reset.
+        </div>
       ) : (
         <>
           <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
