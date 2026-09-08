@@ -8,6 +8,7 @@ import {
   type Generatio,
   type Tractus,
 } from '../lib/api';
+import { isWriteConfirmed, markWriteConfirmed } from '../lib/writeConfirmed';
 
 // ── WriteProposalCard — the author ladder's one card (concierge-author-ladder) ─
 //
@@ -21,7 +22,9 @@ import {
 //      than sending something the card is no longer showing.
 //   3. GO calls the SAME api.* method the corresponding screen already calls — createDataset,
 //      patchCollectionDraft, setGeneratio. There is no concierge write endpoint, and the write
-//      happens in the user's own session, on the user's own click, exactly once per card.
+//      happens in the user's own session, on the user's own click, exactly once per card — and,
+//      via `confirmKey`, exactly once per TURN: a resumed thread re-renders the stored proposal,
+//      and a card already pressed comes back settled rather than offering a second GO.
 //
 // An action outside the three never reaches here: the agent-side allowlist
 // (`validateWriteProposal`) drops it and only the reply text arrives.
@@ -31,6 +34,11 @@ const ACTION_LABEL: Record<ConciergeWriteAction, string> = {
   patch_collection_draft: 'Update a collection draft',
   set_preference: 'Change a preference',
 };
+
+/** Shown in place of GO when this turn's card was already confirmed in this browser. It says what
+ *  is known — that it ran — and not what it did, because the summary lived in the session that ran
+ *  it and nothing persisted it. */
+const ALREADY_DONE = 'Already confirmed. This card has been run.';
 
 const ACTION_NOTE: Record<ConciergeWriteAction, string> = {
   create_dataset: 'Mints a new dataset from runs you already made. Nothing is generated and nothing is charged.',
@@ -66,8 +74,11 @@ function rowsOf(action: ConciergeWriteAction, payload: Record<string, unknown>):
   });
 }
 
-export function WriteProposalCard({ write, onDone }: {
+export function WriteProposalCard({ write, confirmKey, onDone }: {
   write: ConciergeWrite;
+  /** The turn's idempotency key (the agent Dictum's `turnKey`). Present on both the live turn and
+   *  the resumed one, so a card whose GO already landed is not offered again. */
+  confirmKey?: string;
   /** Called once the write lands, with a short line the thread can show. */
   onDone?: (summary: string) => void;
 }) {
@@ -82,7 +93,9 @@ export function WriteProposalCard({ write, onDone }: {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | undefined>();
-  const [done, setDone] = useState<string | undefined>();
+  const [done, setDone] = useState<string | undefined>(() =>
+    isWriteConfirmed(confirmKey) ? ALREADY_DONE : undefined,
+  );
 
   // Which JSON rows currently fail to parse — GO stays disabled while any does.
   const badJson = rows
@@ -126,6 +139,7 @@ export function WriteProposalCard({ write, onDone }: {
           break;
         }
       }
+      markWriteConfirmed(confirmKey);
       setDone(summary);
       onDone?.(summary);
     } catch (e) {

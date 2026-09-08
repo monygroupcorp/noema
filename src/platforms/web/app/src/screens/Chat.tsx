@@ -130,6 +130,7 @@ function hydrateAgentBody(
   corpus: string,
   onAdjust: (priorRunId: string | undefined) => void,
   onGo: (path: string) => void,
+  turnKey?: string,
 ): ReactNode {
   try {
     const parsed = JSON.parse(corpus) as { kind?: string } & Record<string, unknown>;
@@ -138,7 +139,7 @@ function hydrateAgentBody(
       return <ProposalCard proposal={proposal} onAdjust={onAdjust} />;
     }
     if (parsed && parsed.kind === 'reply' && typeof parsed.text === 'string') {
-      return replyBody({ ...parsed, tokenUsage: { totalTokens: 0 } } as unknown as ConciergeReply, onGo);
+      return replyBody({ ...parsed, tokenUsage: { totalTokens: 0 } } as unknown as ConciergeReply, onGo, turnKey);
     }
   } catch { /* not JSON — a plain text reply */ }
   return corpus;
@@ -146,13 +147,15 @@ function hydrateAgentBody(
 
 // A reply's rendered body: the text, then whatever the agent attached to it — a destination the
 // user may click, a write it is asking the user to confirm. Both are already validated
-// server-side; neither does anything until the user acts.
-function replyBody(reply: ConciergeReply, onGo: (path: string) => void): ReactNode {
+// server-side; neither does anything until the user acts. `turnKey` is the turn's own idempotency
+// key, carried so a write card the user already pressed comes back settled on a resume instead of
+// offering a second GO.
+function replyBody(reply: ConciergeReply, onGo: (path: string) => void, turnKey?: string): ReactNode {
   return (
     <>
       {reply.text}
       {reply.destination && <DestinationLink destination={reply.destination} onGo={onGo} />}
-      {reply.write && <WriteProposalCard write={reply.write} />}
+      {reply.write && <WriteProposalCard write={reply.write} confirmKey={turnKey} />}
     </>
   );
 }
@@ -240,7 +243,7 @@ export function Chat() {
         .map((d) =>
           d.genus === 'user'
             ? { who: 'you', body: d.corpus }
-            : { who: 'concierge', body: hydrateAgentBody(d.corpus, adjust, navigate) },
+            : { who: 'concierge', body: hydrateAgentBody(d.corpus, adjust, navigate, d.turnKey) },
         );
       clearExample();
       setMsgs(hydrated);
@@ -305,8 +308,11 @@ export function Chat() {
         setColloquiumId(cid);
         createdThread = true;
       }
+      // Held, not inlined: it is this turn's identity, and the write card is keyed by it so a
+      // resume of this same thread does not offer a second GO on a write already performed.
+      const turnKey = newTurnKey();
       const { result } = await api.postDictum(cid, {
-        turnKey: newTurnKey(),
+        turnKey,
         message: v,
         ...(priorRunId ? { priorRunId } : {}),
       });
@@ -314,7 +320,7 @@ export function Chat() {
         ...m,
         result.kind === 'proposal'
           ? { who: 'concierge', body: <ProposalCard proposal={result as ConciergeProposal} onAdjust={adjust} /> }
-          : { who: 'concierge', body: replyBody(result, navigate), prov: [provFor(sel, 'text')] },
+          : { who: 'concierge', body: replyBody(result, navigate, turnKey), prov: [provFor(sel, 'text')] },
       ]);
       // The turn-end memory delta (the author ladder). Applied HERE, by the client, once, after
       // the turn has rendered — the server wrote nothing on the agent's behalf. Fire-and-forget:

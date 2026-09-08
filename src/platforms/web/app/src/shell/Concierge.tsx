@@ -82,6 +82,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   const [idleSending, setIdleSending] = useState(false);
   const [idleColloquiumId, setIdleColloquiumId] = useState<string | undefined>();
   const [idleResult, setIdleResult] = useState<ConciergeResult | null>(null);
+  // The turn `idleResult` came from, by its idempotency key. The dock keeps only the LAST turn, so
+  // resuming a thread re-renders a stored write card; keyed by this, one already pressed comes back
+  // settled instead of offering a second GO.
+  const [idleTurnKey, setIdleTurnKey] = useState<string | undefined>();
   const [idleCritiqueOf, setIdleCritiqueOf] = useState<string | undefined>();
 
   // Thread history in the dock (noema-111): pick a past thread to continue. The active project
@@ -110,12 +114,14 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
       const { dicta } = await api.getColloquium(id);
       const lastAgent = [...dicta].reverse().find((d) => d.genus === 'agent');
       setIdleResult(lastAgent ? agentDictumToResult(lastAgent.corpus) : null);
+      setIdleTurnKey(lastAgent?.turnKey);
     } catch { /* keep the thread active even if the last-turn fetch fails */ }
   }
   function startNewDock() {
     setHistOpen(false);
     setIdleColloquiumId(undefined);
     setIdleResult(null);
+    setIdleTurnKey(undefined);
   }
 
   // Resume by default (noema-324): on mount, with no active pointer yet, pick the caller's most
@@ -186,12 +192,14 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
         setIdleColloquiumId(cid);
         createdThread = true;
       }
+      const turnKey = newTurnKey();
       const { result } = await api.postDictum(cid, {
-        turnKey: newTurnKey(),
+        turnKey,
         message: v,
         ...(priorRunId ? { priorRunId } : {}),
       });
       setIdleResult(result);
+      setIdleTurnKey(turnKey);
       setIdleMsg('');
       // The turn-end memory delta (the author ladder). The dock is the concierge on every screen
       // but the full chat, so a turn taken here has to write what it learned exactly as a turn in
@@ -202,6 +210,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
       if (createdThread) void refreshThreads();
     } catch (e) {
       setIdleResult({ kind: 'reply', text: e instanceof Error ? e.message : String(e), tokenUsage: { totalTokens: 0 } });
+      setIdleTurnKey(undefined);
     } finally {
       setIdleSending(false);
     }
@@ -293,7 +302,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                     {idleResult.destination && (
                       <DestinationLink destination={idleResult.destination} onGo={navigate} />
                     )}
-                    {idleResult.write && <WriteProposalCard write={idleResult.write} />}
+                    {idleResult.write && <WriteProposalCard write={idleResult.write} confirmKey={idleTurnKey} />}
                   </div>
                 )
             )}
