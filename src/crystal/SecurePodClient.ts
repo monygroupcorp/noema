@@ -251,6 +251,77 @@ export const ACCEPTED_GPU_TYPE_IDS = [
   'Tesla V100-SXM2-16GB',
 ]
 
+// ---------------------------------------------------------------------------
+// CPU pods
+// ---------------------------------------------------------------------------
+//
+// Not every job the platform runs wants a GPU. The CLIP embedding service is the first
+// of them: ViT-B/32 is a 350 MB model whose whole point is that it runs on the CPU wheel
+// (`clip_service/Dockerfile` installs the CPU torch build precisely so the image stays
+// small), and renting a 24 GB GPU to compute 512-float vectors would pay GPU rates for
+// work no GPU accelerates.
+//
+// A CPU pod is the SAME RunPod pod API with a different shape of request: `computeType:
+// 'CPU'` and `instanceIds` in place of `gpuCount`/`gpuTypeIds`. Everything downstream —
+// the proxy hostname, termination, the 8080 http port — is unchanged.
+
+/**
+ * CPU SKUs to ask for, in preference order. A CLIP pass is memory-bound rather than
+ * core-bound (the model and its activations have to fit; four cores saturate the batch
+ * sizes `clip_service` accepts), so the general-purpose 4-core/16 GB SKU leads and the
+ * larger ones follow as availability fallbacks.
+ */
+export const DEFAULT_CPU_INSTANCE_IDS = [
+  'cpu3g-4-16',
+  'cpu3g-8-32',
+  'cpu5g-4-16',
+  'cpu5g-8-32',
+]
+
+/**
+ * RunPod's accepted `instanceIds` enum for CPU pods, snapshotted from its published CPU
+ * catalogue (2026-09-07). Same role as `ACCEPTED_GPU_TYPE_IDS`: RunPod answers an unknown
+ * instance id with a 400, and a stale SKU here would surface as an opaque provision failure
+ * rather than as the enum drift it is. When RunPod changes the catalogue, refresh this
+ * snapshot and `DEFAULT_CPU_INSTANCE_IDS` together — never suppress the guard.
+ */
+export const ACCEPTED_CPU_INSTANCE_IDS = [
+  'cpu3c-2-4',  'cpu3c-4-8',  'cpu3c-8-16',
+  'cpu3g-2-8',  'cpu3g-4-16', 'cpu3g-8-32',
+  'cpu5c-2-4',  'cpu5c-4-8',  'cpu5c-8-16',
+  'cpu5g-2-8',  'cpu5g-4-16', 'cpu5g-8-32',
+]
+
+/**
+ * The same construct-time guard `assertGpuTypeIdsAccepted` is for the GPU tier, for CPU
+ * instance ids. Throws naming the offending SKU(s) rather than letting a drifted catalogue
+ * reach a live provision POST.
+ */
+export function assertCpuInstanceIdsAccepted(
+  ids: readonly string[],
+  accepted: readonly string[] = ACCEPTED_CPU_INSTANCE_IDS,
+): void {
+  const offending = ids.filter(id => !accepted.includes(id))
+  if (offending.length > 0) {
+    throw new Error(
+      `SecurePodClient: CPU instance id(s) not in RunPod's accepted instanceIds enum: ` +
+      `${offending.map(s => `'${s}'`).join(', ')}. RunPod rejects unknown instanceIds with a 400 ` +
+      `on pod provision. Update DEFAULT_CPU_INSTANCE_IDS and/or the ACCEPTED_CPU_INSTANCE_IDS ` +
+      `snapshot to match RunPod's current catalogue.`,
+    )
+  }
+}
+
+/** Container disk for a CPU pod, in GB. The CLIP image bakes its weights in at ~2.5 GB. */
+export const DEFAULT_CPU_POD_DISK_GB = 20
+
+/** What `bootstrapClipService` hands back: a pod, and the base URL its service answers on. */
+export interface ClipPodHandle {
+  podId: string
+  /** `https://<podId>-8080.proxy.runpod.net` — the RunPod proxy in front of the pod's 8080. */
+  baseUrl: string
+}
+
 /**
  * Construct-time guard (noema-103): assert every id in `ids` is present in RunPod's
  * accepted `gpuTypeIds` enum (`accepted`, default ACCEPTED_GPU_TYPE_IDS). Throws an Error
@@ -1291,6 +1362,156 @@ export class SecurePodClient implements RunPodClient, Procurator {
         await new Promise(r => setTimeout(r, 5_000))
       }
     }
+  }
+
+  // ── CPU pods ──────────────────────────────────────────────────────────────
+
+  /**
+   * Provision a CPU-only pod and return its id.
+   *
+   * The GPU path's `_provisionPod` and this one are deliberately separate requests rather
+   * than one parameterised body: `computeType: 'CPU'` and `gpuTypeIds` are mutually
+   * exclusive at RunPod, and a body that carried both shapes would be one edit away from
+   * silently renting a GPU for a CPU job. Nothing about the GPU path changes here.
+   *
+   * `env` is passed through because a CPU pod's whole configuration is its environment —
+   * the CLIP service reads its job token from one (see `bootstrapClipService`).
+   */
+  async provisionCpuPod(opts: {
+    imageName: string
+    /** Overrides `DEFAULT_CPU_INSTANCE_IDS`. Validated against RunPod's accepted enum. */
+    instanceIds?: string[]
+    containerDiskGb?: number
+    /** HTTP/TCP ports to expose. Default: the service port, 8080. */
+    ports?: string[]
+    env?: Record<string, string>
+  }): Promise<string> {
+    const instanceIds = opts.instanceIds ?? DEFAULT_CPU_INSTANCE_IDS
+    // Checked before the POST, so a drifted SKU names itself instead of arriving as a 400.
+    assertCpuInstanceIdsAccepted(instanceIds)
+
+    const body: Record<string, unknown> = {
+      name: `noema-cpu-${Date.now()}`,
+      imageName: opts.imageName,
+      computeType: 'CPU',
+      instanceIds,
+      containerDiskInGb: opts.containerDiskGb ?? DEFAULT_CPU_POD_DISK_GB,
+      ports: opts.ports ?? ['8080/http'],
+      supportPublicIp: true,
+      ...(opts.env ? { env: opts.env } : {}),
+    }
+
+    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }, this.config.provisionTimeoutMs ?? 30_000)
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`RunPod CPU pod provision failed: ${res.status} ${text}`)
+    }
+
+    const data = await res.json() as { id: string }
+    log.info('cpu pod provisioned', { podId: data.id, imageName: opts.imageName })
+    return data.id
+  }
+
+  /**
+   * Bring up the CLIP embedding service on a CPU pod, behind the job token it is given.
+   *
+   * The token is the pod's ONLY door policy. The proxy hostname is derived from the pod id
+   * and is reachable by anyone who knows it, so an embed endpoint left open there is an
+   * open GPU-free inference service on the platform's bill — and, worse, one that will
+   * fetch any URL it is handed. `CLIP_JOB_TOKEN` arms `clip_service`'s bearer check, and
+   * this bootstrap does not hand back a pod until it has SEEN that check refuse.
+   *
+   * Two things are therefore verified before the handle is returned, and a pod that fails
+   * either is terminated rather than left running:
+   *
+   *   1. `/health` answers, and reports `auth: 'token'` — the service came up with the
+   *      token armed, not with an unset env var it would have ignored.
+   *   2. An UNAUTHENTICATED embed request is refused with 401 — the check is not merely
+   *      configured but actually in the request path.
+   */
+  async bootstrapClipService(opts: {
+    /** The bearer the service will require. Generated per pod by the caller. */
+    jobToken: string
+    imageName: string
+    instanceIds?: string[]
+    containerDiskGb?: number
+    /** How long to wait for the service to answer /health. Default 10 min. */
+    readyTimeoutMs?: number
+    /** Gap between health polls. Default 5 s. */
+    pollIntervalMs?: number
+  }): Promise<ClipPodHandle> {
+    const podId = await this.provisionCpuPod({
+      imageName: opts.imageName,
+      ...(opts.instanceIds ? { instanceIds: opts.instanceIds } : {}),
+      ...(opts.containerDiskGb !== undefined ? { containerDiskGb: opts.containerDiskGb } : {}),
+      env: { CLIP_JOB_TOKEN: opts.jobToken },
+    })
+    const baseUrl = SecurePodClient.clipBase(podId)
+
+    try {
+      await this._awaitClipReady(baseUrl, opts.readyTimeoutMs ?? 10 * 60_000, opts.pollIntervalMs ?? 5_000)
+      await this._assertClipRefusesAnonymous(baseUrl)
+    } catch (err) {
+      // A pod that never armed its door is not left running to be found.
+      await this.terminatePodFn(this.config.apiKey, podId).catch(() => {})
+      throw err
+    }
+
+    log.info('clip service ready', { podId })
+    return { podId, baseUrl }
+  }
+
+  /** Poll the CLIP service's open health endpoint until it reports a token-armed service. */
+  private async _awaitClipReady(baseUrl: string, timeoutMs: number, pollIntervalMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    let last = 'no response yet'
+    while (Date.now() < deadline) {
+      try {
+        const res = await this._fetchWithTimeout(`${baseUrl}/health`, { method: 'GET' }, 10_000)
+        if (res.ok) {
+          const body = await res.json() as { status?: string; auth?: string }
+          if (body.status === 'ok' && body.auth === 'token') return
+          // A service that came up WITHOUT its token is a configuration failure, not a slow
+          // start: waiting longer cannot arm it, so give up now and say why.
+          if (body.status === 'ok') {
+            throw new Error('clip service came up without its job token armed — refusing to use an open embed endpoint')
+          }
+          last = `status ${String(body.status)}`
+        } else {
+          last = `HTTP ${res.status}`
+        }
+      } catch (err) {
+        if ((err as Error).message?.includes('refusing to use an open embed endpoint')) throw err
+        last = (err as Error).message ?? String(err)
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs))
+    }
+    throw new Error(`clip service did not become ready within ${timeoutMs} ms (last: ${last})`)
+  }
+
+  /** One unauthenticated embed request. Anything but a 401 means the door is not shut. */
+  private async _assertClipRefusesAnonymous(baseUrl: string): Promise<void> {
+    const res = await this._fetchWithTimeout(`${baseUrl}/embed/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'bootstrap probe' }),
+    }, 30_000)
+    if (res.status !== 401) {
+      throw new Error(`clip service answered an unauthenticated embed with ${res.status}, not 401 — the job-token gate is not in the request path`)
+    }
+  }
+
+  /** Returns the CLIP service HTTP base URL for a given pod ID. */
+  static clipBase(podId: string): string {
+    return `https://${podId}-8080.proxy.runpod.net`
   }
 
   /** Returns the comfyrunner HTTP base URL for a given pod ID. */
