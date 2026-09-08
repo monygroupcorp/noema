@@ -4,6 +4,14 @@
 
 The live, self-describing source of truth is `GET /v1/openapi.json` plus the discovery endpoints (`GET /v1/flows`, `GET /v1/flows/:id`). The dynamic catalog (which flows exist) is discovered live, never baked here.
 
+## Authentication
+
+An operation marked **Auth: required** accepts any one of three credentials, all resolved at the same chokepoint:
+
+- `X-API-Key: <key>` — a partner API key.
+- `Authorization: Bearer <jwt>` — a session key.
+- `x-bursa-token: <token>` — a bearer purse. It carries its own credits and no account identity, so send it alone: pairing it with an identity header defeats the point. An ownerless purse is refused until the trusted-setup ceremony concludes.
+
 ## Operations
 
 ### POST /v1/runs

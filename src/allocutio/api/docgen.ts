@@ -63,7 +63,11 @@ function operationFor(route: RouteSpec): Record<string, unknown> {
 
   const op: Record<string, unknown> = {
     summary: route.summary,
-    security: route.auth ? [{ ApiKeyAuth: [] }, { BearerAuth: [] }] : [],
+    // All three credentials resolve at one chokepoint (`apiRouter.authCaller`), so an authed
+    // operation accepts any of them. A purse token is a bearer credential with no account behind
+    // it: it is admitted here and then bounded by what a purse is allowed to reach, exactly as a
+    // partner API key is bounded by its own scope.
+    security: route.auth ? [{ ApiKeyAuth: [] }, { BearerAuth: [] }, { BursaToken: [] }] : [],
     responses,
   }
   if (parameters.length > 0) op.parameters = parameters
@@ -103,6 +107,19 @@ export function generateOpenApi(contract: ApiContract): object {
       securitySchemes: {
         ApiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
         BearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        // The purse rail. `/features` tells readers they can authenticate with a purse token in
+        // this header and then sends them here to read the contract; for as long as the contract
+        // did not name it, that was a capability the self-describing surface did not describe.
+        // An ownerless (anonymous) purse is refused while the trusted-setup ceremony is
+        // unfinished — the header is live today for a purse minted against an account.
+        BursaToken: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-bursa-token',
+          description:
+            'A bearer purse token. Carries its own credit balance and no account identity. ' +
+            'Send it alone — pairing it with an identity header defeats the point.',
+        },
       },
       schemas: {
         Run: SCHEMAS.Run as object,
@@ -140,6 +157,22 @@ export function generateReference(contract: ApiContract): string {
     'The live, self-describing source of truth is `GET /v1/openapi.json` plus the ' +
       'discovery endpoints (`GET /v1/flows`, `GET /v1/flows/:id`). ' +
       'The dynamic catalog (which flows exist) is discovered live, never baked here.',
+  )
+  lines.push('')
+
+  lines.push('## Authentication')
+  lines.push('')
+  lines.push(
+    'An operation marked **Auth: required** accepts any one of three credentials, all resolved ' +
+      'at the same chokepoint:',
+  )
+  lines.push('')
+  lines.push('- `X-API-Key: <key>` — a partner API key.')
+  lines.push('- `Authorization: Bearer <jwt>` — a session key.')
+  lines.push(
+    '- `x-bursa-token: <token>` — a bearer purse. It carries its own credits and no account ' +
+      'identity, so send it alone: pairing it with an identity header defeats the point. An ' +
+      'ownerless purse is refused until the trusted-setup ceremony concludes.',
   )
   lines.push('')
 
