@@ -129,6 +129,9 @@ export function Funding() {
   // The pack an anon visitor is holding: named by ?pack= and real in the server catalog. A
   // ?pack= that is not a SKU resolves to nothing, and the page falls back to asking them to pick.
   const chosen = !session && preselected ? packs.find((p) => p.id === preselected) ?? null : null;
+  // ...but not before the catalog has arrived. Until it does there is no pack to name AND no
+  // chip to press, so "pick a pack" would be the same wrong instruction, just briefly.
+  const namingPending = preselected != null && packs.length === 0;
 
   async function connect() {
     setWalletErr(null);
@@ -324,7 +327,7 @@ export function Funding() {
                   </span>
                 </div>
               )}
-              {!session && !chosen && (
+              {!session && !chosen && !namingPending && (
                 <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
                   <WarnIc />
                   <span>
