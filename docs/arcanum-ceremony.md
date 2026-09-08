@@ -217,6 +217,47 @@ drops contributions is refused however it labels itself.
 
 ---
 
+## After the ceremony: serving the key it produced
+
+A finished transcript is only half of it. The proving key clients download has to be the
+key that transcript names — otherwise the page can say "ceremony complete, final key
+`dd96…`" while `/arcanum/circuit/zkey` hands out something else entirely, and from outside
+nobody can tell.
+
+So the beacon'd final key is published to the sequencer's custody, and the server serves it
+from there:
+
+```bash
+CEREMONY_FINAL_ZKEY=/path/to/arcanum_final.zkey   # published into custody at boot
+CEREMONY_FINALIZE=<sha256 of that file>           # seals the ceremony at that hash
+```
+
+The two must agree: a `CEREMONY_FINAL_ZKEY` that does not hash to `CEREMONY_FINALIZE` is
+refused, and the key is published *before* the phase flips, so the ceremony never reads
+finalized while the key it names is missing. A key too large to serve from the API goes on
+R2 instead (`ARCANUM_ZKEY_URL`).
+
+Anyone can check the running site against its own transcript, without trusting either:
+
+```bash
+curl -s https://noema.art/v1/ceremony | jq -r .finalHash
+curl -s https://noema.art/arcanum/config | jq -r .zkeyHash
+curl -s https://noema.art/arcanum/circuit/zkey | shasum -a 256
+```
+
+The `/ceremony` page makes that same comparison for you and prints what it found under the
+transcript — including when it comes out wrong, which is the only version of this check worth
+publishing. The curl above is how you confirm the page is not simply agreeing with itself.
+
+All three are the same hash, or the ceremony's output is not what the site is serving. If
+the final key is not published, `/arcanum/circuit/zkey` answers 503 and `/arcanum/config`
+reports `ready: false` — the committed key is *not* served in its place, because it is not
+the ceremony's output and serving it under a finished transcript would say that it was.
+
+`verification_key.json` must come from the same finalize run as the key being served: it is
+exported from that exact zkey, and a proof made against a proving key whose verification key
+the server does not hold will not verify.
+
 ## After the ceremony: wiring the verifier
 
 Once `verification_key.json` is in `src/arcanum/circuit/artifacts/`, load it in

@@ -1478,7 +1478,13 @@ export interface SecretView {
 /** `enabled` is ANON_PURSE_ENABLED (noema-131) — false until the trusted-setup ceremony runs.
  *  Optional because an older server omits it; read it as `=== true`, never as a truthy default,
  *  so a page never promises the purse to a visitor the server will refuse. */
-export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean; enabled?: boolean }
+/** `zkeyHash` is the sha256 of the proving key this server serves, and `zkeySource` says where
+    it came from ('ceremony' once the trusted setup is finalized). Compare zkeyHash with the
+    ceremony transcript's finalHash (GET /v1/ceremony) to confirm the key is the one the public
+    record names. Both optional: an older server omits them, and zkeyHash is null when zkeyUrl
+    points at a host the API does not serve from. */
+export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean; enabled?: boolean;
+  zkeyHash?: string | null; zkeySource?: 'ceremony' | 'repo' | 'external' | 'none' }
 // What POST /arcanum/issue returns (mirror src/arcanum/types.ts ArcanumIssuance). We
 // already hold valor locally; the load-bearing fields here are leafIndex + the Merkle path.
 export interface ArcanumIssuance {
