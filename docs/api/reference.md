@@ -8635,6 +8635,13 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
             "attestedAt"
           ]
         },
+        "memoryNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8887,6 +8894,13 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
         "attestedAt"
       ]
     },
+    "memoryNotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
+    },
     "privateOutputs": {
       "type": "boolean",
       "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8952,6 +8966,13 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
           "required": [
             "attestedAt"
           ]
+        },
+        "memoryNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
         "privateOutputs": {
           "type": "boolean",

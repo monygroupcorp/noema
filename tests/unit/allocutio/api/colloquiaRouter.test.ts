@@ -513,3 +513,63 @@ test("an 'active' purse opens a colloquium unchanged", async () => {
   const res = await request(h.app).post('/v1/colloquia').set('x-bursa-token', 'bt-1').send({})
   assert.equal(res.status, 200)
 })
+
+// ── the author ladder: what a turn PERSISTS, so a resumed thread round-trips ───
+//
+// `dictumCorpus` stores a turn's text plainly when that is all there is, and serializes it when
+// it carries structure the text alone would lose. Both shapes have to be right: a plain reply
+// stored as JSON would put a raw blob on screen for every already-stored Dictum, and a write card
+// stored as its text alone would strand a confirmation the user never pressed GO on.
+
+test('a plain reply persists as plain text — the shape every already-stored Dictum has', async () => {
+  const h = harness({ auctor: { animaId: 'A' }, script: [reply(100, 'Tell me more about the look you want.')] })
+  const id = await createThread(h.app)
+
+  const res = await request(h.app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 't1', message: 'hi' })
+  assert.equal(res.status, 200)
+
+  const agent = h.dicta.store.find((d) => d.genus === 'agent')
+  assert.ok(agent)
+  assert.equal(agent.corpus, 'Tell me more about the look you want.')
+})
+
+test('a reply carrying an un-GO\'d write persists serialized, and the write survives the round-trip', async () => {
+  const content = JSON.stringify({
+    kind: 'reply',
+    text: 'I can save that as your default style.',
+    write: { action: 'set_preference', payload: { key: 'style', value: 'cold, desaturated' } },
+  })
+  const h = harness({ auctor: { animaId: 'A' }, script: [reply(100, content)] })
+  const id = await createThread(h.app)
+
+  const res = await request(h.app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 't1', message: 'always cold' })
+  assert.equal(res.status, 200)
+
+  const agent = h.dicta.store.find((d) => d.genus === 'agent')
+  assert.ok(agent)
+  const stored = JSON.parse(agent.corpus) as Record<string, unknown>
+  assert.equal(stored.kind, 'reply')
+  assert.equal(stored.text, 'I can save that as your default style.')
+  assert.deepEqual(stored.write, { action: 'set_preference', payload: { key: 'style', value: 'cold, desaturated' } })
+})
+
+// The delta is applied ONCE, client-side, at the end of the turn that produced it. Persisting it
+// would make every resume of the thread re-apply what the user may since have edited away.
+test('a turn-end memory delta is NOT persisted on the Dictum', async () => {
+  const content = JSON.stringify({
+    kind: 'reply',
+    text: 'Noted.',
+    memoryDelta: { add: ['works in Portuguese'] },
+  })
+  const h = harness({ auctor: { animaId: 'A' }, script: [reply(100, content)] })
+  const id = await createThread(h.app)
+
+  const res = await request(h.app).post(`/v1/colloquia/${id}/dicta`).send({ turnKey: 't1', message: 'eu falo portugues' })
+  assert.equal(res.status, 200)
+  // The live turn carries it — that is what the client applies.
+  assert.deepEqual(res.body.result.memoryDelta, { add: ['works in Portuguese'] })
+
+  const agent = h.dicta.store.find((d) => d.genus === 'agent')
+  assert.ok(agent)
+  assert.ok(!agent.corpus.includes('memoryDelta'), 'the delta must not be stored on the Dictum')
+})

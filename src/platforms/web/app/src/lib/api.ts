@@ -122,8 +122,28 @@ export interface ConciergeProposal {
   tokenUsage: ConciergeTokenUsage;
   priorRunId?: string;
   delta?: string;
+  memoryDelta?: ConciergeMemoryDelta;
 }
-export interface ConciergeReply { kind: 'reply'; text: string; tokenUsage: ConciergeTokenUsage }
+// An in-app destination a reply may point at (noema-367). Validated server-side against the
+// concierge's route allowlist; an invalid one never arrives, it is dropped there.
+export interface ConciergeDestination { path: string; label: string }
+// The three writes the concierge may PROPOSE (the author ladder). It never performs one: the
+// payload arrives here as data, WriteProposalCard shows it whole, the user amends it, and GO
+// calls the same api.* method the corresponding screen already calls. An action outside these
+// three never arrives — the agent-side allowlist drops it and only the reply text comes through.
+export type ConciergeWriteAction = 'create_dataset' | 'patch_collection_draft' | 'set_preference';
+export interface ConciergeWrite { action: ConciergeWriteAction; payload: Record<string, unknown> }
+// What the concierge asks to remember (or forget) about the caller at the end of a turn. The
+// CLIENT applies it — see lib/conciergeMemory.ts — through PUT /v1/me/generatio.
+export interface ConciergeMemoryDelta { add?: string[]; remove?: string[] }
+export interface ConciergeReply {
+  kind: 'reply';
+  text: string;
+  destination?: ConciergeDestination;
+  write?: ConciergeWrite;
+  memoryDelta?: ConciergeMemoryDelta;
+  tokenUsage: ConciergeTokenUsage;
+}
 export type ConciergeResult = ConciergeProposal | ConciergeReply;
 export interface Dictum {
   id: string;
@@ -1335,6 +1355,10 @@ export interface Generatio {
   // Private generation (noema-347). When ON, the outputs of NEW runs are visible only to you, via
   // expiring links; default-absent = OFF. Forward-only — it never moves what already exists.
   privateOutputs?: boolean;
+  // Short lines the concierge remembers about you between threads (the author ladder). Written
+  // by THIS client at the end of a turn the agent proposed a delta on; listed and editable on
+  // Preferences; capped server-side at MEMORY_NOTES_MAX lines; deleted with the account.
+  memoryNotes?: string[];
 }
 // BYO gated-origin credential providers (mirror the server `SecretProvider` union).
 export type SecretProvider = 'civitai' | 'huggingface';

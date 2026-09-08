@@ -96,7 +96,22 @@ export interface Generatio {
    *  have a private-outputs bucket configured; without one the write is refused rather than
    *  silently downgraded to the public bucket. */
   privateOutputs?: boolean
+  /** Short lines the concierge remembers about this caller between threads (the author ladder).
+   *  Proposed by the agent as a turn-end delta and applied CLIENT-side through the same
+   *  `PUT /v1/me/generatio` the Preferences screen uses — nothing writes them on the agent's
+   *  behalf. Listed and editable on /preferences, capped at `MEMORY_NOTES_MAX` lines of
+   *  `MEMORY_NOTE_MAX_CHARS` each (re-enforced in `CrystalApi.setGeneratio`, so the ceiling
+   *  holds against any caller), and — because they live here, on the anon-capable Generatio in
+   *  `consuetudines` — hard-deleted with the account by `MeEraser`. */
+  memoryNotes?: string[]
 }
+
+/** Longest single concierge memory note. A note is a line a person skims on /preferences,
+ *  not a paragraph. */
+export const MEMORY_NOTE_MAX_CHARS = 200
+
+/** Hard ceiling on memory notes kept for one caller; the oldest fall off first. */
+export const MEMORY_NOTES_MAX = 20
 
 /** One verb→modus binding row (for the read side — `listBindings`). */
 export interface Binding { verb: string; modusId: string }

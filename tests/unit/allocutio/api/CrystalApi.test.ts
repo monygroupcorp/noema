@@ -15,6 +15,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/C
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { MemoryConsuetudinum } from '../../../../src/crystal/MemoryConsuetudinum.js'
 import { spicyModelFor, SPICY_MODEL_OVERRIDES } from '../../../../src/crystal/spicyRouting.js'
+import { MEMORY_NOTE_MAX_CHARS, MEMORY_NOTES_MAX } from '../../../../src/types/consuetudo.js'
 import type { Actum } from '../../../../src/types/actum.js'
 import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio, Cursor } from '../../../../src/types/cursus.js'
@@ -1647,4 +1648,59 @@ test('PromptGuard.check is invoked on every invokeFlow regardless of spicyMode',
     await api.invokeFlow(auctor, { modusId: 'sd1-5' }, { prompt: 'hi' })
     assert.equal(calls, 1, 'guard still runs when spicy is ON — no spicyMode gate on the moderation path')
   }
+})
+
+// =============================================================================
+// Concierge memory notes (the author ladder) — the STORE's half of the cap.
+//
+// The notes are proposed by the concierge and written by the CLIENT through this
+// same PUT, so the ceiling cannot live only where they are composed: it is
+// re-applied here, on every caller. The truncation is deliberate rather than a
+// rejection — a rejected Preferences save would lose the user's OTHER edits to
+// make a point about a note the agent wrote.
+// =============================================================================
+
+test('setGeneratio truncates an over-long memory-note list to the newest MEMORY_NOTES_MAX', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  const { deps } = makeDeps({ consuetudinum })
+  const api = new CrystalApi(deps)
+
+  const notes = Array.from({ length: MEMORY_NOTES_MAX + 5 }, (_, i) => `note ${i}`)
+  const g = await api.setGeneratio(auctor, { memoryNotes: notes })
+
+  assert.equal(g.memoryNotes?.length, MEMORY_NOTES_MAX)
+  assert.equal(g.memoryNotes?.[0], `note ${5}`, 'the OLDEST fall off, the newest are kept')
+  assert.equal(g.memoryNotes?.[MEMORY_NOTES_MAX - 1], `note ${MEMORY_NOTES_MAX + 4}`)
+  assert.equal((await consuetudinum.resolveGeneratio(auctor))?.memoryNotes?.length, MEMORY_NOTES_MAX)
+})
+
+test('setGeneratio clips a single memory note to MEMORY_NOTE_MAX_CHARS and drops the blanks', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  const { deps } = makeDeps({ consuetudinum })
+  const api = new CrystalApi(deps)
+
+  const g = await api.setGeneratio(auctor, {
+    memoryNotes: ['x'.repeat(MEMORY_NOTE_MAX_CHARS + 50), '   ', '  keeps this  '],
+  })
+
+  assert.equal(g.memoryNotes?.length, 2, 'a blanked line is a deletion, which is what "edit it away" means')
+  assert.equal(g.memoryNotes?.[0].length, MEMORY_NOTE_MAX_CHARS)
+  assert.equal(g.memoryNotes?.[1], 'keeps this')
+})
+
+// The save is never REFUSED over a note — the rest of the record must land regardless.
+test('an over-long memory-note list does not cost the caller their other preference edits', async () => {
+  const consuetudinum = new MemoryConsuetudinum()
+  const { deps } = makeDeps({ consuetudinum })
+  const api = new CrystalApi(deps)
+
+  const g = await api.setGeneratio(auctor, {
+    style: 'cinematic',
+    negativePrompt: 'blurry',
+    memoryNotes: Array.from({ length: MEMORY_NOTES_MAX + 5 }, (_, i) => `note ${i}`),
+  })
+
+  assert.equal(g.style, 'cinematic')
+  assert.equal(g.negativePrompt, 'blurry')
+  assert.equal(g.memoryNotes?.length, MEMORY_NOTES_MAX)
 })
