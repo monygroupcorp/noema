@@ -70,10 +70,15 @@ async function main() {
   console.log(`    ${finalHash}\n`)
   console.log('Next steps:')
   console.log(`  1. Commit ${path.relative(process.cwd(), VKEY)} — the server auto-loads it`)
-  console.log('     and turns on real ZK spend verification.')
-  console.log(`  2. Host ${path.relative(process.cwd(), FINAL)} for clients and set ARCANUM_ZKEY_URL.`)
-  console.log('  3. Flip the ceremony page to "complete" — set this in the env and restart:\n')
+  console.log('     and turns on real ZK spend verification. It must come from THIS run:')
+  console.log('     it is the verification key for the proving key below, and no other.')
+  console.log(`  2. Put ${path.relative(process.cwd(), FINAL)} on the server and set both of`)
+  console.log('     these, so the key the site serves is the key this transcript names:\n')
+  console.log(`    CEREMONY_FINAL_ZKEY=/path/to/arcanum_final.zkey`)
   console.log(`    CEREMONY_FINALIZE=${finalHash}\n`)
+  console.log('     (A key too large to serve from the API goes on R2 — ARCANUM_ZKEY_URL.)')
+  console.log('  3. Restart, then check the site against its own transcript:\n')
+  console.log(`    curl -s ${HOST}/arcanum/config | jq -r .zkeyHash    # == ${finalHash.slice(0, 16)}…\n`)
   console.log('─'.repeat(64))
 }
 

@@ -26,8 +26,10 @@ import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.j
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
 import { createQuerelaAdminRouter } from './api/querela/querelaAdminRouter.js'
-import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
-import { mountCeremony } from './api/arcanum/mountCeremony.js'
+import { createArcanumRouter, REPO_ZKEY_PATH } from './api/arcanum/arcanumRouter.js'
+import { mountCeremony, ceremonyCustodyDir } from './api/arcanum/mountCeremony.js'
+import { LocalZkeyCustody } from './arcanum/CeremoniaCustody.js'
+import { createProvingKeySource } from './arcanum/ProvingKeySource.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
@@ -1208,6 +1210,13 @@ async function main(): Promise<void> {
   app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
     anonPurseEnabled,
     zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    // The key clients prove with follows the ceremony: once it is finalized, /circuit/zkey
+    // serves the key its public transcript names, not whatever the image was built with.
+    provingKey: createProvingKeySource({
+      store: ring.ceremonia,
+      custody: new LocalZkeyCustody(ceremonyCustodyDir()),
+      repoZkeyPath: REPO_ZKEY_PATH,
+    }),
     serverUrl: process.env.WEBHOOK_URL,
     resolve: (req) => apiResolver.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body)

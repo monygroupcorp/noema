@@ -8,6 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import { createHash } from 'node:crypto'
 import express from 'express'
 import { createArcanumRouter, type ArcanumRouterConfig } from '../../../src/api/arcanum/arcanumRouter.js'
 import type { ArcanumIssuer } from '../../../src/ledger/ArcanumIssuer.js'
@@ -100,6 +101,17 @@ test('GET /config: no serverUrl configured falls back to relative paths', async 
   }
 })
 
+function getBody(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    http.get(url, res => {
+      const chunks: Buffer[] = []
+      res.on('data', c => chunks.push(c as Buffer))
+      res.on('end', () => resolve(Buffer.concat(chunks)))
+      res.on('error', reject)
+    }).on('error', reject)
+  })
+}
+
 function getRaw(url: string): Promise<{ status: number; headers: http.IncomingHttpHeaders; length: number }> {
   return new Promise((resolve, reject) => {
     http.get(url, res => {
@@ -119,6 +131,93 @@ test('GET /circuit/zkey serves the tracked proving key with correct content-leng
     assert.equal(headers['content-type'], 'application/octet-stream')
     assert.equal(Number(headers['content-length']), length)
     assert.ok(length > 0)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── The served key is named, and it is the ceremony's once there is one ──────
+// A client is asked to trust a 5MB proving key it downloads from us. What makes that
+// checkable rather than trusting is the hash: /config and the x-zkey-hash header name
+// the exact bytes, so they can be compared with the ceremony's published finalHash
+// (GET /v1/ceremony) before a proof is ever made with them.
+
+const CEREMONY_KEY = Buffer.from('a finalized ceremony proving key')
+const CEREMONY_HASH = createHash('sha256').update(CEREMONY_KEY).digest('hex')
+
+test('GET /config names the sha256 of the key served and where it came from', async () => {
+  const { server, url } = await makeServer({ serverUrl: 'https://staging.noema.art' })
+  try {
+    const { body } = await getJson(`${url}/config`)
+    assert.equal(body.zkeySource, 'repo')
+    assert.match(String(body.zkeyHash), /^[0-9a-f]{64}$/)
+    // The hash names the bytes this server actually hands out.
+    const served = await getBody(`${url}/circuit/zkey`)
+    assert.equal(createHash('sha256').update(served).digest('hex'), body.zkeyHash)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /config: a zkeyUrl pointing elsewhere reports no hash — we have not seen those bytes', async () => {
+  const { server, url } = await makeServer({
+    serverUrl: 'https://staging.noema.art',
+    zkeyUrl: 'https://cdn.example.com/ceremony/arcanum_final.zkey',
+  })
+  try {
+    const { body } = await getJson(`${url}/config`)
+    assert.equal(body.zkeySource, 'external')
+    assert.equal(body.zkeyHash, null)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a finalized ceremony key is served in place of the committed one, under its published hash', async () => {
+  const { server, url } = await makeServer({
+    provingKey: async () => ({ origin: 'ceremony', hash: CEREMONY_HASH, bytes: CEREMONY_KEY }),
+  })
+  try {
+    const cfg = await getJson(`${url}/config`)
+    assert.equal(cfg.body.zkeySource, 'ceremony')
+    assert.equal(cfg.body.zkeyHash, CEREMONY_HASH)
+    const { status, headers, length } = await getRaw(`${url}/circuit/zkey`)
+    assert.equal(status, 200)
+    assert.equal(headers['x-zkey-hash'], CEREMONY_HASH)
+    assert.equal(length, CEREMONY_KEY.length)
+    assert.equal(await getBody(`${url}/circuit/zkey`).then(b => b.toString()), CEREMONY_KEY.toString())
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a finalized ceremony whose key this server lacks serves nothing, and /config is not ready', async () => {
+  const { server, url } = await makeServer({
+    serverUrl: 'https://staging.noema.art',
+    provingKey: async () => ({
+      origin: 'none', hash: CEREMONY_HASH, reason: 'the ceremony is finalized but its proving key is not published on this server',
+    }),
+  })
+  try {
+    const { body } = await getJson(`${url}/config`)
+    assert.equal(body.zkeyUrl, null)
+    assert.equal(body.ready, false)
+    assert.equal(body.zkeySource, 'none')
+    // 503, not 404: the key exists and is named in the transcript — this server is the gap.
+    const { status } = await getJson(`${url}/circuit/zkey`)
+    assert.equal(status, 503)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('no proving key at all is a 404 — there is nothing named to serve', async () => {
+  const { server, url } = await makeServer({
+    provingKey: async () => ({ origin: 'none', hash: null, reason: 'zkey not found — run arcanum-trusted-setup.sh' }),
+  })
+  try {
+    const { status } = await getJson(`${url}/circuit/zkey`)
+    assert.equal(status, 404)
   } finally {
     await closeServer(server)
   }
