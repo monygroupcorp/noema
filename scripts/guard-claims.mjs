@@ -9,8 +9,15 @@
  * the privacy policy disclaims.
  *
  * This guard fails on absolute phrasings that claim the second thing. Hedged roadmap
- * language is deliberately allowed: a line that says "in development", "not yet
+ * language is deliberately allowed: a SENTENCE that says "in development", "not yet
  * available", "roadmap" or "coming" is describing direction, not a shipped guarantee.
+ *
+ * The hedge window is the sentence, not the source line. It was the line, and that made a
+ * true sentence fail on where its author happened to press Enter: "Direct-to-commitment
+ * deposits, where we never see the funding wallet, are on the roadmap" tripped the guard
+ * whenever the wrap put "roadmap" on the next line, so /pricing carried a hand-placed line
+ * break and a comment telling the next editor not to reflow it. A guard that can be
+ * satisfied or broken by a formatter is teaching the wrong lesson.
  *
  * Read-only. Never edits. Exit 0 silent when clean; exit 1 with `file:line: <phrase>`
  * for every hit.
@@ -29,11 +36,13 @@ const DENY = [
   /we cannot see your/i,
   /completely private/i,
   /fully private/i,
-  /privacy-by-construction/i,
+  // Hyphen or space, either way. The hyphenated spelling was the only one denied, and the
+  // site footer shipped the spaced one on every page for exactly as long.
+  /privacy[-\s]by[-\s]construction/i,
   /strongest privacy/i,
   /nobody can see/i,
   /no one can see/i,
-  /military grade/i,
+  /military[-\s]?grade/i,
   // "zero-knowledge" is only a problem as a DIRECT MODIFIER of compute/inference/session
   // — that is a confidential-compute claim. The ZK *billing* claim (zero-knowledge proofs
   // for credit spends) is true and must not be caught, and it legitimately shares a line
@@ -41,8 +50,15 @@ const DENY = [
   /zero[-\s]?knowledge[-\s]+(compute|inference|session)/i,
 ];
 
-/** A line carrying any of these is describing the roadmap, not a shipped guarantee. */
+/** A sentence carrying any of these is describing the roadmap, not a shipped guarantee. */
 const HEDGES = /in development|not yet available|roadmap|coming/i;
+
+/**
+ * How far either side of a match to look for the sentence boundary. A file with no sentence
+ * punctuation near the hit — minified output, a long JSX attribute — must not end up hedging
+ * itself from something a page away, so the window is bounded rather than open.
+ */
+const SENTENCE_REACH = 400;
 
 /**
  * Paths the guard does not read.
@@ -60,6 +76,9 @@ const SKIP_PREFIXES = [
 ];
 const SKIP_FILES = new Set([
   'scripts/guard-claims.mjs',
+  // Quotes the denied phrases in order to assert they are denied. Same reason as the legal copy:
+  // the guard must not fight its own denylist.
+  'tests/unit/architecture/claimsGuard.test.ts',
   'package-lock.json',
   'src/platforms/web/app/package-lock.json',
   'src/platforms/web/app/src/content/privacy.md',
@@ -111,6 +130,29 @@ function candidates() {
   }
 }
 
+/** 1-based line number of the character at `at`. */
+function lineOf(text, at) {
+  let line = 1;
+  for (let i = 0; i < at; i += 1) if (text[i] === '\n') line += 1;
+  return line;
+}
+
+/**
+ * The sentence containing `at`, whitespace collapsed so a hedge that wrapped across lines still
+ * reads as one phrase. Bounded by SENTENCE_REACH in each direction; a blank line ends a sentence
+ * as firmly as a full stop, so a hedge in the next paragraph cannot excuse this one.
+ */
+function sentenceAround(text, at) {
+  const from = Math.max(0, at - SENTENCE_REACH);
+  const to = Math.min(text.length, at + SENTENCE_REACH);
+  const before = text.slice(from, at);
+  const after = text.slice(at, to);
+  const starts = [...before.matchAll(/[.!?](?=\s)|\n\s*\n/g)];
+  const start = starts.length > 0 ? starts[starts.length - 1].index + starts[starts.length - 1][0].length : 0;
+  const end = after.search(/[.!?](?=\s|$)|\n\s*\n/);
+  return (before.slice(start) + (end === -1 ? after : after.slice(0, end + 1))).replace(/\s+/g, ' ');
+}
+
 const hits = [];
 
 for (const rel of candidates()) {
@@ -129,13 +171,10 @@ for (const rel of candidates()) {
 
   if (!DENY.some((re) => re.test(text))) continue; // fast reject
 
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (HEDGES.test(line)) continue;
-    for (const re of DENY) {
-      const m = line.match(re);
-      if (m) hits.push(`${rel}:${i + 1}: ${m[0]}`);
+  for (const re of DENY) {
+    for (const m of text.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`))) {
+      if (HEDGES.test(sentenceAround(text, m.index))) continue;
+      hits.push(`${rel}:${lineOf(text, m.index)}: ${m[0]}`);
     }
   }
 }
@@ -146,7 +185,7 @@ if (hits.length > 0) {
   console.error(
     '\nNoema claims anonymity, not confidentiality from the operator. Rewrite onto what is' +
       '\nactually true — unlinkable ZK spends, no retention, no training, no email — or hedge' +
-      '\nthe line ("in development", "not yet available", "roadmap", "coming").',
+      '\nthe SENTENCE it sits in ("in development", "not yet available", "roadmap", "coming").',
   );
   process.exit(1);
 }

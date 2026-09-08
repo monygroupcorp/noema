@@ -10,6 +10,7 @@
     "guard:claims": "node scripts/guard-claims.mjs",
     "guard:browser-storage": "node scripts/guard-browser-storage.mjs",
     "guard:legal-mirror": "node scripts/guard-legal-mirror.mjs",
+    "guard:site-truth": "node scripts/guard-site-truth.mjs",
     "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
     "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
