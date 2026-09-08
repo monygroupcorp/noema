@@ -1000,6 +1000,13 @@ export class CrystalApi {
    * anything ahead of it dispatched. A settled run is never in a line, so it is not asked
    * about; and a store that cannot answer leaves the field absent rather than guessing.
    */
+  private async _attachActivityQueuePlace(row: ActivityRow, actum: Actum): Promise<void> {
+    if (!this.deps.vocator) return
+    if (actum.status === 'completus' || actum.status === 'fractus') return
+    const at = await this.deps.vocator.place(actum.id).catch(() => null)
+    if (at) row.queue = at
+  }
+
   private async _attachQueuePlace(run: Run, actum: Actum): Promise<void> {
     if (!this.deps.vocator) return
     if (actum.status === 'completus' || actum.status === 'fractus') return
@@ -1255,6 +1262,12 @@ export class CrystalApi {
       if (!actum) continue
       const door = activityDoorFor(row.kind, actum.aditus, actum.exitus)
       if (door) row.door = door
+      // A run still in flight may not be running at all — it may be holding a place in the
+      // warm-pod line. This list is what someone opens when they come BACK to a run they
+      // walked away from, so it is the surface that owes them the difference; leaving it out
+      // would show a queued run as running, and a queue nobody can see is a queue nobody
+      // trusts. Settled rows are never in a line and are not asked about.
+      if (row.status === 'running') await this._attachActivityQueuePlace(row, actum)
     }
 
     return { activity: rows, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }

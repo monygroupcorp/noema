@@ -67,6 +67,13 @@ export interface Run {
   cost?: string;
   createdAt?: string;
   order?: RunOrder;
+  /**
+   * Where a run WAITING FOR A WARM POD stands in line — 1-based `place`, and the `depth`
+   * of the line it is in. Present only while it waits: a run that went straight onto a pod
+   * never carries it, and it is gone once the run is called forward. The line is per
+   * substrate image, so the depth counts the runs wanting the same image, not every run.
+   */
+  queue?: { place: number; depth: number };
 }
 
 export interface RunRequest {
@@ -470,6 +477,18 @@ export const api = {
     return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
   },
   getRun: (id: string) => fetch(`/v1/runs/${id}`, { headers: readHeaders() }).then(j<{ run: Run }>),
+  // POST /v1/runs/:id/cancel — give up a run the caller owns. The reservation is released
+  // rather than charged, so a run given up while it waits for a warm pod costs nothing; the
+  // run then reads `failed` with `cost` 0, which is what the readout says about it.
+  // The active purse rides the request for the same reason `createRun` sends it: a run funded
+  // from an anonymous purse is owned by that token, and identity headers would address a
+  // different owner — or none — and come back `not_found`.
+  cancelRun: (id: string) => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'x-bursa-token': purse } : authHeaders();
+    return fetch(`/v1/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers })
+      .then(j<{ run: Run }>);
+  },
   // The standing order behind a run, and the cancel for it. Owner-scoped server-side off the
   // run — a run id addresses the order, it does not authorise it.
   getRunOrder: (id: string) =>
@@ -1905,6 +1924,8 @@ export interface ActivityRow {
   createdAt?: string;
   settledAt?: string;
   door?: ActivityDoor;
+  /** Where an in-flight run waiting for a warm pod stands in line; absent once it dispatches. */
+  queue?: { place: number; depth: number };
 }
 // A page of the owner's activity — in-flight and settled runs, newest first. In-flight rows
 // ride the first page only; `nextCursor` walks settled history.

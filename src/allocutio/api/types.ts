@@ -256,6 +256,12 @@ export interface ActivityRow {
   settledAt?: string
   /** The link to the run's artifact, when one is resolvable. */
   door?: ActivityDoor
+  /**
+   * Where an in-flight run WAITING FOR A WARM POD stands in line. Present only while it
+   * waits — the whole point of the line is that its runs are not watched, so the place has
+   * to be readable from the list someone comes back to, not only from the run they left.
+   */
+  queue?: { place: number; depth: number }
 }
 
 /** A page of the owner's activity — in-flight and settled runs, newest first. */

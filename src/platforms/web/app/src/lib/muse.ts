@@ -1115,6 +1115,44 @@ export function phaseToStage(phase: Phasis): number {
   }
 }
 
+/** Where a run waiting for a warm pod stands: 1-based place, and the depth of its line. */
+export interface QueuePlace { place: number; depth: number }
+
+/**
+ * Does this run still hold a place in the warm-pod line, and where?
+ *
+ * The place arrives two ways and this reconciles them. The stream's opening snapshot
+ * carries it as a field, which is how a watcher joining late — a reload, a second tab —
+ * learns the run is waiting at all. After that the line reports itself on the ordinary
+ * progress rail: a `queued` frame whose measurement is `place` of `depth`, re-sent to
+ * everyone still waiting each time the line moves. The frame is the fresher of the two,
+ * so it wins.
+ *
+ * What CLEARS the place is the run moving on: a frame reporting any phase but `queued`
+ * means a pod took it, and a terminal means it is over. Both matter more than they look,
+ * because this is what gates the offer to stop waiting — a run already generating on a
+ * pod must not be shown a button that says it is still in a line.
+ */
+export function queuePlace(
+  known: QueuePlace | undefined,
+  latest: Progressus | undefined,
+  terminal: 'complete' | 'failed' | null,
+): QueuePlace | undefined {
+  if (terminal) return undefined;
+  if (latest && latest.phase !== 'queued') return undefined;
+  const p = latest?.progress;
+  if (p && p.total !== undefined) return { place: p.done, depth: p.total };
+  return known;
+}
+
+/**
+ * How a place in the line reads on screen. Deliberately the same sentence `/status` says
+ * in chat, so a user watching one run on two surfaces is not told two different things.
+ */
+export function queueLabel(at: QueuePlace): string {
+  return `Waiting for a warm pod — ${at.place} of ${at.depth} in line`;
+}
+
 // The sub-line for the active stage: prefer the runner's human message, else its
 // typed progress measurement, else the raw phase name.
 export function measure(p?: Progressus): string {

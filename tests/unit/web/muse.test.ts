@@ -24,6 +24,8 @@ import {
   resumePhase,
   rollCurated,
   pieceReadout,
+  queueLabel,
+  queuePlace,
   pieceStageline,
   streamColumns,
   streamPiece,
@@ -4027,4 +4029,56 @@ test('a varied roll goes through the existing keep rail exactly as an independen
     prompt: neighbour.prompt,
     paid: neighbour.paid,
   })
+})
+
+// ---------------------------------------------------------------------------
+// The warm-pod line, as the run readout sees it (front: warm-pod-queue).
+//
+// A run cast on the economy strategy with no pod free is HELD rather than refused, and
+// what the watcher is owed for that is two things: an honest account of where it stands,
+// and a way out that gives the reservation back. Both are gated on `queuePlace`, so what
+// it decides is what decides whether "Stop waiting and refund" is on screen.
+// ---------------------------------------------------------------------------
+
+test('a run holding a place in the warm-pod line reports it, and says so the way /status does', () => {
+  const at = queuePlace({ place: 2, depth: 5 }, undefined, null)
+  assert.deepEqual(at, { place: 2, depth: 5 })
+  assert.equal(queueLabel(at!), 'Waiting for a warm pod — 2 of 5 in line')
+})
+
+test('the line moving overrides the place the snapshot opened with', () => {
+  // The line re-announces every waiting run each time it moves, on the ordinary progress
+  // rail. That frame is fresher than the snapshot the watcher joined on, so a run that was
+  // 4th when the page loaded reads 2nd once two ahead of it have gone.
+  assert.deepEqual(
+    queuePlace(
+      { place: 4, depth: 6 },
+      { phase: 'queued', message: '2nd in line for a warm pod', progress: { done: 2, total: 4, unit: 'items' } },
+      null,
+    ),
+    { place: 2, depth: 4 },
+  )
+})
+
+test('a pod taking the run clears its place, so the way out goes with the wait', () => {
+  // The FIRST frame reporting anything but `queued` is the run leaving the line. Holding
+  // the place past that would leave a "stop waiting" button on a run already generating —
+  // an offer to abandon work the payer is now being charged for.
+  for (const phase of ['provisioning', 'executing', 'uploading'] as const) {
+    assert.equal(queuePlace({ place: 1, depth: 3 }, { phase }, null), undefined, phase)
+  }
+})
+
+test('a run that has ended holds no place, however it ended', () => {
+  // Including the cancel a waiting user just asked for: that arrives as `failed`, and a
+  // cancelled run must not still be advertising a line it is no longer in.
+  assert.equal(queuePlace({ place: 1, depth: 3 }, { phase: 'queued' }, 'failed'), undefined)
+  assert.equal(queuePlace({ place: 1, depth: 3 }, undefined, 'complete'), undefined)
+})
+
+test('a run that never queued carries no place at all', () => {
+  // The common path: a pod was free, the run went straight onto it, and nothing about a
+  // line is ever shown. An absent snapshot field is absent, not a place of zero.
+  assert.equal(queuePlace(undefined, undefined, null), undefined)
+  assert.equal(queuePlace(undefined, { phase: 'executing' }, null), undefined)
 })

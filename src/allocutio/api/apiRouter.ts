@@ -537,6 +537,12 @@ export function createApiRouter(deps: {
       ...(run.cost !== undefined ? { cost: run.cost } : {}),
       ...(run.createdAt !== undefined ? { createdAt: run.createdAt } : {}),
       ...(run.resumeCheckpoint !== undefined ? { resumeCheckpoint: run.resumeCheckpoint } : {}),
+      // Where the run stands in the warm-pod line, when it is in one. The line announces a
+      // place on the progress rail as it moves, but that announcement is made once, when the
+      // run is admitted — a subscriber arriving after it (a reload, a second tab, a stream
+      // opened on a run started minutes ago) would otherwise read a waiting run as one merely
+      // `pending`, which is the false position the line exists to avoid.
+      ...(run.queue !== undefined ? { queue: run.queue } : {}),
     }
     res.write('data: ' + JSON.stringify({ kind: 'snapshot', run: snapshot }) + '\n\n')
 
