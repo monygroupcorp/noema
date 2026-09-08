@@ -87,3 +87,22 @@ describe('safeReturn — what is worth carrying through Stripe', () => {
     expect(safeReturn('')).toBe(false);
   });
 });
+
+describe('signInThenBuy — the page they came from survives the door', () => {
+  it('carries the page alongside the pack, so the return is not lost by signing in', () => {
+    const url = new URL(signInThenBuy('plus_50', '/canvas?doc=17'), 'https://noema.example');
+    const next = new URL(url.searchParams.get('next') as string, 'https://noema.example');
+    expect(next.pathname).toBe('/funding');
+    expect(next.searchParams.get('pack')).toBe('plus_50');
+    expect(next.searchParams.get('back')).toBe('/canvas?doc=17');
+  });
+
+  it('drops an off-site return the same way the checkout request does', () => {
+    expect(signInThenBuy('plus_50', 'https://evil.example')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
+    expect(signInThenBuy('plus_50', '//evil.example')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
+  });
+
+  it('drops the funding page itself — the pack already lands there', () => {
+    expect(signInThenBuy('plus_50', '/funding')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
+  });
+});

@@ -44,6 +44,14 @@ export function safeReturn(returnTo: string | null | undefined): boolean {
 // Where the front door should return a visitor who tried to buy a pack without an account.
 // They asked for a specific pack; sign-in hands them back to that exact purchase rather than
 // to a generic landing, so choosing the pack is not a step they repeat.
-export function signInThenBuy(packId: string): string {
-  return doorPath(`/funding?pack=${packId}`);
+//
+// `returnTo` is the page they were standing on when they reached for credits — the pill opens
+// the buy modal anywhere in the app, so that is usually mid-task. It rides along to the funding
+// page, which puts it into the checkout request, so a buyer who had to sign in on the way is
+// offered the same way back from Stripe as one who was signed in already. Without it the return
+// path is dropped at the door, and the longest version of this walk is the one that ends
+// furthest from where it started.
+export function signInThenBuy(packId: string, returnTo?: string | null): string {
+  const back = safeReturn(returnTo) ? `&back=${encodeURIComponent(returnTo as string)}` : '';
+  return doorPath(`/funding?pack=${packId}${back}`);
 }

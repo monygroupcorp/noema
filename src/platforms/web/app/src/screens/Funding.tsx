@@ -65,6 +65,11 @@ export function Funding() {
   // rather than only highlighting a chip they would have to press again.
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get('pack');
+  // The page the buyer was on when they reached for credits, handed to us by the door when
+  // signing in was a step on the way here. Held in state because the auto-buy below strips the
+  // query before it leaves, and this has to outlive that. Same guard as everything else that
+  // arrives in a URL we were sent to.
+  const [cameFrom] = useState(() => safeNext(searchParams.get('back')));
   const [pack, setPack] = useState(preselected ?? 'plus_50');
   // The credit-pack catalog, loaded from the single server source (no hardcoded numbers).
   const [packs, setPacks] = useState<Pack[]>([]);
@@ -121,6 +126,10 @@ export function Funding() {
     }
   }
 
+  // The pack an anon visitor is holding: named by ?pack= and real in the server catalog. A
+  // ?pack= that is not a SKU resolves to nothing, and the page falls back to asking them to pick.
+  const chosen = !session && preselected ? packs.find((p) => p.id === preselected) ?? null : null;
+
   async function connect() {
     setWalletErr(null);
     try { const w = await connectWallet(); setWallet(w.address); }
@@ -137,9 +146,9 @@ export function Funding() {
   // door with this pack in hand — signing in returns them here and the purchase resumes.
   function buyPack(packId: string) {
     setCheckoutErr(null);
-    if (!canCheckout(session)) { navigate(signInThenBuy(packId)); return; }
+    if (!canCheckout(session)) { navigate(signInThenBuy(packId, cameFrom)); return; }
     setCheckoutBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
   }
@@ -296,7 +305,26 @@ export function Funding() {
                 </div>
               </div>
 
-              {!session && (
+              {/* Someone holding a pack they cannot buy has already made the choice this
+                  section asks for, and telling them to make it again is the loop: they pressed
+                  Buy, went to the door, chose to stay anonymous, and came back to "pick a pack".
+                  Say which pack is waiting, put the door one click away rather than behind
+                  finding the chip again, and — for the visitor who chose anonymity on purpose —
+                  name the rail that actually serves them instead of leaving them on this one. */}
+              {!session && chosen && (
+                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
+                  <WarnIc />
+                  <span>
+                    The {chosen.label} pack — {fmt(chosen.credits)} credits for ${chosen.usd} —
+                    is waiting on an account: a card purchase is the one rail that can't be
+                    anonymous, so it needs an identified one.{' '}
+                    <Link to={signInThenBuy(chosen.id, cameFrom)}>Sign in and buy it →</Link>{' '}
+                    Staying anonymous instead? No card can fund an anonymous session at all — the
+                    on-chain wallet below is the rail that can.
+                  </span>
+                </div>
+              )}
+              {!session && !chosen && (
                 <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
                   <WarnIc />
                   <span>

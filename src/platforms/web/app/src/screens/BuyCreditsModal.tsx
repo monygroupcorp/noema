@@ -159,12 +159,14 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
   // the door carrying this pack — signing in returns them to that exact purchase.
   function buyPack(packId: string) {
     setCardErr(null);
-    if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId)); return; }
-    setCardBusy(packId);
     // The page they were on when they reached for credits. This modal opens from the top-bar
     // pill, so that is usually somewhere mid-task — Stripe returns everyone to /funding, and
-    // this is what lets that page offer the way back.
+    // this is what lets that page offer the way back. It is carried whether or not the buyer
+    // has to sign in on the way: dropping it at the door is what left the anon buyer, who walks
+    // the longest version of this path, the only one with no way back to what they broke off.
     const returnTo = window.location.pathname + window.location.search;
+    if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId, returnTo)); return; }
+    setCardBusy(packId);
     api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, returnTo))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCardErr(e instanceof Error ? e.message : String(e)); setCardBusy(null); });
