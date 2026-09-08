@@ -2442,6 +2442,24 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
                 "description": "First media URL among the run's outputs, when one is trivially present."
               }
             }
+          },
+          "queue": {
+            "type": "object",
+            "properties": {
+              "place": {
+                "type": "number",
+                "description": "1-based position in the line, 1 being next."
+              },
+              "depth": {
+                "type": "number",
+                "description": "How many runs are waiting on the same image, this one included."
+              }
+            },
+            "required": [
+              "place",
+              "depth"
+            ],
+            "description": "Where a run waiting for a warm pod stands in line. Present only while the run is queued — a run that dispatched straight onto a pod never carries it, and it is gone once the run is called forward. The line is per substrate image, not global."
           }
         },
         "required": [
