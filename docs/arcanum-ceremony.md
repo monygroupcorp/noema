@@ -245,6 +245,10 @@ curl -s https://noema.art/arcanum/config | jq -r .zkeyHash
 curl -s https://noema.art/arcanum/circuit/zkey | shasum -a 256
 ```
 
+The `/ceremony` page makes that same comparison for you and prints what it found under the
+transcript — including when it comes out wrong, which is the only version of this check worth
+publishing. The curl above is how you confirm the page is not simply agreeing with itself.
+
 All three are the same hash, or the ceremony's output is not what the site is serving. If
 the final key is not published, `/arcanum/circuit/zkey` answers 503 and `/arcanum/config`
 reports `ready: false` — the committed key is *not* served in its place, because it is not
