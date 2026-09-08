@@ -20,6 +20,8 @@
 // policy vocabulary (spec §8).
 // =============================================================================
 
+import type { ModerationCategory } from '../crystal/ModerationGate.js'
+
 /** Which canonical artifact an Editio puts forth. Editio never copies it. */
 export type ArtifactKind = 'actum' | 'intella' | 'collectio'
 
@@ -82,6 +84,10 @@ export type ReviewOutcome = 'pending' | 'approved' | 'rejected'
 export interface EditioModeration {
   /** The gate's verdict.reason, verbatim. May describe detection internals. */
   reason: string
+  /** The gate's author-safe category for the refusal, if it set one — what a
+   *  publisher may be told about WHY, without the raw text. Absent from a gate that
+   *  sets none, and from rows written before the field existed. */
+  category?: ModerationCategory
   /** True only when this verdict HELD (vs. terminally rejected). */
   hold?: boolean
   /** When the gate produced this verdict, ISO-8601. */

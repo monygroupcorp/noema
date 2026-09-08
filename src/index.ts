@@ -55,7 +55,7 @@ import { createAuthRouter } from './allocutio/api/authRouter.js'
 import { MongoCredentum } from './crystal/MongoCredentum.js'
 import { MongoLinkToken } from './crystal/MongoLinkToken.js'
 import { linkTelegramToAccount, issueTelegramRecoveryCode } from './allocutio/telegram/telegramRecovery.js'
-import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
+import { createWidgetRouter, parseFrameAncestors, frameAncestorsFor } from './allocutio/api/widgetRouter.js'
 import { createPurseRouter } from './allocutio/api/purseRouter.js'
 import { createColloquiaRouter } from './allocutio/api/colloquiaRouter.js'
 import { runToolChat, httpApiTransport } from './allocutio/api/OpenRouterToolClient.js'
@@ -1410,8 +1410,7 @@ async function main(): Promise<void> {
   // wins; otherwise the platform-wide CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-
   // sep) applies unchanged; with neither set, the router's own default ('self') applies —
   // replacing the legacy `frame-ancestors *`.
-  const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
-    .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+  const widgetFrameAncestors = parseFrameAncestors(process.env.WIDGET_FRAME_ANCESTORS)
   app.use('/widget', createWidgetRouter({
     legati: ring.legati,
     feed: (filter) => crystalApi.feed(filter),
@@ -1420,7 +1419,7 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
-    frameAncestors: (legatus) => (legatus?.frameAncestors?.length ? legatus.frameAncestors : widgetFrameAncestors),
+    frameAncestors: frameAncestorsFor(widgetFrameAncestors),
   }))
 
   // Owned purses (§7) — the crystal-core "delegation": an identified account mints a

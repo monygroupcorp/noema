@@ -41,7 +41,26 @@ import type { PublishArtifact } from './PublicationAdapter.js'
  */
 export type ModerationVerdict =
   | { ok: true; billable?: boolean }
-  | { ok: false; reason: string; hold?: boolean; billable?: boolean }
+  | { ok: false; reason: string; category?: ModerationCategory; hold?: boolean; billable?: boolean }
+
+/**
+ * Why a publication was refused, in terms the publisher can be told. `reason` is the
+ * scanner's own words and may describe detection internals, so it stays admin-only
+ * (`GET /v1/editiones/:id/moderation`); this closed set is what survives out to the
+ * author, projected to copy by `publisherModerationNote` (allocutio/api/runProjection).
+ *
+ *   unavailable — no scanner is configured, so nothing was checked. This says nothing
+ *                 about the content: the item was refused for want of a scanner.
+ *   review      — routed to a person to look at before it goes live, with nothing
+ *                 detected. The interim manual-review posture holds EVERY public
+ *                 publish; a hold under it is not a finding about the content.
+ *   content     — the scan matched something in the content itself.
+ *
+ * Optional, because a gate written before this field (including the private compliance
+ * module) sets none. With no category the projection says only what `hold` already
+ * proves — never more.
+ */
+export type ModerationCategory = 'unavailable' | 'review' | 'content'
 
 /** Scans an artifact bound for a public surface. */
 export interface ModerationGate {
@@ -78,7 +97,7 @@ export const permissiveModerationGate: ModerationGate = {
  */
 export const denyModerationGate: ModerationGate = {
   async scan(): Promise<ModerationVerdict> {
-    return { ok: false, reason: 'public publishing is unavailable — content moderation is not yet configured' }
+    return { ok: false, category: 'unavailable', reason: 'public publishing is unavailable — content moderation is not yet configured' }
   },
 }
 
@@ -105,7 +124,7 @@ export const denyModerationGate: ModerationGate = {
  */
 export const manualReviewGate: ModerationGate = {
   async scan(): Promise<ModerationVerdict> {
-    return { ok: false, hold: true, reason: 'held for manual review' }
+    return { ok: false, hold: true, category: 'review', reason: 'held for manual review' }
   },
 }
 

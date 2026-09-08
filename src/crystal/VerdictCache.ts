@@ -19,7 +19,7 @@
 // =============================================================================
 
 import { createHash } from 'node:crypto'
-import type { ModerationVerdict } from './ModerationGate.js'
+import type { ModerationCategory, ModerationVerdict } from './ModerationGate.js'
 import { allMediaUrls } from './BucketAdapter.js'
 
 /** A durable, reusable gate verdict for one content-addressed key. */
@@ -30,6 +30,10 @@ export interface CachedVerdict {
   ok: boolean
   /** Refusal reason (when !ok). */
   reason?: string
+  /** The author-safe category of the refusal (when !ok and the gate set one). Cached
+   *  alongside `reason` so a cache HIT tells the publisher the same thing the original
+   *  scan did — otherwise an identical re-publish would explain itself less well. */
+  category?: ModerationCategory
   /** True when the refusal was a HOLD-for-review (not a terminal reject). */
   hold?: boolean
   /** When the underlying scan ran (ISO-8601). */
@@ -58,6 +62,7 @@ export function toCachedVerdict(key: string, v: ModerationVerdict, scannedAt: st
     key,
     ok: v.ok,
     ...(v.ok === false && v.reason !== undefined ? { reason: v.reason } : {}),
+    ...(v.ok === false && v.category !== undefined ? { category: v.category } : {}),
     ...(v.ok === false && v.hold ? { hold: true } : {}),
     scannedAt,
   }
@@ -66,5 +71,10 @@ export function toCachedVerdict(key: string, v: ModerationVerdict, scannedAt: st
 /** Reconstruct a gate verdict from a cached one (never `billable` — no scan ran). */
 export function fromCachedVerdict(c: CachedVerdict): ModerationVerdict {
   if (c.ok) return { ok: true }
-  return { ok: false, reason: c.reason ?? 'previously refused by the safety scan', ...(c.hold ? { hold: true } : {}) }
+  return {
+    ok: false,
+    reason: c.reason ?? 'previously refused by the safety scan',
+    ...(c.category !== undefined ? { category: c.category } : {}),
+    ...(c.hold ? { hold: true } : {}),
+  }
 }
