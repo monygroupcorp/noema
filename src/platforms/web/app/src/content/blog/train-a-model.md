@@ -50,9 +50,11 @@ From the set, go to **derive**. This is the recipe, and it is four choices:
 
 - **Which captionset.** This is the lesson. A set can carry several; you pick the one the model
   learns from.
-- **Base model.** What you are training on top of. The picker lists the bases the trainer currently
-  accepts — read it there rather than from any list written down elsewhere, including this one,
-  because the catalogue moves.
+- **Base model.** What you are training on top of. The picker offers a short list — read it there
+  rather than from any list written down elsewhere, including this one, because the catalogue
+  moves. Worth knowing that the list is hand-maintained rather than read back from the trainer, so
+  it can lag what the trainer will actually accept; if a base you expect is missing, it is the
+  picker that is behind.
 - **Trigger word.** The word that summons what you trained, once the model is on your shelf.
 - **Steps.** How long to train. A fresh form starts at 1000.
 

@@ -32,19 +32,32 @@ it.
 
 ## Credentials
 
-Running a flow needs a caller identity. There are four ways to present one, and you need exactly
+Running a flow needs a caller identity. There are five ways to present one, and you need exactly
 one of them:
 
 - an `X-API-Key` header,
 - an `Authorization: Bearer <jwt>` header,
-- a signed wallet bundle in the request body,
-- an anonymous credit commitment in the request body.
+- an `x-bursa-token` header carrying a purse code,
+- an anonymous credit commitment — an `x-commitment` header, or a `commitment` field in the body,
+- a signed wallet bundle in the request body.
 
-One honest note on the first of those: **there is no self-serve API key yet.** The `/v1` API is
-live and everything in this guide works, but minting a personal key from your account settings is
-not wired — the settings page says so too, rather than showing you a button that does nothing.
-Today keys are issued through the partner path; if you need one, ask via
-[the partner form](/partners).
+Two of them come with a trap.
+
+**Send the commitment as a header if you intend to watch the run.** A `GET` carries no body, so an
+anonymous caller who put their commitment in the invoke body and nowhere else can start a run and
+then never read it back: the poll and the stream arrive with no credential at all and answer `401
+auth.missing`. Send `x-commitment` on every call and the question does not come up.
+
+**A purse code spends somebody else's credits.** It is a bearer string minted out of an account
+holder's balance and handed on — whoever holds it is the caller. That is also why it can stop
+working with nothing wrong at your end: whoever minted it can revoke it, and a code that has been
+redeemed into an account stops spending too.
+
+One honest note on the API key: **it is not minted from your account settings.** That pane says
+"coming soon" rather than showing you a button that does nothing. The key rides on partner
+approval instead — ask via [the partner form](/partners) — and once you are approved you generate
+and rotate it yourself from your [partner dashboard](/partner). The raw key is shown once, in the
+response that mints it, and rotating retires the previous one the moment the new one appears.
 
 ## Invoke
 
@@ -82,10 +95,14 @@ the same handle:
 On `complete`, read the outputs. On `failed`, read the failure's code and message.
 
 A `pending` run that is not moving may be in a line rather than stalled. A run that found no warm
-machine waits for one instead of being refused, and while it waits the handle carries
+machine waits for one instead of being refused, and while it waits it carries
 `queue: { place, depth }` — its 1-based position and how many runs are ahead of it plus itself. The
 line is per machine image, not one global queue, and the field is gone the moment the run is called
 forward. Report it rather than leaving someone watching a `pending` that sits still.
+
+Read that field off the invoke response or off a poll. The stream does not carry it: its opening
+snapshot is a fixed set of fields that does not include `queue`, and no later event adds it. An
+integration that watches by stream alone still has to poll once to answer "how long".
 
 ## Two kinds of error, and why the difference matters
 
