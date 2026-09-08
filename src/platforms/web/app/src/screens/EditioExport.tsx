@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection } from '../lib/api';
-import { publishNote, publishOutcome, type PublishRequest } from '../lib/editio';
+import { publishNote, publishOutcome, type Editio, type PublishRequest } from '../lib/editio';
 
 // Export & publish (editio-export-spec.md). Publishing is a CHOICE OF DESTINATION across
 // the private→public hemisphere spectrum.
@@ -18,10 +18,32 @@ type Job =
   | { s: 'idle' }
   | { s: 'busy'; editionId: string; kind: Kind }
   | { s: 'ready'; url: string; kind: Kind; editionId: string }
+  | { s: 'held'; msg: string }
   | { s: 'rejected'; msg: string }
   | { s: 'err'; msg: string };
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// Where one edition leaves this screen's job. Pure, so the hosting path's terminal states are
+// checked without mounting the screen.
+//
+// Hosting publishes at visibility 'marketplace', which is a moderated public surface, so the
+// gate can HOLD it — and a hold never settles on its own; only a reviewer clears it. The poll
+// below used to end on published / rejected / failed alone, so a held publication left the
+// button reading "Publishing…" and re-polled every 2.5s forever: the publisher was never told
+// their collection was waiting on a person, and had nothing to wait for on this screen. A hold
+// is terminal HERE for that reason — the outcome arrives on the shelf's review state, not from
+// another poll.
+//
+// Returns null while the publication is genuinely still settling (keep polling).
+export function exportJobFor(e: Editio, kind: Kind): Job | null {
+  if (e.status === 'published' && e.externalRef) return { s: 'ready', url: e.externalRef, kind, editionId: e.id };
+  const outcome = publishOutcome(e);
+  if (outcome === 'refused') return { s: 'rejected', msg: publishNote(e) };
+  if (outcome === 'held') return { s: 'held', msg: publishNote(e) };
+  if (outcome === 'failed') return { s: 'err', msg: 'The publish failed. Approve some pieces in curation, then try again.' };
+  return null;
+}
 
 interface Option {
   key: Dest; glyph: string; title: React.ReactNode; tag: string; tagClass: string; desc: string; sub: string;
@@ -60,9 +82,8 @@ export function EditioExport() {
       try {
         const { edition } = await api.getEdition((job as { editionId: string }).editionId);
         if (!live) return;
-        if (edition.status === 'published' && edition.externalRef) { setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id }); return; }
-        if (edition.status === 'rejected') { setJob({ s: 'rejected', msg: publishNote(edition) }); return; }
-        if (edition.status === 'failed') { setJob({ s: 'err', msg: 'The publish failed. Approve some pieces in curation, then try again.' }); return; }
+        const settled = exportJobFor(edition, kind);
+        if (settled) { setJob(settled); return; }
         t = setTimeout(tick, 2500);
       } catch (e) { if (live) setJob({ s: 'err', msg: msg(e) }); }
     };
@@ -90,9 +111,7 @@ export function EditioExport() {
     setJob({ s: 'busy', editionId: '', kind });
     try {
       const { edition } = await api.publish(body);
-      if (edition.status === 'published' && edition.externalRef) setJob({ s: 'ready', url: edition.externalRef, kind, editionId: edition.id });
-      else if (publishOutcome(edition) === 'refused') setJob({ s: 'rejected', msg: publishNote(edition) });
-      else setJob({ s: 'busy', editionId: edition.id, kind });
+      setJob(exportJobFor(edition, kind) ?? { s: 'busy', editionId: edition.id, kind });
     } catch (e) { setJob({ s: 'err', msg: msg(e) }); }
   }
 
@@ -166,6 +185,8 @@ export function EditioExport() {
                     Retract hosting <span className="ex-btn-sub">unpublish — the URIs stop resolving</span>
                   </button>
                 </div>
+              ) : job.s === 'held' ? (
+                <div className="warn">This collection isn’t hosted yet — {job.msg} Nothing more to do here; you’ll find it on your shelf, and your export-to-you download is unaffected.</div>
               ) : job.s === 'rejected' ? (
                 <div className="warn">This collection wasn’t published to hosting — {job.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
               ) : (

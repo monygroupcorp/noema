@@ -2360,6 +2360,7 @@ export class CrystalApi {
         // signal for why. Written on BOTH branches, alongside the existing status write.
         const moderation = {
           reason: verdict.reason,
+          ...(verdict.category !== undefined ? { category: verdict.category } : {}),
           ...(verdict.hold ? { hold: true } : {}),
           scannedAt: new Date().toISOString(),
         }
