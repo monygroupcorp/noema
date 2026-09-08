@@ -194,7 +194,14 @@ import {
 } from '../../crystal/muse/session.js'
 import { MAX_INSTRUCTION_CHARS, type SteerProposal } from '../../crystal/muse/steer.js'
 import { promotionFrom } from './musePromote.js'
-import { MODUS_MUSE_STEER } from '../../crystal/seeds/modi.js'
+import { MODUS_EMBED_SWEEP, MODUS_MUSE_STEER } from '../../crystal/seeds/modi.js'
+import {
+  MAX_SWEEP_ITEMS,
+  parseSweepDimension,
+  sweepOwnerToken,
+  type SweepOwner,
+} from '../../crystal/EmbedSweepCursor.js'
+import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
@@ -337,6 +344,10 @@ export interface CrystalApiDeps {
   /** Muse session store — backs the session spawn/read/steer/record surface.
    *  Absent → Muse session ops unavailable. */
   museSessions?: MuseSessions
+  /** Trace store — resolves the calling identity's own embedding backlog for the embed
+   *  sweep, which travels as values because an Actum is identity-blind (see
+   *  `_stampEmbedSweep`). Absent → the sweep is refused rather than run unscoped. */
+  vestigiorum?: Pick<Vestigiorum, 'backlog' | 'backlogCount'>
   /** Team store — backs the team CRUD + team-owned collections. Absent → team ops unavailable. */
   sodalitatum?: Sodalitatum
   /** Project store (Provincia) — backs the account-scoped project CRUD + holdings. Absent → project ops unavailable. */
@@ -850,6 +861,16 @@ export class CrystalApi {
     // ever tighten, so a caller sending a larger `maxImpetus` cannot lift the key's limit, and
     // a caller sending a smaller one still gets the smaller one. With no credential ceiling
     // the minimum IS the caller's cap and this is the check it has always been.
+    // The embed sweep's work is resolved HERE, from the caller, and stamped onto the aditus
+    // (see `_stampEmbedSweep`). It happens above the admission cap because the reservation IS
+    // a function of the batch — a cap measured against an unstamped aditus would be measured
+    // against no work at all — and above the `Inceptio` literal, so a refusal (a sweep with
+    // nothing to do, a bearer credential that names no trail) reserves no signa and creates
+    // no actum.
+    if (modusId === MODUS_EMBED_SWEEP.id) {
+      effectiveAditus = await this._stampEmbedSweep(opts.by ?? auctor, effectiveAditus)
+    }
+
     const callerCap = opts.maxImpetus !== undefined ? BigInt(opts.maxImpetus) : undefined
     const keyCap = opts.keyMaxImpetusPerRun
     const cap =
@@ -990,6 +1011,62 @@ export class CrystalApi {
     // client reads off a field rather than infers from a `pending` that never moves.
     await this._attachQueuePlace(run, actum)
     return run
+  }
+
+  /**
+   * Resolve the embed sweep's work from the CALLER and stamp it onto the aditus.
+   *
+   * This is where stranger isolation is enforced for the sweep, and it is enforced by
+   * CONSTRUCTION rather than by a check: whatever `_owner` and `_sweep` the request body
+   * carried are dropped, and the ones that reach the cursor are read here from the resolved
+   * caller's own backlog. There is no request field that widens the set, so there is nothing
+   * for a caller to forge — the same reason the training modus stamps its own `ownerAnimaId`.
+   *
+   * The work travels as VALUES because an Actum carries no identity: by dispatch there is no
+   * caller left to scope a store read against, so a cursor handed ids would be unscoped by
+   * construction. (The writeback is scoped a second time at the store — `setEmbedding` matches
+   * on the owner — so a foreign id could not be written even if one ever reached the cursor.)
+   *
+   * Refuses, before anything is reserved:
+   *   • a bearer (`bursaToken`) credential — a purse names no trail to sweep;
+   *   • a deployment with no trace store — there is no backlog to read;
+   *   • a caller whose backlog for that dimension is empty — a run that would embed nothing.
+   */
+  private async _stampEmbedSweep(
+    by: Inceptio['by'],
+    aditus: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    // Whatever the body sent under these names is dropped here, unread.
+    const { _owner: _dropOwner, _sweep: _dropSweep, ...rest } = aditus
+
+    const owner: SweepOwner | undefined =
+      'animaId' in by ? { animaId: by.animaId }
+      : 'commitment' in by ? { commitment: by.commitment }
+      : undefined
+    if (!owner) {
+      throw Errors.authForbidden('A purse token names no trail — the embed sweep runs for an identified or committed caller')
+    }
+
+    const store = this.deps.vestigiorum
+    if (!store) {
+      throw new ApiError('internal.unavailable', 'Trace search is not available on this deployment', 503, { retryable: false })
+    }
+
+    const per = parseSweepDimension(rest.per)
+    const asked = Number(rest.limit ?? MAX_SWEEP_ITEMS)
+    const limit = Number.isFinite(asked) && asked > 0 ? Math.min(Math.floor(asked), MAX_SWEEP_ITEMS) : MAX_SWEEP_ITEMS
+
+    const items = await store.backlog(owner, per, limit)
+    if (items.length === 0) {
+      throw new ApiError(
+        'conflict.nothing_to_sweep',
+        `Nothing to sweep: every trace of yours that can carry a '${per}' embedding already has one`,
+        409,
+        { retryable: false, details: { per } },
+      )
+    }
+
+    return { ...rest, per, limit, _owner: sweepOwnerToken(owner), _sweep: items }
   }
 
   /**

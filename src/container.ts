@@ -79,6 +79,7 @@ import { RemoteAitkLauncher, securePodTrainingProvisioner } from './crystal/Remo
 import { DatasetCaptionCursor } from './crystal/DatasetCaptionCursor.js'
 import { MuseDecomposeCursor, MUSE_DECOMPOSE_MINISTERIUM } from './crystal/MuseDecomposeCursor.js'
 import { MuseSteerCursor, MUSE_STEER_MINISTERIUM } from './crystal/MuseSteerCursor.js'
+import { EmbedSweepCursor, EMBED_SWEEP_MINISTERIUM } from './crystal/EmbedSweepCursor.js'
 import { CaptionPodLauncher } from './crystal/CaptionPodLauncher.js'
 import { makeDatasetResolver } from './crystal/datasetManifest.js'
 import { SqliteAitkJobStore } from './crystal/AitkJobStore.js'
@@ -446,6 +447,14 @@ export interface ContainerConfig {
   embed?: (text: string) => Promise<number[]>
   embedImage?: (imageUrl: string) => Promise<number[]>
   /**
+   * The BATCH form of the two above — one forward pass over many inputs, which is the
+   * shape the embed sweep always has and the shape the CLIP service is built around.
+   * Both absent → no sweep cursor is registered, and `modus.embed-sweep` refuses at
+   * resolve() rather than embedding one item at a time on a rail meant for batches.
+   */
+  embedTexts?: (texts: string[]) => Promise<number[][]>
+  embedImages?: (imageUrls: string[]) => Promise<number[][]>
+  /**
    * Hosted-API inference providers (OpenAI, OpenRouter, …). Each entry is a
    * declarative descriptor + its resolved bearer key. One ApiCursor is
    * registered per provider under `provider.id`. Absent providers → their tools
@@ -668,6 +677,24 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   cursorum.register(MUSE_STEER_MINISTERIUM, new MuseSteerCursor({
     providers: (config.apiProviders ?? []).map(({ provider, apiKey }) => ({ provider, apiKey })),
   }))
+
+  // Embed sweep (`modus.embed-sweep`) — the pass that works off a caller's backlog of
+  // un-embedded traces. Its OWN ministerium, for the same reason the two muse cursors state
+  // above, and gated on the BATCH embed functions: with no embedding service wired there is
+  // nothing for it to call, and refusing at resolve() is a better answer than a cursor that
+  // throws on every run.
+  //
+  // It takes only the WRITEBACK slice of the trace store. The work arrives as values the API
+  // layer read for the resolved caller (an Actum is identity-blind), and `setEmbedding` matches
+  // on the owner, so the store itself is the second place a stranger's trace is out of reach.
+  if (config.embedTexts && config.embedImages) {
+    const embedTexts = config.embedTexts
+    const embedImages = config.embedImages
+    cursorum.register(EMBED_SWEEP_MINISTERIUM, new EmbedSweepCursor({
+      clip: { embedTexts, embedImages },
+      vestigiorum,
+    }))
+  }
 
   // Publication adapters (spec §5b): feed + model registries need nothing; the
   // bucket adapter needs R2 (custody=ours hosting) so it is gated on config below.

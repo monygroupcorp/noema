@@ -411,26 +411,44 @@ async function main(): Promise<void> {
 
   // 2. Build embedding functions (CLIP service) and hosted-API providers
   const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL
+  // The job token a token-gated CLIP service requires (`CLIP_JOB_TOKEN` on the pod side).
+  // Unset is the in-cluster deployment, reachable only on a private network; set is a
+  // service on a public hostname, and then every embed request carries the bearer.
+  const CLIP_JOB_TOKEN = process.env.CLIP_JOB_TOKEN
 
   let embed: ContainerConfig['embed'] | undefined
   let embedImage: ContainerConfig['embedImage'] | undefined
+  let embedTexts: ContainerConfig['embedTexts'] | undefined
+  let embedImages: ContainerConfig['embedImages'] | undefined
 
   if (CLIP_SERVICE_URL) {
-    const clipPost = async (path: string, body: unknown): Promise<number[]> => {
+    const clipCall = async (path: string, body: unknown): Promise<unknown> => {
       const res = await fetch(`${CLIP_SERVICE_URL}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(CLIP_JOB_TOKEN ? { Authorization: `Bearer ${CLIP_JOB_TOKEN}` } : {}),
+        },
         body: JSON.stringify(body),
       })
       if (!res.ok) {
         const msg = await res.text().catch(() => '')
         throw new Error(`CLIP service ${path} failed: ${res.status} ${msg}`)
       }
-      return (await res.json() as { embedding: number[] }).embedding
+      return res.json()
     }
-    embed      = (text) => clipPost('/embed/text',  { text })
-    embedImage = (url)  => clipPost('/embed/image', { url })
-    log.info(`CLIP service: ${CLIP_SERVICE_URL}`)
+    const clipPost = async (path: string, body: unknown): Promise<number[]> =>
+      (await clipCall(path, body) as { embedding: number[] }).embedding
+    const clipPostBatch = async (path: string, body: unknown): Promise<number[][]> =>
+      (await clipCall(path, body) as { embeddings: number[][] }).embeddings
+
+    embed       = (text)  => clipPost('/embed/text',  { text })
+    embedImage  = (url)   => clipPost('/embed/image', { url })
+    // The batch endpoints back the embed sweep — one forward pass per batch, which is
+    // what makes working off a backlog affordable.
+    embedTexts  = (texts) => clipPostBatch('/embed/text/batch',  { texts })
+    embedImages = (urls)  => clipPostBatch('/embed/image/batch', { urls })
+    log.info(`CLIP service: ${CLIP_SERVICE_URL}${CLIP_JOB_TOKEN ? ' (job token)' : ''}`)
   } else {
     log.warn('CLIP_SERVICE_URL not set — vestigium embeddings disabled')
   }
@@ -600,6 +618,8 @@ async function main(): Promise<void> {
     ...(apiProviders.length ? { apiProviders } : {}),
     ...(embed ? { embed } : {}),
     ...(embedImage ? { embedImage } : {}),
+    ...(embedTexts ? { embedTexts } : {}),
+    ...(embedImages ? { embedImages } : {}),
     ...(_arcanumVerifyFn ? { arcanumVerifyFn: _arcanumVerifyFn } : {}),
     ...(TEE_IMAGE_ID && RUNPOD_API_KEY && TEE_PLATFORM_CALLBACK ? {
       teeProvisioner: {
@@ -1064,6 +1084,10 @@ async function main(): Promise<void> {
     // reference it has to refuse.
     corpora: ring.corpora,
     museSessions: ring.museSessions,
+    // The trace store, for the embed sweep alone: the run entry point resolves the calling
+    // identity's own embedding backlog and stamps it onto the run, because an Actum is
+    // identity-blind and a cursor handed ids would be unscoped by construction.
+    vestigiorum: ring.vestigiorum,
     collectioCursor: ring.collectioCursor,
     sodalitatum: ring.sodalitates,
     provinciarum: ring.provinciae,

@@ -6,6 +6,9 @@ import type {
   Vestigiorum,
   VestigiumQuery,
   VestigiumResult,
+  VestigiumBacklog,
+  VestigiumSearchDimension,
+  VestigiumSweepItem,
   ImpressioKind,
 } from '../types/vestigium.js'
 
@@ -27,6 +30,37 @@ function matchesKey(a: AuctorKey, b: AuctorKey): boolean {
 function auctorKeyQuery(key: AuctorKey): Record<string, unknown> {
   if ('animaId' in key) return { 'auctorKey.animaId': key.animaId }
   return { 'auctorKey.commitment': key.commitment }
+}
+
+/** The stored vector field behind each search dimension. */
+const EMBEDDING_FIELD: Record<VestigiumSearchDimension, string> = {
+  promptum: 'embeddingPromptum',
+  imago:    'embeddingImago',
+  intella:  'embeddingIntella',
+}
+
+/**
+ * What makes a vestigium OWE one dimension: the vector is absent, and the source the
+ * vector would be computed from is present. `promptum` is required on every vestigium,
+ * so a missing vector is always a debt; the other two are owed only by the traces that
+ * carry the material — an image-less text run owes no `imago`, and counting it would
+ * quote work that can never be done.
+ */
+function backlogFilter(per: VestigiumSearchDimension): Record<string, unknown> {
+  const filter: Record<string, unknown> = { [EMBEDDING_FIELD[per]]: { $exists: false } }
+  if (per === 'imago')   filter.imagoUrl = { $exists: true, $nin: [null, ''] }
+  if (per === 'intella') filter.intellaDescription = { $exists: true, $nin: [null, ''] }
+  return filter
+}
+
+/** The value an embed pass works from, per dimension. Mirrors what `index*()` embeds. */
+function sweepItem(per: VestigiumSearchDimension, doc: Record<string, unknown>): VestigiumSweepItem {
+  const id = String(doc.id)
+  if (per === 'imago') return { id, imagoUrl: String(doc.imagoUrl ?? '') }
+  if (per === 'intella') return { id, textum: String(doc.intellaDescription ?? '') }
+  const promptum = String(doc.promptum ?? '')
+  const negativum = typeof doc.negativum === 'string' && doc.negativum ? doc.negativum : ''
+  return { id, textum: negativum ? `${promptum} ${negativum}` : promptum }
 }
 
 function fromDoc(doc: Record<string, unknown>): Vestigium {
@@ -244,5 +278,40 @@ export class MongoVestigiorum implements Vestigiorum {
 
   async delete(id: string): Promise<void> {
     await this.col.deleteOne({ id })
+  }
+
+  async backlogCount(auctorKey: AuctorKey): Promise<VestigiumBacklog> {
+    const owner = auctorKeyQuery(auctorKey)
+    const [promptum, imago, intella] = await Promise.all(
+      (['promptum', 'imago', 'intella'] as const).map(per =>
+        this.col.countDocuments({ ...owner, ...backlogFilter(per) }),
+      ),
+    )
+    return { promptum, imago, intella }
+  }
+
+  async backlog(auctorKey: AuctorKey, per: VestigiumSearchDimension, limit: number): Promise<VestigiumSweepItem[]> {
+    if (limit <= 0) return []
+    const docs = await this.col
+      .find({ ...auctorKeyQuery(auctorKey), ...backlogFilter(per) })
+      .sort({ natum: 1 })
+      .limit(limit)
+      .toArray()
+    return docs.map(d => sweepItem(per, d as Record<string, unknown>))
+  }
+
+  async setEmbedding(
+    id: string,
+    auctorKey: AuctorKey,
+    per: VestigiumSearchDimension,
+    embedding: number[],
+  ): Promise<boolean> {
+    // The owner is part of the MATCH: a foreign id selects no document, so the write is
+    // not refused after the fact — it never addresses a stranger's record at all.
+    const result = await this.col.updateOne(
+      { id, ...auctorKeyQuery(auctorKey) },
+      { $set: { [EMBEDDING_FIELD[per]]: embedding, mutatum: new Date() } },
+    )
+    return result.matchedCount > 0
   }
 }

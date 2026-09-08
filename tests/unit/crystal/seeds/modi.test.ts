@@ -14,10 +14,33 @@ import {
   MODUS_DATASET_CAPTION,
   MODUS_DATASET_DECOMPOSE,
   MODUS_MUSE_STEER,
+  MODUS_EMBED_SWEEP,
 } from '../../../../src/crystal/seeds/modi.js'
 
-test('CANONICAL_MODI contains twelve entries', () => {
-  assert.equal(CANONICAL_MODI.length, 12)
+test('CANONICAL_MODI contains thirteen entries', () => {
+  assert.equal(CANONICAL_MODI.length, 13)
+})
+
+test('embed-sweep modus is a canon backlog pass on its OWN ministerium (sync, per-item billed)', () => {
+  // Same point as the two assertions below on the muse arms, for the same reason: `Cursorum`
+  // is a flat Map<ministerium, Cursor> whose `register` is a bare set, so a shared key would
+  // silently replace another cursor and send its dispatches here.
+  assert.equal(MODUS_EMBED_SWEEP.ministerium, 'embedsweep')
+  assert.notEqual(MODUS_EMBED_SWEEP.ministerium, MODUS_MUSE_STEER.ministerium)
+  assert.equal(MODUS_EMBED_SWEEP.genus, 'atomicus')
+  assert.equal(MODUS_EMBED_SWEEP.deliveryMode, 'sync')
+  // No fixed cost: the cursor reserves the batch and settles what it actually embedded.
+  assert.equal(MODUS_EMBED_SWEEP.impetusFixum, undefined)
+  // The two ports the API layer stamps from the resolved caller. They are DECLARED (the cursor
+  // reads them) and underscore-prefixed (they are internal channels, not inputs a caller fills):
+  // a sweep that took an identity or a set of ids off a request body would embed, and bill for,
+  // whatever it was handed.
+  for (const k of ['_owner', '_sweep']) {
+    assert.equal(MODUS_EMBED_SWEEP.aditus[k]?.required, false, `${k} is stamped, never required of a caller`)
+  }
+  // Exitus matches the cursor's return exactly.
+  assert.deepEqual(Object.keys(MODUS_EMBED_SWEEP.exitus).sort(), ['embedded', 'per', 'skipped'])
+  assert.ok(MODUS_EMBED_SWEEP.contentHash.length > 0)
 })
 
 test('no canonical modus is still on the dropped huggingface ministerium', () => {
