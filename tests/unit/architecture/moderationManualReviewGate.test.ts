@@ -179,6 +179,21 @@ test('manualReviewGate: a public feed publish is HELD (never published, never re
   assert.deepEqual(csamReviewReporterCalls, [])
 })
 
+test('manualReviewGate: the publisher is told a person has it, not that their content was flagged', async () => {
+  // The posture holds EVERY public publish and inspects nothing. Telling the author their
+  // work was "flagged by automated review" — which is what one shared note used to say for
+  // every refusal — is false under exactly the posture production runs.
+  const { api, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const note = (await api.getEdition(anima1, ed.id)).moderationNote ?? ''
+  assert.ok(note.length > 0, 'a held publish explains itself to its publisher')
+  assert.ok(/person/i.test(note), 'the note says a person has it')
+  assert.ok(!/flagged something in this content/i.test(note), 'nothing was inspected, so nothing may be claimed about the content')
+  assert.ok(!note.includes('held for manual review'), 'never the gate\'s own raw reason text')
+})
+
 test('manualReviewGate: admin APPROVE clears the hold → the content publishes to the feed', async () => {
   const { api, editiones, csamReviewReporterCalls, flush } = makeApi()
   const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })

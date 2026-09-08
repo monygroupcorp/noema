@@ -2,7 +2,7 @@
      truth: `src/platforms/web/app/src/content/cookies.md`. Keep the two in step. -->
 
 # Cookie Policy
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-08
 
 ---
 
@@ -28,16 +28,17 @@ The rest of what the app remembers lives in your browser's `localStorage`. It st
 |---|---|
 | `noema-sessions` | Your saved logins — for each one, the account id, the session token, and the username. This is the sign-in credential. |
 | `noema-session`, `noema-session-username` | The earlier single-login form of the above, read once and migrated. |
-| `noema-vault` | Your anonymous credit: notes and minted purse tokens, including their private secrets. **These are bearer secrets. They never leave your browser, and if you lose this storage the credit is gone with it** — export a backup from the Vault screen. |
+| `noema-vault` | Your anonymous credit: notes and minted purse tokens, including their private secrets. The anonymous purse rail is **switched off today** — issuing a note and minting a purse are refused until the trusted-setup ceremony concludes, so nothing is written here on an account funded the ordinary way. When it opens: **these are bearer secrets. They never leave your browser, and if you lose this storage the credit is gone with it** — export a backup from the Vault screen. |
 | `noema-active-purse` | Which purse token a run should spend from. |
 | `noema-commitment` | A random per-browser id used to identify an anonymous caller when quoting a price. It is not linked to an account. |
-| `noema-tee` | The browser-side keypair for a private-compute session. The private key never leaves your browser. |
 | `noema-projects`, `noema-project` and their per-account forms (`noema-<account>-projects`, `noema-<account>-project`) | Your project list and which project is open. |
 | `noema-exec`, `noema-<account>-exec` | Your execution-mode preference — whose hardware a run should go to. |
 | `noema-availability` | Your availability preference from Account Settings. |
 | `noema-pins` | The flows you pinned to the rail. |
+| `noema-<account>-space-selection` | The region you selected in the corpus explorer, and which projection layer you carved it in. |
 | `noema-onboarded` | Whether you have completed onboarding. |
 | `noema-chat-example-cleared` | Whether you dismissed the example prompt in chat. |
+| `concierge-seen:<route>` | Which routes this browser has already seen the assistant panel announce itself on, so it never re-fires on a repeat visit. One entry per route you have visited. |
 
 ## What we do not use
 
@@ -54,7 +55,7 @@ Third-party analytics would create tracking vectors that contradict the privacy 
 
 There is no cookie preference manager, because there is nothing to manage: the one cookie is strictly necessary for the ceremony feature and is set only if you use it.
 
-You can clear cookies and site data at any time through your browser settings. Clearing site data logs you out — and it **destroys any anonymous credit held in `noema-vault`**, which cannot be recovered. Export your Vault first.
+You can clear cookies and site data at any time through your browser settings. Clearing site data logs you out — and once the anonymous purse rail opens it will **destroy any credit held in `noema-vault`**, which cannot be recovered. Export your Vault first.
 
 ## Contact
 
