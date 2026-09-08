@@ -21,8 +21,15 @@ import { spawnSync } from 'node:child_process'
 // never run by the suite that is supposed to prove it, and the suite was red for saying so.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
-/** Copy for the five surfaces; anything omitted gets harmless filler. */
-type Site = { about?: string; features?: string; guide?: string; pricing?: string; footer?: string }
+/** Copy for the six surfaces; anything omitted gets harmless filler. */
+type Site = {
+  about?: string
+  features?: string
+  guide?: string
+  landing?: string
+  pricing?: string
+  footer?: string
+}
 
 function guardOn(site: Site): { code: number; out: string } {
   const dir = mkdtempSync(join(tmpdir(), 'site-truth-'))
@@ -32,6 +39,12 @@ function guardOn(site: Site): { code: number; out: string } {
     writeFileSync(join(dir, 'content', 'about.md'), site.about ?? '# About\n')
     writeFileSync(join(dir, 'content', 'features.md'), site.features ?? '# Features\n')
     writeFileSync(join(dir, 'content', 'blog', 'guide.md'), site.guide ?? '# Guide\n')
+    writeFileSync(join(dir, 'screens', 'Landing.tsx'), site.landing ?? 'export function Landing() { return null }\n')
+    // The rest of the public screens §5 walks. Their copy is not varied by any test here; they
+    // exist so the guard reads the same surface list it reads against the real app.
+    for (const screen of ['Blog', 'Ceremony', 'RequestDemo']) {
+      writeFileSync(join(dir, 'screens', `${screen}.tsx`), `export function ${screen}() { return null }\n`)
+    }
     writeFileSync(join(dir, 'screens', 'Pricing.tsx'), site.pricing ?? 'export function Pricing() { return null }\n')
     writeFileSync(join(dir, 'screens', 'SiteFooter.tsx'), site.footer ?? 'export function SiteFooter() { return null }\n')
     const r = spawnSync('node', ['scripts/guard-site-truth.mjs', '--app', dir], {
@@ -124,4 +137,38 @@ test('anonymous funding must say the depositing address is kept', () => {
     about: 'Fund anonymously from a shielded wallet; the depositing address still reaches us and we keep it for sanctions screening.\n',
   })
   assert.equal(honest.code, 0, honest.out)
+})
+
+test('a link no route serves is caught, on a page and on a screen', () => {
+  const page = guardOn({ features: 'Start in the [workbench](/workbench).\n' })
+  assert.equal(page.code, 1, page.out)
+  assert.match(page.out, /\/workbench/, page.out)
+
+  const screen = guardOn({ landing: 'export const cta = <Link to="/sign-up">Start</Link>' })
+  assert.equal(screen.code, 1, screen.out)
+  assert.match(screen.out, /\/sign-up/, screen.out)
+
+  // Routes App.tsx really mounts, including one behind a `:param` and one two segments deep.
+  const real = guardOn({
+    features: 'See the [catalog](/catalog), a [dataset](/datasets/42) and the [privacy policy](/legal/privacy).\n',
+    footer: 'export const nav = <Link to="/pricing">Pricing</Link>',
+  })
+  assert.equal(real.code, 0, `routes the router mounts must pass:\n${real.out}`)
+})
+
+test('a guide slug with no file behind it is caught, though :slug matches anything', () => {
+  const missing = guardOn({ features: 'Read [the API guide](/blog/call-the-api).\n' })
+  assert.equal(missing.code, 1, missing.out)
+  assert.match(missing.out, /call-the-api/, missing.out)
+
+  // `guide.md` is the fixture's own post, so this is the slug the folder actually carries.
+  const present = guardOn({ features: 'Read [the guide](/blog/guide).\n' })
+  assert.equal(present.code, 0, present.out)
+})
+
+test('an external link and an API path are not judged as routes', () => {
+  const { code, out } = guardOn({
+    features: 'The [contract](/v1/openapi.json), our [repo](https://github.com/example/noema) and [mail](mailto:x@example.com).\n',
+  })
+  assert.equal(code, 0, out)
 })

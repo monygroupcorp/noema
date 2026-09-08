@@ -13,7 +13,7 @@
  * None of those were in `GET /v1/models`, `GET /v1/flows` or `GET /v1/openapi.json`; several never
  * were. It read as a product description because it was shaped like one.
  *
- * So four rules, each derived from something the running system already publishes:
+ * So five rules, each derived from something the running system already publishes:
  *
  *   1. ENDPOINTS. Every `/v1/…` path in the copy is a path in `docs/api/openapi.json` — which
  *      `apiDocsDrift.test.ts` holds byte-equal to the in-code contract, so this reads the live
@@ -28,15 +28,21 @@
  *      /about, /features, /pricing — must say what the privacy policy says. Run records are
  *      retained and erasure severs rather than deletes (§7, §8); anonymous funding hides an
  *      identity, not the depositing address, which is kept for sanctions screening (§2b).
+ *   5. LINKS. Every internal link the copy offers resolves to a route `App.tsx` declares. A
+ *      marketing page is mostly links, and a link is the one claim a reader tests immediately:
+ *      renaming a screen leaves the pages that pointed at it landing on the 404 stub, and nothing
+ *      about that is loud. A `/blog/<slug>` resolves only when the guide file behind it exists,
+ *      because the router's `:slug` matches anything and the index is the folder.
  *
  * Read-only. Never edits. Exit 0 silent when clean; exit 1 with `file: <what is wrong>` per hit.
  *
- * `--app <dir>` points the four surfaces at a different `src/` — how the test drives it, and the
- * only reason it is a parameter. The contract and the seeds are always read from this repository:
- * the whole value of the guard is that the truth side of every comparison is the running system.
+ * `--app <dir>` points the marketing surfaces at a different `src/` — how the test drives it, and
+ * the only reason it is a parameter. The contract, the seeds and the router are always read from
+ * this repository: the whole value of the guard is that the truth side of every comparison is the
+ * running system.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -63,6 +69,19 @@ const WIDEST_CLAIMS = [
   join('content', 'features.md'),
   join('screens', 'Pricing.tsx'),
   join('screens', 'SiteFooter.tsx'),
+];
+
+/**
+ * The surfaces §5 walks: the marketing markdown, plus the public screens — every page a reader
+ * reaches without an account, and the footer that rides under all of them.
+ */
+const LINK_SCREENS = [
+  join('screens', 'Landing.tsx'),
+  join('screens', 'Pricing.tsx'),
+  join('screens', 'SiteFooter.tsx'),
+  join('screens', 'Blog.tsx'),
+  join('screens', 'Ceremony.tsx'),
+  join('screens', 'RequestDemo.tsx'),
 ];
 
 const read = (rel) => readFileSync(join(APP, rel), 'utf8');
@@ -173,6 +192,65 @@ for (const rel of WIDEST_CLAIMS) {
   if (/anonym/i.test(text) && /\bfund(?:s|ed|ing)?\b/i.test(text)
       && !/sanctions|compliance|screening|deposit(?:ing)? address/i.test(text)) {
     fail(rel, 'claims anonymous funding without saying the depositing address is kept (privacy policy §2b)');
+  }
+}
+
+// ── 5. Links, against the routes the router declares ─────────────────────────────────────────
+
+/**
+ * Every path `App.tsx` mounts. The router is the running system's own answer to "does this URL
+ * exist", so the guard reads it rather than a list — a screen renamed in `App.tsx` invalidates
+ * the pages that pointed at it in the same commit. The catch-all is excluded on purpose: it is
+ * the 404 stub, and matching against it would make every dead link resolve.
+ */
+const routes = [...readFileSync(join(ROOT, 'src/platforms/web/app/src/App.tsx'), 'utf8')
+  .matchAll(/<Route\b[^>]*?\bpath="([^"]+)"/g)]
+  .map((m) => m[1])
+  .filter((p) => p !== '*');
+
+/** A route pattern matches when it has the same segments, `:param` standing for any one. */
+function routeExists(path) {
+  const want = path.split('/').filter(Boolean);
+  return routes.some((pattern) => {
+    const have = pattern.split('/').filter(Boolean);
+    return have.length === want.length
+      && have.every((seg, i) => seg.startsWith(':') || seg === want[i]);
+  });
+}
+
+/**
+ * Internal link targets, as the copy spells them. Markdown links and JSX `to=`/`href=` only:
+ * a computed target is not a claim a reader can read off the page, and a guard that tried to
+ * evaluate one would be guessing.
+ */
+function linksIn(rel, text) {
+  const found = [];
+  if (rel.endsWith('.md')) {
+    for (const m of text.matchAll(/\]\(([^)\s]+)/g)) found.push(m[1]);
+  } else {
+    for (const m of text.matchAll(/\b(?:to|href)="([^"]+)"/g)) found.push(m[1]);
+  }
+  return found
+    .map((href) => href.split('#')[0].split('?')[0])
+    // `/v1/…` is the API, not a page; rule 1 already holds it to the contract.
+    .filter((href) => href.startsWith('/') && !href.startsWith('/v1/'));
+}
+
+for (const rel of [...marketingMarkdown(), ...LINK_SCREENS]) {
+  const text = published(rel, read(rel));
+
+  for (const href of linksIn(rel, text)) {
+    // `/blog/:slug` matches any slug, so the router cannot answer this one: a guide resolves
+    // when its file is there, which is also how the index finds it.
+    const guide = href.match(/^\/blog\/([^/]+)$/);
+    if (guide) {
+      if (!existsSync(join(CONTENT, 'blog', `${guide[1]}.md`))) {
+        fail(rel, `links to ${href}, and no guide file content/blog/${guide[1]}.md exists`);
+      }
+      continue;
+    }
+
+    if (!routeExists(href)) fail(rel, `links to ${href}, which no route in App.tsx serves`);
   }
 }
 
