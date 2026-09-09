@@ -17,9 +17,9 @@ funding wallet at all is a further step, and it is not built.
 
 ## How we built it
 
-Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We never train on your prompts or outputs. We do retain run records until you erase your account
-— the privacy policy states exactly what is kept and why, including the parts we would rather be
-able to state differently.
+Noema runs a curated set of open- and closed-source models across every modality, wired to a concierge that turns intent into finished work. Generation runs on external GPUs (RunPod); concierge reasoning routes to an external LLM provider. We never train on your prompts or outputs. We do retain run records, and erasing your account
+severs them from you rather than deleting them — the privacy policy states exactly what is kept
+and why, including the parts we would rather be able to state differently.
 
 Purse credits will be zero-knowledge proofs: we verify the math and cannot link that spend to
 you. The rail is written and it is switched off — until the ceremony concludes, the key it verifies

@@ -5,6 +5,7 @@ import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { api, setActivePurse, getActivePurse, type ArcanumConfig } from '../lib/api';
 import { doorPath } from '../lib/entry';
+import { purseIsOff } from '../lib/purseSwitch';
 import {
   computeCommitment,
   computeNullifierHash,
@@ -128,12 +129,15 @@ export function Vault() {
   const unspent = useMemo(() => notes.filter((n) => !n.spent), [notes]);
   // ANON_PURSE_ENABLED (noema-131): the anonymous ZK purse is gated off for v1 (the arcanum
   // proving key is a forgeable dev key until the trusted-setup ceremony runs). `purseOff` = the
-  // backend reported the gate closed → hide the fund/mint/paste surfaces and show coming-soon.
+  // gate is not known to be open → hide the fund/mint/paste surfaces and show coming-soon. It
+  // used to require a LOADED config, so the mint and paste surfaces rendered for the whole window
+  // before the config arrived, and stayed rendered after a failed fetch — underneath this page's
+  // own "couldn't reach the anonymous-credit service" warning. Unknown now reads as off.
   // The backend refuses issue/mint/ownerless-spend regardless; this is the honest UI mirror.
   // The backend GET /arcanum/config also returns `enabled` (ANON_PURSE_ENABLED, noema-131);
   // read it defensively — the shared ArcanumConfig client type isn't widened here.
   const purseEnabled = (config as { enabled?: boolean } | null)?.enabled === true;
-  const purseOff = !!config && !purseEnabled;
+  const purseOff = purseIsOff(config);
   const canMint = !!config?.ready && purseEnabled;
   const totalPurseCredits = useMemo(
     () => purses.reduce((sum, p) => { try { return sum + BigInt(p.credits); } catch { return sum; } }, 0n),

@@ -26,6 +26,7 @@ import { InsufficientBursaCreditsError } from '../../types/bursa.js'
 import { DecomposeInFlightError, DecomposeNothingToDoError } from '../../crystal/MuseDecomposeCursor.js'
 import type { ActumIndex, ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
+import { MEMORY_NOTE_MAX_CHARS, MEMORY_NOTES_MAX } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligensGenus, Intellarum, Intella, IntellaContentRating } from '../../types/intelligendi.js'
@@ -1265,8 +1266,8 @@ export class CrystalApi {
       // A run still in flight may not be running at all — it may be holding a place in the
       // warm-pod line. This list is what someone opens when they come BACK to a run they
       // walked away from, so it is the surface that owes them the difference; leaving it out
-      // would show a queued run as running, and a queue nobody can see is a queue nobody
-      // trusts. Settled rows are never in a line and are not asked about.
+      // would show a queued run as running, and a queue that is never shown is a queue
+      // nobody trusts. Settled rows are never in a line and are not asked about.
       if (row.status === 'running') await this._attachActivityQueuePlace(row, actum)
     }
 
@@ -5026,6 +5027,19 @@ export class CrystalApi {
         503,
         { retryable: false },
       )
+    }
+    // Memory notes (the author ladder) are proposed by the concierge and written by the CLIENT
+    // through this same PUT, so the ceiling is enforced HERE and not only where they are composed:
+    // an over-long list is truncated to the newest MEMORY_NOTES_MAX and each line to
+    // MEMORY_NOTE_MAX_CHARS rather than rejected, because a rejected Preferences save would lose the
+    // user's OTHER edits to make a point about a note the agent wrote.
+    if (merged.memoryNotes !== undefined) {
+      const notes = (Array.isArray(merged.memoryNotes) ? merged.memoryNotes : [])
+        .filter((n): n is string => typeof n === 'string')
+        .map((n) => n.trim().slice(0, MEMORY_NOTE_MAX_CHARS))
+        .filter((n) => n !== '')
+        .slice(-MEMORY_NOTES_MAX)
+      merged.memoryNotes = notes
     }
     await this.deps.consuetudinum.setGeneratio(auctor, merged)
     return merged

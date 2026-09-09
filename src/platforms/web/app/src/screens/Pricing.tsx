@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
 import { entryPath } from '../lib/entry';
-import { api, type Pack } from '../lib/api';
+import { api, type ArcanumConfig, type Pack } from '../lib/api';
+import { purseIsOff } from '../lib/purseSwitch';
 import './landing.css'; // reuse .topnav / .btn chrome
 import './doc.css';
 
@@ -14,23 +15,18 @@ import './doc.css';
 // DISPLAYS and starts the flow.
 //
 // The ZK purse copy is gated the same way Funding.tsx gates it: on `enabled` from GET
-// /arcanum/config (ANON_PURSE_ENABLED, noema-131). The rail is off until the trusted-setup
-// ceremony runs — POST /arcanum/purse answers "anonymous purse coming soon" — so a page that
-// offers minting outright sells a visitor something the server refuses.
-//
-// `npm run guard:claims` reads this file a line at a time, so a denied phrase has to carry its
-// own hedge on the SAME source line. Both direct-to-commitment sentences below are wrapped for
-// that: reflowing one so "roadmap" lands on the next line is not a cosmetic change, it is an
-// unhedged confidentiality claim as far as the guard is concerned.
+// /arcanum/config (ANON_PURSE_ENABLED, noema-131), read through `purseIsOff` so every page that
+// makes the offer decides it the same way. The rail is off until the trusted-setup ceremony runs
+// — POST /arcanum/purse answers "anonymous purse coming soon" — so a page that offers minting
+// outright sells a visitor something the server refuses.
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 export function Pricing() {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [err, setErr] = useState(false);
-  // null = not yet known. Unknown and unreachable both read as off: the honest failure is to
-  // under-claim a privacy feature, never to promise one we cannot confirm is switched on.
-  const [purseEnabled, setPurseEnabled] = useState<boolean | null>(null);
-  const purseOff = purseEnabled !== true;
+  // null = not yet known, and `purseIsOff` reads that as off, as it reads an unreachable config.
+  const [purse, setPurse] = useState<ArcanumConfig | null>(null);
+  const purseOff = purseIsOff(purse);
 
   useEffect(() => {
     let live = true;
@@ -38,8 +34,8 @@ export function Pricing() {
       .then((p) => { if (live) setPacks(p); })
       .catch(() => { if (live) setErr(true); });
     api.arcanum.config()
-      .then((c) => { if (live) setPurseEnabled(c.enabled === true); })
-      .catch(() => { if (live) setPurseEnabled(false); });
+      .then((c) => { if (live) setPurse(c); })
+      .catch(() => {});
     return () => { live = false; };
   }, []);
 
@@ -148,16 +144,16 @@ export function Pricing() {
               balance and its spends will be cryptographically unlinkable to what you funded. It
               unlocks after the trusted-setup <Link to="/ceremony">ceremony</Link> — until then the
               rail is switched off and minting is refused, because the proving key it would verify
-              against is not yet one nobody controls. Direct-to-commitment deposits, where
-              we never see the funding wallet, are further out on the roadmap.
+              against is not yet one nobody controls. Direct-to-commitment deposits, where we
+              never see the funding wallet, are further out on the roadmap.
             </>
           ) : (
             <>
               On top of that, mint a ZK purse from your balance: its spends are cryptographically
               unlinkable to what you funded. Minting a purse needs a signed-in account, so it's an
               unlinkable spend layer over an identified balance — strongest when you fund from a
-              shielded wallet. Direct-to-commitment deposits, where
-              we never see the funding wallet, are on the roadmap.
+              shielded wallet. Direct-to-commitment deposits, where we never see the funding
+              wallet, are on the roadmap.
             </>
           )}
         </p>

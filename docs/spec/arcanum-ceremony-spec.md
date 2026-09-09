@@ -67,7 +67,9 @@ Wraps `snarkjs.groth16.fullProve()`. Input shape:
 
 ### Phase 3 — Serve circuit assets ✅ DONE (2026-06-12)
 - `GET /arcanum/circuit/wasm` → streams `arcanum.wasm` (2MB, immutable cache header)
-- `GET /arcanum/config` → `{ wasmUrl, zkeyUrl, depth:32, ready }` (discovery)
+- `GET /arcanum/config` → `{ wasmUrl, zkeyUrl, zkeyHash, zkeySource, depth:32, ready }` (discovery).
+  `zkeyHash` names the exact key served at `/arcanum/circuit/zkey`; once the ceremony is finalized
+  it equals the transcript's `finalHash`, so a client can check the key against the public record.
 - `POST /v1/runs/quote` now returns `{ impetus, recipient }` — clients use `recipient` when generating proof
 - `ARCANUM_ZKEY_URL` env var → passed into `/arcanum/config` response for client to know where to fetch .zkey
 - Arcanum router now mounted at `/arcanum` in `index.ts` (was wired but never mounted)

@@ -130,11 +130,20 @@ function toHistory(dicta: Dictum[]): OpenRouterChatMessage[] {
   }))
 }
 
-/** The text recorded as the agent Dictum's corpus: a reply's text, or the proposal serialized
- *  (so the thread round-trips what the agent actually produced). */
+/** The text recorded as the agent Dictum's corpus, so the thread round-trips what the agent
+ *  actually produced. A proposal serializes. A reply serializes too WHEN it carries structure the
+ *  text alone would lose — a destination link, or a write-proposal card whose GO the user has not
+ *  pressed yet; a resumed thread that dropped the card would strand a pending confirmation. A
+ *  plain reply stays plain text, which is what the great majority of turns are and what every
+ *  already-stored Dictum is. `memoryDelta` is deliberately NOT persisted: it is applied once,
+ *  client-side, at the end of the turn that produced it, and a resume must not re-apply it. */
 function dictumCorpus(result: ConciergeResult): string {
-  if (result.kind === 'reply') return result.text
-  const { tokenUsage: _t, ...proposal } = result
+  if (result.kind === 'reply') {
+    if (!result.destination && !result.write) return result.text
+    const { tokenUsage: _t, memoryDelta: _m, ...reply } = result
+    return JSON.stringify(reply)
+  }
+  const { tokenUsage: _t, memoryDelta: _m, ...proposal } = result
   return JSON.stringify(proposal)
 }
 

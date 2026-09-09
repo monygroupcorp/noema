@@ -5,6 +5,7 @@ import type { ArcanumIssuer } from '../../ledger/ArcanumIssuer.js'
 import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
 import type { ArcanumVerifier } from '../../arcanum/ArcanumVerifier.js'
 import type { Bursarum } from '../../types/bursa.js'
+import { createRepoProvingKeySource, type ProvingKeySource } from '../../arcanum/ProvingKeySource.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('arcanum:router')
@@ -14,8 +15,9 @@ declare const __dirname: string
 const ARTIFACTS_DIR = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const WASM_PATH     = path.join(ARTIFACTS_DIR, 'arcanum.wasm')
 const WASM_READY    = existsSync(WASM_PATH)
-const ZKEY_PATH     = path.join(ARTIFACTS_DIR, 'arcanum_final.zkey')
-const ZKEY_ON_DISK  = existsSync(ZKEY_PATH)
+
+/** The proving key committed to the repo — served until the ceremony finalizes. */
+export const REPO_ZKEY_PATH = path.join(ARTIFACTS_DIR, 'arcanum_final.zkey')
 
 // Normalize a bare-domain serverUrl (e.g. "staging.noema.art") to an absolute
 // https:// URL so /config never emits relative-looking absolute URLs. Env vars
@@ -57,6 +59,12 @@ export interface ArcanumRouterConfig {
    * post-ceremony to restore the full purse (a one-flag flip).
    */
   anonPurseEnabled?: boolean
+  /**
+   * Which proving key /circuit/zkey serves, and its sha256 — the ceremony's published
+   * key once the ceremony is finalized (see `createProvingKeySource`). When absent, the
+   * key committed to the repo is served, which is the pre-ceremony state.
+   */
+  provingKey?: ProvingKeySource
 }
 
 export function createArcanumRouter(
@@ -65,6 +73,7 @@ export function createArcanumRouter(
   config: ArcanumRouterConfig = {},
 ): Router {
   const router = Router()
+  const provingKey = config.provingKey ?? createRepoProvingKeySource(REPO_ZKEY_PATH)
 
   // ── POST /issue ───────────────────────────────────────────────────────────────
   //
@@ -298,17 +307,26 @@ export function createArcanumRouter(
   // Prover discovery: client fetches this to learn where to get the wasm and zkey.
   //
   // Returns:
-  //   wasmUrl  string  — URL to fetch arcanum.wasm (for snarkjs in-browser proving)
-  //   zkeyUrl  string  — URL to fetch arcanum_final.zkey (~5MB dev / ~300MB prod)
-  //   depth    number  — Merkle tree depth (32)
-  //   ready    boolean — false when wasm or zkey is not yet configured
+  //   wasmUrl    string  — URL to fetch arcanum.wasm (for snarkjs in-browser proving)
+  //   zkeyUrl    string  — URL to fetch arcanum_final.zkey (~5MB dev / ~300MB prod)
+  //   zkeyHash   string  — sha256 of the key this server serves, so a client can check it
+  //                        against the ceremony transcript (GET /v1/ceremony → finalHash)
+  //                        before trusting it. null when zkeyUrl points at a host we do
+  //                        not serve from, since then we have not seen those bytes.
+  //   zkeySource string  — where that key comes from: 'ceremony' (the finalized
+  //                        ceremony's published key), 'repo' (the committed key, which is
+  //                        what a dev setup produces), 'external' (an ARCANUM_ZKEY_URL
+  //                        host), or 'none'
+  //   depth      number  — Merkle tree depth (32)
+  //   ready      boolean — false when wasm or zkey is not yet configured
 
-  router.get('/config', (_req, res) => {
+  router.get('/config', async (_req, res) => {
     const serverUrl = normalizeServerUrl(config.serverUrl)
     const wasmUrl = serverUrl
       ? `${serverUrl.replace(/\/$/, '')}/arcanum/circuit/wasm`
       : '/arcanum/circuit/wasm'
-    const zkeyUrl = config.zkeyUrl ?? (ZKEY_ON_DISK
+    const key = await provingKey()
+    const zkeyUrl = config.zkeyUrl ?? (key.origin !== 'none'
       ? (serverUrl
           ? `${serverUrl.replace(/\/$/, '')}/arcanum/circuit/zkey`
           : '/arcanum/circuit/zkey')
@@ -316,6 +334,8 @@ export function createArcanumRouter(
     return res.json({
       wasmUrl,
       zkeyUrl,
+      zkeyHash: config.zkeyUrl ? null : key.hash,
+      zkeySource: config.zkeyUrl ? 'external' : key.origin,
       depth: 32,
       ready: WASM_READY && zkeyUrl !== null,
       // ANON_PURSE_ENABLED (noema-131) — the security boundary is the backend gate; this just
@@ -349,15 +369,39 @@ export function createArcanumRouter(
   // Serve the Groth16 proving key for client-side proof generation. The dev-ceremony
   // key (~5MB) is small enough to serve from the API; the prod ceremony key (~300MB)
   // is expected to be hosted on R2/CDN instead (config.zkeyUrl overrides this route).
+  //
+  // Once the ceremony is finalized this is the key its transcript names, and the
+  // x-zkey-hash header names it here too — the same header /v1/ceremony/current.zkey
+  // uses — so the bytes a client proves with can be checked against the public record
+  // without trusting this response. A finalized ceremony whose key this server does not
+  // hold serves nothing: the committed key is not the ceremony's output, and handing it
+  // out under a finished transcript would say that it was.
 
-  router.get('/circuit/zkey', (req, res) => {
-    if (!ZKEY_ON_DISK) {
-      return res.status(404).json({ error: 'zkey not found — run arcanum-trusted-setup.sh' })
+  router.get('/circuit/zkey', async (req, res) => {
+    const key = await provingKey()
+    if (key.origin === 'none') {
+      // A hash means we know which key belongs here and do not have it — a gap on this
+      // server. No hash means there is no such artifact at all.
+      const status = key.hash ? 503 : 404
+      return res.status(status).json({ error: key.reason ?? 'no proving key available' })
     }
     res.setHeader('Content-Type', 'application/octet-stream')
-    res.setHeader('Content-Length', statSync(ZKEY_PATH).size)
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-    const stream = createReadStream(ZKEY_PATH)
+    if (key.hash) {
+      res.setHeader('x-zkey-hash', key.hash)
+      res.setHeader('ETag', `"${key.hash}"`)
+    }
+    // Not `immutable`: the served key changes once, when the ceremony finalizes, and a
+    // year-long cache of the pre-ceremony key would outlive the ceremony itself.
+    res.setHeader('Cache-Control', 'public, max-age=3600')
+    if (req.headers['if-none-match'] === `"${key.hash}"`) return res.status(304).end()
+
+    if (key.bytes) {
+      res.setHeader('Content-Length', key.bytes.length)
+      return res.end(key.bytes)
+    }
+    const file = key.path as string
+    res.setHeader('Content-Length', statSync(file).size)
+    const stream = createReadStream(file)
     stream.on('error', (err) => {
       log.error('zkey stream error', { error: String(err) })
       if (!res.headersSent) res.status(500).json({ error: 'internal error' })

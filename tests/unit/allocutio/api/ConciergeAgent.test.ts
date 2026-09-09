@@ -978,3 +978,102 @@ test('system prompt instructs the rationale to state the price plainly', () => {
   const prompt = buildSystemPrompt(baseCtx())
   assert.match(prompt, /state that\s+price plainly/)
 })
+
+// ---------------------------------------------------------------------------
+// (j) The author ladder, end to end through the turn. The agent may NAME a write;
+// it never performs one. What this covers is the DEGRADATION contract: an action
+// outside the server-side allowlist is dropped exactly the way an invalid
+// NAVIGATE destination is — the turn still succeeds, the reply text still
+// delivers whole, and nothing about the refusal reaches the user. The grammar's
+// per-payload rules are unit-tested next door in conciergeWrite.test.ts.
+// ---------------------------------------------------------------------------
+
+test('a reply naming a listed write carries it through validated', async () => {
+  const { api } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      content: JSON.stringify({
+        kind: 'reply',
+        text: 'I can save that as your default style.',
+        write: { action: 'set_preference', payload: { key: 'style', value: 'cold, desaturated' } },
+      }),
+    }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'always make it cold')
+
+  assert.equal(result.kind, 'reply')
+  assert.equal(result.text, 'I can save that as your default style.')
+  assert.deepEqual(result.write, { action: 'set_preference', payload: { key: 'style', value: 'cold, desaturated' } })
+})
+
+test('a reply naming an UNLISTED write degrades to a plain reply: no error, no pass-through', async () => {
+  const { api, spy } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      content: JSON.stringify({
+        kind: 'reply',
+        text: 'Here is what I found in your runs.',
+        write: { action: 'create_run', payload: { modusId: 'flux.txt2img', aditus: { prompt: 'a cat' } } },
+      }),
+    }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'what did I make')
+
+  assert.equal(result.kind, 'reply')
+  assert.equal(result.text, 'Here is what I found in your runs.', 'the reply text must deliver whole')
+  assert.equal(result.write, undefined, 'the unlisted action must be dropped, not passed through')
+  // Nothing about the dropped write is executed or even attempted: the agent never spends.
+  assert.equal(spy.quoteCalls.length, 0)
+})
+
+test('a reply naming a LISTED action with a malformed payload degrades the same way', async () => {
+  const { api } = makeApi()
+  const client = scriptedClient([
+    chatResult({
+      content: JSON.stringify({
+        kind: 'reply',
+        text: 'I could turn those into a dataset.',
+        // A listed action, but `modality` is not one the grammar knows — dropped whole.
+        write: { action: 'create_dataset', payload: { source: 'generation', name: 'x', modality: 'hologram', actumIds: ['run_1'] } },
+      }),
+    }),
+  ])
+
+  const result = await runConcierge(baseDeps(client.runToolChat, api), baseCtx(), 'make a dataset')
+
+  assert.equal(result.kind, 'reply')
+  assert.equal(result.text, 'I could turn those into a dataset.')
+  assert.equal(result.write, undefined)
+})
+
+test('a turn-end memory delta rides on either kind, and a malformed one is dropped whole', async () => {
+  const { api } = makeApi()
+
+  const replyClient = scriptedClient([
+    chatResult({
+      content: JSON.stringify({
+        kind: 'reply',
+        text: 'Noted.',
+        memoryDelta: { add: ['works in Portuguese'] },
+      }),
+    }),
+  ])
+  const reply = await runConcierge(baseDeps(replyClient.runToolChat, api), baseCtx(), 'eu falo portugues')
+  assert.deepEqual(reply.memoryDelta, { add: ['works in Portuguese'] })
+
+  const badClient = scriptedClient([
+    chatResult({
+      content: JSON.stringify({
+        kind: 'reply',
+        text: 'Noted.',
+        memoryDelta: { add: ['fine', 'x'.repeat(400)] },
+      }),
+    }),
+  ])
+  const dropped = await runConcierge(baseDeps(badClient.runToolChat, api), baseCtx(), 'remember everything')
+  assert.equal(dropped.kind, 'reply')
+  assert.equal(dropped.text, 'Noted.', 'the turn is never failed over a memory note')
+  assert.equal(dropped.memoryDelta, undefined)
+})
