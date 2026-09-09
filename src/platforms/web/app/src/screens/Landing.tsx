@@ -1,6 +1,7 @@
 import { type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
+import { entryPath } from '../lib/entry';
 import { LandingWordmark } from './LandingWordmark';
 import { PlateDeck } from './PlateDeck';
 import { ScrollStage } from './ScrollStage';
@@ -172,7 +173,7 @@ export function Landing({
             <Link to="/pricing">Pricing</Link>
           </span>
           <span className="right">
-            <Link className="btn" to="/onboard">Open app</Link>
+            <Link className="btn" to={entryPath()}>Open app</Link>
           </span>
         </nav>
 
@@ -184,7 +185,7 @@ export function Landing({
             Bring your taste, steer the culture of generative art on the new internet.
           </p>
           <span className="lp-cand-cta">
-            <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
+            <Link className="btn lg" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
             <Link className="btn-ghost" to="/catalog">Browse the catalogue</Link>
           </span>
           <span className="lp-cand-more" aria-hidden="true" />
@@ -288,7 +289,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
               Everything on this page was put here by someone. Add the next thing.
             </p>
             <span className="lp-beat-cta">
-              <Link className="btn lg" to="/onboard">Get started <Ic name="arrow-right" /></Link>
+              <Link className="btn lg" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
             </span>
           </div>
         </section>

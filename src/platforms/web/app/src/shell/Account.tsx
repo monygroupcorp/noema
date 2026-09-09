@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { api } from '../lib/api';
-import { clearOnboarded } from '../lib/entry';
+import { clearOnboarded, doorPath } from '../lib/entry';
 import { Ic } from '../lib/icons';
 import { Chip } from './Chip';
 import { BuyCreditsModal } from '../screens/BuyCreditsModal';
@@ -82,7 +82,9 @@ export function Account() {
   // Drop every held login, clear the local onboarded flag, and return to the front door. The
   // sharpest exit: it discards unsaved work AND signs the user out, so the guard runs first.
   const signOutEverything = () => guardedNavigate((to) => { signOutAll(); clearOnboarded(); navigate(to); }, '/');
-  const signIn = () => guardedNavigate(navigate, '/onboard');
+  // Signing in from the app chrome returns to the screen the menu was opened over, so the
+  // account someone just made is one they arrive back holding, on the page they wanted it for.
+  const signIn = () => guardedNavigate(navigate, doorPath(location.pathname + location.search));
 
   return (
     <div className="posture">

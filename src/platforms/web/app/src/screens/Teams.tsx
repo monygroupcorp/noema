@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Team } from '../lib/api';
@@ -10,6 +12,11 @@ import { useSession } from '../state/session';
 // Identified accounts only: the endpoints 401 for the anon-commitment path.
 export function Teams() {
   const { session, ready } = useSession();
+  // Where the door hands this visitor back once their session is live: the page they were
+  // already on. Turning someone away for want of an account should not also cost them the
+  // walk back to what they were doing.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [nomen, setNomen] = useState('');
@@ -69,7 +76,7 @@ export function Teams() {
         </div></div>
 
         {!session && ready && (
-          <div className="warn">Teams need an identified account. <a href="/onboard">Sign in</a> to create and manage them.</div>
+          <div className="warn">Teams need an identified account. <Link to={doorPath(here)}>Sign in</Link> to create and manage them.</div>
         )}
 
         <div className="sectionhead">New team</div>

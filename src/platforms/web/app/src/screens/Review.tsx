@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
@@ -50,6 +51,11 @@ export function ReviewQueueSection({ editions, onError }: { editions: Editio[]; 
 
 export function Review() {
   const { session, ready } = useSession();
+  // Where the door hands this visitor back once their session is live: the page they were
+  // already on. Turning someone away for want of an account should not also cost them the
+  // walk back to what they were doing.
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [admin, setAdmin] = useState(false);
   const [items, setItems] = useState<Editio[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -92,7 +98,7 @@ export function Review() {
           <div className="empty">
             <div className="t">Sign in to see your review status</div>
             <div className="s">Held publications are shown to their author and to moderators.</div>
-            <Link className="btn" to="/onboard"><Ic name="circle-user" /> Sign in</Link>
+            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
           </div>
         )}
 
