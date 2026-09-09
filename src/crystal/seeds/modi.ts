@@ -529,6 +529,57 @@ export const MODUS_MUSE_STEER: Modus = make({
   mutatum: new Date('2026-08-20'),
 })
 
+export const MODUS_EMBED_SWEEP: Modus = make({
+  id: 'modus.embed-sweep',
+  nomen: 'Embed Sweep — the un-embedded trail, caught up',
+  descriptio: 'Embed Sweep — works off the backlog of your own traces that carry no embedding, so a search can find what a run recorded while the embedding service was away. Pick it to make old work searchable again; it produces nothing new.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+
+  // A ministerium of its OWN, for the reason the two muse modi state above: `Cursorum` is a
+  // flat Map<ministerium, Cursor> whose `register` is a bare set, so sharing a key would
+  // replace the cursor already bound to it. This arm owns 'embedsweep'.
+  ministerium: 'embedsweep',
+
+  // Batches against the embedding service in process, returning when the pass is done —
+  // no pod of its own, no webhook.
+  deliveryMode: 'sync',
+  canonica: true,
+  // No impetusFixum: the cursor reserves the batch it was handed and settles what it
+  // actually embedded, so a pass that skipped half its items charges for half.
+
+  // No `verbum` override. The exitus is counts, so the cascade finds no output modality and
+  // falls to its `enhance` catch-all — and every verb in the table names a generative
+  // capability this flow does not have. Claiming one would be a worse answer than the
+  // catch-all, so the cascade is left to decide (the noema-087 convention: an override is
+  // argued, and there is no argument for one here).
+
+  aditus: {
+    per:   { type: 'text', required: false, default: 'promptum', description: "Which embedding to catch up: promptum (what you typed) | imago (what it looked like) | intella (which model you used)" },
+    limit: { type: 'int',  required: false, default: 100, description: 'How many backlogged traces to work off in this pass. Capped server-side.' },
+
+    // The work travels INLINE, and both of these ports are stamped by the API layer from
+    // the RESOLVED CALLER — never read from a request body. A cursor cannot resolve an
+    // owner (an Actum is identity-blind), so a sweep that took an identity or a set of ids
+    // off its aditus would embed, and bill for, whatever it was handed. Declared because
+    // the cursor reads them, and typed 'text' because that is the declared type whose
+    // coercion passes an array through untouched (`validateAditus`).
+    _owner: { type: 'text', required: false, description: "The owner this pass writes for, as 'animaId:<id>' or 'commitment:<id>' (internal — stamped by the run entry point)" },
+    _sweep: { type: 'text', required: false, description: 'The backlogged traces to embed, as an array of { id, textum?, imagoUrl? } values (internal — stamped by the run entry point)' },
+  },
+
+  // Matches the cursor's return exactly. Both counts are over the work THIS pass did, and
+  // `embedded` is the basis the settlement uses.
+  exitus: {
+    embedded: { type: 'int',  description: 'How many traces this pass wrote an embedding onto' },
+    skipped:  { type: 'int',  description: 'How many it could not embed — they stay in the backlog for the next pass' },
+    per:      { type: 'text', description: 'The dimension this pass embedded' },
+  },
+
+  natum:   new Date('2026-09-07'),
+  mutatum: new Date('2026-09-07'),
+})
+
 export const CANONICAL_MODI: Modus[] = [
   MODUS_CHATGPT,
   MODUS_DALLE_III,
@@ -542,6 +593,7 @@ export const CANONICAL_MODI: Modus[] = [
   MODUS_DATASET_CAPTION,
   MODUS_DATASET_DECOMPOSE,
   MODUS_MUSE_STEER,
+  MODUS_EMBED_SWEEP,
 ]
 
 // A modus whose aditus carries a resource-shaped port must say what that port references

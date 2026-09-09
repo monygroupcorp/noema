@@ -10,6 +10,7 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { Credentials } from '../../allocutio/api/IdentityResolver.js'
 import { credentialsFromHeaders } from '../../allocutio/api/IdentityResolver.js'
 import { projectVestigia } from '../../crystal/VestigiaProjection.js'
+import { EMBED_SWEEP_IMPETUS_PER_ITEM, MAX_SWEEP_ITEMS } from '../../crystal/EmbedSweepCursor.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('vestigia:router')
@@ -17,6 +18,12 @@ const log = makeLogger('vestigia:router')
 export interface VestigiaRouterDeps {
   vestigiorum: Vestigiorum
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
+  /**
+   * What one embedded trace costs, for the quote below. Defaults to the constant the
+   * embed-sweep cursor settles with — ONE constant on both sides, so the number a caller
+   * is quoted here is the number the run charges.
+   */
+  impetusPerItem?: bigint
 }
 
 /** Vestigia are owned by an identified anima or an anon commitment — never a purse bearer token. */
@@ -144,6 +151,60 @@ export function createVestigiaRouter(deps: VestigiaRouterDeps): Router {
       }
       log.error('search error', { error: String(err) })
       return res.status(500).json({ error: 'internal search error' })
+    }
+  })
+
+  // ── GET /backlog ─────────────────────────────────────────────────────────────
+  //
+  // How much of the CALLER's own trail is still un-embedded, and what catching it up
+  // would cost. Auth: bearer session / API key / x-commitment, same resolution as GET /.
+  //
+  // A vestigium is written when a run completes and embedded afterwards, so any stretch
+  // where the embedding service was away leaves traces that metadata finds and semantic
+  // search does not. This is the surface that says how many, per dimension — and it is a
+  // QUOTE, not a run: nothing is spent by reading it. The sweep itself is an ordinary
+  // metered run (`POST /v1/runs` with `modusId: modus.embed-sweep`), which resolves the
+  // same backlog for the same caller and settles what it actually embedded.
+  //
+  // Owner-scoped by construction: the count is over the resolved caller's own vestigia
+  // and there is no parameter that widens it.
+  //
+  // Response: { backlog: {promptum,imago,intella}, quote: {…, total}, perItem, cap }
+  // Impetus figures are strings, as everywhere else on the API.
+
+  router.get('/backlog', async (req, res) => {
+    let auctor: VestigiaAuctorKey
+    try {
+      auctor = await resolveCaller(req)
+    } catch {
+      return res.status(401).json({ error: { code: 'auth.invalid', message: 'Authentication required' } })
+    }
+
+    const perItem = deps.impetusPerItem ?? EMBED_SWEEP_IMPETUS_PER_ITEM
+
+    try {
+      const backlog = await vestigiorum.backlogCount(auctor)
+      // One pass is capped, so the quote for a dimension is what the NEXT pass would cost —
+      // quoting an uncapped backlog would name a price no single run can be asked for.
+      const quoteFor = (n: number): string => (BigInt(Math.min(n, MAX_SWEEP_ITEMS)) * perItem).toString()
+      const quote = {
+        promptum: quoteFor(backlog.promptum),
+        imago:    quoteFor(backlog.imago),
+        intella:  quoteFor(backlog.intella),
+      }
+      const total = (
+        BigInt(quote.promptum) + BigInt(quote.imago) + BigInt(quote.intella)
+      ).toString()
+
+      return res.json({
+        backlog,
+        quote: { ...quote, total },
+        perItem: perItem.toString(),
+        cap: MAX_SWEEP_ITEMS,
+      })
+    } catch (err) {
+      log.error('backlog error', { error: String(err) })
+      return res.status(500).json({ error: 'internal error' })
     }
   })
 

@@ -5,6 +5,9 @@ import type {
   Vestigiorum,
   VestigiumQuery,
   VestigiumResult,
+  VestigiumBacklog,
+  VestigiumSearchDimension,
+  VestigiumSweepItem,
   ImpressioKind,
 } from '../types/vestigium.js'
 
@@ -18,6 +21,33 @@ function matchesKey(a: AuctorKey, b: AuctorKey): boolean {
 
 function raterToken(key: AuctorKey): string {
   return 'animaId' in key ? `animaId:${key.animaId}` : `commitment:${key.commitment}`
+}
+
+/** The stored vector field behind each search dimension. */
+const EMBEDDING_FIELD: Record<VestigiumSearchDimension, 'embeddingPromptum' | 'embeddingImago' | 'embeddingIntella'> = {
+  promptum: 'embeddingPromptum',
+  imago:    'embeddingImago',
+  intella:  'embeddingIntella',
+}
+
+/**
+ * Whether this vestigium still OWES the given dimension: the vector is absent and the
+ * source it would be computed from is present. Mirrors `MongoVestigiorum`'s filter —
+ * `promptum` is on every record, the other two only on the traces that carry the
+ * material, and work that can never be done is never counted.
+ */
+function owes(v: Vestigium, per: VestigiumSearchDimension): boolean {
+  if (v[EMBEDDING_FIELD[per]]) return false
+  if (per === 'imago') return !!v.imagoUrl
+  if (per === 'intella') return !!v.intellaDescription
+  return true
+}
+
+/** The value an embed pass works from, per dimension. Mirrors what `index*()` embeds. */
+function sweepItem(v: Vestigium, per: VestigiumSearchDimension): VestigiumSweepItem {
+  if (per === 'imago') return { id: v.id, imagoUrl: v.imagoUrl ?? '' }
+  if (per === 'intella') return { id: v.id, textum: v.intellaDescription ?? '' }
+  return { id: v.id, textum: v.negativum ? `${v.promptum} ${v.negativum}` : v.promptum }
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -199,5 +229,40 @@ export class MemoryVestigiorum implements Vestigiorum {
     this.store.delete(id)
     this.raters.delete(id)
     this.insertionSeq.delete(id)
+  }
+
+  async backlogCount(auctorKey: AuctorKey): Promise<VestigiumBacklog> {
+    const mine = Array.from(this.store.values()).filter(v => matchesKey(v.auctorKey, auctorKey))
+    return {
+      promptum: mine.filter(v => owes(v, 'promptum')).length,
+      imago:    mine.filter(v => owes(v, 'imago')).length,
+      intella:  mine.filter(v => owes(v, 'intella')).length,
+    }
+  }
+
+  async backlog(auctorKey: AuctorKey, per: VestigiumSearchDimension, limit: number): Promise<VestigiumSweepItem[]> {
+    if (limit <= 0) return []
+    return Array.from(this.store.values())
+      .filter(v => matchesKey(v.auctorKey, auctorKey) && owes(v, per))
+      .sort((a, b) => {
+        const t = a.natum.getTime() - b.natum.getTime()
+        if (t !== 0) return t
+        return (this.insertionSeq.get(a.id) ?? 0) - (this.insertionSeq.get(b.id) ?? 0)
+      })
+      .slice(0, limit)
+      .map(v => sweepItem(v, per))
+  }
+
+  async setEmbedding(
+    id: string,
+    auctorKey: AuctorKey,
+    per: VestigiumSearchDimension,
+    embedding: number[],
+  ): Promise<boolean> {
+    // Owner is part of the match, not a check after it: a foreign id addresses nothing.
+    const v = this.store.get(id)
+    if (!v || !matchesKey(v.auctorKey, auctorKey)) return false
+    this.store.set(id, { ...v, [EMBEDDING_FIELD[per]]: embedding, mutatum: new Date() })
+    return true
   }
 }

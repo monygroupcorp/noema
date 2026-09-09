@@ -5,6 +5,9 @@ import {
   DEFAULT_GPU_TYPE_IDS,
   ACCEPTED_GPU_TYPE_IDS,
   assertGpuTypeIdsAccepted,
+  DEFAULT_CPU_INSTANCE_IDS,
+  ACCEPTED_CPU_INSTANCE_IDS,
+  assertCpuInstanceIdsAccepted,
   PROVISION_BUDGET_MS,
   SSH_IPLESS_BAILOUT_MS,
 } from '../../../src/crystal/SecurePodClient.js'
@@ -1375,4 +1378,128 @@ test('substrate budgets: a LONGER declared readiness budget keeps polling past t
 
   assert.ok(healthCalls > 15, `expected polling to outlast the 20ms configured budget, got ${healthCalls} polls`)
   assert.equal(terminateSpy.calls.length, 1, 'the pod is terminated once, after a job that RAN')
+})
+
+// ── CPU pods, and the CLIP service that runs on one ──────────────────────────
+//
+// A CPU pod is the same RunPod pod API with a different request shape, and the CLIP
+// service on it is reachable at a public proxy hostname — so the bootstrap's job is
+// not "is it up" but "is it up with its door shut". These pin both halves.
+
+/**
+ * A fetch double for the CPU rail: the provision POST, the service's /health, and the
+ * unauthenticated embed probe. Each answer is configurable, because what these tests
+ * are about is what the bootstrap does when one of them is wrong.
+ */
+function makeCpuFetchMock(opts: {
+  podId?: string
+  health?: Array<{ status?: string; auth?: string } | 'error'>
+  probeStatus?: number
+} = {}): { fetch: typeof globalThis.fetch; calls: FetchCall[] } {
+  const podId = opts.podId ?? 'pod-cpu'
+  const health = opts.health ?? [{ status: 'ok', auth: 'token' }]
+  const probeStatus = opts.probeStatus ?? 401
+  const base = `https://${podId}-8080.proxy.runpod.net`
+  const calls: FetchCall[] = []
+  let healthCalls = 0
+
+  const fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    calls.push({ url, method, body: init?.body as string | undefined })
+
+    if (method === 'POST' && url === 'https://rest.runpod.io/v1/pods') {
+      return new Response(JSON.stringify({ id: podId }), { status: 200 })
+    }
+    if (method === 'GET' && url === `${base}/health`) {
+      const answer = health[Math.min(healthCalls++, health.length - 1)]
+      if (answer === 'error') throw new Error('connection refused')
+      return new Response(JSON.stringify(answer), { status: 200 })
+    }
+    if (method === 'POST' && url === `${base}/embed/text`) {
+      return new Response('{"error":"a valid job token is required"}', { status: probeStatus })
+    }
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof globalThis.fetch
+
+  return { fetch, calls }
+}
+
+test('every default CPU instance id is one RunPod accepts', () => {
+  assert.doesNotThrow(() => assertCpuInstanceIdsAccepted(DEFAULT_CPU_INSTANCE_IDS))
+})
+
+test('a CPU instance id outside RunPod’s catalogue is named, not sent', () => {
+  assert.throws(
+    () => assertCpuInstanceIdsAccepted(['cpu3g-4-16', 'cpu9z-1-1'], ACCEPTED_CPU_INSTANCE_IDS),
+    /cpu9z-1-1/,
+  )
+})
+
+test('provisionCpuPod asks for CPU compute and no GPU at all', async () => {
+  const { fetch, calls } = makeCpuFetchMock()
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+
+  const podId = await client.provisionCpuPod({ imageName: 'noema/clip:1', env: { CLIP_JOB_TOKEN: 'tok' } })
+
+  assert.equal(podId, 'pod-cpu')
+  const provision = calls.find(c => c.method === 'POST' && c.url === 'https://rest.runpod.io/v1/pods')
+  assert.ok(provision, 'expected a provision POST')
+  const body = JSON.parse(provision.body ?? '{}')
+  assert.equal(body.computeType, 'CPU')
+  assert.deepEqual(body.instanceIds, DEFAULT_CPU_INSTANCE_IDS)
+  assert.equal(body.gpuCount, undefined, 'a CPU pod asks for no GPU')
+  assert.equal(body.gpuTypeIds, undefined, 'and names no GPU SKU')
+  assert.deepEqual(body.env, { CLIP_JOB_TOKEN: 'tok' })
+})
+
+test('bootstrapClipService returns a pod only once the token gate has refused an anonymous embed', async () => {
+  const { fetch, calls } = makeCpuFetchMock({
+    health: [{ status: 'loading' }, { status: 'ok', auth: 'token' }],
+  })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+
+  const handle = await client.bootstrapClipService({
+    jobToken: 'tok', imageName: 'noema/clip:1', pollIntervalMs: 1,
+  })
+
+  assert.equal(handle.podId, 'pod-cpu')
+  assert.equal(handle.baseUrl, 'https://pod-cpu-8080.proxy.runpod.net')
+  const probe = calls.find(c => c.url.endsWith('/embed/text'))
+  assert.ok(probe, 'the bootstrap made the unauthenticated probe')
+  assert.equal(terminateSpy.calls.length, 0, 'a good pod is kept')
+})
+
+test('bootstrapClipService refuses — and terminates — a service that came up with no token', async () => {
+  const { fetch } = makeCpuFetchMock({ health: [{ status: 'ok', auth: 'open' }] })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+
+  await assert.rejects(
+    () => client.bootstrapClipService({ jobToken: 'tok', imageName: 'noema/clip:1', pollIntervalMs: 1 }),
+    /without its job token armed/,
+  )
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-cpu'], 'the open pod is not left running')
+})
+
+test('bootstrapClipService refuses — and terminates — a service that answers an anonymous embed', async () => {
+  const { fetch } = makeCpuFetchMock({ probeStatus: 200 })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+
+  await assert.rejects(
+    () => client.bootstrapClipService({ jobToken: 'tok', imageName: 'noema/clip:1', pollIntervalMs: 1 }),
+    /not in the request path/,
+  )
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-cpu'])
+})
+
+test('bootstrapClipService gives up on a service that never answers, and terminates the pod', async () => {
+  const { fetch } = makeCpuFetchMock({ health: ['error'] })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+
+  await assert.rejects(
+    () => client.bootstrapClipService({
+      jobToken: 'tok', imageName: 'noema/clip:1', readyTimeoutMs: 20, pollIntervalMs: 1,
+    }),
+    /did not become ready/,
+  )
+  assert.deepEqual(terminateSpy.calls.map(c => c.podId), ['pod-cpu'])
 })

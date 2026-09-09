@@ -11,6 +11,7 @@ import http from 'node:http'
 import express from 'express'
 import { createVestigiaRouter } from '../../../src/api/vestigia/vestigiaRouter.js'
 import { MemoryVestigiorum } from '../../../src/rag/MemoryVestigiorum.js'
+import { EMBED_SWEEP_IMPETUS_PER_ITEM, MAX_SWEEP_ITEMS } from '../../../src/crystal/EmbedSweepCursor.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
 import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
 
@@ -467,6 +468,101 @@ test('GET /search with your OWN animaId returns your privata (CRIT-1 preserves s
     const prompts = res.body.results.map((r: any) => r.vestigium.promptum)
     assert.ok(prompts.includes('my own private trace'))
     assert.ok(!prompts.includes('someone elses private trace'), 'must not leak another identity')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+// ── GET /backlog — how much of MY trail is un-embedded, and what it would cost ──
+//
+// A quote, not a run: reading it spends nothing. It is owner-scoped the same way
+// GET / is, and the price it names is the one the sweep settles at, because both
+// read the same constant.
+
+/** A trace with no embedding at all — `seed()` above indexes its promptum, this one doesn't. */
+async function seedUnembedded(vestigiorum: MemoryVestigiorum, animaId: string, promptum: string, imagoUrl?: string) {
+  return vestigiorum.create({
+    modusId: 'modus.test',
+    auctorKey: { animaId },
+    promptum,
+    summarium: promptum,
+    genus: 'image',
+    visibilitas: 'privata',
+    ...(imagoUrl ? { imagoUrl } : {}),
+  })
+}
+
+test('GET /api/vestigia/backlog without credentials -> 401', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/backlog`)
+    assert.equal(res.status, 401)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/backlog counts only the caller’s own un-embedded traces', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedUnembedded(vestigiorum, 'anima-a', 'mine, unembedded')
+  await seedUnembedded(vestigiorum, 'anima-a', 'mine, with a picture', 'https://e/1.png')
+  await seed(vestigiorum, 'anima-a', 'mine, already embedded')
+  await seedUnembedded(vestigiorum, 'anima-b', 'theirs')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/backlog`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.backlog.promptum, 2, 'the embedded one is not owed, the stranger’s is not mine')
+    assert.equal(res.body.backlog.imago, 1, 'only the trace carrying an image owes an image embedding')
+    assert.equal(res.body.backlog.intella, 0)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/backlog quotes the backlog at the price the sweep settles at', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedUnembedded(vestigiorum, 'anima-a', 'one')
+  await seedUnembedded(vestigiorum, 'anima-a', 'two', 'https://e/2.png')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/backlog`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.body.perItem, EMBED_SWEEP_IMPETUS_PER_ITEM.toString())
+    assert.equal(res.body.quote.promptum, (2n * EMBED_SWEEP_IMPETUS_PER_ITEM).toString())
+    assert.equal(res.body.quote.imago, (1n * EMBED_SWEEP_IMPETUS_PER_ITEM).toString())
+    assert.equal(res.body.quote.total, (3n * EMBED_SWEEP_IMPETUS_PER_ITEM).toString())
+    assert.equal(res.body.cap, MAX_SWEEP_ITEMS)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/backlog quotes one pass, not an uncapped backlog', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  for (let i = 0; i < MAX_SWEEP_ITEMS + 5; i++) await seedUnembedded(vestigiorum, 'anima-a', `p${i}`)
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/backlog`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.body.backlog.promptum, MAX_SWEEP_ITEMS + 5, 'the count is the whole truth')
+    assert.equal(
+      res.body.quote.promptum,
+      (BigInt(MAX_SWEEP_ITEMS) * EMBED_SWEEP_IMPETUS_PER_ITEM).toString(),
+      'but the price is what the next pass can actually be asked for',
+    )
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('GET /api/vestigia/backlog is not read as an id', async () => {
+  const vestigiorum = new MemoryVestigiorum(fakeEmbed)
+  await seedUnembedded(vestigiorum, 'anima-a', 'mine')
+  const { server, url } = await makeServer(vestigiorum)
+  try {
+    const res = await get(`${url}/api/vestigia/backlog`, { authorization: 'Bearer anima-a' })
+    assert.equal(res.status, 200)
+    assert.ok(res.body.backlog, 'the backlog route wins over GET /:id')
   } finally {
     await closeServer(server)
   }

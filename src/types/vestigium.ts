@@ -190,6 +190,36 @@ export interface VestigiumResult {
 }
 
 // ---------------------------------------------------------------------------
+// The embedding backlog
+// ---------------------------------------------------------------------------
+
+/**
+ * How many of one identity's vestigia are still missing each embedding.
+ *
+ * A vestigium is created with no vectors and is embedded afterwards, so a run that
+ * completes while the CLIP service is unreachable leaves a trace that metadata can
+ * find and semantic search cannot. That gap is the BACKLOG, and it is per dimension:
+ * a trace with no image carries no `imago` debt, and one whose promptum embedded
+ * while its image fetch failed owes only the image.
+ */
+export type VestigiumBacklog = Record<VestigiumSearchDimension, number>
+
+/**
+ * One backlogged trace, reduced to the values an embed pass needs.
+ *
+ * Deliberately NOT a `Vestigium`: the sweep runs as an ordinary metered run, and an
+ * Actum is identity-blind, so the work has to travel as values the API layer read for
+ * the authenticated caller rather than as ids a cursor would resolve for itself.
+ */
+export interface VestigiumSweepItem {
+  id: string
+  /** The text to embed — promptum + negativum for `promptum`, the model description for `intella`. */
+  textum?: string
+  /** The image to embed for `imago`. */
+  imagoUrl?: string
+}
+
+// ---------------------------------------------------------------------------
 // Vestigiorum — the trace store
 // ---------------------------------------------------------------------------
 
@@ -258,4 +288,41 @@ export interface Vestigiorum {
    * router/API layer, not here; this is a plain delete-by-id.
    */
   delete(id: string): Promise<void>
+
+  /**
+   * How much of this identity's trail is still un-embedded, per dimension.
+   *
+   * Owner-scoped by construction: the count is over the auctorKey's own vestigia and
+   * there is no parameter that widens it. A dimension a vestigium cannot owe — no
+   * image, no model description — is not counted against it.
+   */
+  backlogCount(auctorKey: { animaId: string } | { commitment: string }): Promise<VestigiumBacklog>
+
+  /**
+   * The next `limit` backlogged traces for this identity in one dimension, oldest first
+   * — the oldest gap is the one a search has been failing to find for longest.
+   *
+   * Owner-scoped for the same reason `backlogCount` is, and it returns VALUES rather
+   * than records: what comes back is what an embed pass needs and nothing else.
+   */
+  backlog(
+    auctorKey: { animaId: string } | { commitment: string },
+    per: VestigiumSearchDimension,
+    limit: number,
+  ): Promise<VestigiumSweepItem[]>
+
+  /**
+   * Write one computed vector back onto one of this identity's vestigia.
+   *
+   * The auctorKey is part of the MATCH, not a check made before it: an id belonging to
+   * another identity matches nothing and writes nothing, and the caller is told so by
+   * `false` rather than by an exception. That is what keeps a sweep from writing onto a
+   * stranger's trace even if a foreign id ever reached it.
+   */
+  setEmbedding(
+    id: string,
+    auctorKey: { animaId: string } | { commitment: string },
+    per: VestigiumSearchDimension,
+    embedding: number[],
+  ): Promise<boolean>
 }
