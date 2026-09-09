@@ -23,6 +23,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -269,6 +272,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -437,6 +443,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -605,6 +614,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -717,6 +729,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -829,6 +844,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -996,6 +1014,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -1188,6 +1209,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -1696,6 +1720,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -1787,6 +1814,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -1874,6 +1904,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2044,6 +2077,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2189,6 +2225,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2372,6 +2411,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2464,6 +2506,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2527,6 +2572,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2610,6 +2658,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2682,6 +2733,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2768,6 +2822,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2854,6 +2911,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -2996,6 +3056,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -3172,6 +3235,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -3336,6 +3402,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -3426,6 +3495,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -3701,6 +3773,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -4167,6 +4242,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -4388,6 +4466,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -4646,6 +4727,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -4903,6 +4987,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -5160,6 +5247,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -5403,6 +5493,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -5624,6 +5717,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -5845,6 +5941,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -6074,6 +6173,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -6303,6 +6405,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -6617,6 +6722,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -6928,6 +7036,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -7234,6 +7345,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -7569,6 +7683,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -7905,6 +8022,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -8236,6 +8356,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -8610,6 +8733,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -8752,6 +8878,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -9083,6 +9212,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -9448,6 +9580,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -9788,6 +9923,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10102,6 +10240,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10348,6 +10489,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10560,6 +10704,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10617,6 +10764,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10719,6 +10869,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10899,6 +11052,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -10955,6 +11111,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11056,6 +11215,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11135,6 +11297,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11192,6 +11357,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11272,6 +11440,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11412,6 +11583,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11511,6 +11685,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11615,6 +11792,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -11721,6 +11901,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -12056,6 +12239,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -12302,6 +12488,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -12616,6 +12805,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -12845,6 +13037,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -13074,6 +13269,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -13188,6 +13386,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -13301,6 +13502,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -13550,6 +13754,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -13779,6 +13986,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14008,6 +14218,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14237,6 +14450,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14301,6 +14517,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14365,6 +14584,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14618,6 +14840,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14785,6 +15010,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -14959,6 +15187,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15068,6 +15299,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15242,6 +15476,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15321,6 +15558,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15495,6 +15735,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15790,6 +16033,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15893,6 +16139,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -15974,6 +16223,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16062,6 +16314,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16170,6 +16425,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16266,6 +16524,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16382,6 +16643,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16533,6 +16797,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16656,6 +16923,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16808,6 +17078,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -16849,6 +17122,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -17004,6 +17280,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -17145,6 +17424,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -17336,6 +17618,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -17558,6 +17843,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -17756,6 +18044,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -18057,6 +18348,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -18098,6 +18392,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -18155,6 +18452,9 @@
           },
           {
             "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
           }
         ],
         "responses": {
@@ -18257,6 +18557,12 @@
         "in": "header",
         "name": "x-bursa-token",
         "description": "A bearer purse token. Carries its own credit balance and no account identity. Send it alone — pairing it with an identity header defeats the point."
+      },
+      "CommitmentAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-commitment",
+        "description": "An anonymous arcanum spend commitment. Self-asserted, no account identity — the same commitment used in `commitment` request-body fields, carried as a header on requests that have no body to carry it in."
       }
     },
     "schemas": {
