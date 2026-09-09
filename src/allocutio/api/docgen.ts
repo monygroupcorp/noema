@@ -63,11 +63,13 @@ function operationFor(route: RouteSpec): Record<string, unknown> {
 
   const op: Record<string, unknown> = {
     summary: route.summary,
-    // All three credentials resolve at one chokepoint (`apiRouter.authCaller`), so an authed
+    // All four credentials resolve at one chokepoint (`apiRouter.authCaller`), so an authed
     // operation accepts any of them. A purse token is a bearer credential with no account behind
     // it: it is admitted here and then bounded by what a purse is allowed to reach, exactly as a
-    // partner API key is bounded by its own scope.
-    security: route.auth ? [{ ApiKeyAuth: [] }, { BearerAuth: [] }, { BursaToken: [] }] : [],
+    // partner API key is bounded by its own scope. A commitment is self-asserting the same way.
+    security: route.auth
+      ? [{ ApiKeyAuth: [] }, { BearerAuth: [] }, { BursaToken: [] }, { CommitmentAuth: [] }]
+      : [],
     responses,
   }
   if (parameters.length > 0) op.parameters = parameters
@@ -120,6 +122,19 @@ export function generateOpenApi(contract: ApiContract): object {
             'A bearer purse token. Carries its own credit balance and no account identity. ' +
             'Send it alone — pairing it with an identity header defeats the point.',
         },
+        // The anon arcanum rail. Self-asserting: `IdentityResolver` admits it as-is and the
+        // real spend/double-spend check happens downstream in `ActumInceptor`. It is the only
+        // credential a bodyless request (GET /runs/:id, the SSE stream) can carry, so an
+        // anonymous caller needs it to retrieve or observe a run it started.
+        CommitmentAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-commitment',
+          description:
+            'An anonymous arcanum spend commitment. Self-asserted, no account identity — ' +
+            'the same commitment used in `commitment` request-body fields, carried as a ' +
+            'header on requests that have no body to carry it in.',
+        },
       },
       schemas: {
         Run: SCHEMAS.Run as object,
@@ -163,7 +178,7 @@ export function generateReference(contract: ApiContract): string {
   lines.push('## Authentication')
   lines.push('')
   lines.push(
-    'An operation marked **Auth: required** accepts any one of three credentials, all resolved ' +
+    'An operation marked **Auth: required** accepts any one of four credentials, all resolved ' +
       'at the same chokepoint:',
   )
   lines.push('')
@@ -173,6 +188,12 @@ export function generateReference(contract: ApiContract): string {
     '- `x-bursa-token: <token>` — a bearer purse. It carries its own credits and no account ' +
       'identity, so send it alone: pairing it with an identity header defeats the point. An ' +
       'ownerless purse is refused until the trusted-setup ceremony concludes.',
+  )
+  lines.push(
+    '- `x-commitment: <commitment>` — an anonymous arcanum spend commitment, self-asserted ' +
+      'and carrying no account identity. The only channel on a bodyless request (`GET ' +
+      '/runs/:id`, the SSE stream); elsewhere the same value can travel as a `commitment` ' +
+      'body field instead.',
   )
   lines.push('')
 

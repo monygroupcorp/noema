@@ -6,11 +6,12 @@ The live, self-describing source of truth is `GET /v1/openapi.json` plus the dis
 
 ## Authentication
 
-An operation marked **Auth: required** accepts any one of three credentials, all resolved at the same chokepoint:
+An operation marked **Auth: required** accepts any one of four credentials, all resolved at the same chokepoint:
 
 - `X-API-Key: <key>` — a partner API key.
 - `Authorization: Bearer <jwt>` — a session key.
 - `x-bursa-token: <token>` — a bearer purse. It carries its own credits and no account identity, so send it alone: pairing it with an identity header defeats the point. An ownerless purse is refused until the trusted-setup ceremony concludes.
+- `x-commitment: <commitment>` — an anonymous arcanum spend commitment, self-asserted and carrying no account identity. The only channel on a bodyless request (`GET /runs/:id`, the SSE stream); elsewhere the same value can travel as a `commitment` body field instead.
 
 ## Operations
 
