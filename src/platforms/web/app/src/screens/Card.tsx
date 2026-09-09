@@ -10,7 +10,7 @@ import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
 import { fieldExample } from '../lib/promptExamples';
 import { humanizeKey } from '../lib/labels';
-import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
+import { STAGE_LABELS, measure, queueLabel, useRunStream } from '../lib/runStream';
 import { publishNote, publishOutcome } from '../lib/editio';
 import { Lightbox } from '../components/Lightbox';
 
@@ -168,6 +168,10 @@ export function Card() {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchErr, setDispatchErr] = useState<string | undefined>();
   const runStream = useRunStream(runId);
+  // Giving up a run that is still waiting for a warm pod. Local only while the request is
+  // in flight — the outcome is not asserted here but read off the stream, which reports the
+  // cancelled run as failed with nothing charged, the same as any other way it could end.
+  const [stopping, setStopping] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   // Publish-to-feed state for the current result.
@@ -351,6 +355,22 @@ export function Card() {
     }
   }
 
+  // Stop waiting: the way out of the warm-pod line. A queued run holds its reservation for
+  // the whole wait, so without this the only way to get those credits back is to leave the
+  // page and let the wait budget expire — which is the same refusal the line was built to
+  // spare the payer, just twenty minutes later.
+  async function stopWaiting() {
+    if (!runId || stopping) return;
+    setStopping(true);
+    try {
+      await api.cancelRun(runId);
+    } catch (e) {
+      setDispatchErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStopping(false);
+    }
+  }
+
   // Credit model (credits only — never a $/hr market rate). The live quote's
   // impetus is the upper-bound base credit estimate for a run on our compute.
   const baseCredits = quote?.impetus ? Math.round(Number(quote.impetus)) : null;
@@ -530,6 +550,22 @@ export function Card() {
                   {runId && <> — charged {runStream.charged ?? '0'} credits.</>}
                   {' '}
                   <button className="btn-ghost" onClick={doRun}>Retry</button>
+                </div>
+              )}
+
+              {/* Waiting for a pod is a different thing from running on one, and it is the
+                  one state the watcher can still act on: they are told where they stand, that
+                  they need not sit here for it, and how to take the credits back instead. */}
+              {runId && runStream.queue && !runStream.terminal && (
+                <div className="warn">
+                  <div>
+                    {queueLabel(runStream.queue)}. It starts on the next pod that frees — you can
+                    close this page and come back to it.
+                    {' '}
+                    <button className="btn-ghost" onClick={stopWaiting} disabled={stopping}>
+                      {stopping ? 'Stopping…' : 'Stop waiting and refund'}
+                    </button>
+                  </div>
                 </div>
               )}
 

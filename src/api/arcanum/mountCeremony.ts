@@ -15,18 +15,28 @@ const R1CS_PATH = path.join(ARTIFACTS, 'arcanum.r1cs')
 const ROOT_ZKEY = path.join(ARTIFACTS, 'arcanum_0000.zkey')
 
 /**
+ * Where the ceremony's zkey chain lives. The sequencer writes it; /arcanum/circuit/zkey
+ * reads the finalized key back out of it, so both sides must resolve the same directory.
+ */
+export function ceremonyCustodyDir(): string {
+  return process.env.CEREMONY_ZKEY_DIR ?? path.join(ARTIFACTS, 'ceremony')
+}
+
+/**
  * Wire the ceremony sequencer onto the app at /v1/ceremony and run the two one-time
  * coordinator events as deploy-time toggles (so the live contribution flow itself never
  * needs a redeploy):
  *
  *   CEREMONY_OPEN=1            — seed the chain root from arcanum_0000.zkey and open it.
+ *   CEREMONY_FINAL_ZKEY=<path> — publish the beacon'd final proving key into custody, so
+ *                                the site can serve the key the transcript names.
  *   CEREMONY_FINALIZE=<hash>   — seal the ceremony with the beacon'd final proving-key hash
  *                                (run scripts/arcanum-trusted-setup.sh --finalize first).
  *   CEREMONY_ZKEY_DIR          — custody dir for the zkey chain (default: <artifacts>/ceremony).
  *   ARCANUM_PTAU_PATH          — pot20_final.ptau for deep per-contribution verification.
  */
 export async function mountCeremony(app: Express, store: CeremoniaStore): Promise<void> {
-  const custodyDir = process.env.CEREMONY_ZKEY_DIR ?? path.join(ARTIFACTS, 'ceremony')
+  const custodyDir = ceremonyCustodyDir()
   const custody = new LocalZkeyCustody(custodyDir)
   const ptauPath = process.env.ARCANUM_PTAU_PATH ?? path.join(ARTIFACTS, 'pot20_final.ptau')
 
@@ -53,6 +63,34 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
     }
   }
 
+  // ── one-time: publish the beacon'd final key ──────────────────────────────────────
+  // The beacon is applied off the sequencer (scripts/arcanum-trusted-setup.sh --finalize),
+  // so the final key exists only on the coordinator's box until it is put here. Without
+  // it the transcript would name a key the site cannot serve. This runs BEFORE the phase
+  // flip below: the ceremony must never read finalized while the key it names is absent.
+  const finalZkey = process.env.CEREMONY_FINAL_ZKEY
+  if (finalZkey) {
+    try {
+      if (!existsSync(finalZkey)) {
+        log.error('CEREMONY_FINAL_ZKEY set but the file is absent — final key NOT published',
+          { path: finalZkey })
+      } else {
+        const bytes = readFileSync(finalZkey)
+        const hash = sha256Hex(bytes)
+        const declared = process.env.CEREMONY_FINALIZE?.toLowerCase()
+        if (declared && declared !== hash) {
+          log.error('CEREMONY_FINAL_ZKEY does not hash to CEREMONY_FINALIZE — refusing to publish it',
+            { fileHash: hash, declared })
+        } else {
+          await custody.put(hash, bytes)
+          log.info('ceremony final proving key published to custody', { finalHash: hash, bytes: bytes.length })
+        }
+      }
+    } catch (err) {
+      log.error('publishing the final proving key failed', { error: String(err) })
+    }
+  }
+
   // ── one-time: finalize ────────────────────────────────────────────────────────────
   const finalHash = process.env.CEREMONY_FINALIZE
   if (finalHash && /^[0-9a-f]{64}$/i.test(finalHash)) {
@@ -65,6 +103,22 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
     } catch (err) {
       log.error('ceremony finalize failed', { error: String(err) })
     }
+  }
+
+  // A finalized ceremony whose key is in neither custody nor an external host means
+  // /arcanum/circuit/zkey has nothing it can honestly serve. Say so at boot rather than
+  // leave it to be discovered by a client that cannot make a proof.
+  try {
+    const status = await store.status()
+    if (status.phase === 'finalized' && status.finalHash && !process.env.ARCANUM_ZKEY_URL) {
+      if (!(await custody.get(status.finalHash))) {
+        log.error('ceremony is finalized but its proving key is in neither custody nor ' +
+          'ARCANUM_ZKEY_URL — the site can serve no proving key. Set CEREMONY_FINAL_ZKEY ' +
+          'to the beacon\'d arcanum_final.zkey and redeploy.', { finalHash: status.finalHash })
+      }
+    }
+  } catch (err) {
+    log.error('ceremony final-key check failed', { error: String(err) })
   }
 
   app.use('/v1/ceremony', express.json(), createCeremoniaRouter(store, {

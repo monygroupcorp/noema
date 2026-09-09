@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import request from 'supertest'
-import { createWidgetRouter, type WidgetRouterDeps } from '../../../../src/allocutio/api/widgetRouter.js'
+import { createWidgetRouter, parseFrameAncestors, frameAncestorsFor, type WidgetRouterDeps } from '../../../../src/allocutio/api/widgetRouter.js'
 import type { Legatus } from '../../../../src/types/legatus.js'
 import type { FeedItem } from '../../../../src/allocutio/api/types.js'
 import type { FeedFilter } from '../../../../src/types/editio.js'
@@ -25,8 +25,9 @@ function app(over: Partial<WidgetRouterDeps> = {}, capture?: { filter?: FeedFilt
     },
     feed: async (filter) => { if (capture) capture.filter = filter; return rawFeed(filter) },
     appearance: over.appearance ?? (async () => undefined),
-    // Mirrors the real src/index.ts resolver: a per-`Legatus` list wins, else the global list.
-    frameAncestors: over.frameAncestors ?? ((l) => (l?.frameAncestors?.length ? l.frameAncestors : GLOBAL_ANCESTORS)),
+    // The resolver src/index.ts wires, not a copy of it — so these assertions are about the
+    // deployed behaviour and cannot pass while production's own resolution has drifted.
+    frameAncestors: over.frameAncestors ?? frameAncestorsFor(GLOBAL_ANCESTORS),
     ...(over.modorum ? { modorum: over.modorum } : {}),
     ...(over.quoteImpetus ? { quoteImpetus: over.quoteImpetus } : {}),
     ...(over.x402Config ? { x402Config: over.x402Config } : {}),
@@ -223,6 +224,28 @@ test('empty allowlist → frame-ancestors defaults to self', async () => {
   const a = app({ frameAncestors: () => [] })
   const res = await request(a).get('/widget/camel42')
   assert.equal(res.headers['content-security-policy'], "frame-ancestors 'self'")
+})
+
+// The env seam: `WIDGET_FRAME_ANCESTORS` is the only control a deployment has over who may
+// frame the embed, and an operator's string reaches the CSP header through parseFrameAncestors
+// alone. Unset must mean CLOSED — the legacy behaviour it replaced was `frame-ancestors *`.
+test('parseFrameAncestors: unset or blank is an EMPTY list, which frame() renders as self', () => {
+  assert.deepEqual(parseFrameAncestors(undefined), [])
+  assert.deepEqual(parseFrameAncestors(''), [])
+  assert.deepEqual(parseFrameAncestors('   \n\t '), [])
+})
+
+test('parseFrameAncestors: origins separate on whitespace, commas, or both', () => {
+  const expected = ['https://a.example', 'https://b.example', 'https://c.example']
+  assert.deepEqual(parseFrameAncestors('https://a.example https://b.example https://c.example'), expected)
+  assert.deepEqual(parseFrameAncestors('https://a.example,https://b.example,https://c.example'), expected)
+  assert.deepEqual(parseFrameAncestors(' https://a.example , https://b.example\nhttps://c.example '), expected)
+})
+
+test('parseFrameAncestors: a parsed list reaches the header verbatim, in order', async () => {
+  const a = app({ frameAncestors: frameAncestorsFor(parseFrameAncestors('https://a.example, https://b.example')) })
+  const res = await request(a).get('/widget/camel42')
+  assert.equal(res.headers['content-security-policy'], 'frame-ancestors https://a.example https://b.example')
 })
 
 test('per-agent frameAncestors on the Legatus wins over the global list', async () => {

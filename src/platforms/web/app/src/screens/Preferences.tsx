@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { api, type Generatio, type MeView, type FlowSummary } from '../lib/api';
+import { MEMORY_NOTES_MAX, MEMORY_NOTE_MAX_CHARS } from '../lib/conciergeMemory';
 import { useProject } from '../state/project';
 
 // Preferences — portable generation defaults that travel across web · Telegram · API.
@@ -10,7 +11,11 @@ import { useProject } from '../state/project';
 // applied at cast time (style prepends the prompt; negativePrompt fills the flow's
 // negative input). The per-command param defaults have a ready backend too
 // (GET/PUT /v1/me/affines/:modusId, applied cast-time) — the inline per-command editor
-// is the marked next step. "land in (project)" is a live picker persisting
+// is the marked next step. The memory-notes card is the concierge's side of the author ladder:
+// the agent PROPOSES a line at the end of a turn, the chat screen writes it through this same
+// `generatio`, and this is where the user reads it back, edits it, and deletes it. Nothing here
+// is a special surface — the notes are a Generatio field, so they are portable like the rest and
+// are deleted with the account. "land in (project)" is a live picker persisting
 // generatio.defaultProjectId (Provincia) — stored + portable; cast-time auto-filing is the
 // marked next step. The "default /make flow" picker is WIRED — it rebinds the `make` verb
 // (PUT /v1/me/bindings/make), resolved at cast time server-side. MARKED gap: /animate·/effect·
@@ -24,6 +29,9 @@ export function Preferences() {
   const [gen, setGen] = useState<Generatio>({});
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [makeModel, setMakeModel] = useState('flux-schnell');
+  // The concierge's memory notes, held apart from `gen` so an in-progress edit to a line does not
+  // ride along on an unrelated preference save (and vice versa). Committed on blur / delete.
+  const [notes, setNotes] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const genRef = useRef<Generatio>({});
@@ -34,7 +42,7 @@ export function Preferences() {
     let live = true;
     api.getMe().then((m) => {
       if (!live) return;
-      setMe(m); setGen(m.generatio ?? {});
+      setMe(m); setGen(m.generatio ?? {}); setNotes(m.generatio?.memoryNotes ?? []);
       setMakeModel(m.bindings.find((b) => b.verb === 'make')?.modusId ?? 'flux-schnell');
     }).catch((e) => { if (live) setErr(msg(e)); });
     // The picker's options — the flow catalogue. Falls back to just the current binding on failure.
@@ -51,6 +59,14 @@ export function Preferences() {
   }
   const editLocal = (patch: Partial<Generatio>) => setGen((cur) => ({ ...cur, ...patch }));
   const flush = () => commit(genRef.current);
+
+  // Memory notes commit through the SAME whole-record PUT; a blanked line is a deletion, which is
+  // what "edit it away" has to mean for the promise on the card to be true.
+  function commitNotes(next: string[]) {
+    const cleaned = next.map((n) => n.trim()).filter((n) => n !== '');
+    setNotes(cleaned);
+    commit({ ...genRef.current, memoryNotes: cleaned });
+  }
 
   // Spicy mode (18+). Enabling requires a one-time 18+ self-attestation on file; if none is recorded,
   // run a click-through confirmation and POST it (POST /v1/me/attestation) BEFORE persisting the toggle.
@@ -137,6 +153,27 @@ export function Preferences() {
               <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
             <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
               <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
+            </div>
+          </div>
+          <div className="pref-card">
+            <div className="pref-card-h"><Ic name="sparkles" /><b>What the concierge remembers</b></div>
+            {notes.length === 0 && (
+              <div className="pref-note mono" style={{ color: 'var(--faint)' }}>Nothing yet. The concierge adds a line here when it learns something durable about how you work.</div>
+            )}
+            {notes.map((note, i) => (
+              <label key={i} className="ac-row">
+                <input
+                  className="cer-input"
+                  value={note}
+                  maxLength={MEMORY_NOTE_MAX_CHARS}
+                  onChange={(e) => setNotes(notes.map((n, j) => (j === i ? e.target.value : n)))}
+                  onBlur={() => commitNotes(notes)}
+                />
+                <button className="ghost" aria-label="Forget this" title="Forget this" onClick={() => commitNotes(notes.filter((_, j) => j !== i))}>✕</button>
+              </label>
+            ))}
+            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
+              <span className="hemi2 dashed" /> Written by the concierge at the end of a turn, never silently — edit or delete any line and it is gone from the next conversation. Kept to the {MEMORY_NOTES_MAX} most recent, and deleted with your account.
             </div>
           </div>
         </div>

@@ -6,14 +6,12 @@ import { buildPrompt } from '../lib/promptExamples';
 import { api, newTurnKey, type ConciergeProposal, type ConciergeReply, type ConciergeResult, type ColloquiumSummary } from '../lib/api';
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
+import { WriteProposalCard } from '../components/WriteProposalCard';
+import { commitMemoryDelta } from '../lib/conciergeMemory';
 import { pickConciergeThread } from '../lib/conciergeThread';
 
-// NAVIGATE (noema-367): `destination` isn't part of `lib/api.ts`'s ConciergeReply
-// shape yet (that file deliberately holds local types, not a backend import — see
-// `git log -- src/platforms/web/app/src/lib/api.ts`), so it's widened locally here
-// rather than by editing that shared file. Belt-and-suspenders: render only when
-// the path is in-app (starts with "/"); the agent-side allowlist is the real gate.
-type ReplyWithDestination = ConciergeReply & { destination?: { path: string; label: string } };
+// NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
+// (starts with "/"); the agent-side allowlist is the real gate.
 function DestinationLink({ destination, onGo }: { destination: { path: string; label: string }; onGo: (path: string) => void }) {
   if (!destination.path.startsWith('/')) return null;
   return (
@@ -44,13 +42,19 @@ function groupDockThreads(threads: ColloquiumSummary[], nameOf: (id?: string) =>
   }
   return [...buckets.values()].sort((a, b) => (a.key === DOCK_UNCATEGORIZED ? 1 : b.key === DOCK_UNCATEGORIZED ? -1 : 0));
 }
-// Reconstruct a ConciergeResult from a stored agent Dictum corpus (a serialized proposal round-trips
-// to a proposal; anything else is a plain reply) so the dock shows the resumed thread's last turn.
+// Reconstruct a ConciergeResult from a stored agent Dictum corpus so the dock shows the resumed
+// thread's last turn. colloquiaRouter.dictumCorpus serializes any turn that carries structure — a
+// proposal, or a reply with a destination or an un-GO'd write card — and leaves a plain reply as
+// plain text, so BOTH shapes arrive here and both must round-trip. A serialized reply that fell
+// through to the plain-text branch would put a raw JSON blob on screen where the answer belongs.
 function agentDictumToResult(corpus: string): ConciergeResult {
   try {
     const parsed = JSON.parse(corpus) as { kind?: string } & Record<string, unknown>;
     if (parsed && parsed.kind === 'proposal') {
       return { ...parsed, tokenUsage: (parsed.tokenUsage as ConciergeProposal['tokenUsage']) ?? { totalTokens: 0 } } as unknown as ConciergeProposal;
+    }
+    if (parsed && parsed.kind === 'reply' && typeof parsed.text === 'string') {
+      return { ...parsed, tokenUsage: { totalTokens: 0 } } as unknown as ConciergeReply;
     }
   } catch { /* plain reply */ }
   return { kind: 'reply', text: corpus, tokenUsage: { totalTokens: 0 } };
@@ -78,6 +82,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   const [idleSending, setIdleSending] = useState(false);
   const [idleColloquiumId, setIdleColloquiumId] = useState<string | undefined>();
   const [idleResult, setIdleResult] = useState<ConciergeResult | null>(null);
+  // The turn `idleResult` came from, by its idempotency key. The dock keeps only the LAST turn, so
+  // resuming a thread re-renders a stored write card; keyed by this, one already pressed comes back
+  // settled instead of offering a second GO.
+  const [idleTurnKey, setIdleTurnKey] = useState<string | undefined>();
   const [idleCritiqueOf, setIdleCritiqueOf] = useState<string | undefined>();
 
   // Thread history in the dock (noema-111): pick a past thread to continue. The active project
@@ -106,12 +114,14 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
       const { dicta } = await api.getColloquium(id);
       const lastAgent = [...dicta].reverse().find((d) => d.genus === 'agent');
       setIdleResult(lastAgent ? agentDictumToResult(lastAgent.corpus) : null);
+      setIdleTurnKey(lastAgent?.turnKey);
     } catch { /* keep the thread active even if the last-turn fetch fails */ }
   }
   function startNewDock() {
     setHistOpen(false);
     setIdleColloquiumId(undefined);
     setIdleResult(null);
+    setIdleTurnKey(undefined);
   }
 
   // Resume by default (noema-324): on mount, with no active pointer yet, pick the caller's most
@@ -182,16 +192,25 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
         setIdleColloquiumId(cid);
         createdThread = true;
       }
+      const turnKey = newTurnKey();
       const { result } = await api.postDictum(cid, {
-        turnKey: newTurnKey(),
+        turnKey,
         message: v,
         ...(priorRunId ? { priorRunId } : {}),
       });
       setIdleResult(result);
+      setIdleTurnKey(turnKey);
       setIdleMsg('');
+      // The turn-end memory delta (the author ladder). The dock is the concierge on every screen
+      // but the full chat, so a turn taken here has to write what it learned exactly as a turn in
+      // /chat does — the client applies it, once, after the turn renders. Fire-and-forget:
+      // commitMemoryDelta swallows its own failures, because losing a remembered line must never
+      // fail the turn that produced it.
+      if (result.memoryDelta) void commitMemoryDelta(result.memoryDelta);
       if (createdThread) void refreshThreads();
     } catch (e) {
       setIdleResult({ kind: 'reply', text: e instanceof Error ? e.message : String(e), tokenUsage: { totalTokens: 0 } });
+      setIdleTurnKey(undefined);
     } finally {
       setIdleSending(false);
     }
@@ -280,9 +299,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                 : (
                   <div className="ex">
                     <div className="extext">{idleResult.text}</div>
-                    {(idleResult as ReplyWithDestination).destination && (
-                      <DestinationLink destination={(idleResult as ReplyWithDestination).destination!} onGo={navigate} />
+                    {idleResult.destination && (
+                      <DestinationLink destination={idleResult.destination} onGo={navigate} />
                     )}
+                    {idleResult.write && <WriteProposalCard write={idleResult.write} confirmKey={idleTurnKey} />}
                   </div>
                 )
             )}

@@ -26,8 +26,10 @@ import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.j
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
 import { createQuerelaAdminRouter } from './api/querela/querelaAdminRouter.js'
-import { createArcanumRouter } from './api/arcanum/arcanumRouter.js'
-import { mountCeremony } from './api/arcanum/mountCeremony.js'
+import { createArcanumRouter, REPO_ZKEY_PATH } from './api/arcanum/arcanumRouter.js'
+import { mountCeremony, ceremonyCustodyDir } from './api/arcanum/mountCeremony.js'
+import { LocalZkeyCustody } from './arcanum/CeremoniaCustody.js'
+import { createProvingKeySource } from './arcanum/ProvingKeySource.js'
 import { CrystalApi } from './allocutio/api/CrystalApi.js'
 import { IdentityResolver as ApiIdentityResolver, credentialsFromHeaders } from './allocutio/api/IdentityResolver.js'
 import { createApiRouter } from './allocutio/api/apiRouter.js'
@@ -53,7 +55,7 @@ import { createAuthRouter } from './allocutio/api/authRouter.js'
 import { MongoCredentum } from './crystal/MongoCredentum.js'
 import { MongoLinkToken } from './crystal/MongoLinkToken.js'
 import { linkTelegramToAccount, issueTelegramRecoveryCode } from './allocutio/telegram/telegramRecovery.js'
-import { createWidgetRouter } from './allocutio/api/widgetRouter.js'
+import { createWidgetRouter, parseFrameAncestors, frameAncestorsFor } from './allocutio/api/widgetRouter.js'
 import { createPurseRouter } from './allocutio/api/purseRouter.js'
 import { createColloquiaRouter } from './allocutio/api/colloquiaRouter.js'
 import { runToolChat, httpApiTransport } from './allocutio/api/OpenRouterToolClient.js'
@@ -1232,6 +1234,13 @@ async function main(): Promise<void> {
   app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
     anonPurseEnabled,
     zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    // The key clients prove with follows the ceremony: once it is finalized, /circuit/zkey
+    // serves the key its public transcript names, not whatever the image was built with.
+    provingKey: createProvingKeySource({
+      store: ring.ceremonia,
+      custody: new LocalZkeyCustody(ceremonyCustodyDir()),
+      repoZkeyPath: REPO_ZKEY_PATH,
+    }),
     serverUrl: process.env.WEBHOOK_URL,
     resolve: (req) => apiResolver.resolve(
       credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body)
@@ -1425,8 +1434,7 @@ async function main(): Promise<void> {
   // wins; otherwise the platform-wide CSP allowlist (WIDGET_FRAME_ANCESTORS, space/comma-
   // sep) applies unchanged; with neither set, the router's own default ('self') applies —
   // replacing the legacy `frame-ancestors *`.
-  const widgetFrameAncestors = (process.env.WIDGET_FRAME_ANCESTORS ?? '')
-    .split(/[\s,]+/).map((o) => o.trim()).filter(Boolean)
+  const widgetFrameAncestors = parseFrameAncestors(process.env.WIDGET_FRAME_ANCESTORS)
   app.use('/widget', createWidgetRouter({
     legati: ring.legati,
     feed: (filter) => crystalApi.feed(filter),
@@ -1435,7 +1443,7 @@ async function main(): Promise<void> {
     modorum: ring.modorum,
     quoteImpetus: async (modusId) => BigInt((await crystalApi.quote(SYSTEM_AUCTOR, { modusId }, {})).impetus),
     x402Config,
-    frameAncestors: (legatus) => (legatus?.frameAncestors?.length ? legatus.frameAncestors : widgetFrameAncestors),
+    frameAncestors: frameAncestorsFor(widgetFrameAncestors),
   }))
 
   // Owned purses (§7) — the crystal-core "delegation": an identified account mints a

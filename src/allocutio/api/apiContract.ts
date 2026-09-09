@@ -76,6 +76,20 @@ export interface ApiContract {
 // ---------------------------------------------------------------------------
 
 /** The public `Run` projection (mirrors `types.ts#Run`). */
+/** Where a run waiting for a warm pod stands in line — shared by the run and activity reads. */
+const QueuePlaceSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    place: { type: 'number', description: "1-based position in the line, 1 being next." },
+    depth: { type: 'number', description: 'How many runs are waiting on the same image, this one included.' },
+  },
+  required: ['place', 'depth'],
+  description:
+    'Where a run waiting for a warm pod stands in line. Present only while the run is ' +
+    'queued — a run that dispatched straight onto a pod never carries it, and it is gone ' +
+    'once the run is called forward. The line is per substrate image, not global.',
+}
+
 const RunSchema: JsonSchema = {
   type: 'object',
   description: 'The public projection of a run (Actum). JSON-safe and stable.',
@@ -150,18 +164,7 @@ const RunSchema: JsonSchema = {
       description:
         'The standing order this run belongs to, when it has one (training runs). See GET /v1/runs/:id/order.',
     },
-    queue: {
-      type: 'object',
-      properties: {
-        place: { type: 'number', description: "1-based position in the line, 1 being next." },
-        depth: { type: 'number', description: 'How many runs are waiting on the same image, this one included.' },
-      },
-      required: ['place', 'depth'],
-      description:
-        'Where a run waiting for a warm pod stands in line. Present only while the run is ' +
-        'queued — a run that dispatched straight onto a pod never carries it, and it is gone ' +
-        'once the run is called forward. The line is per substrate image, not global.',
-    },
+    queue: QueuePlaceSchema,
   },
   required: ['id', 'status', 'modusId'],
 }
@@ -344,6 +347,7 @@ const ActivityRowSchema: JsonSchema = {
     createdAt: { type: 'string', format: 'date-time', description: 'When the run started, ISO-8601.' },
     settledAt: { type: 'string', format: 'date-time', description: 'When the run settled, ISO-8601. Absent while in flight.' },
     door: ActivityDoorSchema,
+    queue: QueuePlaceSchema,
   },
   required: ['actumId', 'kind', 'modusId', 'status'],
 }
@@ -711,6 +715,7 @@ const GeneratioSchema: JsonSchema = {
       properties: { attestedAt: { type: 'number', description: 'Epoch-ms timestamp of the attestation.' } },
       required: ['attestedAt'],
     },
+    memoryNotes: { type: 'array', items: { type: 'string' }, description: "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account." },
     privateOutputs: { type: 'boolean', description: 'Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise.' },
   },
 }
@@ -1317,7 +1322,7 @@ const EditionSchema: JsonSchema = {
     custody: { type: 'string', enum: ['ours', 'theirs', 'both'] },
     status: { type: 'string', enum: ['pending', 'published', 'rejected', 'failed', 'retracted'], description: 'Lifecycle: pending → published | rejected | failed; retracted on unpublish.' },
     reviewOutcome: { type: 'string', enum: ['pending', 'approved', 'rejected'], description: 'Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path.' },
-    moderationNote: { type: 'string', description: "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
+    moderationNote: { type: 'string', description: "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged." },
     externalRef: { type: 'string', description: "The destination's handle — feed post id / HF repo / token id / R2 url." },
     owners: {
       type: 'array',
@@ -1359,6 +1364,7 @@ const EditionModerationSchema: JsonSchema = {
       description: 'The recorded verdict, or null when this Editio was never held or rejected.',
       properties: {
         reason: { type: 'string', description: "The classifier's raw verdict text." },
+        category: { type: 'string', enum: ['unavailable', 'review', 'content'], description: "The gate's author-safe category for the refusal, when it set one: unavailable (nothing was checked — no scanner configured) | review (routed to a person, nothing detected) | content (the scan matched the content itself). This is what `Edition.moderationNote` is projected from. Absent from a gate that sets none." },
         hold: { type: 'boolean', description: 'True only when this verdict HELD (vs. terminally rejected).' },
         scannedAt: { type: 'string', format: 'date-time' },
       },

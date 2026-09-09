@@ -2,7 +2,7 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
-import type { Editio, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
+import type { Editio, EditionModerationDetail, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
 
 // Querela — an in-app report (bug/feature/feedback), noema-100's backend contract
 // (src/types/Querela.ts). Mirrored here (not imported) — the web app doesn't import
@@ -67,6 +67,13 @@ export interface Run {
   cost?: string;
   createdAt?: string;
   order?: RunOrder;
+  /**
+   * Where a run WAITING FOR A WARM POD stands in line — 1-based `place`, and the `depth`
+   * of the line it is in. Present only while it waits: a run that went straight onto a pod
+   * never carries it, and it is gone once the run is called forward. The line is per
+   * substrate image, so the depth counts the runs wanting the same image, not every run.
+   */
+  queue?: { place: number; depth: number };
 }
 
 export interface RunRequest {
@@ -122,8 +129,28 @@ export interface ConciergeProposal {
   tokenUsage: ConciergeTokenUsage;
   priorRunId?: string;
   delta?: string;
+  memoryDelta?: ConciergeMemoryDelta;
 }
-export interface ConciergeReply { kind: 'reply'; text: string; tokenUsage: ConciergeTokenUsage }
+// An in-app destination a reply may point at (noema-367). Validated server-side against the
+// concierge's route allowlist; an invalid one never arrives, it is dropped there.
+export interface ConciergeDestination { path: string; label: string }
+// The three writes the concierge may PROPOSE (the author ladder). It never performs one: the
+// payload arrives here as data, WriteProposalCard shows it whole, the user amends it, and GO
+// calls the same api.* method the corresponding screen already calls. An action outside these
+// three never arrives — the agent-side allowlist drops it and only the reply text comes through.
+export type ConciergeWriteAction = 'create_dataset' | 'patch_collection_draft' | 'set_preference';
+export interface ConciergeWrite { action: ConciergeWriteAction; payload: Record<string, unknown> }
+// What the concierge asks to remember (or forget) about the caller at the end of a turn. The
+// CLIENT applies it — see lib/conciergeMemory.ts — through PUT /v1/me/generatio.
+export interface ConciergeMemoryDelta { add?: string[]; remove?: string[] }
+export interface ConciergeReply {
+  kind: 'reply';
+  text: string;
+  destination?: ConciergeDestination;
+  write?: ConciergeWrite;
+  memoryDelta?: ConciergeMemoryDelta;
+  tokenUsage: ConciergeTokenUsage;
+}
 export type ConciergeResult = ConciergeProposal | ConciergeReply;
 export interface Dictum {
   id: string;
@@ -322,6 +349,48 @@ const authHeaders = (): Record<string, string> => {
 const readHeaders = (): Record<string, string> =>
   getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
 
+// ── Deadline for a read a screen is blocked on ─────────────────────────────
+// `fetch` has no timeout of its own. A request the network accepts and then never answers —
+// a socket a proxy holds open, a server that stops mid-response — leaves its promise pending
+// for as long as the tab lives. A screen that shows "Loading…" until that promise settles has
+// no error to print and no way out; it just sits there. That is the last door to the run
+// screen's "Loading… and nothing else", and unlike the others it cannot be closed at the
+// screen, because the screen never learns anything went wrong.
+//
+// So the deadline lives with the read: the request is aborted, and the silence becomes a
+// rejection carrying a sentence a person can act on. Reads only — a write must not be
+// retried on a guess about whether it landed.
+export const READ_TIMEOUT_MS = 20_000;
+export const READ_TIMEOUT_MESSAGE = 'the server did not answer — reload to try again';
+
+export async function withReadTimeout<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  ms: number = READ_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  // The deadline RACES the read rather than waiting for the abort to come back through it.
+  // Aborting alone would leave the guarantee resting on the read honouring the signal, which
+  // is the same bet — a read that ignores it hangs exactly as long as one with no deadline at
+  // all. So the abort frees the socket and the rejection settles the caller, independently.
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(READ_TIMEOUT_MESSAGE));
+    }, ms);
+  });
+  try {
+    return await Promise.race([read(controller.signal), deadline]);
+  } catch (err) {
+    // When the read loses the race it usually rejects first, with a DOMException whose message
+    // names neither the request nor anything the reader can do about it. Report the deadline.
+    if (controller.signal.aborted) throw new Error(READ_TIMEOUT_MESSAGE);
+    throw err;
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 // ── Fetch-based SSE reader ─────────────────────────────────────────────────
 // EventSource can't send auth headers, so authed SSE routes need a hand-rolled
 // reader over `fetch` + a `ReadableStream`. Surfaces the minimal shape callers
@@ -470,6 +539,18 @@ export const api = {
     return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
   },
   getRun: (id: string) => fetch(`/v1/runs/${id}`, { headers: readHeaders() }).then(j<{ run: Run }>),
+  // POST /v1/runs/:id/cancel — give up a run the caller owns. The reservation is released
+  // rather than charged, so a run given up while it waits for a warm pod costs nothing; the
+  // run then reads `failed` with `cost` 0, which is what the readout says about it.
+  // The active purse rides the request for the same reason `createRun` sends it: a run funded
+  // from an anonymous purse is owned by that token, and identity headers would address a
+  // different owner — or none — and come back `not_found`.
+  cancelRun: (id: string) => {
+    const purse = getActivePurse();
+    const headers = purse ? { 'x-bursa-token': purse } : authHeaders();
+    return fetch(`/v1/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers })
+      .then(j<{ run: Run }>);
+  },
   // The standing order behind a run, and the cancel for it. Owner-scoped server-side off the
   // run — a run id addresses the order, it does not authorise it.
   getRunOrder: (id: string) =>
@@ -671,8 +752,10 @@ export const api = {
     return fetch(`/v1/collectiones${qs ? `?${qs}` : ''}`, { headers: readHeaders() })
       .then(j<{ collections: Collection[]; nextCursor?: string }>);
   },
-  getCollection: (id: string) => fetch(`/v1/collectiones/${id}`, { headers: readHeaders() })
-    .then(j<{ collection: Collection }>),
+  // Deadlined: every collection screen renders "Loading…" until this read answers, so a read
+  // that never answers is a screen with no way out. See `withReadTimeout`.
+  getCollection: (id: string) => withReadTimeout((signal) =>
+    fetch(`/v1/collectiones/${id}`, { headers: readHeaders(), signal }).then(j<{ collection: Collection }>)),
   createCollection: (body: CreateCollectionRequest) =>
     fetch('/v1/collectiones', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ collection: Collection }>),
@@ -735,6 +818,11 @@ export const api = {
   // approve/reject/confirm-csam); a non-admin caller is refused.
   getEditionPreview: (id: string) =>
     fetch(`/v1/editiones/${id}/preview`, { headers: readHeaders() }).then(j<EditionPreview>),
+  // GET /v1/editiones/:id/moderation — the gate's RAW verdict (why it held or refused).
+  // PLATFORM-ADMIN ONLY server-side. The author-facing wording is `Edition.moderationNote`;
+  // this is what the reviewer adjudicating the hold needs and the author must never see.
+  getEditionModeration: (id: string) =>
+    fetch(`/v1/editiones/${id}/moderation`, { headers: readHeaders() }).then(j<EditionModerationDetail>),
   // Clear a moderation hold → the item re-settles and publishes.
   approveEdition: (id: string) =>
     fetch(`/v1/editiones/${id}/approve`, { method: 'POST', headers: authHeaders() }).then(j<{ edition: Editio }>),
@@ -1335,6 +1423,10 @@ export interface Generatio {
   // Private generation (noema-347). When ON, the outputs of NEW runs are visible only to you, via
   // expiring links; default-absent = OFF. Forward-only — it never moves what already exists.
   privateOutputs?: boolean;
+  // Short lines the concierge remembers about you between threads (the author ladder). Written
+  // by THIS client at the end of a turn the agent proposed a delta on; listed and editable on
+  // Preferences; capped server-side at MEMORY_NOTES_MAX lines; deleted with the account.
+  memoryNotes?: string[];
 }
 // BYO gated-origin credential providers (mirror the server `SecretProvider` union).
 export type SecretProvider = 'civitai' | 'huggingface';
@@ -1410,7 +1502,13 @@ export interface SecretView {
 /** `enabled` is ANON_PURSE_ENABLED (noema-131) — false until the trusted-setup ceremony runs.
  *  Optional because an older server omits it; read it as `=== true`, never as a truthy default,
  *  so a page never promises the purse to a visitor the server will refuse. */
-export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean; enabled?: boolean }
+/** `zkeyHash` is the sha256 of the proving key this server serves, and `zkeySource` says where
+    it came from ('ceremony' once the trusted setup is finalized). Compare zkeyHash with the
+    ceremony transcript's finalHash (GET /v1/ceremony) to confirm the key is the one the public
+    record names. Both optional: an older server omits them, and zkeyHash is null when zkeyUrl
+    points at a host the API does not serve from. */
+export interface ArcanumConfig { wasmUrl: string; zkeyUrl: string | null; depth: number; ready: boolean; enabled?: boolean;
+  zkeyHash?: string | null; zkeySource?: 'ceremony' | 'repo' | 'external' | 'none' }
 // What POST /arcanum/issue returns (mirror src/arcanum/types.ts ArcanumIssuance). We
 // already hold valor locally; the load-bearing fields here are leafIndex + the Merkle path.
 export interface ArcanumIssuance {
@@ -1905,6 +2003,8 @@ export interface ActivityRow {
   createdAt?: string;
   settledAt?: string;
   door?: ActivityDoor;
+  /** Where an in-flight run waiting for a warm pod stands in line; absent once it dispatches. */
+  queue?: { place: number; depth: number };
 }
 // A page of the owner's activity — in-flight and settled runs, newest first. In-flight rows
 // ride the first page only; `nextCursor` walks settled history.

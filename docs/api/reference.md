@@ -4,6 +4,14 @@
 
 The live, self-describing source of truth is `GET /v1/openapi.json` plus the discovery endpoints (`GET /v1/flows`, `GET /v1/flows/:id`). The dynamic catalog (which flows exist) is discovered live, never baked here.
 
+## Authentication
+
+An operation marked **Auth: required** accepts any one of three credentials, all resolved at the same chokepoint:
+
+- `X-API-Key: <key>` — a partner API key.
+- `Authorization: Bearer <jwt>` — a session key.
+- `x-bursa-token: <token>` — a bearer purse. It carries its own credits and no account identity, so send it alone: pairing it with an identity header defeats the point. An ownerless purse is refused until the trusted-setup ceremony concludes.
+
 ## Operations
 
 ### POST /v1/runs
@@ -2442,6 +2450,24 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
                 "description": "First media URL among the run's outputs, when one is trivially present."
               }
             }
+          },
+          "queue": {
+            "type": "object",
+            "properties": {
+              "place": {
+                "type": "number",
+                "description": "1-based position in the line, 1 being next."
+              },
+              "depth": {
+                "type": "number",
+                "description": "How many runs are waiting on the same image, this one included."
+              }
+            },
+            "required": [
+              "place",
+              "depth"
+            ],
+            "description": "Where a run waiting for a warm pod stands in line. Present only while the run is queued — a run that dispatched straight onto a pod never carries it, and it is gone once the run is called forward. The line is per substrate image, not global."
           }
         },
         "required": [
@@ -8635,6 +8661,13 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
             "attestedAt"
           ]
         },
+        "memoryNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8887,6 +8920,13 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
         "attestedAt"
       ]
     },
+    "memoryNotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
+    },
     "privateOutputs": {
       "type": "boolean",
       "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8952,6 +8992,13 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
           "required": [
             "attestedAt"
           ]
+        },
+        "memoryNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
         "privateOutputs": {
           "type": "boolean",
@@ -11868,7 +11915,7 @@ Publish an artifact (an Actum for #1) to a destination under a visibility/custod
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12010,7 +12057,7 @@ The human-review queue: publications the moderation gate HELD for review (spec �
           },
           "moderationNote": {
             "type": "string",
-            "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+            "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
           },
           "externalRef": {
             "type": "string",
@@ -12151,7 +12198,7 @@ Fetch one publication (author-scoped). Poll it to watch a `pending` settle land 
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12248,6 +12295,15 @@ The moderation gate's raw verdict for one publication (why it was held or reject
         "reason": {
           "type": "string",
           "description": "The classifier's raw verdict text."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "review",
+            "content"
+          ],
+          "description": "The gate's author-safe category for the refusal, when it set one: unavailable (nothing was checked — no scanner configured) | review (routed to a person, nothing detected) | content (the scan matched the content itself). This is what `Edition.moderationNote` is projected from. Absent from a gate that sets none."
         },
         "hold": {
           "type": "boolean",
@@ -12357,7 +12413,7 @@ Retract a publication where the destination allows it (feed/bucket = revocable; 
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12542,7 +12598,7 @@ Clear a moderation HOLD so the held publication re-settles and publishes (spec �
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",
@@ -12682,7 +12738,7 @@ Decline a held publication → terminal `rejected` (spec §4). Restricted to the
         },
         "moderationNote": {
           "type": "string",
-          "description": "A generic note when the moderation gate held or rejected this publication (e.g. 'Flagged by automated review.') — never the classifier's raw verdict text. A platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
         },
         "externalRef": {
           "type": "string",

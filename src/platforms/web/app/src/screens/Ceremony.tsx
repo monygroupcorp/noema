@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, type CeremonyStatus, type ContributePhase } from '../lib/ceremony';
+import { ceremony, checkServedKey, type CeremonyStatus, type ContributePhase, type ServedKey } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import './landing.css';
 import './ceremony.css';
@@ -192,13 +192,55 @@ function ContributePanel({ onContributed }: { onContributed: () => void }) {
   );
 }
 
+// The transcript names a final key; a different route serves the key people prove with.
+// Nothing on this page ever compared the two, so a visitor reading "ceremony complete"
+// still had to take on faith that the download matched the record. This says what the
+// comparison found — including when it comes out wrong, which is the whole point of
+// making it in public.
+function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; served: ServedKey | null }) {
+  const verdict = checkServedKey(status, served);
+  if (verdict === 'unknown') return null;
+
+  const NOTE = {
+    match: {
+      icon: 'check',
+      text: 'The proving key this site serves is the key above, hash for hash. Check it yourself: '
+        + 'the key at /arcanum/circuit/zkey sha256s to the final hash in this transcript.',
+    },
+    mismatch: {
+      icon: 'flag',
+      text: 'The key this site is serving is NOT the key this transcript names. Do not prove '
+        + 'against it — a key outside the record has no ceremony behind it.',
+    },
+    absent: {
+      icon: 'flag',
+      text: 'This site is serving no proving key: the ceremony is finalized but its key is not '
+        + 'published here yet. It serves nothing rather than serve a key the record does not name.',
+    },
+    external: {
+      icon: 'file-text',
+      text: 'The proving key is hosted off this API, so we cannot name its bytes for you. '
+        + 'Hash your download and compare it with the final hash above.',
+    },
+  }[verdict];
+
+  return (
+    <div className={`cer-served cer-served-${verdict}`}>
+      <span className="cer-link-i"><Ic name={NOTE.icon} /></span>
+      <span>{NOTE.text}</span>
+    </div>
+  );
+}
+
 export function Ceremony() {
   const [status, setStatus] = useState<CeremonyStatus | null>(null);
+  const [served, setServed] = useState<ServedKey | null>(null);
   const [contact, setContact] = useState('');
   const [claimed, setClaimed] = useState(false);
 
   const refresh = useCallback(() => {
     ceremony.status().then(setStatus).catch(() => {});
+    ceremony.servedKey().then(setServed).catch(() => {});
   }, []);
 
   // Poll for the live chain — contributions land without a redeploy, so the transcript
@@ -206,6 +248,7 @@ export function Ceremony() {
   useEffect(() => {
     let live = true;
     ceremony.status().then((s) => { if (live) setStatus(s); });
+    ceremony.servedKey().then((k) => { if (live) setServed(k); });
     const ms = 5000;
     const t = setInterval(() => { if (live) refresh(); }, ms);
     return () => { live = false; clearInterval(t); };
@@ -347,7 +390,14 @@ export function Ceremony() {
                   {phase === 'finalized' ? (
                     <div className="cer-claimed">
                       <Ic name="check" />
-                      <span>The ceremony is complete and the proving key is published. Thank you to everyone who folded in their randomness.</span>
+                      {/* "and the proving key is published" is a claim about a different route,
+                          so it is only made when the check below actually found the key there. */}
+                      <span>
+                        {checkServedKey(status, served) === 'match'
+                          ? 'The ceremony is complete and the proving key it produced is the one this site serves.'
+                          : 'The ceremony is complete. See below for whether the key this site serves is the one it produced.'}
+                        {' '}Thank you to everyone who folded in their randomness.
+                      </span>
                     </div>
                   ) : claimed ? (
                     <div className="cer-claimed">
@@ -408,6 +458,7 @@ export function Ceremony() {
                   <code>{status.finalHash.slice(0, 14)}…</code>
                 </div>
               )}
+              <ServedKeyNote status={status} served={served} />
             </div>
           </aside>
         </div>

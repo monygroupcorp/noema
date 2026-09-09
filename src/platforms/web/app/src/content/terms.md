@@ -1,6 +1,6 @@
 # Terms & Conditions
 
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-08
 
 ---
 
@@ -31,12 +31,14 @@ You will not use the Service to generate, store, transmit, or facilitate:
 
 - **Child sexual abuse material (CSAM)** or any sexual content involving minors, real or
   AI-generated. Nothing reaches a public surface without clearing a moderation gate, and where
-  that gate cannot run the publication is refused rather than allowed. Apparent CSAM is
-  confirmed by a human reviewer, reported to **NCMEC** as required by **18 U.S.C. § 2258A**,
-  and preserved as evidence; we cooperate with law enforcement. This is a zero-tolerance,
+  that gate cannot run the publication is refused rather than allowed. A human reviewer confirms
+  an apparent match before any report is filed; on confirmation the publication is rejected and
+  the evidence preserved. We are required by **18 U.S.C. § 2258A** to report child sexual abuse
+  material to **NCMEC**, and we cooperate with law enforcement. This is a zero-tolerance,
   immediate-termination offense.
 - **Non-consensual intimate imagery**, including AI deepfakes of real persons (per the
-  **TAKE IT DOWN Act** and state law). We honor takedown requests within 48 hours.
+  **TAKE IT DOWN Act** and state law). We honor takedown requests within 48 hours — send one to
+  mony.group.corporation+privacy@gmail.com.
 - Content that is illegal in your jurisdiction or ours, infringes others' rights, or
   facilitates violence, terrorism, or trafficking.
 
@@ -64,8 +66,8 @@ beyond what these controls require.
   terminating at a single-tenant compute instance. This is network isolation only: the
   infrastructure provider hosting the instance can technically access its memory, so do not treat
   a session as sealed from the compute provider. We keep the record of each run — the inputs you
-  submitted and the outputs they produced — as your own history, until you erase your account. We
-  do not train models on it. The Privacy Policy sets out what is held and for how long.
+  submitted and the outputs they produced — as your own history. Erasing your account severs
+  that record from you rather than deleting it. We do not train models on it. The Privacy Policy sets out what is held and for how long.
 - In **bot-mediated (Simple Case)** sessions, we act as your client and necessarily process
   your prompts, outputs, and identity to deliver the Service.
 - The Service is **not offered for regulated workloads**. We do not act as a HIPAA Business

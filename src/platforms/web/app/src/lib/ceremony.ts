@@ -60,6 +60,23 @@ export const ceremony = {
     }
   },
 
+  /**
+   * The proving key this site serves, per GET /arcanum/config. Null when the request
+   * fails or the server predates `zkeyHash` — in which case the page says it cannot
+   * check rather than implying the key is right. See `checkServedKey`.
+   */
+  async servedKey(): Promise<ServedKey | null> {
+    try {
+      const res = await fetch('/arcanum/config');
+      if (!res.ok) return null;
+      const cfg = (await res.json()) as { zkeyHash?: string | null; zkeySource?: ServedKey['source'] };
+      if (cfg.zkeySource === undefined) return null;
+      return { hash: cfg.zkeyHash ?? null, source: cfg.zkeySource ?? null };
+    } catch {
+      return null;
+    }
+  },
+
   /** Register interest in a contributor slot. Returns false until the coordinator is live. */
   async claimSlot(contact: string): Promise<boolean> {
     try {
@@ -122,3 +139,47 @@ export const ceremony = {
     return up.json();
   },
 };
+
+// ── Does the site serve the key its own transcript names? ─────────────────────────
+//
+// A finished transcript names a final key by hash. That is only half a guarantee: the
+// key clients download for proving is served by a different route, and nothing on the
+// page ever compared the two. So "ceremony complete, final key dd96…" could sit above a
+// /arcanum/circuit/zkey handing out something else entirely, and a visitor had no way to
+// tell. GET /arcanum/config now names the served key's sha256, so the page can make that
+// comparison in the open and say what it found.
+
+/** The proving key the site actually serves, as `GET /arcanum/config` reports it. */
+export interface ServedKey {
+  /** sha256 of the bytes at /arcanum/circuit/zkey. Null when the API does not serve them. */
+  hash: string | null;
+  /** Where that key came from: the finalized ceremony, the repo, another host, or nowhere. */
+  source: 'ceremony' | 'repo' | 'external' | 'none' | null;
+}
+
+export type ServedKeyVerdict =
+  /** The served key is the one the transcript names. */
+  | 'match'
+  /** The site serves a key the transcript does not name. */
+  | 'mismatch'
+  /** The transcript names a final key the site has not got. */
+  | 'absent'
+  /** The key is hosted elsewhere, so the API has not seen those bytes and cannot name them. */
+  | 'external'
+  /** Nothing to compare yet: the ceremony is unfinished, or this server predates the check. */
+  | 'unknown';
+
+/**
+ * Compare the transcript's final key against the key the site serves. Pure so it can be
+ * tested without a server, and so the page renders one verdict rather than re-deriving it.
+ */
+export function checkServedKey(
+  status: CeremonyStatus | null,
+  served: ServedKey | null,
+): ServedKeyVerdict {
+  if (!status || status.phase !== 'finalized' || !status.finalHash) return 'unknown';
+  if (!served || served.source === null) return 'unknown';
+  if (served.source === 'external') return 'external';
+  if (served.source === 'none' || !served.hash) return 'absent';
+  return served.hash.toLowerCase() === status.finalHash.toLowerCase() ? 'match' : 'mismatch';
+}

@@ -26,6 +26,7 @@ import { InsufficientBursaCreditsError } from '../../types/bursa.js'
 import { DecomposeInFlightError, DecomposeNothingToDoError } from '../../crystal/MuseDecomposeCursor.js'
 import type { ActumIndex, ActumIndexStore } from '../../types/actumIndex.js'
 import type { Consuetudinum, Appearance, Generatio } from '../../types/consuetudo.js'
+import { MEMORY_NOTE_MAX_CHARS, MEMORY_NOTES_MAX } from '../../types/consuetudo.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Intelligens, IntelligensGenus, Intellarum, Intella, IntellaContentRating } from '../../types/intelligendi.js'
@@ -1077,6 +1078,13 @@ export class CrystalApi {
    * anything ahead of it dispatched. A settled run is never in a line, so it is not asked
    * about; and a store that cannot answer leaves the field absent rather than guessing.
    */
+  private async _attachActivityQueuePlace(row: ActivityRow, actum: Actum): Promise<void> {
+    if (!this.deps.vocator) return
+    if (actum.status === 'completus' || actum.status === 'fractus') return
+    const at = await this.deps.vocator.place(actum.id).catch(() => null)
+    if (at) row.queue = at
+  }
+
   private async _attachQueuePlace(run: Run, actum: Actum): Promise<void> {
     if (!this.deps.vocator) return
     if (actum.status === 'completus' || actum.status === 'fractus') return
@@ -1332,6 +1340,12 @@ export class CrystalApi {
       if (!actum) continue
       const door = activityDoorFor(row.kind, actum.aditus, actum.exitus)
       if (door) row.door = door
+      // A run still in flight may not be running at all — it may be holding a place in the
+      // warm-pod line. This list is what someone opens when they come BACK to a run they
+      // walked away from, so it is the surface that owes them the difference; leaving it out
+      // would show a queued run as running, and a queue that is never shown is a queue
+      // nobody trusts. Settled rows are never in a line and are not asked about.
+      if (row.status === 'running') await this._attachActivityQueuePlace(row, actum)
     }
 
     return { activity: rows, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }
@@ -1628,6 +1642,12 @@ export class CrystalApi {
       }
     }
 
+    // The draft's supply reaches the same dispatch budget an extend does, by the other door:
+    // the route reads it as `Number(numerus)`, so an unparseable one arrives as NaN. Zero is
+    // allowed here — a draft may be authored before its supply is decided — where an extend
+    // of nothing is not a request anyone means to make.
+    if (patch.numerus !== undefined) this._assertPieceCount(patch.numerus, 'numerus', 0)
+
     const modusId = patch.modusId ?? c.modusId
     const tractus = patch.tractus ?? c.tractus
     const modus = modusId ? await this.deps.modorum.find(modusId) : null
@@ -1807,8 +1827,35 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
     }
+    // Checked after the gates, so a malformed count never tells a stranger whether the
+    // collection exists. An extend raises the dispatch budget, so the SUM has to stay exact
+    // too — a valid `addCount` on an already-large collection is still refused if it would
+    // push the target past where integer arithmetic holds.
+    this._assertPieceCount(addCount, 'count', 1)
+    this._assertPieceCount(c.numerus + addCount, 'the extended target', 1)
     await this.deps.collectioCursor?.extend(id, addCount)
     return toCollection((await this.deps.collectiones!.find(id))!)
+  }
+
+  /**
+   * A piece count that reaches the store, checked before it gets there.
+   *
+   * `numerus` is not a display field: `numerus + reiectae` is `CollectioCursor`'s dispatch
+   * budget, and the fan-out advances while `nextIndex < budget`. A non-number written into it
+   * makes that comparison false forever, so the collection reads as `agens`, shows as
+   * generating, and dispatches nothing — the failure `MongoCollectio`'s `fromDoc` already
+   * defends `reiectae` against, reached instead through the wire. `Number(undefined)` is `NaN`
+   * and `NaN <= 0` is false, so a request that simply omits the count walks past every
+   * downstream guard, which is why the check belongs here and not on the route: the HTTP
+   * router, the MCP tool and the concierge all arrive through this method.
+   *
+   * The upper bound is arithmetic, not policy: past `Number.MAX_SAFE_INTEGER` the budget sum
+   * stops being exact, and a piece index can no longer be told apart from its neighbour.
+   */
+  private _assertPieceCount(n: number, field: string, min: number): void {
+    if (!Number.isSafeInteger(n) || n < min) {
+      throw Errors.inputMalformed(`${field} must be a whole number of pieces, ${min} or more`)
+    }
   }
 
   /** Whether the caller is the concrete funding identity of a collection (its `by`). */
@@ -2391,6 +2438,7 @@ export class CrystalApi {
         // signal for why. Written on BOTH branches, alongside the existing status write.
         const moderation = {
           reason: verdict.reason,
+          ...(verdict.category !== undefined ? { category: verdict.category } : {}),
           ...(verdict.hold ? { hold: true } : {}),
           scannedAt: new Date().toISOString(),
         }
@@ -5056,6 +5104,19 @@ export class CrystalApi {
         503,
         { retryable: false },
       )
+    }
+    // Memory notes (the author ladder) are proposed by the concierge and written by the CLIENT
+    // through this same PUT, so the ceiling is enforced HERE and not only where they are composed:
+    // an over-long list is truncated to the newest MEMORY_NOTES_MAX and each line to
+    // MEMORY_NOTE_MAX_CHARS rather than rejected, because a rejected Preferences save would lose the
+    // user's OTHER edits to make a point about a note the agent wrote.
+    if (merged.memoryNotes !== undefined) {
+      const notes = (Array.isArray(merged.memoryNotes) ? merged.memoryNotes : [])
+        .filter((n): n is string => typeof n === 'string')
+        .map((n) => n.trim().slice(0, MEMORY_NOTE_MAX_CHARS))
+        .filter((n) => n !== '')
+        .slice(-MEMORY_NOTES_MAX)
+      merged.memoryNotes = notes
     }
     await this.deps.consuetudinum.setGeneratio(auctor, merged)
     return merged
