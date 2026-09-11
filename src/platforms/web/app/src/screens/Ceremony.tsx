@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, checkServedKey, type CeremonyStatus, type ContributePhase, type ServedKey } from '../lib/ceremony';
+import { ceremony, checkServedKey, contributionsPaused, type CeremonyStatus, type ContributePhase, type ServedKey } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import { entryPath } from '../lib/entry';
 import './landing.css';
@@ -69,13 +69,18 @@ const STEPS = [
   },
 ];
 
-function StatusPill({ phase }: { phase: CeremonyStatus['phase'] }) {
+function StatusPill({ status }: { status: CeremonyStatus | null }) {
+  const phase = status?.phase ?? 'announced';
+  // "accepting contributions" is a claim about what happens if you click, so it is only
+  // made when the sequencer says it can hand out the key a contribution builds on.
+  const paused = contributionsPaused(status);
   const label =
-    phase === 'open' ? 'Ceremony open · accepting contributions'
+    phase === 'open' && paused ? 'Ceremony open · contributions paused'
+    : phase === 'open' ? 'Ceremony open · accepting contributions'
     : phase === 'finalized' ? 'Ceremony finalized · keys published'
     : 'Ceremony announced · opening soon';
   return (
-    <span className={`cer-pill cer-${phase}`}>
+    <span className={`cer-pill cer-${paused ? 'paused' : phase}`}>
       <span className="cer-dot" />
       {label}
     </span>
@@ -288,7 +293,7 @@ export function Ceremony() {
           proving key must be built by many hands — so no single party, us included,
           can ever forge a note. That's the ceremony. You can be in it.
         </p>
-        <div className="cer-status-row"><StatusPill phase={phase} /></div>
+        <div className="cer-status-row"><StatusPill status={status} /></div>
         <div className="cta">
           <a className="btn lg" href="#contribute">Contribute <Ic name="arrow-right" /></a>
           <a className="btn-ghost" href="#how">How it works</a>
@@ -380,7 +385,23 @@ export function Ceremony() {
 
           <aside className="cer-side">
             <div className="cer-card">
-              {phase === 'open' ? (
+              {phase === 'open' && contributionsPaused(status) ? (
+                <>
+                  <div className="cer-card-h"><Ic name="shuffle" /> Contribute in your browser</div>
+                  {/* Every contribution begins with the current key, and this sequencer
+                      does not have it to give. Say so here rather than let someone spend
+                      a minute gathering entropy for an upload that cannot be accepted. */}
+                  <div className="cer-claimed">
+                    <Ic name="pause" />
+                    <span>
+                      Contributions are paused: this server does not currently hold the key
+                      the next contribution builds on, so it cannot hand one out. The
+                      transcript below is unchanged and nothing already contributed is lost.
+                      Check back shortly.
+                    </span>
+                  </div>
+                </>
+              ) : phase === 'open' ? (
                 <>
                   <div className="cer-card-h"><Ic name="shuffle" /> Contribute in your browser</div>
                   <ContributePanel onContributed={refresh} />

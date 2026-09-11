@@ -59,6 +59,16 @@ MAINT_FLAG="${MAINT_DIR}/maintenance.flag"
 # this into a hard failure — dev boxes, staging and fresh droplets legitimately have no module.
 COMPLIANCE_DIR="${COMPLIANCE_DIR:-/opt/noema/private/compliance}"
 
+# Arcanum ceremony custody — the trusted-setup chain's .zkey files (host state, deliberately
+# NOT in the image). The transcript lives in the database and outlives every deploy; the keys
+# it names live on a disk, and until this mount existed that disk was the container's own. So a
+# deploy handed the sequencer an empty custody while the public record went on naming a chain
+# head no contributor could download, and there was no way back: the ceremony read "open" and
+# refused every contribution. The directory is content-addressed (<sha256>.zkey) and each file
+# is ~5MB. Read-write: the sequencer stores each verified contribution here as it lands.
+CEREMONY_DIR="${CEREMONY_DIR:-/opt/noema/ceremony}"
+CEREMONY_DIR_IN_CONTAINER="/var/lib/noema/ceremony"
+
 # Keystore
 KEYSTORE_SCRIPT="${DEPLOY_ROOT}/keystore/loadKeystore.js"
 KEYSTORE_PATH="/etc/account/STATIONTHIS"
@@ -91,6 +101,8 @@ load_env_var() {
 mkdir -p "${LOG_DIR}" "${MAINT_DIR}"
 # Created-if-missing so the read-only bind mount below always has a source. Empty == stubs.
 mkdir -p "${COMPLIANCE_DIR}"
+# Empty is the correct state before a ceremony opens; it fills as contributions land.
+mkdir -p "${CEREMONY_DIR}"
 
 log() { echo "[deploy] $1" | tee -a "${LOG_FILE}"; }
 
@@ -255,6 +267,7 @@ stop_container_if_exists "${NEW_CONTAINER}"
 run_logged "Starting new container (${IMAGE})..." docker run -d \
   --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
+  --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
   --env-file "${ENV_FILE}" \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
@@ -263,6 +276,7 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --log-opt max-file=3 \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
   -v "${COMPLIANCE_DIR}:/usr/src/app/dist/private/compliance:ro" \
+  -v "${CEREMONY_DIR}:${CEREMONY_DIR_IN_CONTAINER}" \
   --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
