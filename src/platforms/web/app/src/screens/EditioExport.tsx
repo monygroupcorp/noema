@@ -45,6 +45,31 @@ export function exportJobFor(e: Editio, kind: Kind): Job | null {
   return null;
 }
 
+/**
+ * The held publication this collection already has, if any. Pure.
+ *
+ * `exportJobFor` makes a hold terminal for the poll that is already running, which is only
+ * half of it: the poll runs in the session that pressed the button. This screen mounts at
+ * `{s:'idle'}` and fetches only the collection, so a reload dropped the hold entirely and
+ * offered "Publish to hosting" again — the same bug the shelf had for models (a held card
+ * read as an unpublished one, and the button filed a second edition behind the first). A
+ * hold is the server's record, so seed from the caller's own review queue
+ * (GET /v1/editiones/review, which returns an author their own held items).
+ *
+ * Only a hold can be recovered this way: the queue is the `reviewOutcome:'pending'` set, so
+ * a refusal is not in it and this says nothing about one.
+ *
+ * The queue is newest-first, so the first entry for this collection is the live one.
+ */
+export function heldCollectionJob(editions: Editio[], collectionId: string): Job | null {
+  for (const e of editions) {
+    if (e.artifact.kind !== 'collectio' || e.artifact.id !== collectionId) continue;
+    if (publishOutcome(e) !== 'held') continue;
+    return { s: 'held', msg: publishNote(e) };
+  }
+  return null;
+}
+
 interface Option {
   key: Dest; glyph: string; title: React.ReactNode; tag: string; tagClass: string; desc: string; sub: string;
 }
@@ -69,6 +94,14 @@ export function EditioExport() {
     if (!id) return;
     let live = true;
     api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setErr(msg(e)); });
+    // A hold outlives the session that filed it, so recover it on mount. Only ever promotes
+    // an idle screen: a publish begun in THIS session owns the job and must not be clobbered
+    // by a snapshot taken before it. A failure here leaves the screen as it was — the hold is
+    // still listed in /feed (the shelf carries model holds only), and refusing to render the
+    // whole page over a missing seed would be worse than the button coming back.
+    api.listReviewQueue()
+      .then((q) => { if (live) setJob((j) => (j.s === 'idle' ? heldCollectionJob(q.editions, id) ?? j : j)); })
+      .catch(() => {});
     return () => { live = false; };
   }, [id]);
 
@@ -186,7 +219,7 @@ export function EditioExport() {
                   </button>
                 </div>
               ) : job.s === 'held' ? (
-                <div className="warn">This collection isn’t hosted yet — {job.msg} Nothing more to do here; you’ll find it on your shelf, and your export-to-you download is unaffected.</div>
+                <div className="warn">This collection isn’t hosted yet — {job.msg} Nothing more to do here; <Link to="/feed">track it in the feed</Link>, and your export-to-you download is unaffected.</div>
               ) : job.s === 'rejected' ? (
                 <div className="warn">This collection wasn’t published to hosting — {job.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
               ) : (
