@@ -876,6 +876,13 @@ export const INTELLA_GEMMA_3_12B: Intella = {
 // first half of the denoise trajectory, low-noise finishes it — KSamplerAdvanced split at step 10).
 // Both directions share the umt5 text encoder + the Wan2.1 VAE (Wan2.2 14B reuses it). Render-proven
 // on this box (both t2v and i2v produced real mp4s) — see wan-artifacts/*.api.json for the graphs.
+//
+// SOURCES: all four unets come from Comfy-Org/Wan_2.2_ComfyUI_Repackaged, under
+// split_files/diffusion_models/ (ungated, verified 200). They were addressed to Wan-AI's own
+// Wan2.2-*-A14B repos, which host no fp8_scaled file at all — only the bf16 weights in six
+// diffusers shards under high_noise_model/ and low_noise_model/ — so every one of the four 404'd
+// and a pod pulling them died at wget. Note the capital R in Repackaged: the 2.1 repo beside it
+// spells the same word lowercase, which is why this address cannot be copied from its sibling.
 export const INTELLA_WAN22_T2V_HIGH: Intella = {
   id: 'intella.wan22-t2v-high',
   nomen: 'Wan2.2 T2V — high-noise unet (14B, fp8 scaled)',
@@ -888,9 +895,9 @@ export const INTELLA_WAN22_T2V_HIGH: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/resolve/main/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Wan-AI/Wan2.2-T2V-A14B', branch: 'main', filename: 'wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', branch: 'main', filename: 'split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors',
@@ -913,9 +920,9 @@ export const INTELLA_WAN22_T2V_LOW: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/resolve/main/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Wan-AI/Wan2.2-T2V-A14B', branch: 'main', filename: 'wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', branch: 'main', filename: 'split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors',
@@ -938,9 +945,9 @@ export const INTELLA_WAN22_I2V_HIGH: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B/resolve/main/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Wan-AI/Wan2.2-I2V-A14B', branch: 'main', filename: 'wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', branch: 'main', filename: 'split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors',
@@ -963,9 +970,9 @@ export const INTELLA_WAN22_I2V_LOW: Intella = {
   sources: [
     {
       provenance: 'huggingface',
-      uri: 'https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B/resolve/main/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors',
+      uri: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors',
       format: 'safetensors',
-      meta: { repo: 'Wan-AI/Wan2.2-I2V-A14B', branch: 'main', filename: 'wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors' },
+      meta: { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', branch: 'main', filename: 'split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors' },
     },
   ],
   dest: 'unet/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors',
