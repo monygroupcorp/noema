@@ -154,23 +154,29 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
   const report: { route: string; viewport: string; violations: unknown[] }[] = [];
   const counts: Record<string, number> = {};
   const shots: { route: string; viewport: string; file: string; bytes: number }[] = [];
-  const failed: { route: string; error: string }[] = [];
+  const failed: { route: string; viewport: string; error: string }[] = [];
 
   for (const row of rows) {
-    const ctx = authenticated && existsSync(STATE_FILE)
-      ? await browser.newContext({ storageState: STATE_FILE })
-      : await browser.newContext();
-    const page = await ctx.newPage();
-    try {
-      // `networkidle` never fires on a screen holding a live connection — the heavy lazy routes
-      // (Canvas, Space, Vault) time out waiting for a quiet network that a streaming app does not
-      // have. Wait for the document, then for the page to stop changing.
-      await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForLoadState('load').catch(() => {});
-      await settle(page);
+    // One context per VIEWPORT, not one per route. Sizing a page down after it has rendered wide
+    // captures a resized desktop, not a phone: anything the app decides once at the width it first
+    // saw keeps the wide decision. The concierge dock is the case that proved it — its own
+    // `matchMedia('(max-width:760px)')` guard is read when the panel opens, so a page opened at
+    // 1280 and then narrowed to 390 shows a panel a phone-first visitor never gets, over every
+    // shot. A fresh context also clears the per-path localStorage that suppresses first-visit
+    // behaviour, so each shot is a first visit AT ITS OWN WIDTH — the state to photograph.
+    for (const vp of VIEWPORTS) {
+      const ctx = authenticated && existsSync(STATE_FILE)
+        ? await browser.newContext({ storageState: STATE_FILE, viewport: { width: vp.width, height: vp.height } })
+        : await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+      const page = await ctx.newPage();
+      try {
+        // `networkidle` never fires on a screen holding a live connection — the heavy lazy routes
+        // (Canvas, Space, Vault) time out waiting for a quiet network that a streaming app does not
+        // have. Wait for the document, then for the page to stop changing.
+        await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.waitForLoadState('load').catch(() => {});
+        await settle(page);
 
-      for (const vp of VIEWPORTS) {
-        await page.setViewportSize({ width: vp.width, height: vp.height });
         const dir = resolve(SHOTS_DIR, slug(row.path));
         mkdirSync(dir, { recursive: true });
         const file = resolve(dir, `${vp.name}.png`);
@@ -181,20 +187,23 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
           file: `${slug(row.path)}/${vp.name}.png`,
           bytes: statSync(file).size,
         });
-      }
 
-      const axeResults = await new AxeBuilder({ page })
-        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'])
-        .analyze();
-      report.push({ route: row.path, viewport: 'desktop', violations: axeResults.violations });
-      counts[row.path] = axeResults.violations.length;
-    } catch (err) {
-      console.log(`  ! ${row.path} — ${(err as Error).message}`);
-      counts[row.path] = -1; // -1 = walk failed to reach the route, distinct from 0 violations
-      failed.push({ route: row.path, error: (err as Error).message });
-    } finally {
-      await page.close();
-      await ctx.close();
+        // Scanned at the width that was photographed, and recorded under that width. A contrast or
+        // target-size finding is a statement about a viewport; one filed under the wrong width
+        // sends the next reader to a screenshot that does not show it.
+        const axeResults = await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'])
+          .analyze();
+        report.push({ route: row.path, viewport: vp.name, violations: axeResults.violations });
+        counts[`${row.path} [${vp.name}]`] = axeResults.violations.length;
+      } catch (err) {
+        console.log(`  ! ${row.path} [${vp.name}] — ${(err as Error).message}`);
+        counts[`${row.path} [${vp.name}]`] = -1; // -1 = unreachable, distinct from 0 violations
+        failed.push({ route: row.path, viewport: vp.name, error: (err as Error).message });
+      } finally {
+        await page.close();
+        await ctx.close();
+      }
     }
   }
 
@@ -209,6 +218,17 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         revision: revision(),
         baseUrl: BASE_URL,
         authenticated,
+        // Says in words what `authenticated: false` says in a boolean. A run captured without
+        // credentials covers the logged-out half of the app and nothing else — every auth-gated
+        // screen in it is a sign-in gate or an anonymous render, never the screen a member sees.
+        // A reader who mistakes one for the other reads a whole baseline wrong, so the manifest
+        // states the coverage rather than leaving it to be inferred from a flag.
+        coverage: authenticated
+          ? 'signed in — auth-gated screens show member state'
+          : 'logged-out only — no WALK_EMAIL/WALK_PASSWORD, so the signed-in half of every '
+            + 'auth-gated route is NOT captured; those shots are the anonymous render or the sign-in gate',
+        // Each shot is a first visit at its own width: one browser context per (route, viewport).
+        perViewportContext: true,
         viewports: VIEWPORTS,
         routes: rows.length,
         failed,

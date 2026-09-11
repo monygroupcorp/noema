@@ -25,4 +25,5 @@ export const fixtures: Record<string, Record<string, string>> = {
   '/collections/:id/export': { id: 'sample-collection' },
   '/projects/:id': { id: 'sample-project' },
   '/account/:section': { section: 'compute' },
+  '/blog/:slug': { slug: 'train-a-model' },
 };
