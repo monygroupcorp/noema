@@ -6,6 +6,7 @@ import { api, type DepositConfig, type DepositQuote, type MyDeposit, type Pack }
 import { connectWallet, waitForReceipt, type ConnectedWallet } from '../lib/wallet';
 import { sendEthDeposit } from '../lib/deposit';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
+import { creditsLanded } from '../lib/balance';
 import { useSession } from '../state/session';
 import { Meter } from './IdentityMeter';
 import './buy-credits-modal.css';
@@ -266,6 +267,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
       setNewBalance(bal);
       setSettledAt(new Date().toISOString());
       setPhase('settled');
+      // The stamp below says the new balance; the top bar was still showing the old one until a
+      // reload, which is the number someone closes this modal to go and check.
+      creditsLanded();
     };
     // Either poll again or stop and say we stopped — never stop quietly.
     const again = () => {

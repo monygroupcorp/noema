@@ -11,31 +11,43 @@ export function canCheckout(session: unknown): boolean {
   return session != null;
 }
 
-// The checkout request sent to POST /v1/payments/checkout. successUrl/cancelUrl point back at
-// the Funding page with a `checkout` query flag so we know to poll on return (Stripe's webhook
-// credits async — the redirect itself carries no proof of payment).
+/** Add the `checkout` outcome flag to an app path, keeping the query it already carries — that
+ *  query is often what identifies the task the buyer broke off (`/canvas?doc=17`). */
+function withCheckoutFlag(path: string, outcome: 'success' | 'cancel'): string {
+  // `safeReturn` has already established this is a rooted, same-origin path, so the base here
+  // only supplies a host for the parser and never reaches the built URL.
+  const u = new URL(path, 'https://checkout.invalid');
+  u.searchParams.set('checkout', outcome);
+  return u.pathname + u.search + u.hash;
+}
+
+// The checkout request sent to POST /v1/payments/checkout.
 //
-// `returnTo` is the page the visitor was actually on when they decided to buy. Credits are
-// bought from the pill in the top bar, so the usual buyer is mid-task somewhere else and Stripe
-// returns everyone to /funding; carrying the page lets the return offer the way back instead of
-// leaving them to re-find it. It is a same-origin app path or it is dropped — the value comes
-// back to us through a URL Stripe redirects to, which is exactly the position `next` is in at
-// the door.
+// Stripe returns the buyer to the page they were standing on when they reached for credits,
+// carrying a `checkout` flag so the app knows to poll (the webhook credits async — the redirect
+// itself carries no proof of payment). Credits are bought from the pill in the top bar, so that
+// page is usually mid-task; returning everyone to /funding instead meant the shortest purchase
+// still ended with a page nobody asked for and a link to press to leave it. The outcome is said
+// wherever they land, by the shell that carries the balance.
+//
+// `returnTo` is a same-origin app path or it is dropped for /funding — the value comes back to
+// us through a URL Stripe redirects to, which is exactly the position `next` is in at the door.
 export function buildCheckoutRequest(
   packId: string,
   origin: string,
   returnTo?: string | null,
 ): { packId: string; successUrl: string; cancelUrl: string } {
-  const back = safeReturn(returnTo) ? `&back=${encodeURIComponent(returnTo as string)}` : '';
+  const back = safeReturn(returnTo) ? (returnTo as string) : '/funding';
   return {
     packId,
-    successUrl: `${origin}/funding?checkout=success${back}`,
-    cancelUrl: `${origin}/funding?checkout=cancel${back}`,
+    successUrl: `${origin}${withCheckoutFlag(back, 'success')}`,
+    cancelUrl: `${origin}${withCheckoutFlag(back, 'cancel')}`,
   };
 }
 
-/** A return target worth carrying: a same-origin app path, and not the Funding page itself —
- *  offering "back to Funding" to someone standing on Funding is a link to nowhere. */
+/** A return target worth carrying: a same-origin app path, and not the Funding page — which is
+ *  where a buyer with nowhere in particular to go back to already lands, and whose URL can
+ *  still hold a `?pack=` that would re-start the purchase the moment Stripe returned to it. */
 export function safeReturn(returnTo: string | null | undefined): boolean {
   if (!returnTo || !returnTo.startsWith('/') || returnTo.startsWith('//')) return false;
   return !returnTo.split('?')[0].replace(/\/$/, '').endsWith('/funding');
@@ -47,8 +59,8 @@ export function safeReturn(returnTo: string | null | undefined): boolean {
 //
 // `returnTo` is the page they were standing on when they reached for credits — the pill opens
 // the buy modal anywhere in the app, so that is usually mid-task. It rides along to the funding
-// page, which puts it into the checkout request, so a buyer who had to sign in on the way is
-// offered the same way back from Stripe as one who was signed in already. Without it the return
+// page, which puts it into the checkout request, so a buyer who had to sign in on the way comes
+// back from Stripe to the same place as one who was signed in already. Without it the return
 // path is dropped at the door, and the longest version of this walk is the one that ends
 // furthest from where it started.
 export function signInThenBuy(packId: string, returnTo?: string | null): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { doorPath, entryPath } from './entry';
+import { addAccountPath, doorPath, entryPath } from './entry';
 
 // Every surface that turns a visitor away for want of an account sends them through `doorPath`,
 // so signing in hands them back to the page they were already on. The pair with `safeNext` in
@@ -19,6 +19,20 @@ describe('doorPath', () => {
     expect(doorPath()).toBe('/onboard');
     expect(doorPath(null)).toBe('/onboard');
     expect(doorPath('')).toBe('/onboard');
+  });
+});
+
+describe('addAccountPath', () => {
+  it('returns to the page the account menu was opened over, the way Sign in does', () => {
+    const url = new URL(addAccountPath('/canvas?doc=17'), 'https://noema.example');
+    expect(url.pathname).toBe('/onboard');
+    expect(url.searchParams.get('add')).toBe('1');
+    expect(url.searchParams.get('next')).toBe('/canvas?doc=17');
+  });
+
+  it('falls back to the keyring for the keyring\'s own button, which is already there', () => {
+    expect(addAccountPath()).toBe('/onboard?add=1');
+    expect(addAccountPath(null)).toBe('/onboard?add=1');
   });
 });
 

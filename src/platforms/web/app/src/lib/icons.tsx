@@ -7,6 +7,7 @@ import {
   Heart, Smile, Star, Wallet, Shuffle, Coins, Laptop, Server, FileText,
   CreditCard, GraduationCap, Rss, Send, Globe, Trash2, WandSparkles,
   House, Database, Box, Hexagon, Download, Users, HandCoins, Pause, Play, UserPlus, Folder, Flag,
+  TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -66,6 +67,7 @@ export const ICONS: Record<string, LucideIcon> = {
   'user-plus': UserPlus,
   'folder': Folder,
   'flag': Flag,
+  'triangle-alert': TriangleAlert,
 };
 
 // lucide-react already renders <svg class="lucide lucide-...">, which our CSS targets.

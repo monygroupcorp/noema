@@ -10,7 +10,7 @@ describe('buildCheckoutRequest', () => {
     expect(buildCheckoutRequest('standard_25', 'https://noema.example').packId).toBe('standard_25');
   });
 
-  it('points success/cancel back at /funding with a checkout flag', () => {
+  it('falls back to /funding when the buyer came from nowhere in particular', () => {
     const req = buildCheckoutRequest('starter_10', 'https://noema.example');
     expect(req.successUrl).toBe('https://noema.example/funding?checkout=success');
     expect(req.cancelUrl).toBe('https://noema.example/funding?checkout=cancel');
@@ -45,22 +45,31 @@ describe('signInThenBuy — the door returns you to the pack you picked', () => 
   });
 });
 
-describe('buildCheckoutRequest — carrying the page the buyer came from', () => {
-  it('carries a same-origin app path on both outcomes, so the return can offer the way back', () => {
+describe('buildCheckoutRequest — Stripe returns you to where you were', () => {
+  it('returns to the page the buyer left, on both outcomes — not to a page nobody asked for', () => {
     const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/app');
-    expect(new URL(req.successUrl).searchParams.get('back')).toBe('/app');
-    expect(new URL(req.cancelUrl).searchParams.get('back')).toBe('/app');
+    expect(req.successUrl).toBe('https://noema.example/app?checkout=success');
+    expect(req.cancelUrl).toBe('https://noema.example/app?checkout=cancel');
   });
 
   it('keeps the query of the page it came from — a task is often identified by it', () => {
-    const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/canvas?doc=17');
-    expect(new URL(req.successUrl).searchParams.get('back')).toBe('/canvas?doc=17');
+    const url = new URL(buildCheckoutRequest('plus_50', 'https://noema.example', '/canvas?doc=17').successUrl);
+    expect(url.pathname).toBe('/canvas');
+    expect(url.searchParams.get('doc')).toBe('17');
+    expect(url.searchParams.get('checkout')).toBe('success');
   });
 
-  it('carries nothing when there is nowhere in particular to go back to', () => {
-    const req = buildCheckoutRequest('plus_50', 'https://noema.example');
+  it('refuses an off-site return — the value comes back through a URL Stripe redirects to', () => {
+    for (const evil of ['https://evil.example', '//evil.example', 'app']) {
+      expect(buildCheckoutRequest('plus_50', 'https://noema.example', evil).successUrl)
+        .toBe('https://noema.example/funding?checkout=success');
+    }
+  });
+
+  it('never returns to a /funding URL holding a pack, which would re-start the purchase', () => {
+    const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/funding?pack=plus_50');
     expect(req.successUrl).toBe('https://noema.example/funding?checkout=success');
-    expect(req.cancelUrl).toBe('https://noema.example/funding?checkout=cancel');
+    expect(req.successUrl).not.toContain('pack=');
   });
 });
 
@@ -76,7 +85,7 @@ describe('safeReturn — what is worth carrying through Stripe', () => {
     expect(safeReturn('app')).toBe(false);
   });
 
-  it('drops the funding page itself, which is where the return already lands', () => {
+  it('drops the funding page itself, which is where a return with nowhere to go already lands', () => {
     expect(safeReturn('/funding')).toBe(false);
     expect(safeReturn('/funding?pack=plus_50')).toBe(false);
   });
