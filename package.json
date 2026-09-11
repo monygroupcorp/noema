@@ -16,6 +16,7 @@
     "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
     "ceremony:finalize": "npx tsx scripts/ceremony-finalize.ts",
+    "ceremony:rehearse": "npx tsx scripts/ceremony-rehearsal.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
