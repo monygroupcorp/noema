@@ -53,17 +53,21 @@ export function safeReturn(returnTo: string | null | undefined): boolean {
   return !returnTo.split('?')[0].replace(/\/$/, '').endsWith('/funding');
 }
 
-// Where the front door should return a visitor who tried to buy a pack without an account.
-// They asked for a specific pack; sign-in hands them back to that exact purchase rather than
-// to a generic landing, so choosing the pack is not a step they repeat.
+// The door, carrying the purchase it interrupted. A visitor who pressed Buy on a pack without
+// an account has already chosen; the door takes the account and then completes that checkout
+// itself, so Stripe is the next thing they see.
 //
-// `returnTo` is the page they were standing on when they reached for credits — the pill opens
-// the buy modal anywhere in the app, so that is usually mid-task. It rides along to the funding
-// page, which puts it into the checkout request, so a buyer who had to sign in on the way comes
-// back from Stripe to the same place as one who was signed in already. Without it the return
-// path is dropped at the door, and the longest version of this walk is the one that ends
-// furthest from where it started.
+// It used to hand them to `/funding?pack=<id>` instead, and that page started the checkout on
+// their behalf. The purchase resumed, but through a screen nobody asked for: a page load, a pack
+// catalog fetched over the network, and a flash of the funding rails before the redirect. The
+// buyer who has to sign in walks the longest version of this path, and that page was a step in
+// it that decided nothing.
+//
+// `returnTo` is the page they were standing on when they reached for credits — the pill opens the
+// buy modal anywhere in the app, so that is usually mid-task. It rides as the door's ordinary
+// `next`, which is also what Stripe is told to return them to: a buyer who signed in on the way
+// comes back to the same place as one who was signed in already.
 export function signInThenBuy(packId: string, returnTo?: string | null): string {
-  const back = safeReturn(returnTo) ? `&back=${encodeURIComponent(returnTo as string)}` : '';
-  return doorPath(`/funding?pack=${packId}${back}`);
+  const door = doorPath(safeReturn(returnTo) ? (returnTo as string) : null);
+  return `${door}${door.includes('?') ? '&' : '?'}buy=${encodeURIComponent(packId)}`;
 }

@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
-import { AuthApiError, getAccounts } from '../lib/api';
+import { api, AuthApiError, getAccounts } from '../lib/api';
+import { buildCheckoutRequest } from '../lib/checkout';
 import { markOnboarded } from '../lib/entry';
 import { Wordmark } from '../ui/Wordmark';
 import type { Execution } from '../lib/idents';
@@ -23,9 +24,22 @@ import './onboard.css';
 // The multi-session store APPENDS a login rather than replacing, so this flag only governs copy
 // and where we land afterwards (back to /keyring, not /app).
 //
-// RETURN (`?next=<path>`): a visitor sent here mid-task — pressing Buy on a pack without an
+// RETURN (`?next=<path>`): a visitor sent here mid-task — reaching for a tool that needs an
 // account, say — is handed back to that exact task once the session is live, so the choice they
 // already made is not one they make twice.
+//
+// Every way out of here REPLACES this entry in history rather than pushing past it. A door you
+// have walked through is not somewhere Back should put you: this page's whole content is a
+// sign-in form, and offering one for a session the browser already holds is a step that decides
+// nothing. Back from inside the app now reaches whatever sent the visitor here, and Back from
+// Stripe reaches the page they were working on.
+//
+// RESUMED PURCHASE (`?buy=<packId>`): pressing Buy on a card pack without an account arrives
+// here too, and pressing it WAS the choice. So the door does not hand the buyer onward to a page
+// that would start the checkout for them — it starts the checkout, and Stripe is the next thing
+// they see. `next` is where Stripe returns them, exactly as it is for a buyer who never had to
+// stop here. The anonymous door cannot do this and says so instead: no card can fund an
+// anonymous session, on any rail.
 
 const MIN_PASSWORD = 8;
 const MIN_USERNAME = 3;
@@ -43,13 +57,20 @@ export function Onboard() {
   const [params] = useSearchParams();
   const addMode = params.get('add') === '1';
   const next = safeNext(params.get('next'));
+  // A card pack the visitor already pressed Buy on, waiting on the account this page is for.
+  const buy = addMode ? null : params.get('buy');
+  // How far that purchase has got, once the account exists: 'handing' while the checkout is
+  // being opened, the refusal if the card rail would not open it. It lives here rather than in
+  // Door A because the whole page stops addressing someone with no account the moment they have
+  // one — the header and the anonymous door included.
+  const [resume, setResume] = useState<'handing' | { err: string } | null>(null);
 
   // Anon entry (Door B): the anon commitment path is a session with no account, so there's
   // nothing to set beyond the execution mode — funding derives from the (absent) session.
   const enter = (exec: Execution) => {
     setExecution(exec);       // session mode; custody is still per-run inside the app
     markOnboarded();
-    navigate(next ?? (addMode ? '/keyring' : '/app'));
+    navigate(next ?? (addMode ? '/keyring' : '/app'), { replace: true });
   };
 
   return (
@@ -68,14 +89,15 @@ export function Onboard() {
             {/* Someone sent here mid-task did not come looking for a front door. Say that the
                 task is still waiting, so the door reads as a step in what they were doing
                 rather than the start of something else. */}
-            {next && <p className="auth-sub">Whichever you choose, we take you straight back to what you were doing.</p>}
+            {buy && !resume && <p className="auth-sub">The pack you picked is waiting — make an account and we take you straight to the card checkout, then back to what you were doing.</p>}
+            {next && !buy && <p className="auth-sub">Whichever you choose, we take you straight back to what you were doing.</p>}
           </>
         )}
       </header>
 
       <div className="auth-doors">
         {/* Door A — bring an identity (real account) */}
-        <IdentityDoor addMode={addMode} next={next} />
+        <IdentityDoor addMode={addMode} next={next} buy={buy} resume={resume} setResume={setResume} />
 
         {/* Door B — stay anonymous (slate / dashed hemisphere) */}
         <section className="door anon">
@@ -84,6 +106,10 @@ export function Onboard() {
             <h2>Stay anonymous</h2>
           </div>
           <p className="door-d">No account — browse and make anonymously on our compute. Fund a bearer purse from a shielded wallet to spend without a name attached.</p>
+          {/* Someone who arrived holding a card pack is about to choose the one rail that pack
+              cannot travel. Say it here, at the choice, rather than letting them enter and meet
+              a refusal on the funding page afterwards. */}
+          {buy && !resume && <p className="door-warn">* the pack you picked is a <b>card</b> purchase, and no card can fund an anonymous session. Entering here drops it — fund this session from a wallet instead.</p>}
           <button className="door-cta slate" onClick={() => enter('rented')}>Enter anonymously →</button>
           <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a purse <span className="opt-meta">coming soon</span></button>
           <p className="door-warn">* a purse is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
@@ -137,7 +163,13 @@ function PasswordField({ value, onChange, placeholder, autoComplete, disabled }:
 // Door A. The form is the door — there is no button that only reveals it. A visitor arriving at
 // the front door has no account yet, so they land on CREATE; someone adding a second login to a
 // keyring they already hold lands on SIGN IN. Either way the other is one click away.
-function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null }) {
+function IdentityDoor({ addMode, next, buy, resume, setResume }: {
+  addMode: boolean;
+  next: string | null;
+  buy: string | null;
+  resume: 'handing' | { err: string } | null;
+  setResume: (r: 'handing' | { err: string } | null) => void;
+}) {
   const { login, register, signUpWithWallet, recoverWithWallet, recoverWithTelegram } = useSession();
   const navigate = useNavigate();
   // Which form opens. Read the held logins straight from the client store rather than from
@@ -154,22 +186,42 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
   const [tgCode, setTgCode] = useState('');
 
   const reset = () => { setErr(null); };
-  // The session is live; hand the visitor back to whatever sent them here, else into the app
-  // (or back to the keyring when they were adding an account).
-  const done = () => { markOnboarded(); navigate(next ?? (addMode ? '/keyring' : '/app')); };
+  // The session is live. If a card pack came with them, finish that purchase here — Stripe is
+  // what they were reaching for, and it returns them to `next` the same as it would have if
+  // they had never been stopped. Otherwise hand them back to whatever sent them here, else into
+  // the app (or back to the keyring when they were adding an account).
+  const done = async () => {
+    markOnboarded();
+    if (buy) {
+      setResume('handing');
+      try {
+        const s = await api.createCheckoutSession(buildCheckoutRequest(buy, window.location.origin, next));
+        // Replace, not push: Back from Stripe reaches the page the buyer was working on, not
+        // this door with a form on it and a session already held.
+        window.location.replace(s.url);
+        return;
+      } catch (e) {
+        // The account is real and held; only the checkout failed. Say both, and point at the
+        // one page that can offer every pack, rather than dropping them somewhere silent.
+        setResume({ err: e instanceof Error ? e.message : String(e) });
+        return;
+      }
+    }
+    navigate(next ?? (addMode ? '/keyring' : '/app'), { replace: true });
+  };
 
   // Wallet-first SIGNUP: connect + sign, mint-if-absent, land wherever we were headed. A wallet
   // that is already bound logs into that same soul, so this button is both doors at once.
   async function onSignUpWallet() {
     reset(); setBusy(true);
-    try { await signUpWithWallet(); done(); }
+    try { await signUpWithWallet(); await done(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
 
   async function onRecoverWallet() {
     reset(); setBusy(true);
-    try { await recoverWithWallet(); done(); }
+    try { await recoverWithWallet(); await done(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
@@ -177,7 +229,7 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
   async function onRecoverTelegram() {
     if (!tgCode.trim()) return;
     reset(); setBusy(true);
-    try { await recoverWithTelegram(tgCode.trim()); done(); }
+    try { await recoverWithTelegram(tgCode.trim()); await done(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
@@ -187,7 +239,7 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
     reset(); setBusy(true);
     try {
       await login(username.trim(), password);
-      done();
+      await done();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
@@ -199,7 +251,7 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
     if (username.trim().length < MIN_USERNAME) { setErr(`Username must be at least ${MIN_USERNAME} characters.`); return; }
     if (password.length < MIN_PASSWORD) { setErr(`Password must be at least ${MIN_PASSWORD} characters.`); return; }
     setBusy(true);
-    try { await register(username.trim(), password); done(); }   // register logs you straight in
+    try { await register(username.trim(), password); await done(); }   // register logs you straight in
     catch (e) {
       if (e instanceof AuthApiError && e.code === 'conflict.registration') setErr('That username is taken — try another, or sign in.');
       else setErr(e instanceof Error ? e.message : String(e));
@@ -209,6 +261,33 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
   // Switching between the two forms keeps what has been typed: the username and password a
   // visitor entered are the same ones they need on the other form.
   const swap = (to: 'signin' | 'register') => { reset(); setForgot(false); setMode(to); };
+
+  // Past this point the account exists and the form has nothing left to ask. Leaving it on
+  // screen would offer "Create account" to someone who just made one, and the second press
+  // would come back as a name already taken — a dead end dressed as their mistake.
+  if (resume) {
+    return (
+      <section className="door">
+        <div className="door-h">
+          <span className="hemi lit" aria-hidden="true" />
+          <h2>Your account is ready</h2>
+        </div>
+        {resume === 'handing' ? (
+          <p className="door-d">Signed in. Opening the card checkout for the pack you picked…</p>
+        ) : (
+          <>
+            <p className="door-d">
+              You are signed in and the account is yours to keep — it was the card checkout that
+              would not open ({resume.err}). Nothing has been charged.
+            </p>
+            <Link className="door-cta primary" to="/funding">Pick a pack on the funding page →</Link>
+            <Link className="door-opt" to={next ?? '/app'}>Carry on without buying →</Link>
+          </>
+        )}
+        <div className="door-knows"><span className="hemi lit sm" aria-hidden="true" /> noema knows: <b>it's you</b></div>
+      </section>
+    );
+  }
 
   return (
     <section className="door">

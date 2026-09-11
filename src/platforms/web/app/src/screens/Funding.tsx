@@ -9,7 +9,6 @@ import { useSession } from '../state/session';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { doorPath } from '../lib/entry';
 import { creditsLanded } from '../lib/balance';
-import { safeNext } from './Onboard';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
@@ -55,11 +54,6 @@ export function Funding() {
   // rather than only highlighting a chip they would have to press again.
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get('pack');
-  // The page the buyer was on when they reached for credits, handed to us by the door when
-  // signing in was a step on the way here. Held in state because the auto-buy below strips the
-  // query before it leaves, and this has to outlive that. Same guard as everything else that
-  // arrives in a URL we were sent to.
-  const [cameFrom] = useState(() => safeNext(searchParams.get('back')));
   const [pack, setPack] = useState(preselected ?? 'plus_50');
   // The credit-pack catalog, loaded from the single server source (no hardcoded numbers).
   const [packs, setPacks] = useState<Pack[]>([]);
@@ -116,11 +110,10 @@ export function Funding() {
     }
   }
 
-  // The pack an anon visitor is holding: named by ?pack= and real in the server catalog. A
-  // ?pack= that is not a SKU resolves to nothing, and the page falls back to asking them to pick.
-  const chosen = !session && preselected ? packs.find((p) => p.id === preselected) ?? null : null;
-  // ...but not before the catalog has arrived. Until it does there is no pack to name AND no
-  // chip to press, so "pick a pack" would be the same wrong instruction, just briefly.
+  // A ?pack= that is not a real SKU resolves to nothing and the page falls back to asking the
+  // visitor to pick — but not before the catalog has arrived, because until it does there is no
+  // pack to name AND no chip to press, so "pick a pack" would be the same wrong instruction,
+  // just briefly.
   const namingPending = preselected != null && packs.length === 0;
 
   async function connect() {
@@ -139,32 +132,33 @@ export function Funding() {
   // door with this pack in hand — signing in returns them here and the purchase resumes.
   function buyPack(packId: string) {
     setCheckoutErr(null);
-    if (!canCheckout(session)) { navigate(signInThenBuy(packId, cameFrom)); return; }
+    if (!canCheckout(session)) { navigate(signInThenBuy(packId)); return; }
     setCheckoutBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom))
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
   }
 
-  // Arriving as /funding?pack=<id> — from a pricing card's Buy, or handed back by the door after
-  // signing in — starts that purchase straight away. Pressing Buy already WAS the choice; making
-  // it again on this page is the step this removes. It fires once (a ref, not state, so a
-  // re-render can't double-charge) and only once auth has settled, so a signed-in visitor whose
-  // session is still hydrating isn't mistaken for an anon one.
+  // Arriving as /funding?pack=<id> — from a pricing card's Buy — carries a decision the visitor
+  // already made by pressing Buy. So this page does not ask for it again: `buyPack` starts the
+  // checkout for a signed-in visitor, and takes an anon one to the door holding the pack, where
+  // making an account leads straight on to that same checkout. Either way this page is not a
+  // stop, which is the step this removes.
   //
-  // Without a session it deliberately does NOT route to the door: someone who took this pack to
-  // the door and then chose "Enter anonymously" comes back here still anon, and bouncing them
-  // again would loop forever. They land on the highlighted pack with the sign-in note under it,
-  // and clicking is what takes them to the door.
-  const autoBuyFired = useRef(false);
+  // It fires once (a ref, not state, so a re-render can't double-charge) and only once auth has
+  // settled, so a signed-in visitor whose session is still hydrating isn't mistaken for an anon
+  // one. A pack that isn't a real SKU is left alone, and the page falls back to asking them to
+  // pick from the chips.
+  //
+  // The pack leaves the URL before we do, the way the return-from-Stripe flag is dropped: this
+  // page is where Stripe sends a buyer who came from nowhere in particular, and where the browser
+  // Back button lands from the door — either arriving on a URL that would start the whole thing
+  // over, with no way out but forward.
+  const resumeFired = useRef(false);
   useEffect(() => {
-    if (!ready || autoBuyFired.current || !preselected || packs.length === 0) return;
-    if (!canCheckout(session)) return;
+    if (!ready || resumeFired.current || !preselected || packs.length === 0) return;
     if (!packs.some((p) => p.id === preselected)) return;   // not a real SKU — leave them on the page
-    autoBuyFired.current = true;
-    // Drop the pack from the URL before leaving, the way the return-from-Stripe flag is dropped:
-    // otherwise coming BACK from Stripe lands on this URL again and starts the same checkout,
-    // and the back button never escapes.
+    resumeFired.current = true;
     window.history.replaceState({}, '', window.location.pathname);
     buyPack(preselected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -257,32 +251,15 @@ export function Funding() {
                 </div>
               </div>
 
-              {/* Someone holding a pack they cannot buy has already made the choice this
-                  section asks for, and telling them to make it again is the loop: they pressed
-                  Buy, went to the door, chose to stay anonymous, and came back to "pick a pack".
-                  Say which pack is waiting, put the door one click away rather than behind
-                  finding the chip again, and — for the visitor who chose anonymity on purpose —
-                  name the rail that actually serves them instead of leaving them on this one. */}
-              {!session && chosen && (
-                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
-                  <Ic name="triangle-alert" />
-                  <span>
-                    The {chosen.label} pack — {fmt(chosen.credits)} credits for ${chosen.usd} —
-                    is waiting on an account: a card purchase is the one rail that can't be
-                    anonymous, so it needs an identified one.{' '}
-                    <Link to={signInThenBuy(chosen.id, cameFrom)}>Sign in and buy it →</Link>{' '}
-                    Staying anonymous instead? No card can fund an anonymous session at all — the
-                    on-chain wallet below is the rail that can.
-                  </span>
-                </div>
-              )}
-              {!session && !chosen && !namingPending && (
+              {/* A visitor who arrived holding a pack is already on their way to the door with
+                  it; this only speaks to someone browsing the rails with no pack in hand. */}
+              {!session && !namingPending && (
                 <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
                   <Ic name="triangle-alert" />
                   <span>
                     A card purchase needs an identified account (fiat can't fund an anonymous
-                    purse). Pick a pack and we'll take you to the door — you come straight back
-                    here to it.
+                    purse). Pick a pack and we'll take you to the door — make an account there and
+                    you go straight on to the card checkout.
                   </span>
                 </div>
               )}

@@ -20,9 +20,11 @@
 .door-cta.primary{box-shadow:0 0 0 3px var(--accent-bg)}
 .door-cta.slate{border-color:var(--slate,#7d8aa6);background:color-mix(in srgb,var(--slate,#7d8aa6) 16%,transparent);color:var(--text)}
 .door-cta:hover{filter:brightness(1.06)}
+a.door-cta{display:block;text-align:center;text-decoration:none}
 .door-opt{width:100%;display:flex;align-items:center;gap:9px;border:1px solid var(--hair);background:var(--bg);
   color:var(--text);font:inherit;font-size:13px;padding:10px 14px;border-radius:10px;cursor:pointer;transition:.14s var(--ease)}
 .door-opt:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+a.door-opt{justify-content:center;text-decoration:none}
 .door-opt:disabled{opacity:.5;cursor:not-allowed}
 .door-opt svg.lucide{width:15px;height:15px;color:var(--muted)}
 .door-opt .opt-meta{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
