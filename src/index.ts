@@ -261,9 +261,13 @@ const TEE_AZURE_INGRESS_TEMPLATE = process.env.TEE_AZURE_INGRESS_TEMPLATE  // e.
 
 const _vKeyPath = path.join(__dirname, 'arcanum', 'circuit', 'artifacts', 'verification_key.json')
 let _arcanumVerifyFn: ReturnType<typeof makeSnarkjsVerifier> | undefined
+// Kept alongside the verify function so /config can check it against the key actually
+// being served. The two halves of a setup reach this process by different roads.
+let _arcanumVerificationKey: unknown
 if (existsSync(_vKeyPath)) {
   try {
-    _arcanumVerifyFn = makeSnarkjsVerifier(JSON.parse(readFileSync(_vKeyPath, 'utf8')))
+    _arcanumVerificationKey = JSON.parse(readFileSync(_vKeyPath, 'utf8'))
+    _arcanumVerifyFn = makeSnarkjsVerifier(_arcanumVerificationKey as object)
   } catch (err) {
     // Malformed vkey — proceed without ZK verification rather than crashing at startup
     console.error('[arcanum] verification_key.json is invalid, ZK proofs disabled:', err)
@@ -1234,6 +1238,7 @@ async function main(): Promise<void> {
   app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
     anonPurseEnabled,
     zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    verificationKey: _arcanumVerificationKey,
     // The key clients prove with follows the ceremony: once it is finalized, /circuit/zkey
     // serves the key its public transcript names, not whatever the image was built with.
     provingKey: createProvingKeySource({

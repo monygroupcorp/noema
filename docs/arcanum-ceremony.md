@@ -258,6 +258,24 @@ the ceremony's output and serving it under a finished transcript would say that 
 exported from that exact zkey, and a proof made against a proving key whose verification key
 the server does not hold will not verify.
 
+That is not a detail to remember at the end. The two halves of a setup reach a running
+server by different roads — the proving key follows the transcript out of ceremony custody,
+the verification key is a JSON file baked into the image — so publishing the ceremony's key
+against an image built before it leaves the site handing out one setup's proving key and
+judging proofs with another's. Honest proofs are rejected, and the verification key still in
+force is whichever the image carried: if that is the committed dev key, the forgery the
+ceremony exists to close is still open, behind a page reporting that it closed.
+
+So the server checks. `/arcanum/config` derives the verification key from the key it is
+actually serving and reports `verifierPaired`; a known mismatch makes `ready` false and is
+logged with the served key's hash, and the `/ceremony` page says the served key matches the
+transcript *and* that the site cannot verify proofs made with it. `verifierPaired` is null,
+not false, where the question cannot be answered — no key served, none held, or a key hosted
+off this API — because a site that cannot check is not a site that failed the check.
+
+Finalizing is therefore two artifacts, not one: publish the beacon'd zkey (above) and commit
+the `verification_key.json` exported from that same zkey.
+
 ## After the ceremony: wiring the verifier
 
 Once `verification_key.json` is in `src/arcanum/circuit/artifacts/`, load it in

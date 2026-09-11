@@ -223,6 +223,12 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
       text: 'The proving key is hosted off this API, so we cannot name its bytes for you. '
         + 'Hash your download and compare it with the final hash above.',
     },
+    unverifiable: {
+      icon: 'flag',
+      text: 'The key this site serves is the key above, hash for hash — but the verification '
+        + 'key it judges proofs with came from a different setup, so a proof made with it '
+        + 'will not verify here. The ceremony is not yet in force on this site.',
+    },
   }[verdict];
 
   return (
