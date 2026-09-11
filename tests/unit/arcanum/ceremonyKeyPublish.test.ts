@@ -137,7 +137,7 @@ test('a final key that does not hash to CEREMONY_FINALIZE is not published', asy
   }
 })
 
-test('a finalized ceremony with no CEREMONY_FINAL_ZKEY serves nothing — not the image key', async () => {
+test('a finalized ceremony whose key the image does NOT carry serves nothing', async () => {
   // The state the live site was in: the transcript is finished, the deploy published no
   // key, and the committed key is NOT served in its place because it is not the one the
   // transcript names.
@@ -148,6 +148,42 @@ test('a finalized ceremony with no CEREMONY_FINAL_ZKEY serves nothing — not th
     assert.equal(config.zkeySource, 'none')
     assert.equal(config.ready, false)
     assert.notEqual(config.zkeyHash, TRACKED_HASH)
+  } finally {
+    await rig.close()
+  }
+})
+
+// The deploy step that keeps getting skipped, removed.
+//
+// Twice now the key has been right and the site has served nothing, because publishing it
+// into custody was a separate manual act on the box whose omission is silent to everyone
+// but whoever reads the boot log. Once the ceremony's own output is the committed key,
+// the image is already carrying the exact bytes the transcript names, and there is
+// nothing left for an operator to get wrong: the hash decides.
+test('the committed key IS served when it hashes to finalHash — no env, no custody, no deploy step', async () => {
+  const rig = await boot({}, TRACKED_HASH)
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'ceremony',
+      'the image key hashes to the transcript finalHash, so it IS the ceremony key')
+    assert.equal(config.zkeyHash, TRACKED_HASH)
+    assert.equal(config.ready, true, 'and the site is ready to serve proofs with nothing set')
+    assert.ok(config.zkeyUrl, 'clients get a url to fetch it from')
+  } finally {
+    await rig.close()
+  }
+})
+
+test('one byte off and it is refused — the hash decides, not the fact that a key is present', async () => {
+  // The guard the case above rests on. A committed key that is NOT the transcript's is
+  // exactly the situation #593 exists to refuse, and it still refuses it.
+  const nearly = TRACKED_HASH.slice(0, -1) + (TRACKED_HASH.endsWith('a') ? 'b' : 'a')
+  const rig = await boot({}, nearly)
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'none', 'a key that is not the named one is not served')
+    assert.equal(config.ready, false)
+    assert.equal(config.zkeyHash, nearly, 'and /config still names the key that belongs here')
   } finally {
     await rig.close()
   }

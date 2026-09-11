@@ -14,6 +14,7 @@ declare const __dirname: string
 const ARTIFACTS = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const R1CS_PATH = path.join(ARTIFACTS, 'arcanum.r1cs')
 const ROOT_ZKEY = path.join(ARTIFACTS, 'arcanum_0000.zkey')
+const REPO_ZKEY = path.join(ARTIFACTS, 'arcanum_final.zkey')
 
 /**
  * Where the ceremony's zkey chain lives. The sequencer writes it; /arcanum/circuit/zkey
@@ -67,8 +68,10 @@ async function publishKey(
  *   CEREMONY_OPEN=1            — seed the chain root from arcanum_0000.zkey and open it.
  *   CEREMONY_HEAD_ZKEY=<path>  — put the chain head back in custody on a box that does not
  *                                have it, so an open ceremony can accept contributions again.
- *   CEREMONY_FINAL_ZKEY=<path> — publish the beacon'd final proving key into custody, so
- *                                the site can serve the key the transcript names.
+ *   CEREMONY_FINAL_ZKEY=<path> — publish a final proving key the image does NOT carry into
+ *                                custody. Unnecessary when the committed arcanum_final.zkey
+ *                                already hashes to the transcript's finalHash: the server
+ *                                recognises that and serves it from the image.
  *   CEREMONY_FINALIZE=<hash>   — seal the ceremony with the beacon'd final proving-key hash
  *                                (run scripts/arcanum-trusted-setup.sh --finalize first).
  *   CEREMONY_ZKEY_DIR          — custody dir for the zkey chain (default: <artifacts>/ceremony,
@@ -148,9 +151,11 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
   }
 
   // A ceremony whose key is not on this box cannot do its job, and boot is the first place
-  // that is knowable. Both halves below are the same failure — the record lives in the
-  // database and the keys live on a disk, and nothing makes the disk outlive a deploy
-  // unless CEREMONY_ZKEY_DIR points somewhere mounted.
+  // that is knowable. An OPEN ceremony needs its chain head in custody, which nothing makes
+  // outlive a deploy unless CEREMONY_ZKEY_DIR points somewhere mounted. A FINALIZED one is
+  // servable from any of three places — custody, the image, an external host — so say which
+  // it came from, and complain only when it is in none, because an alarm that fires on a
+  // healthy box is one nobody reads.
   try {
     const status = await store.status()
     const head = headHash(status)
@@ -161,10 +166,18 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
         'next deploy does not strand it again.', { headHash: head, custodyDir })
     }
     if (status.phase === 'finalized' && status.finalHash && !process.env.ARCANUM_ZKEY_URL) {
-      if (!(await custody.has(status.finalHash))) {
-        log.error('ceremony is finalized but its proving key is in neither custody nor ' +
-          'ARCANUM_ZKEY_URL — the site can serve no proving key. Set CEREMONY_FINAL_ZKEY ' +
-          'to the beacon\'d arcanum_final.zkey and redeploy.', { finalHash: status.finalHash })
+      const inCustody = Boolean(await custody.get(status.finalHash))
+      const imageKeyHash = existsSync(REPO_ZKEY) ? sha256Hex(readFileSync(REPO_ZKEY)) : null
+      if (inCustody) {
+        log.info('ceremony final proving key is in custody', { finalHash: status.finalHash })
+      } else if (imageKeyHash === status.finalHash) {
+        log.info('ceremony final proving key is the one committed to the image — served from there',
+          { finalHash: status.finalHash })
+      } else {
+        log.error('ceremony is finalized but its proving key is in neither custody, the image, ' +
+          'nor ARCANUM_ZKEY_URL — the site can serve no proving key. Commit the key the ' +
+          'transcript names, or set CEREMONY_FINAL_ZKEY to it and redeploy.',
+          { finalHash: status.finalHash, imageKeyHash })
       }
     }
   } catch (err) {
