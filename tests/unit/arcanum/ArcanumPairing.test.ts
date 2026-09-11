@@ -24,8 +24,17 @@ import * as snarkjs from 'snarkjs'
 // snarkjs footgun; their own CLI works around it the same way). Each test
 // file runs in its own isolated process under node:test, so forcing exit
 // here is safe and does not affect other hermetic test files.
+//
+// It exits on the VERDICT and not on zero. A hook that exits zero pulls the
+// process out from under node:test before the run is reported, so this file
+// came back as a pass whatever the assertion below did — the check it exists
+// to make could have been failing for as long as it has been in the gate and
+// nothing would have said so. A throw leaves `passed` false and this exits 1,
+// which is the only signal the runner has left to read.
+let passed = false
+
 after(() => {
-  process.exit(0)
+  process.exit(passed ? 0 : 1)
 })
 
 const ARTIFACTS = path.join(process.cwd(), 'src/arcanum/circuit/artifacts')
@@ -48,4 +57,6 @@ test('tracked verification_key.json is derived from the tracked arcanum_final.zk
       'npx snarkjs zkey export verificationkey src/arcanum/circuit/artifacts/arcanum_final.zkey ' +
       'src/arcanum/circuit/artifacts/verification_key.json',
   )
+
+  passed = true
 })

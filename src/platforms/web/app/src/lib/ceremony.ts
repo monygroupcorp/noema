@@ -69,9 +69,17 @@ export const ceremony = {
     try {
       const res = await fetch('/arcanum/config');
       if (!res.ok) return null;
-      const cfg = (await res.json()) as { zkeyHash?: string | null; zkeySource?: ServedKey['source'] };
+      const cfg = (await res.json()) as {
+        zkeyHash?: string | null;
+        zkeySource?: ServedKey['source'];
+        verifierPaired?: boolean | null;
+      };
       if (cfg.zkeySource === undefined) return null;
-      return { hash: cfg.zkeyHash ?? null, source: cfg.zkeySource ?? null };
+      return {
+        hash: cfg.zkeyHash ?? null,
+        source: cfg.zkeySource ?? null,
+        paired: cfg.verifierPaired ?? null,
+      };
     } catch {
       return null;
     }
@@ -155,6 +163,11 @@ export interface ServedKey {
   hash: string | null;
   /** Where that key came from: the finalized ceremony, the repo, another host, or nowhere. */
   source: 'ceremony' | 'repo' | 'external' | 'none' | null;
+  /**
+   * Whether the verification key the site judges proofs with is the served key's own
+   * half. null when the site cannot say — an older server, or a key hosted elsewhere.
+   */
+  paired?: boolean | null;
 }
 
 export type ServedKeyVerdict =
@@ -166,6 +179,12 @@ export type ServedKeyVerdict =
   | 'absent'
   /** The key is hosted elsewhere, so the API has not seen those bytes and cannot name them. */
   | 'external'
+  /**
+   * The served key IS the one the transcript names, and the site cannot verify proofs
+   * made with it — its verification key is from a different setup. A hash match is only
+   * half the claim, and this is the half that decides whether a proof is worth making.
+   */
+  | 'unverifiable'
   /** Nothing to compare yet: the ceremony is unfinished, or this server predates the check. */
   | 'unknown';
 
@@ -181,5 +200,8 @@ export function checkServedKey(
   if (!served || served.source === null) return 'unknown';
   if (served.source === 'external') return 'external';
   if (served.source === 'none' || !served.hash) return 'absent';
-  return served.hash.toLowerCase() === status.finalHash.toLowerCase() ? 'match' : 'mismatch';
+  if (served.hash.toLowerCase() !== status.finalHash.toLowerCase()) return 'mismatch';
+  // Only an explicit false downgrades the verdict: a server that does not report the
+  // pairing is the older build, and 'match' is what it was always able to say.
+  return served.paired === false ? 'unverifiable' : 'match';
 }
