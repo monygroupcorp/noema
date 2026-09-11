@@ -14,7 +14,10 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 class MemoryCustody implements ZkeyCustody {
   private m = new Map<string, Buffer>()
   async get(h: string) { return this.m.get(h) ?? null }
+  async has(h: string) { return this.m.has(h) }
   async put(h: string, b: Buffer) { this.m.set(h, b) }
+  /** What a deploy does to a custody directory that is part of the image. */
+  wipe() { this.m.clear() }
 }
 
 // No ptau → verifyContinuation skips the snarkjs deep check, so these run without a
@@ -279,4 +282,56 @@ test('POST /slots rejects blank or over-long contact', async () => {
   const { app } = makeApp()
   assert.equal((await request(app).post('/v1/ceremony/slots').send({ contact: '  ' })).status, 400)
   assert.equal((await request(app).post('/v1/ceremony/slots').send({ contact: 'x'.repeat(300) })).status, 400)
+})
+
+// ── an open ceremony that this box cannot actually serve ───────────────────────────
+// The transcript is a database record and the chain is files on a disk. Those two
+// outlive different things: the record survives a deploy, the disk only survives one if
+// somebody mounted it. So "open" and "joinable" are separate facts, and the public
+// status says both — it used to say only the first, and the page turned that into
+// "accepting contributions" for a ceremony whose every route answered 503.
+
+test('an open ceremony whose head is in custody reports that it is accepting contributions', async () => {
+  const { app, store, custody } = makeApp()
+  await open(store, custody)
+  const res = await request(app).get('/v1/ceremony')
+  assert.equal(res.status, 200)
+  assert.equal(res.body.phase, 'open')
+  assert.equal(res.body.acceptingContributions, true)
+})
+
+test('an open ceremony whose head is gone from custody says so in its public status', async () => {
+  const { app, store, custody } = makeApp()
+  const rootHash = await open(store, custody)
+  custody.wipe()
+
+  const res = await request(app).get('/v1/ceremony')
+  assert.equal(res.status, 200)
+  // The record is untouched — the chain, the phase and the head all still read as they did.
+  assert.equal(res.body.phase, 'open')
+  assert.equal(res.body.headHash, rootHash)
+  // But nothing here can hand that head out, and the status is the only place a
+  // contributor finds out before spending a minute gathering entropy.
+  assert.equal(res.body.acceptingContributions, false)
+  assert.equal((await request(app).get('/v1/ceremony/current.zkey')).status, 503)
+})
+
+test('a ceremony not yet open is not accepting contributions either', async () => {
+  const { app } = makeApp()
+  const res = await request(app).get('/v1/ceremony')
+  assert.equal(res.body.phase, 'announced')
+  assert.equal(res.body.acceptingContributions, false)
+})
+
+test('the status returned with an accepted contribution reports the new head is servable', async () => {
+  const { app, store, custody } = makeApp()
+  const rootHash = await open(store, custody)
+  const res = await request(app).post('/v1/ceremony/contributions')
+    .set('x-based-on', rootHash).set('x-contributor-name', 'c1')
+    .set('Content-Type', 'application/octet-stream').send(fakeZkey(after(ROOT, 'c1')))
+  assert.equal(res.status, 201)
+  // The contribution is only useful if the NEXT one can start from it, which means the
+  // bytes it just stored have to be retrievable under the hash it just published.
+  assert.equal(res.body.acceptingContributions, true)
+  assert.equal(res.body.headHash, sha(fakeZkey(after(ROOT, 'c1'))))
 })

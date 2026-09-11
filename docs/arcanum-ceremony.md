@@ -258,6 +258,39 @@ the ceremony's output and serving it under a finished transcript would say that 
 exported from that exact zkey, and a proof made against a proving key whose verification key
 the server does not hold will not verify.
 
+## Where the chain is kept, and why that is a mount
+
+The transcript is a database record; the keys it names are files on the sequencer's disk,
+under `CEREMONY_ZKEY_DIR` (content-addressed, `<sha256>.zkey`, about 5MB each). Those two
+things survive different events. The record survives a deploy. The files only survive one
+if the directory they are in is a mount — and the default is a directory inside the built
+application, which on a container is part of the image and is replaced with it.
+
+That is not a tidy-up: a ceremony whose custody is inside the image is a ceremony a routine
+deploy ends. The record goes on publishing a chain head, `/v1/ceremony/current.zkey` has no
+bytes to answer with, and every upload is refused for building on a head the server cannot
+produce. `deploy.sh` and `docker-compose.prod.yml` mount `/opt/noema/ceremony` (override
+with `CEREMONY_DIR`) at `/var/lib/noema/ceremony` and set `CEREMONY_ZKEY_DIR` to it. A
+sequencer run any other way should have that directory pointed somewhere that outlives the
+process.
+
+The status the page reads says which of the two is true. `acceptingContributions` is false
+whenever the sequencer cannot hand out the head, whatever the phase says, and the page reads
+"Ceremony open · contributions paused" rather than inviting a contribution into a 503.
+
+### Putting a lost head back
+
+The keys in the chain are not secret — every one of them is published by hash and was in a
+contributor's browser — so a sequencer that lost its custody can be given the head back:
+
+```bash
+CEREMONY_HEAD_ZKEY=/path/to/the/head.zkey   # restored into custody at boot
+```
+
+It is checked against the head the transcript already publishes, and a file that hashes to
+anything else is refused rather than installed under a name the record gives to other bytes.
+Boot logs name the hash it is looking for when the head is missing.
+
 ## After the ceremony: wiring the verifier
 
 Once `verification_key.json` is in `src/arcanum/circuit/artifacts/`, load it in

@@ -47,6 +47,7 @@ services:
     environment:
       - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
+      - CEREMONY_ZKEY_DIR=/var/lib/noema/ceremony
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
     volumes:
       - /var/run/hyperbot:/var/run/hyperbot
@@ -57,6 +58,13 @@ services:
       # its permissive stubs and deposit screening becomes a no-op. An empty directory is safe
       # and expected on a box that has no module — the fallback is the same, with a loud warning.
       - ${COMPLIANCE_DIR:-/opt/noema/private/compliance}:/usr/src/app/dist/private/compliance:ro
+      # Arcanum ceremony custody — the trusted-setup chain's .zkey files. The transcript is in
+      # the database and outlives every deploy; without this mount the keys it names live in the
+      # container and do not, so a deploy leaves an open ceremony advertising a chain head no
+      # contributor can download and no upload can extend. deploy.sh mounts the same path and
+      # sets the same CEREMONY_ZKEY_DIR; the two must stay in step. Empty is correct until a
+      # ceremony opens.
+      - ${CEREMONY_DIR:-/opt/noema/ceremony}:/var/lib/noema/ceremony
     mem_limit: 900m
     networks:
       hyperbot:
