@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.29.1](https://github.com/monygroupcorp/noema/compare/v5.29.0...v5.29.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **blog:** ship the guides in the image, and stop denying the queue on the stream ([#601](https://github.com/monygroupcorp/noema/issues/601)) ([674df84](https://github.com/monygroupcorp/noema/commit/674df846c3836166039d15d7560fd251838d5809))
+* **ceremony:** the trusted-setup chain survives a deploy, and says so when it has not ([#602](https://github.com/monygroupcorp/noema/issues/602)) ([16a24e1](https://github.com/monygroupcorp/noema/commit/16a24e1ebc7ad6457a57f1ffb2f4ad464e8a09f0))
+* **crystal:** point the four Wan 2.2 unets at a repo that has them, and refuse a dead weight address ([#598](https://github.com/monygroupcorp/noema/issues/598)) ([99faac1](https://github.com/monygroupcorp/noema/commit/99faac11e3bc76933d8fcd2d0818e968b9270a0f))
+* **publish:** a held collection still says so when the export screen is reopened ([#600](https://github.com/monygroupcorp/noema/issues/600)) ([779941a](https://github.com/monygroupcorp/noema/commit/779941a5f979eb3414b5f31d11693a8351a243d1))
+
 ## [5.29.0](https://github.com/monygroupcorp/noema/compare/v5.28.0...v5.29.0) (2026-09-09)
 
 
