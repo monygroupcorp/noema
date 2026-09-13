@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": "image_chroma_text_to_image"},
   "inputTemplate": {
     "67": { "class_type": "SamplerCustomAdvanced", "inputs": { "noise": ["68", 0], "guider": ["73", 0], "sigmas": ["84", 0], "sampler": ["72", 0], "latent_image": ["69", 0] } },
     "68": { "class_type": "RandomNoise",           "inputs": { "noise_seed": 666 } },

@@ -16,6 +16,16 @@ export interface WorkflowTemplate {
    * weights all resolve from the registry needs no fallback table.
    */
   requiredModels?: Array<{ role: string; id: string; url?: string; dest: string }>
+  /**
+   * Where this graph comes from in Comfy-Org's workflow_templates library, which
+   * is the feedstock crystal draws flows from rather than building each by hand.
+   * `template` names the upstream template (a `name` in the pinned catalogue,
+   * src/crystal/upstream/); `null` says the subject has no upstream counterpart
+   * and `note` says why, so a flow that must stay hand-maintained is a recorded
+   * choice and not an oversight. Documentation, read by tests and the
+   * `scripts/crystal/upstream-templates.ts` tooling — nothing at runtime.
+   */
+  upstream?: { template: string | null; note?: string }
   platformHints?: Record<string, unknown>
   /**
    * True when the workflow has a multi-LoRA loader / extraction node configured

@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": "image_sdxl_simple"},
   "inputTemplate": {
     "3":  { "class_type": "KSampler",              "inputs": { "seed": 88888888, "steps": 30, "cfg": 7, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1, "model": ["46", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["97", 0] } },
     "4":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" } },

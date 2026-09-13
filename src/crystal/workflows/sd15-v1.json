@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": null, "note": "upstream carries no SD1.5 template at all — the library's oldest image base is SDXL. SD1.5 stays hand-maintained for the LoRA ecosystem that still targets it."},
   "inputTemplate": {
     "3":  { "class_type": "KSampler",             "inputs": { "seed": 88888888, "steps": 20, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["11", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
     "4":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" } },

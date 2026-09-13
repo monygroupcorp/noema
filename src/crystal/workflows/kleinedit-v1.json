@@ -5,6 +5,7 @@
   "seedInputKey": "input_seed",
   "loraCapable": false,
   "customNodes": [],
+  "upstream": {"template": "image_flux2_klein_image_edit_9b_distilled"},
   "inputTemplate": {
     "76": { "class_type": "LoadImage",              "inputs": { "image": "PLACEHOLDER" } },
     "70": { "class_type": "UNETLoader",             "inputs": { "unet_name": "flux-2-klein-9b-fp8.safetensors", "weight_dtype": "default" } },

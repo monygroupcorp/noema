@@ -20,6 +20,7 @@
     "census:dead-exports": "npx tsx scripts/dead-exports.ts",
     "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
+    "templates:upstream": "npx tsx scripts/crystal/upstream-templates.ts",
     "ceremony:finalize": "npx tsx scripts/ceremony-finalize.ts",
     "ceremony:rehearse": "npx tsx scripts/ceremony-rehearsal.ts",
     "typecheck": "tsc --noEmit",

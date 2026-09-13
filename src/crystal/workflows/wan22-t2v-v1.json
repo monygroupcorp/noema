@@ -4,6 +4,7 @@
   "displayName": "Wan2.2 — text to video (480x480, 33f, MoE high/low unets)",
   "seedInputKey": "input_seed",
   "customNodes": [],
+  "upstream": {"template": "video_wan2_2_14B_t2v", "note": "upstream also loads the two lightx2v 4-step LoRAs, which we do not hold; the flow is the template on the bare MoE pair."},
   "inputTemplate": {
     "37": { "class_type": "UNETLoader", "inputs": { "unet_name": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors", "weight_dtype": "default" } },
     "56": { "class_type": "UNETLoader", "inputs": { "unet_name": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors", "weight_dtype": "default" } },

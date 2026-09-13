@@ -4,6 +4,7 @@
   "displayName": "Image upscale (4x-UltraSharp, model-only)",
   "loraCapable": false,
   "customNodes": [],
+  "upstream": {"template": "utility-gan_upscaler", "note": "same shape — one GAN upscaler, no diffusion — on a different weight: upstream runs RealESRGAN_x4plus, this runs 4x-UltraSharp."},
   "inputTemplate": {
     "10": { "class_type": "LoadImage",             "inputs": { "image": "PLACEHOLDER" } },
     "32": { "class_type": "UpscaleModelLoader",     "inputs": { "model_name": "4x-UltraSharp.pth" } },
