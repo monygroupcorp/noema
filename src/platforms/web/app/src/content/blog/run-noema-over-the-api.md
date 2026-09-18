@@ -96,9 +96,11 @@ On `complete`, read the outputs. On `failed`, read the failure's code and messag
 
 A `pending` run that is not moving may be in a line rather than stalled. A run that found no warm
 machine waits for one instead of being refused, and while it waits it carries
-`queue: { place, depth }` — its 1-based position and how many runs are ahead of it plus itself. The
-line is per machine image, not one global queue, and the field is gone the moment the run is called
-forward. Report it rather than leaving someone watching a `pending` that sits still.
+`queue: { place, depth }`. `place` is its 1-based position, 1 being next. `depth` is the whole
+line, this run included — the runs behind it count too, so read the pair as "3rd of 10" and never
+as "3 of 3". The line is per machine image, not one global queue, and the field is gone the moment
+the run is called forward. Report it rather than leaving someone watching a `pending` that sits
+still.
 
 Every way of watching carries it. It is on the invoke response and on a poll; the stream's opening
 snapshot carries it too, so a client that attaches to a run minutes after casting it still reads a
