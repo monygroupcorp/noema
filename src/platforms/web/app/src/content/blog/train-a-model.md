@@ -41,8 +41,14 @@ Two things about caption passes that are not obvious:
   captioner, say — mint a new captionset explicitly. That control is opt-in precisely so a re-run
   never quietly overwrites work you edited by hand.
 
-You can also mint an empty captionset and write every caption yourself. That is the same road with
-the compute step removed.
+What you cannot do on this screen is skip the compute. Both controls start a real pass: extending
+reads the images the captionset does not already cover, minting reads every image in the set. Writing
+captions by hand is correcting what a pass produced, not an alternative to running one.
+
+The hand-authored road exists, but only over the API. `POST /v1/data/datasets/<id>/captionsets`
+accepts a captionset carrying no captions at all, and the per-caption edit
+(`PATCH /v1/data/datasets/<id>/captionsets/<captionsetId>/captions/<mediaId>`) fills it in one
+image at a time. That is the same road with the compute step removed. It is not wired into the app.
 
 ## 3. Set up the training
 
