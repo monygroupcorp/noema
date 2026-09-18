@@ -43,6 +43,7 @@ export const API_ERROR_CODES: ErrorCodeSpec[] = [
     { code: 'not_found.muse_piece', httpStatus: 404 },
     { code: 'not_found.dataset', httpStatus: 404 },
     { code: 'not_found.partner_request', httpStatus: 404 },
+    { code: 'not_found.partner_invoice', httpStatus: 404 },
     { code: 'not_found.querela', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
     // The balance cannot cover the reservation. NOT retryable: only funding the account changes
@@ -62,6 +63,17 @@ export const API_ERROR_CODES: ErrorCodeSpec[] = [
     // A partner request PATCH targets a request that already has a decision. NOT retryable:
     // an already-issued API key is show-once and never re-minted for the same decision.
     { code: 'conflict.already_decided', httpStatus: 409, retryable: false },
+    // Payment was requested for an invoice that is already paid or was voided. NOT retryable:
+    // both states are terminal, and the payer needs a different invoice, not a retry.
+    { code: 'conflict.invoice_not_open', httpStatus: 409, retryable: false },
+    // An invoice already covers this partner and period. NOT retryable: a period is billed once,
+    // and re-issuing goes through voiding the first invoice.
+    { code: 'conflict.period_already_billed', httpStatus: 409, retryable: false },
+    // The B2B API Customer Agreement has not been signed at its current version, so no key is
+    // issued. NOT retryable by itself — the caller signs, then asks again.
+    { code: 'partner.contract_unsigned', httpStatus: 422, retryable: false },
+    // No billing account is on file, so there is nowhere to send the invoice a key would run up.
+    { code: 'partner.billing_required', httpStatus: 422, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     // The flow carries licence terms the caller has not accepted at their current version. NOT

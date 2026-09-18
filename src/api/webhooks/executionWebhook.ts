@@ -6,6 +6,7 @@ import type { Vestigiorum } from '../../types/vestigium.js'
 import type { Modorum } from '../../types/modus.js'
 import type { MateriaStore } from '../../types/materia.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
+import type { PartnerUsageStore } from '../../types/partnerUsage.js'
 import { projectExitus } from '../../execution/projectExitus.js'
 import { privateMarker } from '../../crystal/MediaFetcher.js'
 
@@ -45,6 +46,11 @@ export interface ExecutionWebhookDeps {
    *  row terminal themselves; this webhook only reads it, as the identity fallback for a run
    *  `flowRouter` has no FlowContext for (`findByActumId`, see below). */
   actumIndex?: ActumIndexStore
+  /** Optional: the B2B meter. On `completus` the row this run's admission opened is stamped with
+   *  its units + models; on `fractus` it is voided. A no-op for runs that opened no row, which is
+   *  every run not made on a partner API key. Absent → nothing is metered (a deployment with no
+   *  B2B program wires none). */
+  partnerUsage?: Pick<PartnerUsageStore, 'settle' | 'void'>
   /** Optional: routes collection actum completions back to CollectioCursor. */
   collectioRouter?: {
     findCollectioIdForActum(actumId: string): string | null
@@ -271,6 +277,26 @@ export async function handleExecutionWebhook(
       // one choke point every completion rail reaches, not just this webhook — so the index
       // row is already stamped settled by the call above.
 
+      // The B2B meter's second half. `apiRouter` opened the row at admission, where the API key
+      // was known and the units were not; this is the other end, where the units are known and
+      // the credential is not. Keyed on the actum, which is all either end shares.
+      //
+      // A no-op for every run that is not a partner run — the store returns without writing when
+      // no row exists, and the webhook has no way (and no need) to know which runs those are.
+      // Swallowed: a meter write must never turn a completed run into a failed webhook delivery,
+      // which Stripe-like at-least-once retries would then replay against a settled ledger.
+      if (deps.partnerUsage) {
+        await deps.partnerUsage
+          .settle(actum.id, {
+            settledAt: completed.completum ?? new Date(),
+            impetus: completed.impetus.toString(),
+            modusLabel: modus?.nomen ?? actum.modusId,
+            models: (modus?.intellae ?? []).map(i => i.id),
+            ...(completed.duratio !== undefined ? { durationMs: completed.duratio } : {}),
+          })
+          .catch(() => {})
+      }
+
       return { status: 200, body: { success: true } }
     }
 
@@ -291,6 +317,12 @@ export async function handleExecutionWebhook(
 
       // Retain-on-release mirrors retain-on-settle above: `completor.fail()` already
       // stamped the index row released.
+
+      // The meter VOIDS rather than prunes. Its question is "what did this key do", not "what did
+      // this account spend": a customer reconciling an invoice is entitled to see the calls that
+      // were made and not billed, and a call that silently vanished is the one a dispute is about.
+      // `sumPeriod` counts settled rows only, so a void costs nothing.
+      if (deps.partnerUsage) await deps.partnerUsage.void(actum.id, new Date()).catch(() => {})
 
       return { status: 200, body: { success: true } }
     }

@@ -61,16 +61,19 @@ export function makeStripeGateway(config: StripeConfig): StripeGateway {
   const stripe = new Stripe(config.secretKey)
   return {
     async createCheckoutSession(input) {
-      const metadata = {
-        packId: input.packId,
+      // Exactly one of packId / invoiceId is set, and it is what the webhook branches on to decide
+      // whether this payment credits spendable impetus or settles a B2B invoice. It travels in
+      // metadata on BOTH the session and the payment_intent so the webhook can read it from either
+      // event type. The webhook trusts THESE server-set values, never the client.
+      const metadata: Record<string, string> = {
         animaId: input.animaId,
+        ...(input.packId ? { packId: input.packId } : {}),
+        ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}),
         ...(input.allocutio ? { allocutio: input.allocutio } : {}),
       }
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         client_reference_id: input.animaId,
-        // packId travels in metadata on BOTH the session and the payment_intent so the webhook
-        // can read it from either event type. The webhook trusts THIS server-set value, not the client.
         metadata,
         payment_intent_data: { metadata },
         line_items: [

@@ -28,6 +28,8 @@ import { requiredUseTerms, acceptUseTerms } from './crystal/useTerms.js'
 import { licenseUseTerms } from './crystal/modelLicense.js'
 import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
+import { createPartnerBillingRouter } from './api/partner/partnerBillingRouter.js'
+import { PARTNER_CONTRACT_VERSION } from './crystal/partnerContract.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
 import { createQuerelaAdminRouter } from './api/querela/querelaAdminRouter.js'
 import { createArcanumRouter, REPO_ZKEY_PATH } from './api/arcanum/arcanumRouter.js'
@@ -1190,6 +1192,9 @@ async function main(): Promise<void> {
     // Admin revenue report (conditional-license tripwire, ADR-0013 §5): the trailing-12mo rollup
     // + the last persisted band. Read-only; the scheduled evaluator (below) owns alerts/persistence.
     redituum: ring.redituum,
+    // The B2B invoice book — backs the invoice checkout, and the webhook branch that settles an
+    // invoice instead of crediting a pack.
+    partnerInvoices: ring.partnerInvoices,
     tripwireBand: ring.tripwireBand,
     // Admin COGS report (admin workspace, credits-only/read-only): trailing-window rollup of
     // per-job costUsd off the same wide-event store the analytics listener writes through.
@@ -1239,6 +1244,16 @@ async function main(): Promise<void> {
     animae: ring.animae,
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     verifyApiKeyToAccountId,
+    // The B2B gate, asked on every request that presents a partner key and on no other key.
+    // The mint checked these same three facts once; all three decay, so the call asks again —
+    // a revoked partner, a retired agreement version, or a removed billing account stops
+    // authenticating rather than waiting for someone to notice. See `apiAcceptors.ts`.
+    partnerKeyAdmitted: async (animaId, contractVersion) => {
+      if (contractVersion !== PARTNER_CONTRACT_VERSION) return false
+      const partner = await ring.partners.find(animaId)
+      if (!partner || partner.status === 'revoked' || !partner.billing) return false
+      return (await ring.partnerContracts.findCurrent(animaId, PARTNER_CONTRACT_VERSION)) !== null
+    },
     // Federated (JWKS) SSO — trusted-issuer registry + the live prod JWKS override.
     issuers: ring.issuers,
     jwksOverride: parseJwksOverride(process.env.AGENT_JWKS_OVERRIDE),
@@ -1300,6 +1315,15 @@ async function main(): Promise<void> {
   app.use('/v1/admin/partner-requests', express.json(), createPartnerAdminRouter({
     partnerRequests: ring.partnerRequests,
     partners: ring.partners,
+    identity: apiResolver,
+  }))
+  // The B2B billing desk: read a partner's meter for a period, and issue the invoice drawn from
+  // it. Platform-admin only, same reproduced gate, its own file for the same reason the review
+  // queue has one — see partnerBillingRouter.ts's header.
+  app.use('/v1/admin/partner-billing', express.json(), createPartnerBillingRouter({
+    partners: ring.partners,
+    usage: ring.partnerUsage,
+    invoices: ring.partnerInvoices,
     identity: apiResolver,
   }))
 
@@ -1475,7 +1499,10 @@ async function main(): Promise<void> {
     bursarium: ring.bursarium,
     partners: ring.partners,
     partnerRequests: ring.partnerRequests,
-    apiKeys: { personae: ring.personae, usersCol },
+    partnerContracts: ring.partnerContracts,
+    partnerUsage: ring.partnerUsage,
+    partnerInvoices: ring.partnerInvoices,
+    apiKeys: { personae: ring.personae, usersCol, partners: ring.partners, contracts: ring.partnerContracts },
     ...(meExporter ? { exporter: meExporter } : {}),
     rateLimiters: { publish: publishLimiter },
   }))
@@ -1973,6 +2000,8 @@ async function main(): Promise<void> {
     ...(exitusResolver ? { resolveExitus: exitusResolver } : {}),
     materiae,
     actumIndex: ring.actumIndex,
+    // The B2B meter's settle/void half. A no-op for every run that is not a partner run.
+    partnerUsage: ring.partnerUsage,
     vestigiorum: ring.vestigiorum,
     collectioRouter: ring.collectioCursor,
     compositusRouter: ring.compositusCursor,

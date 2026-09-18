@@ -2171,6 +2171,299 @@ Return the authenticated caller's most recent B2B partner application and its st
 }
 ```
 
+### GET /v1/me/partner/contract
+
+Return the current B2B API Customer Agreement version, where it is published, and whether the authenticated partner has signed it. A key is issued only against a signature on the CURRENT version, so this is the route to call before asking for one. 404 not_found.partner when the caller is not an active partner.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The current API Customer Agreement, where to read it, and whether this partner has signed it.",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "The version keys are currently issued against."
+    },
+    "path": {
+      "type": "string",
+      "description": "Where the agreement is published."
+    },
+    "signed": {
+      "type": "boolean",
+      "description": "Whether this account has signed the CURRENT version."
+    },
+    "signedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this account first signed the current version. Absent when it has not."
+    },
+    "signerName": {
+      "type": "string",
+      "description": "Who signed the current version. Absent when it is unsigned."
+    },
+    "signedVersions": {
+      "type": "array",
+      "description": "Every agreement version this account has ever signed.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "path",
+    "signed",
+    "signedVersions"
+  ]
+}
+```
+
+### POST /v1/me/partner/contract
+
+Sign the current B2B API Customer Agreement. The body must name the version being accepted and it must equal the current one — a signature is an acceptance of a specific text, and a stale version is refused with input.malformed naming the current one. Signing again appends; the date this account became bound does not move. Does not issue a key.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "An acceptance of one specific version of the agreement.",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "The version being accepted. Must equal the current version, or the request is refused."
+    },
+    "signerName": {
+      "type": "string",
+      "description": "The name of the person signing."
+    },
+    "signerTitle": {
+      "type": "string",
+      "description": "The signer's role at the organization. Optional."
+    }
+  },
+  "required": [
+    "version",
+    "signerName"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The current API Customer Agreement, where to read it, and whether this partner has signed it.",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "The version keys are currently issued against."
+    },
+    "path": {
+      "type": "string",
+      "description": "Where the agreement is published."
+    },
+    "signed": {
+      "type": "boolean",
+      "description": "Whether this account has signed the CURRENT version."
+    },
+    "signedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this account first signed the current version. Absent when it has not."
+    },
+    "signerName": {
+      "type": "string",
+      "description": "Who signed the current version. Absent when it is unsigned."
+    },
+    "signedVersions": {
+      "type": "array",
+      "description": "Every agreement version this account has ever signed.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "path",
+    "signed",
+    "signedVersions"
+  ]
+}
+```
+
+### PUT /v1/me/partner/billing
+
+Set or replace the billing account this partner's invoices are issued against. Required before a key is issued: a post-paid customer with nowhere to send the invoice is generating on credit nobody extended. Replacing it never rewrites an invoice already issued.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "The billing account invoices are issued against.",
+  "properties": {
+    "billingEmail": {
+      "type": "string",
+      "description": "Where invoices are sent."
+    },
+    "billedTo": {
+      "type": "string",
+      "description": "The legal entity to bill, as it should appear on the invoice."
+    },
+    "netDays": {
+      "type": "integer",
+      "description": "Days from issue until payment is due. 0..120."
+    }
+  },
+  "required": [
+    "billingEmail",
+    "billedTo",
+    "netDays"
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The stored billing account.",
+  "properties": {
+    "billing": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "billing"
+  ]
+}
+```
+
+### GET /v1/me/partner/usage
+
+The caller's own B2B meter for a window — every call its API keys made, what each ran and cost, and the rollup an invoice for that window is drawn from. The same rows the invoice is billed from, readable before it is issued and after. Both bounds are required; the window is half-open [from, to).
+
+- **Auth:** required
+
+**Query parameters:**
+
+- `from` (string) — Start of the window, ISO-8601 (inclusive). Required.
+- `to` (string) — End of the window, ISO-8601 (exclusive). Required.
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's own B2B meter for a window: every call its keys made, and the rollup an invoice for that window is drawn from.",
+  "properties": {
+    "from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Start of the window (inclusive)."
+    },
+    "to": {
+      "type": "string",
+      "format": "date-time",
+      "description": "End of the window (exclusive)."
+    },
+    "rollup": {
+      "type": "object",
+      "description": "Billable totals — settled calls only.",
+      "additionalProperties": true
+    },
+    "calls": {
+      "type": "array",
+      "description": "Every metered call in the window, newest first, billable or not.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "from",
+    "to",
+    "rollup",
+    "calls"
+  ]
+}
+```
+
+### GET /v1/me/partner/invoices
+
+The caller's B2B invoices, newest issued first. Optionally narrowed by status.
+
+- **Auth:** required
+
+**Query parameters:**
+
+- `status` (string) — Narrow to 'open', 'paid' or 'void'.
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's invoices, newest issued first.",
+  "properties": {
+    "invoices": {
+      "type": "array",
+      "description": "Invoice rows.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "invoices"
+  ]
+}
+```
+
+### POST /v1/me/partner/invoices/:id/checkout
+
+Pay an open B2B invoice: returns a hosted Stripe Checkout URL for the invoice's own amount, which was drawn from the meter and frozen at issue. This is NOT the credit-pack checkout — settling an invoice books revenue and credits no spendable balance. 404 not_found.partner_invoice for an invoice that is not the caller's; 409 conflict.invoice_not_open for one already paid or voided.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "A hosted Stripe Checkout session that settles one invoice.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "The hosted checkout URL to send the payer to."
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "The Stripe Checkout Session id."
+    }
+  },
+  "required": [
+    "url",
+    "sessionId"
+  ]
+}
+```
+
 ### GET /v1/me/status
 
 Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.
@@ -15132,6 +15425,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `not_found.muse_piece` | 404 | no |
 | `not_found.dataset` | 404 | no |
 | `not_found.partner_request` | 404 | no |
+| `not_found.partner_invoice` | 404 | no |
 | `not_found.querela` | 404 | no |
 | `input.model_not_resolved` | 422 | no |
 | `economy.insufficient_signa` | 402 | no |
@@ -15141,6 +15435,10 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.nothing_to_decompose` | 409 | no |
 | `conflict.muse_session` | 409 | yes |
 | `conflict.already_decided` | 409 | no |
+| `conflict.invoice_not_open` | 409 | no |
+| `conflict.period_already_billed` | 409 | no |
+| `partner.contract_unsigned` | 422 | no |
+| `partner.billing_required` | 422 | no |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
 | `terms.required` | 403 | no |

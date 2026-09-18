@@ -1,5 +1,5 @@
 import { Collection } from 'mongodb'
-import type { Partner, PartnerStore } from '../types/partner.js'
+import type { Partner, PartnerBilling, PartnerStore } from '../types/partner.js'
 
 function fromDoc(doc: Record<string, unknown>): Partner {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -30,5 +30,9 @@ export class MongoPartner implements PartnerStore {
 
   async setStatus(animaId: string, status: Partner['status']): Promise<void> {
     await this.col.updateOne({ animaId }, { $set: { status } })
+  }
+
+  async setBilling(animaId: string, billing: PartnerBilling): Promise<void> {
+    await this.col.updateOne({ animaId }, { $set: { billing } })
   }
 }

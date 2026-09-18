@@ -131,7 +131,13 @@ import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoPartnerRequest } from './crystal/MongoPartnerRequest.js'
 import type { PartnerRequestStore } from './types/partnerRequest.js'
 import { MongoPartner } from './crystal/MongoPartner.js'
+import { MongoPartnerContract } from './crystal/MongoPartnerContract.js'
+import { MongoPartnerUsage } from './crystal/MongoPartnerUsage.js'
+import { MongoPartnerInvoice } from './crystal/MongoPartnerInvoice.js'
 import type { PartnerStore } from './types/partner.js'
+import type { PartnerContractStore } from './types/partnerContract.js'
+import type { PartnerUsageStore } from './types/partnerUsage.js'
+import type { PartnerInvoiceStore } from './types/partnerInvoice.js'
 import { CollectioCursor } from './crystal/CollectioCursor.js'
 import { CompositusCursor } from './crystal/CompositusCursor.js'
 import { ArcanumIssuer } from './ledger/ArcanumIssuer.js'
@@ -208,6 +214,12 @@ export interface Ring {
   partnerRequests: PartnerRequestStore
   /** Approved B2B partners (an ordinary Anima that has been approved) — see types/partner.ts. */
   partners: PartnerStore
+  /** Signatures on the B2B API Customer Agreement — see types/partnerContract.ts. */
+  partnerContracts: PartnerContractStore
+  /** The B2B meter: one row per API call made on a partner key — see types/partnerUsage.ts. */
+  partnerUsage: PartnerUsageStore
+  /** B2B invoices, drawn from the meter — see types/partnerInvoice.ts. */
+  partnerInvoices: PartnerInvoiceStore
   fundamentorum: import('./types/fundamentum.js').Fundamentorum
   cursorum: Cursorum
   completor: IActumCompletor
@@ -407,6 +419,9 @@ export interface ContainerConfig {
   memoriaeCollection?: string
   partnerRequestsCollection?: string
   partnersCollection?: string
+  partnerContractsCollection?: string
+  partnerUsageCollection?: string
+  partnerInvoicesCollection?: string
   /** Collection name for materiae — default 'materiae' */
   materiaCollection?: string
   /** Collection name for hospitia (identity-bearing hosting metadata) — default 'hospitia' */
@@ -563,6 +578,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const memoriae = new MongoMemoria(db.collection(config.memoriaeCollection ?? 'memoriae'))
   const partnerRequests = new MongoPartnerRequest(db.collection(config.partnerRequestsCollection ?? 'partnerRequests'))
   const partners = new MongoPartner(db.collection(config.partnersCollection ?? 'partners'))
+  const partnerContracts = new MongoPartnerContract(db.collection(config.partnerContractsCollection ?? 'partnerContracts'))
+  const partnerUsage = new MongoPartnerUsage(db.collection(config.partnerUsageCollection ?? 'partnerUsage'))
+  const partnerInvoices = new MongoPartnerInvoice(db.collection(config.partnerInvoicesCollection ?? 'partnerInvoices'))
 
   const materiaCol: Collection = db.collection(config.materiaCollection ?? 'materiae')
   const materiae = config.materiae ?? new MongoMateria(materiaCol)
@@ -967,6 +985,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     mandatores, corpora, collectiones, datasets, museSessions, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, querelae, memoriae, partnerRequests, partners,
+    partnerContracts, partnerUsage, partnerInvoices,
     cursorum, completor, inceptor, arcanumIssuer,
     arcanumTree, arcanumVerifier, bursarium, ceremonia,
     materiae, hospitia, actumIndex, deployments,

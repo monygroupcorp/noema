@@ -39,7 +39,9 @@
 import { asSignumAllocutio, type Signorum, type Signum, type SignumAllocutio } from '../../types/significandi.js'
 import type { Redituum } from '../../types/reditus.js'
 import type { AnimaStore } from '../../types/anima.js'
+import type { PartnerInvoice, PartnerInvoiceStore } from '../../types/partnerInvoice.js'
 import { resolvePack, type CreditPack } from '../../ledger/stripePacks.js'
+import { usdMicroToCents } from '../../ledger/partnerInvoicing.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('stripe-webhook')
@@ -48,9 +50,15 @@ const log = makeLogger('stripe-webhook')
 // The Stripe port — the minimal SDK surface the rail depends on (fake-able in tests)
 // ---------------------------------------------------------------------------
 
-/** Inputs to open a hosted Checkout Session for a pack. */
+/** Inputs to open a hosted Checkout Session. Exactly one of `packId` / `invoiceId` is set, and
+ *  which one it is decides everything downstream: a `packId` session credits spendable impetus
+ *  when it settles, an `invoiceId` session settles a B2B debt and credits nothing. The gateway
+ *  puts whichever is set into the session's metadata, and the webhook branches on it. */
 export interface StripeCheckoutInput {
-  packId: string
+  /** CONSUMER rail: the credit pack being bought. */
+  packId?: string
+  /** B2B rail: the `PartnerInvoice` being settled. Never set together with `packId`. */
+  invoiceId?: string
   animaId: string
   /** Line-item price in cents (the pack's USD × 100). Server-authoritative. */
   amountCents: number
@@ -163,6 +171,52 @@ export async function handleStripeCheckout(
 }
 
 // ---------------------------------------------------------------------------
+// Checkout — the B2B invoice rail
+// ---------------------------------------------------------------------------
+
+export type InvoiceCheckoutResult =
+  | { ok: true; url: string; sessionId: string }
+  | { ok: false; status: 400 | 409; code: string; message: string }
+
+/**
+ * Open a Checkout Session that SETTLES AN INVOICE. The sibling of `handleStripeCheckout`, and
+ * the reason both live in this file: the two rails differ in exactly one respect that matters,
+ * and it is easier to keep that difference true when a reader can see both halves at once.
+ *
+ * What differs: the session carries `invoiceId` and NO `packId`, so the webhook's crediting
+ * branch never resolves a pack and never issues a `Signum`. The amount is the invoice's own,
+ * which was drawn from the meter and frozen at issue — the client sends no figure and cannot
+ * influence one, the same server-authoritative discipline the pack rail has.
+ *
+ * The caller has already checked that this invoice belongs to this caller and is open; this
+ * re-checks `open` because a session must not be opened against a bill that is already settled.
+ */
+export async function handleInvoiceCheckout(
+  invoice: PartnerInvoice,
+  deps: StripeCheckoutDeps & { successUrl?: string; cancelUrl?: string },
+): Promise<InvoiceCheckoutResult> {
+  if (invoice.status !== 'open') {
+    return { ok: false, status: 409, code: 'conflict.invoice_not_open', message: `Invoice '${invoice.id}' is ${invoice.status} and cannot be paid` }
+  }
+  const amountCents = usdMicroToCents(BigInt(invoice.usdMicro))
+  if (amountCents <= 0) {
+    // A period that metered nothing is still invoiced (the books record that it was billed), but
+    // there is no payment to take and Stripe will not open a session for zero.
+    return { ok: false, status: 400, code: 'payments.nothing_due', message: `Invoice '${invoice.id}' has nothing due` }
+  }
+  const period = `${invoice.periodStart.toISOString().slice(0, 10)} to ${invoice.periodEnd.toISOString().slice(0, 10)}`
+  const session = await deps.gateway.createCheckoutSession({
+    invoiceId: invoice.id,
+    animaId: invoice.animaId,
+    amountCents,
+    label: `noema API usage, ${period}`,
+    ...(deps.successUrl ? { successUrl: deps.successUrl } : {}),
+    ...(deps.cancelUrl ? { cancelUrl: deps.cancelUrl } : {}),
+  })
+  return { ok: true, url: session.url, sessionId: session.id }
+}
+
+// ---------------------------------------------------------------------------
 // Webhook
 // ---------------------------------------------------------------------------
 
@@ -221,6 +275,11 @@ export interface StripeWebhookDeps {
   gateway: StripeGateway
   /** Log-only injectable alert seam fired when a dispute freeze is SET. Unset → `logDisputeFrozen`. */
   onDisputeFrozen?: OnDisputeFrozen
+  /** The B2B invoice book. Present → a completed payment carrying `metadata.invoiceId` settles that
+   *  invoice. ABSENT → such a payment is refused rather than silently treated as a pack purchase:
+   *  a deployment that can open an invoice checkout wires this, and one that cannot never mints a
+   *  session carrying an invoiceId in the first place. */
+  partnerInvoices?: Pick<PartnerInvoiceStore, 'find' | 'markPaid'>
 }
 
 /** The result of crediting one completed payment (fresh or replayed on redelivery). */
@@ -266,6 +325,19 @@ export async function handleStripeWebhook(
       // animaId: a checkout.session carries it as client_reference_id; a payment_intent carries it
       // only in metadata (both are server-set at checkout). packId is in metadata on both objects.
       const animaId = requireField(obj.client_reference_id ?? obj.metadata?.animaId, 'client_reference_id / metadata.animaId')
+
+      // THE FORK. A session minted for a B2B invoice carries `invoiceId` and no `packId`, and it
+      // settles a debt for compute already delivered — so it books revenue and issues NO credit.
+      // A pack purchase carries `packId` and credits spendable impetus. Both are server-set at
+      // session creation; nothing a client sends reaches either branch. This is the whole of
+      // "the payment lands apart from consumer credits", and it is one `if`.
+      const invoiceId = obj.metadata?.invoiceId
+      if (invoiceId) {
+        const paid = await settleInvoicePayment({ animaId, invoiceId, paymentKey, createdAt: obj.created }, deps)
+        log.info('stripe partner invoice paid', { paymentKey, animaId, invoiceId, usdMicro: paid.usdMicro })
+        return { status: 200, body: { received: true } }
+      }
+
       const packId = requireField(obj.metadata?.packId, 'metadata.packId')
       const pack = resolvePack(packId)
       if (!pack) throw new StripeEventError(400, `Unknown pack '${packId}'`)
@@ -472,6 +544,71 @@ const STRIPE_AUCTOR = 'stripe:purchase'
  */
 function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000
+}
+
+/**
+ * Settle a B2B invoice from a completed payment: book the USD revenue and mark the invoice paid.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO is call `signorum.issue`. A consumer's payment buys a
+ * closed-loop balance and lands as impetus; this one discharges a receivable for compute the
+ * customer has already consumed, and there is nothing left to credit it with. The two rails share
+ * the Stripe boundary and the `Reditus` book and nothing else, and that is the whole substance of
+ * "the payment lands apart from consumer credits".
+ *
+ * IDEMPOTENCY, on the same key both halves share: `paymentKey` is the Stripe payment_intent, which
+ * one purchase's two events (checkout.session.completed + payment_intent.succeeded) both carry.
+ * `Redituum.record` dedupes on `chargeRef` behind a unique partial index; `markPaid` dedupes on the
+ * same `chargeRef` and returns the already-paid row. So a redelivery, a concurrent instance, and
+ * the purchase's second event all collapse to one revenue row and one paid stamp.
+ *
+ * REVENUE AT RECEIPT (ADR-0013 §4): `natum` is the charge's own creation time when Stripe gives us
+ * one, not the moment this handler ran — a delivery retried an hour later must not move the period
+ * the revenue falls in.
+ */
+async function settleInvoicePayment(
+  args: { animaId: string; invoiceId: string; paymentKey: string; createdAt?: number },
+  deps: StripeWebhookDeps,
+): Promise<{ usdMicro: string }> {
+  const { animaId, invoiceId, paymentKey } = args
+  if (!deps.partnerInvoices) {
+    throw new StripeEventError(400, `This deployment has no invoice book — payment ${paymentKey} names invoice '${invoiceId}'`)
+  }
+  const invoice = await deps.partnerInvoices.find(invoiceId)
+  if (!invoice) throw new StripeEventError(400, `Unknown invoice '${invoiceId}'`)
+  if (invoice.animaId !== animaId) {
+    // The session's animaId and the invoice's owner are both server-set at checkout; a mismatch
+    // means something upstream is wrong and no amount of retrying fixes it.
+    throw new StripeEventError(400, `Invoice '${invoiceId}' does not belong to the paying account`)
+  }
+
+  const paidAt = args.createdAt !== undefined ? new Date(args.createdAt * 1000) : new Date()
+
+  await deps.redituum.record({
+    usdFmv: BigInt(invoice.usdMicro),
+    fmvSource: `stripe:${paymentKey}`,
+    origo: 'fiat',
+    chargeRef: paymentKey,
+    natum: paidAt,
+  })
+
+  try {
+    await deps.partnerInvoices.markPaid(invoice.id, paidAt, paymentKey)
+  } catch (err) {
+    // The one case `markPaid` refuses that a retry cannot fix: this invoice is already paid by a
+    // DIFFERENT charge. Two payments against one bill is a refund someone has to issue, not a
+    // condition to absorb — so it is logged loudly and the delivery is 400'd to stop Stripe
+    // retrying a call that will never succeed. The revenue booked above stands: the money did
+    // arrive.
+    log.error('STRIPE — a partner invoice was paid twice; the second payment is unapplied and needs a refund', {
+      invoiceId: invoice.id,
+      animaId,
+      paymentKey,
+      message: err instanceof Error ? err.message : String(err),
+    })
+    throw new StripeEventError(400, `Invoice '${invoiceId}' is already paid by another charge`)
+  }
+
+  return { usdMicro: invoice.usdMicro }
 }
 
 /** Find this payment's already-struck fiat credit (the replay source), or null. */

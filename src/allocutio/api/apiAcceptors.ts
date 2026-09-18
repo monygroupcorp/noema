@@ -20,6 +20,7 @@ import type { IssuerStore } from '../../types/issuer.js'
 import type { ErasedDenylistStore } from '../../types/erasure.js'
 import type { CredentialAcceptors, ApiKeyIdentity } from './IdentityResolver.js'
 import { AgentJwtVerifier, type JwksFetch } from './AgentJwtVerifier.js'
+import { PARTNER_KEY_NAME } from '../../crystal/apiKeys.js'
 
 /**
  * One verified `users.apiKeys[]` record, as the injected key lookup hands it over.
@@ -32,6 +33,15 @@ import { AgentJwtVerifier, type JwksFetch } from './AgentJwtVerifier.js'
 export interface ApiKeyAccount {
   /** The stable account id — the `'api'` persona's externusId. */
   accountId: string
+  /** The matched key's stored prefix (its first 12 chars). Carried through onto the resolved
+   *  credential so a B2B call can be metered against the key that made it. */
+  keyPrefix?: string
+  /** The matched key's `name` tag, raw as stored. `PARTNER_KEY_NAME` marks a key the B2B program
+   *  issued; anything else (or nothing) is an ordinary key and the partner gate below does not
+   *  apply to it. Deliberately `unknown` for the same reason `maxImpetusPerRun` is. */
+  keyName?: unknown
+  /** The agreement version the key was minted against, raw as stored. */
+  contractVersion?: unknown
   /**
    * Per-run impetus ceiling recorded on the key, RAW AS STORED and deliberately `unknown`: it
    * comes out of a schemaless collection, so declaring it `string` here would be a promise the
@@ -74,6 +84,23 @@ export interface AcceptorDeps {
    * `index.ts` plugs in the `users.apiKeys[]` lookup.
    */
   verifyApiKeyToAccountId?: (apiKey: string) => Promise<ApiKeyAccount | null>
+  /**
+   * Is this B2B partner key still good? Asked for EVERY request that presents a key tagged
+   * `PARTNER_KEY_NAME`, and for no other key.
+   *
+   * This is where "nothing generates without a signed contract and a billing account" keeps
+   * being true after the mint. The mint gate (`assertMintable`) answers the question once, at
+   * issue; the three facts it checks all decay — a partner is revoked, the agreement is
+   * revised, a billing account is removed — and a key that outlived them is a customer
+   * generating outside the arrangement it signed. So the question is asked again on the call.
+   *
+   * Contract: `true` admits the key, `false` refuses it (a 401, same as a key that does not
+   * verify — a refused partner learns nothing about WHY from the edge, and finds out from the
+   * partner routes, which will say). Injected: `index.ts` wires it to the partner directory and
+   * the signature book. ABSENT → partner keys are admitted on their stored fields alone, which
+   * is the behaviour of a deployment that wires no partner directory at all.
+   */
+  partnerKeyAdmitted?: (animaId: string, contractVersion: string | undefined) => Promise<boolean>
   /** Verify a web3 sig bundle → the signer address, or null. Injected. */
   verifyWeb3ToAddress?: (w: { address: string; signature: string; nonce: string }) => Promise<string | null>
   /** Trusted-issuer registry for federated (JWKS) SSO. Absent → no federated acceptor. */
@@ -113,7 +140,7 @@ export async function resolveOrCreateAnima(
 }
 
 export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors {
-  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress, issuers, denylist } = deps
+  const { personae, animae, jwtSecret, verifyApiKeyToAccountId, verifyWeb3ToAddress, issuers, denylist, partnerKeyAdmitted } = deps
 
   // Federated SSO acceptor — built only when a trusted-issuer registry is wired.
   // A verified assertion lands as a `'federated'` persona keyed by `<iss>::<sub>`
@@ -179,7 +206,18 @@ export function makeCredentialAcceptors(deps: AcceptorDeps): CredentialAcceptors
           const ceiling = parseKeyImpetusCeiling(acct.maxImpetusPerRun)
           if (ceiling === null) return null
           const animaId = await resolveOrCreateAnima(personae, animae, 'api', acct.accountId)
-          return ceiling === undefined ? { animaId } : { animaId, maxImpetusPerRun: ceiling }
+          // The B2B gate, and only for B2B keys. A stored `contractVersion` that is not a string
+          // is passed on as `undefined`, which every real gate refuses — same fail-closed reading
+          // `parseKeyImpetusCeiling` gives an unreadable ceiling.
+          if (acct.keyName === PARTNER_KEY_NAME && partnerKeyAdmitted) {
+            const version = typeof acct.contractVersion === 'string' ? acct.contractVersion : undefined
+            if (!(await partnerKeyAdmitted(animaId, version))) return null
+          }
+          return {
+            animaId,
+            ...(ceiling !== undefined ? { maxImpetusPerRun: ceiling } : {}),
+            ...(acct.keyPrefix !== undefined ? { keyPrefix: acct.keyPrefix } : {}),
+          }
         }
       : undefined,
 
