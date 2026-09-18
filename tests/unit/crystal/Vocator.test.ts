@@ -249,6 +249,33 @@ test('a pod that was taken between the signal and the dispatch costs the run not
   assert.deepEqual(await rig.vocator.place(first), { place: 1, depth: 2 }, 'and it kept the place it held')
 })
 
+test('a run that waited finishes and is charged exactly as one that never did', async () => {
+  const rig = await makeRig()
+  const actumId = await rig.cast('anima-1')
+
+  rig.podFree.value = true
+  await rig.vocator.callNext(IMAGE)
+
+  // The completion a pod's webhook drives. The line hands the run back to the
+  // cursor rather than finishing it, so this is the same settlement a run that
+  // found a pod immediately goes through — which is why the user is told it
+  // completed on whichever surface they were already watching it on.
+  const dispatched = await rig.actorum.findById(actumId)
+  await rig.completor.complete(dispatched!, {
+    exitus: { url: 'https://example.com/out.png' },
+    impetus: 80n,
+    duratio: 5000,
+  })
+
+  assert.equal((await rig.actorum.findById(actumId))?.status, 'completus')
+  assert.equal(await lockedFor(rig, 'anima-1'), 0n, 'nothing is left locked against it')
+  assert.equal(
+    await rig.signorum.balance({ animaId: 'anima-1' }),
+    920n,
+    'it was charged what it used — waiting is not a discount and not a refund',
+  )
+})
+
 // ---------------------------------------------------------------------------
 // Exit clause 3 — cancelled before dispatch, and refunded
 // ---------------------------------------------------------------------------
