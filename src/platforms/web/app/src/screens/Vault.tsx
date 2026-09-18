@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { useDoorHere } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { api, setActivePurse, getActivePurse, type ArcanumConfig } from '../lib/api';
-import { doorPath } from '../lib/entry';
 import { purseIsOff } from '../lib/purseSwitch';
 import {
   computeCommitment,
@@ -47,9 +47,7 @@ function Secret({ k, value, secret }: { k: string; value: string; secret?: boole
 export function Vault() {
   const { ident } = useIdentity();
   const signedIn = ident.funding === 'named';
-  // Where the door hands this visitor back once their session is live.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
+  const door = useDoorHere();
 
   const [notes, setNotes] = useState<VaultNote[]>([]);
   const [purses, setPurses] = useState<VaultPurse[]>([]);
@@ -464,7 +462,7 @@ export function Vault() {
             Funding a note converts identified credits into an anonymous note, so it needs a signed-in account.{' '}
             {/* The door, not the keyring: the keyring is the list of logins you already hold, and
                 adding one from there lands you back on the keyring rather than here. */}
-            <Link to={doorPath(here)}>Sign in ▸</Link>
+            <Link to={door}>Sign in ▸</Link>
           </div>
         )}
 

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
+import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { api, type Team } from '../lib/api';
 import { useSession } from '../state/session';
@@ -12,11 +11,6 @@ import { useSession } from '../state/session';
 // Identified accounts only: the endpoints 401 for the anon-commitment path.
 export function Teams() {
   const { session, ready } = useSession();
-  // Where the door hands this visitor back once their session is live: the page they were
-  // already on. Turning someone away for want of an account should not also cost them the
-  // walk back to what they were doing.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [nomen, setNomen] = useState('');
@@ -27,7 +21,7 @@ export function Teams() {
 
   useEffect(() => {
     if (!ready) return;
-    if (!session) { setTeams([]); return; }  // gated — the sign-in prompt covers it, skip the 403
+    if (!session) { setTeams(null); return; }  // account-bound: the gate is the whole screen, skip the 403
     let live = true;
     api.listTeams()
       .then((r) => { if (live) setTeams(r.teams); })
@@ -75,63 +69,67 @@ export function Teams() {
           <div className="sub">A fellowship of accounts that co-owns work. Create one — you’re the founder — and add members by their account id.</div>
         </div></div>
 
-        {!session && ready && (
-          <div className="warn">Teams need an identified account. <Link to={doorPath(here)}>Sign in</Link> to create and manage them.</div>
+        {!ready && <div className="sub">Loading…</div>}
+
+        {ready && !session && (
+          <AccountGate why="A team is a fellowship of identified accounts, so creating or joining one needs an account of your own." />
         )}
 
-        <div className="sectionhead">New team</div>
-        <div style={{ display: 'flex', gap: 'var(--s3)', marginBottom: 'var(--s5)', flexWrap: 'wrap' }}>
-          <input className="inp" style={{ flex: '1 1 260px' }} placeholder="team name" value={nomen} onChange={(e) => setNomen(e.target.value)} disabled={!session} />
-          <button className="btn accent" onClick={create} disabled={creating || !session || !nomen.trim()}>
-            <Ic name="users" /> {creating ? 'Creating…' : 'Create team'}
-          </button>
-        </div>
-
-        {err && <div className="warn">{err}</div>}
-
-        <div className="sectionhead">Your teams</div>
-        {!teams && !err && <div className="empty"><div className="t">Loading…</div></div>}
-        {teams && teams.length === 0 && <div className="empty"><div className="t">No teams yet</div><div className="s">Create one above to co-own collections and models.</div></div>}
-
-        {teams && teams.map((t) => (
-          <div key={t.id} className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s4)' }}>
-            <div className="li-main" style={{ marginBottom: 'var(--s3)' }}>
-              <div className="t"><b>{t.nomen}</b> <span className="badge">{t.members.length} member{t.members.length === 1 ? '' : 's'}</span></div>
-              <div className="s mono">created {new Date(t.createdAt).toLocaleDateString()}</div>
-            </div>
-            <div className="list">
-              {t.members.map((m) => {
-                const isFounder = m === t.founder;
-                const isMe = m === session?.animaId;
-                return (
-                  <div className="lrow" key={m}>
-                    <div className="li-main">
-                      <div className="t mono">{m}{isMe && ' · you'}</div>
-                      <div className="s">{isFounder ? 'founder' : 'member'}</div>
-                    </div>
-                    <div className="li-right">
-                      {isFounder
-                        ? <span className="badge accent">founder</span>
-                        : <button className="btn ghost" onClick={() => removeMember(t.id, m)} disabled={busy === t.id}><Ic name="x" /> remove</button>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 'var(--s3)', marginTop: 'var(--s3)', flexWrap: 'wrap' }}>
-              <input
-                className="inp mono"
-                style={{ flex: '1 1 260px' }}
-                placeholder="add member by account id"
-                value={draft[t.id] ?? ''}
-                onChange={(e) => setDraft((d) => ({ ...d, [t.id]: e.target.value }))}
-              />
-              <button className="btn ghost" onClick={() => addMember(t.id)} disabled={busy === t.id || !(draft[t.id] ?? '').trim()}>
-                <Ic name="user-plus" /> add
-              </button>
-            </div>
+        {ready && session && <>
+          <div className="sectionhead">New team</div>
+          <div style={{ display: 'flex', gap: 'var(--s3)', marginBottom: 'var(--s5)', flexWrap: 'wrap' }}>
+            <input className="inp" style={{ flex: '1 1 260px' }} placeholder="team name" value={nomen} onChange={(e) => setNomen(e.target.value)} />
+            <button className="btn accent" onClick={create} disabled={creating || !nomen.trim()}>
+              <Ic name="users" /> {creating ? 'Creating…' : 'Create team'}
+            </button>
           </div>
-        ))}
+
+          {err && <div className="warn">{err}</div>}
+
+          <div className="sectionhead">Your teams</div>
+          {!teams && !err && <div className="empty"><div className="t">Loading…</div></div>}
+          {teams && teams.length === 0 && <div className="empty"><div className="t">No teams yet</div><div className="s">Create one above to co-own collections and models.</div></div>}
+
+          {teams && teams.map((t) => (
+            <div key={t.id} className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s4)' }}>
+              <div className="li-main" style={{ marginBottom: 'var(--s3)' }}>
+                <div className="t"><b>{t.nomen}</b> <span className="badge">{t.members.length} member{t.members.length === 1 ? '' : 's'}</span></div>
+                <div className="s mono">created {new Date(t.createdAt).toLocaleDateString()}</div>
+              </div>
+              <div className="list">
+                {t.members.map((m) => {
+                  const isFounder = m === t.founder;
+                  const isMe = m === session?.animaId;
+                  return (
+                    <div className="lrow" key={m}>
+                      <div className="li-main">
+                        <div className="t mono">{m}{isMe && ' · you'}</div>
+                        <div className="s">{isFounder ? 'founder' : 'member'}</div>
+                      </div>
+                      <div className="li-right">
+                        {isFounder
+                          ? <span className="badge accent">founder</span>
+                          : <button className="btn ghost" onClick={() => removeMember(t.id, m)} disabled={busy === t.id}><Ic name="x" /> remove</button>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--s3)', marginTop: 'var(--s3)', flexWrap: 'wrap' }}>
+                <input
+                  className="inp mono"
+                  style={{ flex: '1 1 260px' }}
+                  placeholder="add member by account id"
+                  value={draft[t.id] ?? ''}
+                  onChange={(e) => setDraft((d) => ({ ...d, [t.id]: e.target.value }))}
+                />
+                <button className="btn ghost" onClick={() => addMember(t.id)} disabled={busy === t.id || !(draft[t.id] ?? '').trim()}>
+                  <Ic name="user-plus" /> add
+                </button>
+              </div>
+            </div>
+          ))}
+        </>}
       </div></div>
     </AppShell>
   );

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
-import { doorPath, entryPath } from '../lib/entry';
+import { useDoorHere } from '../shell/AccountGate';
+import { entryPath } from '../lib/entry';
 import { api } from '../lib/api';
 import { useSession } from '../state/session';
 import './landing.css'; // reuse .topnav / .btn chrome
@@ -37,8 +38,7 @@ export function RequestDemo() {
   // for anyone who has been through the door once — including a visitor browsing anonymously,
   // who is exactly who this notice is addressed to. Sending them there would skip the sign-in
   // the notice just asked for.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
+  const door = useDoorHere();
   const [nomen, setNomen] = useState('');
   const [org, setOrg] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -94,7 +94,7 @@ export function RequestDemo() {
             account, so approving it switches your partner access on by itself. Sent
             anonymously, there's nothing for us to switch on — we'd have to onboard you by hand.
             {' '}
-            <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring you back here.
+            <Link to={door}>Create an account or sign in</Link> — we bring you back here.
           </div>
         )}
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { doorPath } from '../lib/entry';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { api } from '../lib/api';
 import type { RevenueReport, CogsReport } from '../lib/api';
@@ -18,11 +18,6 @@ const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', cu
 
 export function AdminWorkspace() {
   const { session, ready } = useSession();
-  // Where the door hands this visitor back once their session is live: the page they were
-  // already on. Turning someone away for want of an account should not also cost them the
-  // walk back to what they were doing.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [admin, setAdmin] = useState(false);
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
   const [cogs, setCogs] = useState<CogsReport | null>(null);
@@ -59,11 +54,7 @@ export function AdminWorkspace() {
         {!ready && <div className="sub">Loading…</div>}
 
         {ready && !session && (
-          <div className="empty">
-            <div className="t">Sign in to continue</div>
-            <div className="s">The admin workspace is restricted to the platform administrator.</div>
-            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
-          </div>
+          <AccountGate why="The admin workspace is restricted to the platform administrator." />
         )}
 
         {ready && session && !admin && (

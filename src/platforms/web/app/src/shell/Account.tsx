@@ -3,9 +3,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { api } from '../lib/api';
-import { clearOnboarded, doorPath } from '../lib/entry';
+import { clearOnboarded } from '../lib/entry';
 import { Ic } from '../lib/icons';
 import { Chip } from './Chip';
+import { useDoorHere } from './AccountGate';
 import { BuyCreditsModal } from '../screens/BuyCreditsModal';
 import { guardedClick, guardedNavigate } from '../lib/dirtyGuard';
 
@@ -25,6 +26,7 @@ export function Account() {
   const { session, signOutActive, signOutAll, accounts } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
+  const door = useDoorHere();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CSSProperties>({});
   const [liveCredits, setLiveCredits] = useState<string | null>(null);
@@ -84,7 +86,7 @@ export function Account() {
   const signOutEverything = () => guardedNavigate((to) => { signOutAll(); clearOnboarded(); navigate(to); }, '/');
   // Signing in from the app chrome returns to the screen the menu was opened over, so the
   // account someone just made is one they arrive back holding, on the page they wanted it for.
-  const signIn = () => guardedNavigate(navigate, doorPath(location.pathname + location.search));
+  const signIn = () => guardedNavigate(navigate, door);
 
   return (
     <div className="posture">

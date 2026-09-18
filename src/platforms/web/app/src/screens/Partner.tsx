@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { doorPath } from '../lib/entry';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { api, ApiRequestError, type OwnPartnerRequest, type Partner as PartnerRecord, type SettledRun } from '../lib/api';
 import { useSession } from '../state/session';
@@ -59,11 +59,6 @@ type Gate =
 
 export function Partner() {
   const { session, ready } = useSession();
-  // Where the door hands this visitor back once their session is live: the page they were
-  // already on. Turning someone away for want of an account should not also cost them the
-  // walk back to what they were doing.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [gate, setGate] = useState<Gate>('loading');
   const [partner, setPartner] = useState<PartnerRecord | null>(null);
   const [gateErr, setGateErr] = useState<string | null>(null);
@@ -176,12 +171,7 @@ export function Partner() {
         {gate === 'loading' && <div className="sub">Loading…</div>}
 
         {gate === 'signed-out' && (
-          <div className="empty">
-            <div className="ico"><Ic name="circle-user" /></div>
-            <div className="t">Sign in to continue</div>
-            <div className="s">The partner dashboard is only available to a signed-in account.</div>
-            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
-          </div>
+          <AccountGate why="The partner dashboard reads one organization's balance, spend and API keys, so it needs the account that owns them." />
         )}
 
         {gate === 'error' && (

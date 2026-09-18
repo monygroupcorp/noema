@@ -127,7 +127,7 @@ export function AccountSettings() {
           <div className="noema-frame ac-posture">
             <div className="ac-pcell">
               <div className="ac-l">identity</div>
-              <div className="ac-v"><span className={`hemi2 ${anon ? 'dashed' : 'lit'}`} /> {anon ? 'anonymous' : 'you · signed in'} <Link className="ac-link" to="/account/security">go anonymous ▸</Link></div>
+              <div className="ac-v"><span className={`hemi2 ${anon ? 'dashed' : 'lit'}`} /> {anon ? 'anonymous' : 'you · signed in'}</div>
             </div>
             <div className="ac-pcell">
               <div className="ac-l">live · what we can see</div>
@@ -139,16 +139,19 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty trio — a right, shown up front. Go anonymous + Export are real; Delete is
-              now wired (DELETE /v1/me), gated behind a typed irreversible-confirmation. */}
+          {/* Sovereignty — rights, shown up front, and only the ones this visitor actually holds.
+              Export is real on either footing (POST /v1/me/export takes the bearer or the anon
+              commitment). "Go anonymous" and "Delete account & data" both act on a NAMED account,
+              so an anonymous visitor is shown neither: the first is where they already are, and the
+              second has nothing to erase. Offering them anyway was this screen's own version of the
+              app's two answers — the identity cell above already reads "anonymous", and two more
+              controls under it argued with it. */}
           <div className="ac-sov">
             <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
-            <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
-            {anon ? (
-              <button className="btn ghost bad" disabled title="Sign in to erase a named account — an anonymous slot holds no identified data to erase"><Ic name="x" /> Delete account &amp; data</button>
-            ) : (
+            {!anon && <>
+              <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
               <button className="btn ghost bad" onClick={() => { setDeleteOpen((o) => !o); setDeleteErr(null); setDeleteText(''); }} aria-expanded={deleteOpen} title="Permanently erase your identity & content"><Ic name="x" /> Delete account &amp; data</button>
-            )}
+            </>}
           </div>
           {deleteOpen && !anon && (
             <div className="ac-note mono" style={{ marginTop: 'var(--s3)', borderLeft: '2px solid var(--bad, #c0392b)', paddingLeft: 'var(--s3)' }}>
@@ -193,7 +196,9 @@ export function AccountSettings() {
             </div>
           )}
           <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
-            <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — both are here. Deletion erases your identity &amp; content; financial records are retained in anonymized form for legal reasons.
+            <span className="hemi2 dashed" /> {anon
+              ? <>Data export is your legal right and it is here. Deletion is the other one, and it belongs to a named account — an anonymous slot carries no identity to erase.</>
+              : <>Data export &amp; account deletion are your legal rights — both are here. Deletion erases your identity &amp; content; financial records are retained in anonymized form for legal reasons.</>}
           </div>
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
