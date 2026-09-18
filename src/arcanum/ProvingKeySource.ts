@@ -76,6 +76,41 @@ export function createRepoProvingKeySource(repoZkeyPath: string): ProvingKeySour
   }
 }
 
+/**
+ * A standing fault does not become news by repeating.
+ *
+ * The conditions below hold until someone changes the deployment, and the source is
+ * re-resolved on every GET /arcanum/config and every GET /arcanum/circuit/zkey — so an
+ * unguarded `log.error` on one of them is one line per request for as long as the fault
+ * lasts, and the real errors around it are unreadable. A finalized ceremony whose key is
+ * not on the server put 60 of every 107 production log lines through that path.
+ *
+ * So a condition is an error the first time it is seen, and while it still holds its
+ * repeats go to `debug` — off in production, back with `DEBUG=arcanum:*`. The condition
+ * is keyed, so a fault that changes (a new final hash, a different failure) is news
+ * again, and so is the same one recurring after it had cleared.
+ */
+function faultReporter() {
+  let standing: string | null = null
+  return {
+    report(key: string, msg: string, fields: Record<string, unknown>): void {
+      if (standing === key) {
+        log.debug(msg, { ...fields, standing: true })
+        return
+      }
+      standing = key
+      log.error(msg, fields)
+    },
+    /** This condition no longer holds. If it comes back, it is reported again. */
+    clear(key: string): void {
+      if (standing === key) standing = null
+    },
+  }
+}
+
+/** Key for the one fault that is not about a particular ceremony key. */
+const STATUS_UNREADABLE = 'ceremony-status-unreadable'
+
 export interface ProvingKeySourceOpts {
   /** The ceremony's own record — its phase and the final key's published hash. */
   store: CeremoniaStore
@@ -93,6 +128,7 @@ export interface ProvingKeySourceOpts {
 export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySource {
   let ceremonyKey: ServedProvingKey | null = null
   const fromRepo = createRepoProvingKeySource(opts.repoZkeyPath)
+  const faults = faultReporter()
 
   async function fromCeremony(finalHash: string): Promise<ServedProvingKey> {
     if (ceremonyKey?.hash === finalHash) return ceremonyKey
@@ -105,11 +141,13 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
     try {
       bytes = await opts.custody.get(finalHash)
     } catch (err) {
-      log.error('ceremony custody read failed', { finalHash, error: String(err) })
+      faults.report(`custody-unreadable:${finalHash}`,
+        'ceremony custody read failed', { finalHash, error: String(err) })
       return missing
     }
     if (!bytes) {
-      log.error('ceremony finalized but the final proving key is absent from custody — ' +
+      faults.report(`custody-absent:${finalHash}`,
+        'ceremony finalized but the final proving key is absent from custody — ' +
         'serving no key. Set CEREMONY_FINAL_ZKEY to publish it, or ARCANUM_ZKEY_URL to host it.',
         { finalHash })
       return missing
@@ -119,11 +157,15 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
     // key the client is proving with.
     const got = sha256Hex(bytes)
     if (got !== finalHash) {
-      log.error('custody bytes do not hash to the published final key — serving no key',
+      faults.report(`custody-mismatch:${finalHash}`,
+        'custody bytes do not hash to the published final key — serving no key',
         { finalHash, got })
       return missing
     }
     ceremonyKey = { origin: 'ceremony', hash: finalHash, bytes }
+    faults.clear(`custody-unreadable:${finalHash}`)
+    faults.clear(`custody-absent:${finalHash}`)
+    faults.clear(`custody-mismatch:${finalHash}`)
     log.info('serving the ceremony final proving key', { finalHash, bytes: bytes.length })
     return ceremonyKey
   }
@@ -132,12 +174,15 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
     let finalHash: string | null = null
     try {
       const status = await opts.store.status()
+      faults.clear(STATUS_UNREADABLE)
       if (status.phase === 'finalized') finalHash = status.finalHash
     } catch (err) {
       // The ceremony record is unreadable: fall back to the repo key rather than take the
       // proving key offline over a database blip. The hash in /config still names exactly
       // what is being served, so nothing here can be mistaken for the ceremony's key.
-      log.error('ceremony status unreadable — falling back to the committed key', { error: String(err) })
+      faults.report(STATUS_UNREADABLE,
+        'ceremony status unreadable — falling back to the committed key', { error: String(err) })
+      return fromRepo()
     }
     return finalHash ? fromCeremony(finalHash) : fromRepo()
   }

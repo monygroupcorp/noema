@@ -15,6 +15,8 @@ import path from 'node:path'
 import { createProvingKeySource } from '../../../src/arcanum/ProvingKeySource.js'
 import { MemoryCeremoniaStore, type CeremoniaStore } from '../../../src/arcanum/CeremoniaStore.js'
 import type { ZkeyCustody } from '../../../src/arcanum/CeremoniaCustody.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
@@ -120,4 +122,82 @@ test('a missing committed key is reported without a hash — nothing to serve, n
   const key = await source()
   assert.equal(key.origin, 'none')
   assert.equal(key.hash, null)
+})
+
+// ---------------------------------------------------------------------------
+// The log a standing fault leaves behind.
+//
+// Both "serve nothing" answers above are re-derived on every GET /arcanum/config and
+// every GET /arcanum/circuit/zkey, so whatever they log, they log once per request. A
+// finalized ceremony whose key was not on the server logged an error each time and took
+// 60 of every 107 production log lines, which buried everything else. The condition is
+// real and worth one error; it is not worth one per request.
+// ---------------------------------------------------------------------------
+
+/** Errors this source emitted while `fn` ran. The logger fans out to `bus`. */
+async function errorsWhile(fn: () => Promise<void>): Promise<LogEntry[]> {
+  const seen: LogEntry[] = []
+  const onLog = (e: LogEntry) => {
+    if (e.component === 'arcanum:provingkey' && e.level === 'error') seen.push(e)
+  }
+  bus.on('log', onLog)
+  try { await fn() } finally { bus.off('log', onLog) }
+  return seen
+}
+
+test('a key absent from custody is an error once, not once per request', async () => {
+  const { file } = repoKeyFile()
+  const finalHash = sha(randomBytes(4096))
+  const source = createProvingKeySource({
+    store: await finalized(finalHash), custody: new MemoryCustody(), repoZkeyPath: file,
+  })
+
+  const errors = await errorsWhile(async () => {
+    for (let i = 0; i < 20; i++) assert.equal((await source()).origin, 'none')
+  })
+
+  assert.equal(errors.length, 1)
+  assert.match(String(errors[0].msg), /absent from custody/)
+  assert.equal(errors[0].finalHash, finalHash)
+})
+
+test('an unreadable ceremony record is an error once, however long the outage lasts', async () => {
+  const { file, bytes } = repoKeyFile()
+  const store = {
+    async status() { throw new Error('mongo is down') },
+  } as unknown as CeremoniaStore
+  const source = createProvingKeySource({ store, custody: new MemoryCustody(), repoZkeyPath: file })
+
+  const errors = await errorsWhile(async () => {
+    for (let i = 0; i < 20; i++) assert.equal((await source()).hash, sha(bytes))
+  })
+
+  assert.equal(errors.length, 1)
+  assert.match(String(errors[0].msg), /status unreadable/)
+})
+
+test('a fault that clears and returns is reported again — silence is not permanent', async () => {
+  const { file } = repoKeyFile()
+  const final = randomBytes(4096)
+  const finalHash = sha(final)
+  const custody = new MemoryCustody()
+  const source = createProvingKeySource({
+    store: await finalized(finalHash), custody, repoZkeyPath: file,
+  })
+
+  // Absent: reported, then quiet.
+  const first = await errorsWhile(async () => { await source(); await source() })
+  assert.equal(first.length, 1)
+
+  // Published: the source serves it, and the fault is over.
+  await custody.put(finalHash, final)
+  assert.equal((await source()).origin, 'ceremony')
+
+  // A second source over the same now-empty custody faults afresh — the suppression is
+  // tied to the condition standing, not to the message having been said once ever.
+  const again = createProvingKeySource({
+    store: await finalized(finalHash), custody: new MemoryCustody(), repoZkeyPath: file,
+  })
+  const second = await errorsWhile(async () => { await again() })
+  assert.equal(second.length, 1)
 })
