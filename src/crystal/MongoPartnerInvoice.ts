@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Collection } from 'mongodb'
+import { Collection, MongoServerError } from 'mongodb'
 import type { PartnerInvoice, PartnerInvoiceStatus, PartnerInvoiceStore } from '../types/partnerInvoice.js'
 
 function fromDoc(doc: Record<string, unknown>): PartnerInvoice {
@@ -9,9 +9,9 @@ function fromDoc(doc: Record<string, unknown>): PartnerInvoice {
 }
 
 /** The invoice book. A period is billed once: the not-void (animaId, periodStart, periodEnd)
- *  read below is the same check `MemoryPartnerInvoice` makes, and the deployment carries a
- *  unique partial index behind it (see `docs/ops/`-level index setup alongside the other
- *  unique partial indexes this codebase relies on for money idempotency). */
+ *  read below is the same check `MemoryPartnerInvoice` makes, and a unique PARTIAL index over
+ *  non-void rows (`crystal/ensureIndexes.ts`) is what actually holds it — a read-then-write
+ *  alone is a race between two instances, the same reasoning the fiat `Reditus` follows. */
 export class MongoPartnerInvoice implements PartnerInvoiceStore {
   constructor(private col: Collection) {}
 
@@ -27,7 +27,18 @@ export class MongoPartnerInvoice implements PartnerInvoiceStore {
       throw new Error(`PartnerInvoice: ${input.animaId} is already billed for this period (invoice ${row.id}, ${row.status})`)
     }
     const record: PartnerInvoice = { ...input, id: randomUUID(), status: 'open', issuedAt: input.issuedAt ?? new Date() }
-    await this.col.insertOne({ ...record })
+    try {
+      await this.col.insertOne({ ...record })
+    } catch (err) {
+      // The unique partial index fired: another instance issued this period between the read
+      // above and this insert. The `id` is a fresh uuid, so nothing else on this collection can
+      // collide. Reported as the same refusal the read gives, so a race and a double-click reach
+      // the caller as one answer instead of a 409 and a 500.
+      if (err instanceof MongoServerError && err.code === 11000) {
+        throw new Error(`PartnerInvoice: ${input.animaId} is already billed for this period`)
+      }
+      throw err
+    }
     return record
   }
 
@@ -51,7 +62,7 @@ export class MongoPartnerInvoice implements PartnerInvoiceStore {
       { $set: { status: 'paid', paidAt, chargeRef } },
       { returnDocument: 'after' },
     )
-    if (res) return fromDoc(res as unknown as Record<string, unknown>)
+    if (res) return fromDoc(res as Record<string, unknown>)
 
     const existing = await this.find(id)
     if (!existing) throw new Error(`PartnerInvoice not found: ${id}`)
@@ -66,7 +77,7 @@ export class MongoPartnerInvoice implements PartnerInvoiceStore {
       { $set: { status } },
       { returnDocument: 'after' },
     )
-    if (res) return fromDoc(res as unknown as Record<string, unknown>)
+    if (res) return fromDoc(res as Record<string, unknown>)
     const existing = await this.find(id)
     if (!existing) throw new Error(`PartnerInvoice not found: ${id}`)
     throw new Error(`PartnerInvoice ${id} is paid and cannot be voided`)
