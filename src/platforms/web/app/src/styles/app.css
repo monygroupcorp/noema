@@ -910,6 +910,17 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
   .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
+  /* Run bar — a third docked layer (icon bar + concierge pill + this bar) is what put it on top
+     of the form it belongs to. Undock it and it reads as the last block of the form, which is
+     where you press Run anyway. */
+  .runbar{position:static;background:none;padding:var(--s4) 0 0}
+  /* Three items on one 326px row left the quote 108px and broke it into a ragged four-line
+     column. Wrap instead: the quote takes a full line, the two buttons share the next, and
+     each of the quote's two lines has the whole width and stays on one line. */
+  .run-row{flex-wrap:wrap;gap:var(--s3)}
+  .quote{flex:1 0 100%}
+  .btn-run{flex:0 0 auto}
+  .btn-run .kbd{display:none}                                /* no keyboard to press it with */
   #trustpop{width:calc(100vw - 24px)}
 }
 @media (max-width:680px){
