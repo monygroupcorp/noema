@@ -3,7 +3,16 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
-import { api, ApiRequestError, type OwnPartnerRequest, type Partner as PartnerRecord, type SettledRun } from '../lib/api';
+import {
+  api,
+  ApiRequestError,
+  type OwnPartnerRequest,
+  type Partner as PartnerRecord,
+  type PartnerContractState,
+  type PartnerInvoice,
+  type PartnerUsageView,
+  type SettledRun,
+} from '../lib/api';
 import { useSession } from '../state/session';
 
 // Partner — the B2B partner's own self-service dashboard (v1-minimal).
@@ -34,6 +43,19 @@ import { useSession } from '../state/session';
 // only, no key). POST /v1/me/partner/api-key retires any key this flow previously issued and
 // mints a fresh one; the response is the ONLY time the raw key is ever retrievable, so it lives
 // only in this component's state — never localStorage, never re-fetched on reload.
+//
+// A KEY IS NOT ISSUED ON ASKING. Two things have to be true first: the API Customer Agreement is
+// signed at its CURRENT version, and a billing account is on file. The server refuses either way
+// round (partner.contract_unsigned / partner.billing_required), so this screen does not enforce
+// anything — it makes the two steps doable, in order, and says which one is outstanding rather
+// than offering a button that 422s. The agreement is read on its own published page and signed
+// here; signing sends the version back, so a signature is always an acceptance of the text that
+// was on offer.
+//
+// Billing is POST-PAID, and that is the other half of what "partner" now means: the meter counts
+// every call a key makes, an invoice is drawn from it at the end of a period, and paying one is
+// not buying credits. So the dashboard shows the meter (this period, live) and the invoices, and
+// neither is expressed in the credit balance above them.
 //
 // Feedback/support: ReportModal (POST /v1/reports) is already mounted on every screen (the flag
 // in the concierge panel's head) — that already satisfies "a way to message us" for this screen
@@ -68,6 +90,23 @@ export function Partner() {
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyErr, setKeyErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const [contract, setContract] = useState<PartnerContractState | null>(null);
+  const [signerName, setSignerName] = useState('');
+  const [signerTitle, setSignerTitle] = useState('');
+  const [signBusy, setSignBusy] = useState(false);
+  const [signErr, setSignErr] = useState<string | null>(null);
+
+  const [billedTo, setBilledTo] = useState('');
+  const [billingEmail, setBillingEmail] = useState('');
+  const [netDays, setNetDays] = useState('30');
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingErr, setBillingErr] = useState<string | null>(null);
+
+  const [usage, setUsage] = useState<PartnerUsageView | null>(null);
+  const [invoices, setInvoices] = useState<PartnerInvoice[]>([]);
+  const [payBusy, setPayBusy] = useState<string | null>(null);
+  const [payErr, setPayErr] = useState<string | null>(null);
 
   const [balance, setBalance] = useState<{ impetus: string; usd: number } | null>(null);
   const [spend, setSpend] = useState<SettledRun[]>([]);
@@ -105,9 +144,22 @@ export function Partner() {
     return () => { live = false; };
   }, [ready, session]);
 
+  // The billing form opens on whatever is already on file, so "replace" is an edit rather than a
+  // retype. Keyed off the record the gate fetched, not off the form's own state.
+  useEffect(() => {
+    if (!partner?.billing) return;
+    setBilledTo(partner.billing.billedTo);
+    setBillingEmail(partner.billing.billingEmail);
+    setNetDays(String(partner.billing.netDays));
+  }, [partner]);
+
   useEffect(() => {
     if (gate !== 'ok') return;
     let live = true;
+    api.mePartnerContract()
+      .then((c) => { if (live) setContract(c); })
+      .catch(() => { /* the agreement card falls back to its own loading copy */ });
+    loadBilling(live);
     api.meStatus()
       .then((s) => { if (live) setBalance({ impetus: s.balanceImpetus, usd: s.balanceUsd || Number(s.balanceImpetus) * IMPETUS_USD }); })
       .catch(() => { /* leave the balance card in its loading state */ });
@@ -137,7 +189,76 @@ export function Partner() {
       .finally(() => setSpendLoading(false));
   };
 
+  /** This calendar month, half-open — the window the live meter reads. The period an invoice
+   *  covers is the platform's to choose; this is just "what has this key run up so far". */
+  function thisMonth(): { from: string; to: string } {
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
+
+  /** Meter + invoices. Called on open and again after anything that can change them. */
+  function loadBilling(live = true) {
+    const { from, to } = thisMonth();
+    api.partnerUsage(from, to)
+      .then((u) => { if (live) setUsage(u); })
+      .catch(() => { /* the meter card falls back to its empty state */ });
+    api.partnerInvoices()
+      .then((r) => { if (live) setInvoices(r.invoices); })
+      .catch(() => { /* likewise */ });
+  }
+
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+
+  /** Micro-USD (a string, because a bigint does not survive JSON) → a dollar amount to show. */
+  const fmtUsdMicro = (micro: string) => `$${(Number(micro) / 1_000_000).toFixed(2)}`;
+
+  async function signContract() {
+    if (!contract) return;
+    setSignBusy(true);
+    setSignErr(null);
+    try {
+      // The version goes back exactly as it was displayed. If the agreement was revised between
+      // this page loading and this click, the server refuses rather than binding the signer to
+      // text they did not see — and re-reading gets them the current one.
+      await api.signPartnerContract({
+        version: contract.version,
+        signerName: signerName.trim(),
+        ...(signerTitle.trim() ? { signerTitle: signerTitle.trim() } : {}),
+      });
+      setContract(await api.mePartnerContract());
+    } catch (e) {
+      setSignErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSignBusy(false);
+    }
+  }
+
+  async function saveBilling() {
+    setBillingBusy(true);
+    setBillingErr(null);
+    try {
+      const res = await api.setPartnerBilling({ billedTo: billedTo.trim(), billingEmail: billingEmail.trim(), netDays: Number(netDays) });
+      setPartner((p) => (p ? { ...p, billing: res.billing } : p));
+    } catch (e) {
+      setBillingErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBillingBusy(false);
+    }
+  }
+
+  async function payInvoice(id: string) {
+    setPayBusy(id);
+    setPayErr(null);
+    try {
+      const { url } = await api.payPartnerInvoice(id);
+      window.location.href = url;
+    } catch (e) {
+      setPayErr(e instanceof Error ? e.message : String(e));
+      setPayBusy(null);
+    }
+  }
 
   async function issueOrRotateKey() {
     setKeyBusy(true);
@@ -253,6 +374,87 @@ export function Partner() {
             </div>
 
             <div className="byo-row">
+              <div className="byo-head">
+                <span className="byo-prov">API Customer Agreement</span>
+                <span className={`byo-state${contract?.signed ? ' connected' : ''}`}>{contract ? (contract.signed ? 'signed' : 'unsigned') : '…'}</span>
+              </div>
+              <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s2)' }}>
+                <div className="sub">
+                  Commercial API access runs on a written agreement: you warrant the rights in
+                  everything you send us and indemnify us for it, we may cut a key at any time, and
+                  neither side trades on a named living artist's style. Read it in full before you
+                  sign — signing here is the signature, and no key is issued without it.
+                </div>
+                {contract && (
+                  <div className="meta-line">
+                    <span>Version</span>
+                    <span className="v">
+                      <a href={contract.path} target="_blank" rel="noreferrer">{contract.version}</a>
+                    </span>
+                  </div>
+                )}
+                {contract?.signed ? (
+                  <>
+                    <div className="meta-line"><span>Signed</span><span className="v">{fmtDate(contract.signedAt)}</span></div>
+                    <div className="meta-line"><span>Signed by</span><span className="v">{contract.signerName ?? '—'}</span></div>
+                  </>
+                ) : (
+                  <>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span className="sub">Your full name</span>
+                      <input className="byo-input" type="text" value={signerName} onChange={(e) => setSignerName(e.target.value)} placeholder="Dana Reyes" />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span className="sub">Your role (optional)</span>
+                      <input className="byo-input" type="text" value={signerTitle} onChange={(e) => setSignerTitle(e.target.value)} placeholder="COO" />
+                    </label>
+                    <button className="btn" onClick={signContract} disabled={signBusy || !contract || signerName.trim().length === 0}>
+                      {signBusy ? 'Signing…' : 'I have read and agree to the API Customer Agreement'}
+                    </button>
+                  </>
+                )}
+                {signErr && <div className="warn">Couldn't record your signature — {signErr}</div>}
+                {contract && !contract.signed && contract.signedVersions.length > 0 && (
+                  <div className="sub" style={{ fontSize: 'var(--fs-xs)' }}>
+                    You signed an earlier version ({contract.signedVersions.join(', ')}). The agreement has
+                    been revised since; keys issued under the old version have stopped working, and signing
+                    the current one and rotating your key restores access.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="byo-row">
+              <div className="byo-head">
+                <span className="byo-prov">Billing account</span>
+                <span className={`byo-state${partner.billing ? ' connected' : ''}`}>{partner.billing ? 'on file' : 'needed'}</span>
+              </div>
+              <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s2)' }}>
+                <div className="sub">
+                  API usage is post-paid: we meter every call your keys make and invoice you at the end
+                  of each period. This is where the invoice goes. Changing it never rewrites an invoice
+                  already issued.
+                </div>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="sub">Bill to</span>
+                  <input className="byo-input" type="text" value={billedTo} onChange={(e) => setBilledTo(e.target.value)} placeholder="Acme Studio Ltd" />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="sub">Invoices to</span>
+                  <input className="byo-input" type="email" value={billingEmail} onChange={(e) => setBillingEmail(e.target.value)} placeholder="ap@acme.example" />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="sub">Payment terms (days)</span>
+                  <input className="byo-input" type="text" inputMode="numeric" value={netDays} onChange={(e) => setNetDays(e.target.value)} placeholder="30" />
+                </label>
+                <button className="btn" onClick={saveBilling} disabled={billingBusy}>
+                  {billingBusy ? 'Saving…' : partner.billing ? 'Update billing account' : 'Save billing account'}
+                </button>
+                {billingErr && <div className="warn">Couldn't save the billing account — {billingErr}</div>}
+              </div>
+            </div>
+
+            <div className="byo-row">
               <div className="byo-head"><span className="byo-prov">API key</span></div>
               <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s2)' }}>
                 <div className="sub">
@@ -260,7 +462,16 @@ export function Partner() {
                   immediately retires the previous one — update anywhere it's in use before you rotate again.
                 </div>
 
-                <button className="btn" onClick={issueOrRotateKey} disabled={keyBusy}>
+                {(!contract?.signed || !partner.billing) && (
+                  <div className="sub" style={{ fontSize: 'var(--fs-xs)' }}>
+                    Two things first:{' '}
+                    {!contract?.signed && <>sign the API Customer Agreement above</>}
+                    {!contract?.signed && !partner.billing && <>, and </>}
+                    {!partner.billing && <>put a billing account on file</>}.
+                  </div>
+                )}
+
+                <button className="btn" onClick={issueOrRotateKey} disabled={keyBusy || !contract?.signed || !partner.billing}>
                   {keyBusy ? 'Working…' : apiKey ? 'Rotate API key' : 'Generate API key'}
                 </button>
 
@@ -293,6 +504,82 @@ export function Partner() {
                   <a href="/v1/openapi.json" target="_blank" rel="noreferrer">/v1/openapi.json</a>
                 </div>
               </div>
+            </div>
+
+            <div className="sectionhead">
+              API usage this month
+              {usage && (
+                <span className="sub" style={{ marginLeft: 'var(--s3)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+                  {usage.rollup.calls.toLocaleString()} billable {usage.rollup.calls === 1 ? 'call' : 'calls'} ·{' '}
+                  {Number(usage.rollup.impetus).toLocaleString()} units
+                </span>
+              )}
+            </div>
+            {!usage ? (
+              <div className="empty"><div className="t">Loading your meter…</div></div>
+            ) : usage.calls.length === 0 ? (
+              <div className="empty">
+                <div className="ico"><Ic name="receipt-text" /></div>
+                <div className="t">No API calls yet this month.</div>
+                <div className="s">Every call one of your keys makes is counted here, with the model it ran and what it consumed. This is what your invoice is drawn from.</div>
+              </div>
+            ) : (
+              <div className="list">
+                {usage.rollup.lines.map((l) => (
+                  <div className="lrow" key={l.modusId}>
+                    <div className="li-main">
+                      <div className="t">{l.modusLabel}</div>
+                      <div className="s">{l.calls.toLocaleString()} {l.calls === 1 ? 'call' : 'calls'}</div>
+                    </div>
+                    <div className="li-right">{Number(l.impetus).toLocaleString()} units</div>
+                  </div>
+                ))}
+                {usage.calls.some((c) => c.voidedAt) && (
+                  <div className="sub" style={{ marginTop: 'var(--s2)', fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
+                    {usage.calls.filter((c) => c.voidedAt).length} call(s) this month failed and were not billed. They stay
+                    on the meter so the record of what your keys did is complete.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="sectionhead">Invoices</div>
+            {invoices.length === 0 ? (
+              <div className="empty">
+                <div className="ico"><Ic name="receipt-text" /></div>
+                <div className="t">No invoices yet</div>
+                <div className="s">We invoice at the end of each period, itemized by flow, from the meter above.</div>
+              </div>
+            ) : (
+              <div className="list">
+                {invoices.map((inv) => (
+                  <div className="lrow" key={inv.id}>
+                    <div className="li-main">
+                      <div className="t">{fmtDate(inv.periodStart)} – {fmtDate(inv.periodEnd)}</div>
+                      <div className="s">
+                        {inv.status === 'paid'
+                          ? `Paid ${fmtDate(inv.paidAt)}`
+                          : inv.status === 'void'
+                            ? 'Withdrawn'
+                            : `Due ${fmtDate(inv.dueAt)}`} · {inv.usage.calls.toLocaleString()} calls
+                      </div>
+                    </div>
+                    <div className="li-right" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
+                      <span>{fmtUsdMicro(inv.usdMicro)}</span>
+                      {inv.status === 'open' && Number(inv.usdMicro) > 0 && (
+                        <button className="btn-ghost" onClick={() => payInvoice(inv.id)} disabled={payBusy !== null}>
+                          {payBusy === inv.id ? 'Opening…' : 'Pay'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {payErr && <div className="warn">Couldn't open checkout — {payErr}</div>}
+            <div className="sub" style={{ marginTop: 'var(--s2)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
+              Paying an invoice settles what you owe for compute already delivered. It is not a credit
+              purchase and adds nothing to the balance below.
             </div>
 
             <div className="stats">

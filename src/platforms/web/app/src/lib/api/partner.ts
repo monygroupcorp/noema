@@ -13,6 +13,69 @@ export interface Partner {
   contactEmail?: string;
   sourceRequestId: string;
   natum: string;
+  billing?: PartnerBilling;
+}
+
+/** Where a partner's invoices go and on what terms they are due. */
+export interface PartnerBilling {
+  billingEmail: string;
+  billedTo: string;
+  netDays: number;
+  setAt: string;
+}
+
+/** GET /v1/me/partner/contract — which agreement is current, and where this account stands on it. */
+export interface PartnerContractState {
+  version: string;
+  path: string;
+  signed: boolean;
+  signedAt?: string;
+  signerName?: string;
+  signedVersions: string[];
+}
+
+/** One metered API call, as the caller's own meter reports it. */
+export interface PartnerUsageCall {
+  actumId: string;
+  keyPrefix: string;
+  modusId: string;
+  calledAt: string;
+  settledAt?: string;
+  impetus?: string;
+  durationMs?: number;
+  modusLabel?: string;
+  models?: string[];
+  voidedAt?: string;
+}
+
+export interface PartnerUsageRollup {
+  calls: number;
+  impetus: string;
+  lines: Array<{ modusId: string; modusLabel: string; calls: number; impetus: string }>;
+}
+
+export interface PartnerUsageView {
+  from: string;
+  to: string;
+  rollup: PartnerUsageRollup;
+  calls: PartnerUsageCall[];
+}
+
+export type PartnerInvoiceStatus = 'open' | 'paid' | 'void';
+
+/** One billing period, priced and issued. `usdMicro` is micro-USD as a string ($1 = 1000000). */
+export interface PartnerInvoice {
+  id: string;
+  billedTo: string;
+  billingEmail: string;
+  periodStart: string;
+  periodEnd: string;
+  usage: PartnerUsageRollup;
+  usdMicro: string;
+  status: PartnerInvoiceStatus;
+  issuedAt: string;
+  dueAt: string;
+  paidAt?: string;
 }
 
 // A B2B partner-program intake request (POST /v1/partner-requests, admin-reviewed via
@@ -72,6 +135,38 @@ const partnerApi = {
   // comment below for why). Each call retires any key this same flow issued previously and
   // returns a fresh one; the response is the ONLY time the raw key is ever retrievable.
   rotatePartnerApiKey: () => fetch('/v1/me/partner/api-key', { method: 'POST', headers: authHeaders() }).then(jApi<{ apiKey: string }>),
+
+  // GET /v1/me/partner/contract — the current API Customer Agreement, where to read it, and
+  // whether this account has signed it. A key is issued only against a signature on the CURRENT
+  // version, so the dashboard asks this before it offers the key button.
+  mePartnerContract: () => fetch('/v1/me/partner/contract', { headers: readHeaders() }).then(jApi<PartnerContractState>),
+  // POST /v1/me/partner/contract — sign it. The version is sent back deliberately: a signature is
+  // an acceptance of the specific text that was displayed, and the server refuses one that names
+  // any version but the current, rather than quietly binding the signer to something else.
+  signPartnerContract: (body: { version: string; signerName: string; signerTitle?: string }) =>
+    fetch('/v1/me/partner/contract', { method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(jApi<{ version: string; signedAt: string; signerName: string; signerTitle?: string }>),
+  // PUT /v1/me/partner/billing — set or replace where invoices go and on what terms they are due.
+  // Required before a key is issued: a post-paid customer with nowhere to send the invoice is
+  // generating on credit nobody extended.
+  setPartnerBilling: (body: { billingEmail: string; billedTo: string; netDays: number }) =>
+    fetch('/v1/me/partner/billing', { method: 'PUT', headers: { ...authHeaders(), 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(jApi<{ billing: PartnerBilling }>),
+  // GET /v1/me/partner/usage — the caller's own meter for a window: the calls its keys made and
+  // the rollup an invoice for that window is drawn from. Both bounds are required.
+  partnerUsage: (from: string, to: string) =>
+    fetch(`/v1/me/partner/usage?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { headers: readHeaders() })
+      .then(jApi<PartnerUsageView>),
+  // GET /v1/me/partner/invoices — the caller's invoices, newest issued first.
+  partnerInvoices: () => fetch('/v1/me/partner/invoices', { headers: readHeaders() }).then(jApi<{ invoices: PartnerInvoice[] }>),
+  // POST /v1/me/partner/invoices/:id/checkout — pay one, at the amount the invoice states. NOT the
+  // credit-pack checkout: settling an invoice books revenue and credits no spendable balance.
+  payPartnerInvoice: (id: string) =>
+    fetch(`/v1/me/partner/invoices/${encodeURIComponent(id)}/checkout`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ successUrl: `${window.location.origin}/partner?paid=1`, cancelUrl: `${window.location.origin}/partner` }),
+    }).then(jApi<{ url: string; sessionId: string }>),
 
   // POST /v1/partner-requests — the public "become a B2B partner" intake (partnerRequestRouter.ts).
   // Public, anon-capable: uses the same authHeaders() every other identity-attach write in this
