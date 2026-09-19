@@ -256,7 +256,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                 onChange={(e) => setBrief(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') gen(); }}
               />
-              <button onClick={gen}><Ic name="arrow-up" /></button>
+              <button aria-label={`Write the ${target.fieldLabel}`} onClick={gen}><Ic name="arrow-up" /></button>
             </div>
           </div>
         ) : (
@@ -319,7 +319,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                 onChange={(e) => setIdleMsg(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void idleSend(); }}
               />
-              <button disabled={idleSending} onClick={() => void idleSend()}><Ic name="arrow-up" /></button>
+              <button aria-label="Send message" disabled={idleSending} onClick={() => void idleSend()}><Ic name="arrow-up" /></button>
             </div>
           </>
         )}
