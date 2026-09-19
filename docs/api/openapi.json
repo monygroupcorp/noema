@@ -18819,7 +18819,8 @@
     },
     {
       "code": "economy.insufficient_signa",
-      "httpStatus": 402
+      "httpStatus": 402,
+      "retryable": false
     },
     {
       "code": "economy.cap_too_low",
