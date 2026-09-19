@@ -1512,9 +1512,10 @@ select{
   text-overflow:ellipsis;
   outline:0;
   transition:.14s var(--ease);
-  background-image:
+  --select-chevron:
     linear-gradient(45deg,transparent 50%,var(--faint) 50%),
     linear-gradient(135deg,var(--faint) 50%,transparent 50%);
+  background-image:var(--select-chevron);
   background-position:right 15px center,right 11px center;
   background-size:4.5px 4.5px;
   background-repeat:no-repeat;
@@ -1522,9 +1523,23 @@ select{
 select:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 select:disabled{cursor:default;opacity:.55}
 
+/* The field classes outrank a bare element selector, AND each sets `background` as a SHORTHAND,
+   which resets every background-* longhand — so the chevron above is wiped for exactly the three
+   classes that nearly every select in this app wears. That leaves a de-natived select with no
+   affordance at all: the .coll-create bug, reintroduced by the rule written to remove it.
+   Measured in a browser before this block existed: .inp, .cer-input and .byo-input each reported
+   background-image `none` while an unclassed select drew the chevron correctly.
+   The gradients live in a custom property because a custom property is NOT reset by the
+   background shorthand — so the chevron is authored once above and only referenced here. */
 select.inp,
 select.cer-input,
 .coll-create select.cer-input,
 .gt-grid .traitcard select.cer-input,
 .muse-hist-search select.cer-input,
-select.byo-input{padding-right:30px}
+select.byo-input{
+  padding-right:30px;
+  background-image:var(--select-chevron);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}

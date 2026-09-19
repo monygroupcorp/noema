@@ -37,8 +37,13 @@ test('de-nativing a select leaves an affordance behind', () => {
   // chevron — the user cannot tell it opens. The replacement chevron has to be drawn.
   assert.match(
     baseRule![1],
-    /background-image:[^;]*linear-gradient/,
+    /background-image:\s*var\(--select-chevron\)/,
     'the select rule removes the native chevron and draws none in its place',
+  )
+  assert.match(
+    baseRule![1],
+    /--select-chevron:[^;]*linear-gradient/,
+    'the --select-chevron property does not actually carry a drawn chevron',
   )
   assert.match(
     baseRule![1],
@@ -51,8 +56,34 @@ test('the chevron follows the theme rather than being a fixed colour', () => {
   // The reason it is two gradients and not an inline SVG: a gradient can take var(--faint) and
   // a data: URI cannot, so one rule serves both themes instead of a light/dark pair that have
   // to be kept in step by hand.
-  const chevron = baseRule![1].match(/background-image:([^;]*)/)![1]
-  assert.match(chevron, /var\(--[a-z-]+\)/, 'the chevron is painted in a literal colour, not a token')
+  const chevron = css.match(/--select-chevron:([^;]*(?:;[^;]*?)??)(?=;\s*background-image)/)
+  assert.ok(chevron, 'the chevron gradients are not held in the --select-chevron custom property')
+  assert.match(chevron![1], /var\(--[a-z-]+\)/, 'the chevron is painted in a literal colour, not a token')
+})
+
+test('a select wearing a field class still gets the chevron', () => {
+  // This is the assertion the first version of this suite was missing, and the bug it missed was
+  // shipped: .inp, .cer-input and .byo-input each set `background` as a SHORTHAND, which resets
+  // every background-* longhand. The bare `select` rule is outranked by all three, so the chevron
+  // it paints was wiped for nearly every select in the app — de-natived with no affordance at
+  // all, which is worse than the OS widget it replaced. Measured in a browser: background-image
+  // `none` on all three, while an unclassed select drew it correctly.
+  //
+  // Asserting on the bare rule alone cannot see that, because the bare rule was never wrong.
+  const qualified = css.match(/select\.inp,[^{]*\{([^}]*)\}/)
+  assert.ok(qualified, 'no rule restates the chevron for selects wearing a field class')
+  assert.match(
+    qualified![1],
+    /background-image:\s*var\(--select-chevron\)/,
+    'the qualified rule does not restore background-image, so the field classes wipe the chevron',
+  )
+  for (const longhand of ['background-position', 'background-size', 'background-repeat']) {
+    assert.match(
+      qualified![1],
+      new RegExp(`${longhand}\\s*:`),
+      `the background shorthand also resets ${longhand}; it has to be restated here too`,
+    )
+  }
 })
 
 test('no screen stylesheet re-natives a select behind the shared rule', () => {
