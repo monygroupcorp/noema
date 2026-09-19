@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportJobFor } from './EditioExport';
+import { exportJobFor, heldCollectionJob } from './EditioExport';
 import type { Editio } from '../lib/editio';
 
 // Publishing a collection to hosting goes out at visibility 'marketplace' — a moderated
@@ -56,5 +56,50 @@ describe('exportJobFor — a hold ends the poll instead of hiding behind it', ()
     const job = exportJobFor(ed({ status: 'failed' }), 'download');
     expect(job?.s).toBe('err');
     expect(job && 'msg' in job && job.msg).toContain('try again');
+  });
+});
+
+// `exportJobFor` ends the poll that is already running; it does nothing for the NEXT visit,
+// because the poll only exists in the session that pressed the button. The screen mounted at
+// idle and fetched only the collection, so a reload dropped a hold entirely and offered
+// "Publish to hosting" again — filing a second edition behind the first. These pin the seed
+// that recovers it, the way the shelf already does for a held model.
+describe('heldCollectionJob — a hold is still there on the next visit', () => {
+  it('recovers this collection’s hold, with the server’s author-safe reason', () => {
+    const q = [ed({ id: 'e9', reviewOutcome: 'pending', moderationNote: 'Waiting for a person to look at it.' })];
+    expect(heldCollectionJob(q, 'c1')).toEqual({ s: 'held', msg: 'Waiting for a person to look at it.' });
+  });
+
+  it('names a reason when the API build predates moderationNote', () => {
+    expect(heldCollectionJob([ed({ reviewOutcome: 'pending' })], 'c1'))
+      .toEqual({ s: 'held', msg: 'Held for a person to review before it goes live.' });
+  });
+
+  it('ignores a hold on a DIFFERENT collection', () => {
+    const q = [ed({ artifact: { kind: 'collectio', id: 'c2' }, reviewOutcome: 'pending' })];
+    expect(heldCollectionJob(q, 'c1')).toBeNull();
+  });
+
+  it('ignores a held model — the shelf owns those, and an intella id could collide', () => {
+    const q = [ed({ artifact: { kind: 'intella', id: 'c1' }, reviewOutcome: 'pending' })];
+    expect(heldCollectionJob(q, 'c1')).toBeNull();
+  });
+
+  it('ignores an entry a reviewer has already adjudicated', () => {
+    expect(heldCollectionJob([ed({ reviewOutcome: 'approved' })], 'c1')).toBeNull();
+    expect(heldCollectionJob([ed({ status: 'rejected', reviewOutcome: 'rejected' })], 'c1')).toBeNull();
+  });
+
+  it('takes the newest hold when a collection has been put forth more than once', () => {
+    // The queue is newest-first (MongoEditionum sorts natum: -1), so the first match wins.
+    const q = [
+      ed({ id: 'new', reviewOutcome: 'pending', moderationNote: 'the live one' }),
+      ed({ id: 'old', reviewOutcome: 'pending', moderationNote: 'a stale one' }),
+    ];
+    expect(heldCollectionJob(q, 'c1')).toEqual({ s: 'held', msg: 'the live one' });
+  });
+
+  it('is null on an empty queue, so an unpublished collection still gets its button', () => {
+    expect(heldCollectionJob([], 'c1')).toBeNull();
   });
 });

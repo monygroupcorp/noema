@@ -33,6 +33,13 @@ export interface CeremonyStatus {
   openSlots: number | null;
   /** sha256 of the zkey the next contributor must build on (server-computed). */
   headHash?: string | null;
+  /**
+   * Whether the sequencer can actually hand out that head right now. An open phase is
+   * not the same thing: the chain lives on the sequencer's disk, and a box that does not
+   * hold the head has an open ceremony nobody can join. Absent on a server that predates
+   * the field, where the page says "open" as it always did.
+   */
+  acceptingContributions?: boolean;
 }
 
 /** Progress phases for an in-browser contribution. */
@@ -173,6 +180,18 @@ export type ServedKeyVerdict =
  * Compare the transcript's final key against the key the site serves. Pure so it can be
  * tested without a server, and so the page renders one verdict rather than re-deriving it.
  */
+/**
+ * Is the ceremony open in name only? A contribution starts by downloading the chain head
+ * from the sequencer, so an open phase whose head the sequencer cannot produce is a door
+ * that opens onto a 503. The page says that instead of inviting the contribution.
+ *
+ * A server that does not report the field at all is left alone — it is the older build,
+ * where the page said "open" and nothing here knows better.
+ */
+export function contributionsPaused(status: CeremonyStatus | null): boolean {
+  return status?.phase === 'open' && status.acceptingContributions === false;
+}
+
 export function checkServedKey(
   status: CeremonyStatus | null,
   served: ServedKey | null,
