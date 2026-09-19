@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 
 const SCREENS = dirname(fileURLToPath(import.meta.url));
 const SHELL = join(SCREENS, '..', 'shell');
+const COMPONENTS = join(SCREENS, '..', 'components');
+const UI = join(SCREENS, '..', 'ui');
 const GATE = 'AccountGate.tsx';
 
 const sources = (dir: string) =>
@@ -30,9 +32,19 @@ describe('one rule for the signed-out visitor', () => {
   //    Not caught, deliberately: an INLINE sign-in link inside a working screen (Funding, Profile,
   //    Vault). That is the rule's other half — the action stays live, and its prose is local to
   //    what it is offering. Only the whole-screen card is centralized.
+  //
+  //    What identifies the card is a link to the door INSIDE an `empty` panel — not the door
+  //    appearing somewhere in the same file. `empty` is also this app's loading-and-nothing-here
+  //    panel (Status, Shelf, Teams' "No teams yet"), so a file-scope match would fail honest
+  //    screens; and matching only what follows the panel is how the first version of this guard
+  //    came to be blind. It looked for `doorPath` after the panel opened, which held while screens
+  //    called `doorPath(...)` inline in the JSX — but `useDoorHere()` is a hook, so it is hoisted
+  //    to the top of the component and the door is named ABOVE the card it belongs to. Every copy
+  //    written in the idiom this app now uses went straight past it. `to={door` catches both.
   it('builds the whole-screen sign-in card only in AccountGate', () => {
-    const card = /className="empty"[\s\S]{0,600}?\bdoorPath\b/;
-    const offenders = [...sources(SCREENS), ...sources(SHELL).filter(([f]) => f !== GATE)]
+    const card = /className="empty"[\s\S]{0,600}?to=\{door/;
+    const dirs = [SCREENS, COMPONENTS, UI].flatMap(sources);
+    const offenders = [...dirs, ...sources(SHELL).filter(([f]) => f !== GATE)]
       .filter(([, src]) => card.test(src))
       .map(([f]) => f);
     expect(offenders).toEqual([]);
