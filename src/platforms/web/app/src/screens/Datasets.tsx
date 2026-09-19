@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, type Readiness } from '../lib/datasets';
-import { api, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
+import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
+import { doorPath } from '../lib/entry';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
@@ -61,13 +62,20 @@ export function Datasets() {
 
   const refetch = () => api.listDatasetsFull().then(({ datasets: d }) => setDatasets(d)).catch(() => setDatasets([]));
 
+  // This list is the caller's OWN datasets, so there is nothing to ask for without an account.
+  // Asking anyway sent the anonymous commitment header at an owner-scoped route, which answers
+  // auth.missing every time; the failure was swallowed into an empty list, so a signed-out
+  // visitor was told they have no datasets rather than that they are not signed in.
+  const signedIn = getSession() !== null;
+
   useEffect(() => {
+    if (!signedIn) { setDatasets([]); return; }
     let live = true;
     api.listDatasetsFull()
       .then(({ datasets: d }) => { if (live) setDatasets(d); })
       .catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
-  }, []);
+  }, [signedIn]);
 
   // The public catalog (GET /v1/data/datasets/public) — collapsed until asked for, mirroring
   // Shelf.tsx's "your shelf" + "browse the catalog" split: this list above is YOUR OWN
@@ -157,6 +165,15 @@ export function Datasets() {
         {scope && <ScopeBanner project={scope} noun="datasets" />}
 
         <div className="dsgrid">
+          {!signedIn && (
+            <div className="empty">
+              <div className="t">your datasets live under an account</div>
+              <div className="s">
+                <Link to={doorPath('/datasets')}>Sign in</Link> to see the sets you have built. The
+                published catalog below is open to anyone.
+              </div>
+            </div>
+          )}
           {list.map((d) => {
             const readiness = readinessOf(d);
             const r = READINESS[readiness];
