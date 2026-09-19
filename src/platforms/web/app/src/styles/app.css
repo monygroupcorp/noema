@@ -140,7 +140,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* ── projects workspace screen ──────────────────────────────────────────────── */
 .projgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);transition:.14s var(--ease)}
+/* text-decoration:none because .projcard is an <a> wrapping a whole card. Without it the
+   anchor's underline propagates through every in-flow descendant — the description, the
+   "active" badge and the counts row all carried it, so nothing on the card told the reader
+   which part was the link. The card already says it is clickable by being a card: a border, a
+   hover border, and cursor:pointer. Every other whole-row anchor in this file (.lrow, .reg-row,
+   .btn) already sets this; the card was the one that did not. */
+.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);text-decoration:none;transition:.14s var(--ease)}
 .projcard:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .projcard.on{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .pc-head{display:flex;align-items:center;gap:9px;margin-bottom:8px}
