@@ -57,3 +57,38 @@ test('nothing to compare reads unknown rather than match', () => {
   assert.equal(checkServedKey(finalized(), null), 'unknown')
   assert.equal(checkServedKey(finalized(), served(null, null)), 'unknown')
 })
+
+// ---------------------------------------------------------------------------
+// A hash match is half the claim. The proving key clients download follows the
+// ceremony; the verification key the site judges their proofs with is a file in
+// the image, and the two are only meaningful as a pair. Publish the ceremony's
+// key against an image built before it and the transcript, the served hash and
+// the page all agree — while no proof made with that key can verify here, and
+// the key still in force is the one the ceremony was run to replace.
+// ---------------------------------------------------------------------------
+
+test('a served key that matches the transcript but cannot be verified is not a match', () => {
+  assert.equal(
+    checkServedKey(finalized(), { hash: FINAL, source: 'ceremony', paired: false }),
+    'unverifiable',
+  )
+})
+
+test('a matching key the server vouches for is still a match', () => {
+  assert.equal(
+    checkServedKey(finalized(), { hash: FINAL, source: 'ceremony', paired: true }),
+    'match',
+  )
+})
+
+test('a server that does not report the pairing keeps the verdict it always gave', () => {
+  // `paired` absent is an older build, not a failed check. Downgrading here would put a
+  // warning on every site that has not redeployed yet.
+  assert.equal(checkServedKey(finalized(), { hash: FINAL, source: 'ceremony' }), 'match')
+  assert.equal(checkServedKey(finalized(), { hash: FINAL, source: 'ceremony', paired: null }), 'match')
+})
+
+test('the pairing never rescues a key the transcript does not name', () => {
+  // Wrong key, vouched for: still the wrong key. The hash comparison comes first.
+  assert.equal(checkServedKey(finalized(), { hash: OTHER, source: 'ceremony', paired: true }), 'mismatch')
+})
