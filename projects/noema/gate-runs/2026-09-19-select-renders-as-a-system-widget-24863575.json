@@ -1,0 +1,67 @@
+{
+ "line": "noema",
+ "branch": "select-renders-as-a-system-widget",
+ "head": "24863575fe3519c6aedc7e06b4606654eea3c677",
+ "cwd": "/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02",
+ "base": "main",
+ "at": "2026-09-19T02:14:15.721Z",
+ "by": "arthurt",
+ "named": true,
+ "load": {
+  "before": {
+   "cores": 32,
+   "load1": 37.59,
+   "load5": 17.99,
+   "load15": 11.11,
+   "runnable": 188,
+   "procs": 6277
+  },
+  "after": {
+   "cores": 32,
+   "load1": 17.54,
+   "load5": 17.02,
+   "load15": 11.53,
+   "runnable": 7,
+   "procs": 4923
+  },
+  "cores": 32
+ },
+ "verdict": "fail",
+ "skipped": 0,
+ "provisioned": false,
+ "provision_commands": [],
+ "gates": [
+  {
+   "name": "verify",
+   "cmd": "npm install --legacy-peer-deps && npm run typecheck && npm run test:hermetic",
+   "status": 0,
+   "said": "pass",
+   "ms": 23235,
+   "tail": "… (553350 bytes cut)\nt contributes to neither band (0.034797ms)\n✔ activityRowLabel: prefers modusLabel, falls back to the house noun for the kind (0.043489ms)\n✔ activityDoorHref: resolves each kind's door to its real destination (0.062489ms)\n✔ activityDoorHref: a row without the door fields its kind needs renders without a link, never a dead one (0.033571ms)\n✔ toggleLock: pins a fragment, unpins the same one, and replaces within a category (0.0859ms)\n✔ lockedCategories reads in taxonomy order, and the summary says what is held (0.085248ms)\n✔ a locked fragment is byte-identical across successive varies (0.486029ms)\n✔ an exclusive category yields at most one fragment per roll, locked or not (0.421688ms)\n✔ applyLocks: a locked category the roll could not sample is added exactly once (0.085978ms)\n✔ varyAt: a vary is a new roll at a new index, and the index reproduces it (0.104131ms)\n✔ the mining index space sits above the independent-roll space (0.121588ms)\n✔ stepping back returns the exact prior roll, not a re-sample of it (0.256368ms)\n✔ ancestry reads root-first, and every node is recomputable from its index and locks (0.33141ms)\n✔ stepTo and varyInto refuse an id the tree does not hold, rather than clearing it (0.065358ms)\n✔ varying with every category locked reports that nothing can change (0.147623ms)\n✔ a category with one fragment in the draw pins a vary exactly as a lock does (0.078118ms)\n✔ a varied roll goes through the existing keep rail exactly as an independent one does (0.207516ms)\n✔ a run holding a place in the warm-pod line reports it, and says so the way /status does (0.126667ms)\n✔ the line moving overrides the place the snapshot opened with (0.062971ms)\n✔ a pod taking the run clears its place, so the way out goes with the wait (0.103642ms)\n✔ a run that has ended holds no place, however it ended (0.056183ms)\n✔ a run that never queued carries no place at all (0.030529ms)\n(node:911778) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n✔ formatQuote: the amount carries a formatted number and the shared unit word (13.844837ms)\n✔ formatQuote: the recipient is a short labeled detail, not the raw id jammed in (0.335085ms)\n✔ formatQuote: a short recipient is shown in full (nothing to truncate) (0.172858ms)\n(node:911816) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n✔ a select is de-natived in the app stylesheet (1.008385ms)\n✔ de-nativing a select leaves an affordance behind (0.297197ms)\n✔ the chevron follows the theme rather than being a fixed colour (0.183724ms)\n✔ no screen stylesheet re-natives a select behind the shared rule (25.132371ms)\nℹ tests 3424\nℹ suites 15\nℹ pass 3424\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 14786.785007\nnpm warn allow-scripts 11 packages have install scripts not yet covered by allowScripts:\nnpm warn allow-scripts   @coinbase/x402@2.1.0 (install: (install scripts present))\nnpm warn allow-scripts   aws-sdk@2.1692.0 (install: (install scripts present))\nnpm warn allow-scripts   bigint-buffer@1.1.5 (install: node-gyp rebuild)\nnpm warn allow-scripts   blake-hash@2.0.0 (install: node-gyp rebuild)\nnpm warn allow-scripts   bufferutil@4.0.9 (install: node-gyp rebuild)\nnpm warn allow-scripts   es5-ext@0.10.64 (install: (install scripts present))\nnpm warn allow-scripts   esbuild@0.27.7 (install: (install scripts present))\nnpm warn allow-scripts   keccak@3.0.4 (install: node-gyp rebuild)\nnpm warn allow-scripts   onnxruntime-node@1.27.0 (install: (install scripts present))\nnpm warn allow-scripts   secp256k1@5.0.1 (install: node-gyp rebuild)\nnpm warn allow-scripts   utf-8-validate@5.0.10 (install: node-gyp rebuild)\nnpm warn allow-scripts\nnpm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow."
+  },
+  {
+   "name": "crystal-db",
+   "cmd": "npm run test:crystal",
+   "status": 1,
+   "said": "fail",
+   "ms": 64290,
+   "tail": "… (1689379 bytes cut)\nl/process/task_queues:90:21) {\n      errorLabelSet: Set(1) { 'ResetPool' },\n      beforeHandshake: false,\n      [cause]: AggregateError [ECONNREFUSED]: \n          at internalConnectMultiple (node:net:1339:18)\n          at afterConnectMultiple (node:net:1942:7) {\n        code: 'ECONNREFUSED',\n        [errors]: [Array]\n      }\n    }\n  }\n\ntest at tests/unit/crystal/stripeRailConcurrent.test.ts:2:7480\n✖ MongoRedituum.reverse(): nets the Mongo-backed rollup and is idempotent on reversalOf (0.10047ms)\n  Error [MongoServerSelectionError]: connect ECONNREFUSED ::1:27017, connect ECONNREFUSED 127.0.0.1:27017\n      at Topology.selectServer (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:634:30)\n      at async Topology._connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:468:22)\n      at async Topology.connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:405:7)\n      at async topologyConnect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:638:9)\n      at async MongoClient._connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:650:7)\n      at async MongoClient.connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:562:7)\n      at async TestContext.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts:83:3)\n      at async TestHook.run (node:internal/test_runner/test:1389:7) {\n    errorLabelSet: Set(0) {},\n    reason: { type: 'Unknown', servers: Map(1) { 'localhost:27017' => [Object] }, stale: false, compatible: true, heartbeatFrequencyMS: 10000, localThresholdMS: 15, setName: null, maxElectionId: null, maxSetVersion: null, commonWireVersion: 0, logicalSessionTimeoutMinutes: null },\n    code: undefined,\n    [cause]: Error [MongoNetworkError]: connect ECONNREFUSED ::1:27017, connect ECONNREFUSED 127.0.0.1:27017\n        at Socket.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/cmap/connect.ts:395:16)\n        at Object.onceWrapper (node:events:631:12)\n        at Socket.emit (node:events:509:20)\n        at emitErrorNT (node:internal/streams/destroy:170:8)\n        at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n        at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {\n      errorLabelSet: Set(1) { 'ResetPool' },\n      beforeHandshake: false,\n      [cause]: AggregateError [ECONNREFUSED]: \n          at internalConnectMultiple (node:net:1339:18)\n          at afterConnectMultiple (node:net:1942:7) {\n        code: 'ECONNREFUSED',\n        [errors]: [Array]\n      }\n    }\n  }\n\ntest at tests/unit/crystal/stripeRailConcurrent.test.ts:2:3424\n✖ /home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts (0.070386ms)\n  TypeError: Cannot read properties of undefined (reading 'dropDatabase')\n      at TestContext.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts:112:12)\n      at TestHook.runInAsyncScope (node:async_hooks:226:14)\n      at TestHook.run (node:internal/test_runner/test:1382:25)\n      at TestHook.run (node:internal/test_runner/test:1726:18)\n      at TestHook.run (node:internal/util:581:20)\n      at Test.runHook (node:internal/test_runner/test:1269:20)\n      at after (node:internal/test_runner/test:1322:20)\n      at Test.run (node:internal/test_runner/test:1408:13)\n[run-with-env.sh] Executing: ./scripts/run-tests.sh tests/unit/crystal/*.test.ts tests/unit/crystal/**/*.test.ts tests/unit/lib/**/*.test.ts tests/unit/api/**/*.test.ts tests/unit/analytics/**/*.test.ts tests/unit/flow/MongoFlowContextStore.test.ts"
+  },
+  {
+   "name": "docker-build",
+   "cmd": "docker build .",
+   "status": 1,
+   "said": "fail",
+   "ms": 54,
+   "tail": "ERROR: permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
+  },
+  {
+   "name": "web-app",
+   "cmd": "( cd src/platforms/web/app && npm ci && npm run typecheck && npm run build )",
+   "status": 143,
+   "said": "fail",
+   "ms": 17969,
+   "tail": "\nadded 620 packages, and audited 621 packages in 5s\n\n266 packages are looking for funding\n  run `npm fund` for details\n\n31 vulnerabilities (12 low, 9 moderate, 10 high)\n\nTo address issues that do not require attention, run:\n  npm audit fix\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.\n\n> typecheck\n> tsc --noEmit\n\n\n> build\n> tsc -b && vite build\n\nnpm warn deprecated three-mesh-bvh@0.7.8: Deprecated due to three.js version incompatibility. Please use v0.8.0, instead.\nnpm warn allow-scripts 3 packages have install scripts not yet covered by allowScripts:\nnpm warn allow-scripts   blake-hash@2.0.0 (install: node-gyp-build || exit 0)\nnpm warn allow-scripts   esbuild@0.21.5 (postinstall: node install.js)\nnpm warn allow-scripts   esbuild@0.28.2 (postinstall: node install.js)\nnpm warn allow-scripts\nnpm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.\nTerminated                 ( cd src/platforms/web/app && npm ci && npm run typecheck && npm run build )"
+  }
+ ]
+}
