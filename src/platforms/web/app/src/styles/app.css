@@ -397,7 +397,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* self-contained input styling (don't depend on ceremony.css load order) */
 .coll-create .cer-input{width:100%;box-sizing:border-box;font-size:13px;padding:9px 11px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
 .coll-create .cer-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
-.coll-create select.cer-input{appearance:none;cursor:pointer}
 .coll-create .cc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:4px}
 .coll-create .cc-note{font-size:12px;color:var(--faint)}
 .coll-create .cc-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--faint);margin-right:auto;cursor:pointer}
@@ -1476,3 +1475,56 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .muse-hist-line{font-size:13px}
 .muse-hist-row .muse-hist-lineage{flex:2 1 260px;margin:0}
 .muse-hist-row .btn{margin-left:auto;flex:0 0 auto}
+
+/* ---------------------------------------------------------------------------
+   Selects — the app's control, not the operating system's.
+
+   Every field class in this file (.inp, .cer-input, .byo-input) gives a select a
+   background, a border and `font:inherit`, and not one of them ever set
+   `appearance:none`. A <select> therefore kept the browser's own widget drawn on
+   top of that: system sans instead of the app face, a native chevron, and a
+   border that is not --hair. The controls beside it obeyed the theme and it did
+   not.
+
+   `appearance:none` alone is not the fix — .coll-create set it and left a select
+   with no affordance at all, indistinguishable from a text field. So the chevron
+   is redrawn here, out of two gradients rather than an inline SVG, because a
+   gradient takes `var(--faint)` and a data: URI cannot: one rule that follows
+   both themes instead of a pair that have to be kept in step.
+
+   The bare `select` rule carries the chrome so that a select wearing no field
+   class at all (Studio's, which has only .mobile-zoom-safe — a 16px font size in
+   a media query, no field styling) stops being a raw OS control. The qualified
+   list that follows only reinstates the right-hand padding, because the field
+   classes outrank a bare element selector and their own `padding` shorthand
+   would otherwise run the label under the chevron.
+   --------------------------------------------------------------------------- */
+select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  box-sizing:border-box;
+  font:inherit;
+  color:var(--text);
+  background-color:var(--raised);
+  border:1px solid var(--hair);
+  border-radius:9px;
+  padding:9px 30px 9px 11px;
+  cursor:pointer;
+  text-overflow:ellipsis;
+  outline:0;
+  transition:.14s var(--ease);
+  background-image:
+    linear-gradient(45deg,transparent 50%,var(--faint) 50%),
+    linear-gradient(135deg,var(--faint) 50%,transparent 50%);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}
+select:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
+select:disabled{cursor:default;opacity:.55}
+
+select.inp,
+select.cer-input,
+.coll-create select.cer-input,
+.gt-grid .traitcard select.cer-input,
+.muse-hist-search select.cer-input,
+select.byo-input{padding-right:30px}
