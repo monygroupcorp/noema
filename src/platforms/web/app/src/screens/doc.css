@@ -13,6 +13,22 @@
 .prose p { margin: 0 0 16px; }
 .prose a { color: var(--accent-soft); text-decoration: none; }
 .prose a:hover { text-decoration: underline; }
+
+/* A button placed in prose is still a button.
+   `.prose a` above is (0,1,1) and `.btn`'s own `color` in app.css is (0,1,0), so every
+   <a class="btn"> inside a .prose article took the prose link colour instead of its own.
+   On /pricing that put --accent-soft (#a3adc4) text on the button's own --accent fill
+   (#7d8aa6): 1.54:1 measured in the browser against a required 4.5:1, and a visitor reads the
+   four Buy buttons — the only call to action on the page a stranger lands on — as disabled.
+   Each variant's own colour is restored here rather than excluding buttons from `.prose a`,
+   because narrowing that selector would raise its specificity and change how an ordinary prose
+   link resolves against every other rule that touches one. The colours are the ones app.css
+   sets on .btn, .btn.ghost / .btn-ghost and .btn.accent; they are stated and not inherited
+   because the cascade is exactly what went wrong here. */
+.prose a.btn { color: #0a0a14; }
+.prose a.btn.ghost,
+.prose a.btn-ghost { color: var(--text); }
+.prose a.btn.accent { color: var(--accent-onaccent, #fff); }
 .prose ul, .prose ol { margin: 0 0 16px; padding-left: 22px; }
 .prose li { margin: 5px 0; }
 .prose strong { color: var(--text); font-weight: 600; }
