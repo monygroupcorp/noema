@@ -1,7 +1,7 @@
 import { Router, raw, type Request, type Response } from 'express'
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from 'node:crypto'
 import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
-import type { CeremoniaStore } from '../../arcanum/CeremoniaStore.js'
+import type { CaeremoniaStatus, CeremoniaStore } from '../../arcanum/CeremoniaStore.js'
 import { headHash } from '../../arcanum/CeremoniaStore.js'
 import {
   type ZkeyCustody,
@@ -103,12 +103,29 @@ export function createCeremoniaRouter(
 ): Router {
   const router = Router()
 
+  /**
+   * Can a contributor actually start right now? An open phase is not enough: the chain
+   * head is a file on the sequencer's disk, and a contribution begins by downloading it.
+   * A box that does not hold the head has an open ceremony nobody can join, and saying
+   * "open · accepting contributions" there sends people to a 503 to find that out.
+   */
+  async function acceptingContributions(status: CaeremoniaStatus): Promise<boolean> {
+    if (status.phase !== 'open' || !config.custody) return false
+    const head = headHash(status)
+    return head ? config.custody.has(head) : false
+  }
+
   // ── GET /v1/ceremony ──────────────────────────────────────────────────────────
-  // Public, pollable status: phase, published root/final hashes, and the live chain.
+  // Public, pollable status: phase, published root/final hashes, the live chain, and
+  // whether this sequencer can hand out the head a contribution has to build on.
   router.get('/', async (_req, res) => {
     try {
       const status = await store.status()
-      return res.json({ ...status, headHash: headHash(status) })
+      return res.json({
+        ...status,
+        headHash: headHash(status),
+        acceptingContributions: await acceptingContributions(status),
+      })
     } catch (err) {
       log.error('ceremony status error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
@@ -240,7 +257,12 @@ export function createCeremoniaRouter(
           index: status.chain.length + 1, name, outputHash, deepVerified: verdict.deepVerified,
         })
         const next = await store.status()
-        return res.status(201).json({ ...next, headHash: headHash(next), deepVerified: verdict.deepVerified })
+        return res.status(201).json({
+          ...next,
+          headHash: headHash(next),
+          acceptingContributions: await acceptingContributions(next),
+          deepVerified: verdict.deepVerified,
+        })
       } catch (err) {
         log.error('contribution error', { error: String(err) })
         return res.status(500).json({ error: 'internal error' })

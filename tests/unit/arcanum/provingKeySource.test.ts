@@ -21,6 +21,7 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 class MemoryCustody implements ZkeyCustody {
   private m = new Map<string, Buffer>()
   async get(h: string) { return this.m.get(h) ?? null }
+  async has(h: string) { return this.m.has(h) }
   async put(h: string, b: Buffer) { this.m.set(h, b) }
 }
 

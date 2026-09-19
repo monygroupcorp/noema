@@ -33,6 +33,39 @@ jobs:
       - run: npm run guard:legal-mirror # each docs/legal reference copy still matches the page we publish
       - run: npm run guard:browser-storage # the Cookie Policy inventory still equals the keys the app stores
 
+  # Address gate — every download address in the model registry still names a real file. Its own
+  # job, not a step of `verify`: it is the one check here that talks to the public internet, and
+  # `verify` is the hermetic gate. Folded in, a hub outage would read as a failing hermetic suite.
+  #
+  # `--require-network` is what makes this honest on a runner: offline, the guard reports that it
+  # could not tell and exits 0 (a laptop on a train must not print a catalogue of false deaths),
+  # and here that silence would be a green tick behind which nothing was checked. A runner that
+  # cannot reach the hub is a broken gate, and a broken gate belongs in the red.
+  #
+  # continue-on-error: the thing being probed is outside this repo. A hub rate-limit or a
+  # withdrawn upstream file is not a reason to block an unrelated PR — it is a reason for someone
+  # to look, which the step summary is for. Promote to blocking once a few weeks of runs say the
+  # signal is clean.
+  weight-addresses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: guard:weight-addresses
+        id: addresses
+        continue-on-error: true
+        run: npm run guard:weight-addresses -- --require-network
+      - name: Step summary
+        if: always()
+        run: |
+          echo "### Registry weight addresses" >> "$GITHUB_STEP_SUMMARY"
+          echo "Outcome: ${{ steps.addresses.outcome }} (advisory — non-blocking)" >> "$GITHUB_STEP_SUMMARY"
+          echo "A failure names each address that resolves to nothing. A pod sent to one dies at wget." >> "$GITHUB_STEP_SUMMARY"
+
   # DB-layer gate — the crystal suite that needs a real Mongo (MongoIntella, MongoModorum,
   # executionWebhook, Consuetudinum, the Compiler↔Mongo LoRA repro, …). NOT covered by the
   # hermetic `verify` job (which uses mock stores that diverge from real Mongo). This is the gate

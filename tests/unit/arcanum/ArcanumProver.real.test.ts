@@ -1,7 +1,7 @@
 /**
  * Real Groth16 proof generation + verification.
  *
- * Uses the actual arcanum.wasm + arcanum_final.zkey produced by the dev ceremony.
+ * Uses the actual arcanum.wasm + the tracked arcanum_final.zkey — the ceremony's own key.
  * SLOW (~10-30s for fullProve). Only runs when the circuit artifacts exist.
  *
  * This is the smoking-gun test that the full cryptographic path works:

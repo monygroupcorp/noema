@@ -21,8 +21,13 @@ import { Stageline } from '../components/RunStageline';
 // pass writes into, and the pass captions only the images that captionset does not already
 // cover: adding two images to a set of thirty is a two-image pass, not a thirty-image one. A new
 // captionset is what you want when a different captioner is going to produce it, and there is
-// one, so minting is the explicit choice rather than the default — the control below is opt-in
-// and is also the hand-authored route (an empty pass to write captions into yourself).
+// one, so minting is the explicit choice rather than the default — the control below is opt-in.
+//
+// It is NOT a hand-authored route, and this comment used to say it was: `start` sends the same
+// `createRun` either way, so minting reads and bills every image in the set. A captionset with no
+// captions in it can only be made over the API (`POST /v1/data/datasets/:id/captionsets` takes an
+// absent `captions`), which is why the training guide sends a reader there for it rather than to
+// this screen.
 //
 // The pass is WATCHED, not just awaited: it rides `useRunStream`, the same subscription every
 // other run-watching surface uses, and draws the same stage readout. A caption pass spends its

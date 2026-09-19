@@ -7,6 +7,10 @@
 .cer-pill.cer-open{color:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 32%,var(--hair))}
 .cer-pill.cer-open .cer-dot{background:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
 .cer-pill.cer-finalized .cer-dot{background:var(--accent-soft)}
+/* Open, but the sequencer cannot hand out the key a contribution builds on: it reads
+   as open (it is) without the live accent that invites a click. */
+.cer-pill.cer-paused{color:var(--muted)}
+.cer-pill.cer-paused .cer-dot{background:var(--faint)}
 
 /* "how the ceremony works" — self-contained (does not rely on landing.css; the landing
    restructure dropped its own .arch/.diagram section, but Ceremony still uses the grammar) */
