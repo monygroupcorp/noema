@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportJobFor, heldCollectionJob } from './EditioExport';
+import { exportJobFor, heldCollectionJob, jobOnDestChange } from './EditioExport';
 import type { Editio } from '../lib/editio';
 
 // Publishing a collection to hosting goes out at visibility 'marketplace' — a moderated
@@ -101,5 +101,40 @@ describe('heldCollectionJob — a hold is still there on the next visit', () => 
 
   it('is null on an empty queue, so an unpublished collection still gets its button', () => {
     expect(heldCollectionJob([], 'c1')).toBeNull();
+  });
+});
+
+// The seed only runs on mount, and the held note lives under the hosting footer — which the
+// screen does not open on. So reaching the hold meant clicking "Publish to hosting", and that
+// click reset the job to idle: the recovered hold was thrown away before it was ever drawn,
+// and the publish control came back for a collection a reviewer was already holding. These
+// pin what a destination switch is allowed to discard.
+describe('jobOnDestChange — a destination switch does not undo a filed publication', () => {
+  it('keeps a hold, so it survives the click that reveals the hosting footer', () => {
+    expect(jobOnDestChange({ s: 'held', msg: 'Waiting for a person to look at it.' }))
+      .toEqual({ s: 'held', msg: 'Waiting for a person to look at it.' });
+  });
+
+  it('keeps a refusal — looking at another destination does not make it retryable', () => {
+    expect(jobOnDestChange({ s: 'rejected', msg: 'Automated review flagged something in this content, so it was not published.' }))
+      .toEqual({ s: 'rejected', msg: 'Automated review flagged something in this content, so it was not published.' });
+  });
+
+  it('keeps a live hosting publication, which owns the baseURI and the only Retract control', () => {
+    const live = { s: 'ready', url: 'https://cdn.example/c1', kind: 'hosting', editionId: 'e1' } as const;
+    expect(jobOnDestChange(live)).toEqual(live);
+  });
+
+  it('keeps an in-flight publication, so the poll watching it is not abandoned mid-flight', () => {
+    const busy = { s: 'busy', editionId: 'e1', kind: 'hosting' } as const;
+    expect(jobOnDestChange(busy)).toEqual(busy);
+  });
+
+  it('clears an error, the one state the footer renders under every destination', () => {
+    expect(jobOnDestChange({ s: 'err', msg: 'the network went away' })).toEqual({ s: 'idle' });
+  });
+
+  it('leaves an untouched screen alone', () => {
+    expect(jobOnDestChange({ s: 'idle' })).toEqual({ s: 'idle' });
   });
 });
