@@ -123,7 +123,7 @@ export function Status() {
   };
 
   return (
-    <AppShell crumb="activity">
+    <AppShell crumb="Activity">
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div><h1>Activity</h1><div className="sub">Your balance, what’s running now, and where your credits go.</div></div>

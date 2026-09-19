@@ -693,7 +693,7 @@ function CorpusSpace() {
     : activeInfo;
 
   return (
-    <AppShell crumb="space">
+    <AppShell crumb="Space">
       {/* No clear-on-click here: deselection is driven by the pick result inside the
           canvas (see onPick below), which is the only place that knows whether the
           click landed on a point. Clicks still bubble normally, which the panels

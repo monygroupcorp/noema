@@ -68,7 +68,7 @@ export function Teams() {
   }
 
   return (
-    <AppShell crumb="teams">
+    <AppShell crumb="Teams">
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Teams</h1>

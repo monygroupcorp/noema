@@ -21,7 +21,7 @@ export function Projects() {
   };
 
   return (
-    <AppShell crumb="projects">
+    <AppShell crumb="Projects">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div><h1>Projects</h1><div className="sub">A project is a shared workspace — its chats, cards, canvases, and its slice of your space, in one context.</div></div>

@@ -125,7 +125,7 @@ export function Studio() {
     : <span className="badge accent">ready</span>;
 
   return (
-    <AppShell crumb="studio" context={context}>
+    <AppShell crumb="Studio" context={context}>
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>

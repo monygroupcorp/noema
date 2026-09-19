@@ -58,7 +58,7 @@ export function Profile() {
   const pageStyle = { ['--accent' as keyof CSSProperties]: accent } as CSSProperties;
 
   return (
-    <AppShell crumb="profile">
+    <AppShell crumb="Profile">
       <div className="page" style={pageStyle}><div className="pw">
         <div className="pagehead"><div>
           <h1>Profile</h1>

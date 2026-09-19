@@ -339,7 +339,7 @@ export function Chat() {
   const groups = groupThreads(threads, projectNameOf);
 
   return (
-    <AppShell crumb="chat" concierge={false}>
+    <AppShell crumb="Chat" concierge={false}>
       {/* Thread history (noema-111) — a project-grouped drawer of the caller's past threads. */}
       {listOpen && <div style={H.backdrop} onClick={() => setListOpen(false)} />}
       {listOpen && (
