@@ -1,13 +1,20 @@
 // =============================================================================
-// A fired collection's flow may only be moved by the funder.
+// A fired collection's spend-directing verbs belong to the funder alone.
 // =============================================================================
 //
-// `patchCollectionDraft` is owner-scoped, and ownership is a team overlay: every member of a
-// collection's Sodalitas passes the owner check. Once a collection is fired it keeps dispatching,
-// and `CollectioCursor` re-reads `modusId` on every tick — so a post-fire flow change directs
-// pieces funded by the collection's `by`. `fireCollection` and `extendCollection` already gate
-// their spend-triggering writes on the funder; these tests pin the same rule on the post-fire
-// flow change, and pin that draft-mode team editing is untouched by it.
+// `patchCollectionDraft`, `approveCollectionPiece` and `rejectCollectionPiece` are owner-scoped,
+// and ownership is a team overlay: every member of a collection's Sodalitas passes the owner
+// check. Two of those verbs spend the collection's `by` once it has been fired.
+//
+//  - the FLOW: `CollectioCursor` re-reads `modusId` on every dispatch tick, so a post-fire flow
+//    change redirects pieces the funder is paying for.
+//  - a REJECTION: `rejectAndRevive` bumps `reiectae`, and the dispatch budget is
+//    `numerus + reiectae` — so every rejection generates one more piece at the funder's expense,
+//    as many times as a reviewer presses the button.
+//
+// `fireCollection` and `extendCollection` already gate their spend-triggering writes on the
+// funder; these tests pin the same rule on both post-fire paths, and pin the two places the gate
+// deliberately does NOT reach: draft-mode team editing, and approval (which dispatches nothing).
 //
 // Hermetic: in-memory stores + a recording cursor. No DB, no network.
 // =============================================================================
@@ -78,17 +85,23 @@ function makeCollectionum(): Collectionum & { store: Map<string, Collectio> } {
 function makeApi() {
   const collectiones = makeCollectionum()
   const started: string[] = []
+  // What the review verbs actually asked the cursor to do. A rejection that never reaches
+  // `rejectAndRevive` is a rejection that never raised the dispatch budget.
+  const reviewed: { approved: string[]; rejected: string[] } = { approved: [], rejected: [] }
+  const frozen = new Set<string>()
   const flows = [makeModus(), makeModus(OTHER_FLOW_ID, '2.0.0')]
   const deps = {
     collectiones,
     collectioCursor: {
       async start(c: Collectio) { started.push(c.id) },
+      async approveActum(_id: string, actumId: string) { reviewed.approved.push(actumId) },
+      async rejectAndRevive(_id: string, actumId: string) { reviewed.rejected.push(actumId) },
     },
     modorum: {
       async find(id: string) { return flows.find((m) => m.id === id) ?? null },
     },
     animae: {
-      async find(id: string) { return { id } },
+      async find(id: string) { return { id, disputeFrozen: frozen.has(id) } },
     },
     sodalitatum: {
       async find(id: string) {
@@ -99,18 +112,18 @@ function makeApi() {
       },
     },
   } as unknown as CrystalApiDeps
-  return { api: new CrystalApi(deps), collectiones, started }
+  return { api: new CrystalApi(deps), collectiones, started, reviewed, frozen }
 }
 
 const axis = [{ porta: 'prompt', valores: [{ value: 'a' }, { value: 'b' }] }]
 
 /** A team-owned draft, authored and funded by `funder`. */
 async function teamDraft() {
-  const { api, collectiones, started } = makeApi()
+  const { api, collectiones, started, reviewed, frozen } = makeApi()
   const c = await api.collect(funder, { draft: true, nomen: 'a set', teamId: TEAM_ID })
   await api.patchCollectionDraft(funder, c.id, { modusId: FLOW_ID, numerus: 2, tractus: axis })
   assert.equal(collectiones.store.get(c.id)?.sodalitasId, TEAM_ID, 'the fixture must be team-owned')
-  return { api, collectiones, started, id: c.id }
+  return { api, collectiones, started, reviewed, frozen, id: c.id }
 }
 
 /** The same collection, fired — still dispatching, still funded by `funder`. */
@@ -156,4 +169,47 @@ test('the gate is scoped to fired collections: a non-funder team member may stil
   const regrid = await api.patchCollectionDraft(teammate, id, { numerus: 5 })
   assert.equal(regrid.total, 5)
   assert.equal(collectiones.store.get(id)?.status, 'draft')
+})
+
+// ── The other post-fire spend path: a rejection rerolls the piece ──────────────────
+
+const HELD_PIECE = 'actum-held'
+
+test('post-fire rejection: the funder may reject a held piece, and it reaches the reroll', async () => {
+  const { api, reviewed, id } = await firedTeamCollection()
+
+  await api.rejectCollectionPiece(funder, id, HELD_PIECE)
+
+  assert.deepEqual(reviewed.rejected, [HELD_PIECE], 'the funder’s rejection reaches rejectAndRevive')
+})
+
+test('post-fire rejection: a non-funder team member is refused, and no replacement is dispatched', async () => {
+  const { api, reviewed, id } = await firedTeamCollection()
+
+  // The teammate passes the owner check — the team overlay owns the collection…
+  assert.equal((await api.getCollection(teammate, id)).id, id)
+
+  // …but a rejection raises `numerus + reiectae` and generates another piece on the funder’s
+  // balance, so it is refused for the same reason an extend is.
+  await assert.rejects(() => api.rejectCollectionPiece(teammate, id, HELD_PIECE), isForbidden)
+
+  assert.deepEqual(reviewed.rejected, [], 'the budget-raising call never reached the cursor')
+})
+
+test('post-fire rejection: APPROVAL stays open to the team — it dispatches nothing', async () => {
+  const { api, reviewed, id } = await firedTeamCollection()
+
+  await api.approveCollectionPiece(teammate, id, HELD_PIECE)
+
+  assert.deepEqual(reviewed.approved, [HELD_PIECE], 'a teammate may still accept a piece')
+  assert.deepEqual(reviewed.rejected, [], 'and accepting one costs the funder nothing')
+})
+
+test('post-fire rejection: a dispute-frozen funder is refused before the collection is read', async () => {
+  const { api, reviewed, frozen, id } = await firedTeamCollection()
+  frozen.add('anima-funder')
+
+  await assert.rejects(() => api.rejectCollectionPiece(funder, id, HELD_PIECE), isForbidden)
+
+  assert.deepEqual(reviewed.rejected, [], 'a frozen account dispatches no replacement piece')
 })
