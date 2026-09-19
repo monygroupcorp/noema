@@ -52,12 +52,12 @@ export interface ArcanumRouterConfig {
   bursarium?: Bursarum
   /**
    * ANON_PURSE_ENABLED (noema-131) — the anonymous ZK purse master switch. Default OFF.
-   * The arcanum path currently verifies against a committed SOLO DEV proving key: anonymity
-   * holds, but SOUNDNESS does not — the dev-key holder can forge spend proofs and counterfeit
-   * the anonymous pool. Until the trusted-setup ceremony runs, no real value may flow through
-   * this path in prod. When false, POST /issue and POST /purse refuse (503) BEFORE any debit or
-   * mint, and GET /config reports `enabled:false` so the UI hides the purse. Flip to true
-   * post-ceremony to restore the full purse (a one-flag flip).
+   * It was off because the committed proving key was a SOLO DEV key: anonymity held, but
+   * SOUNDNESS did not, since the dev-key holder could forge spend proofs and counterfeit the
+   * anonymous pool. The tracked key is now the ceremony's own output, so what the switch gates
+   * is the decision to let real value flow through this path, not a key nobody should trust.
+   * When false, POST /issue and POST /purse refuse (503) BEFORE any debit or mint, and GET
+   * /config reports `enabled:false` so the UI hides the purse.
    */
   anonPurseEnabled?: boolean
   /**
@@ -389,9 +389,9 @@ export function createArcanumRouter(
 
   // ── GET /circuit/zkey ─────────────────────────────────────────────────────────
   //
-  // Serve the Groth16 proving key for client-side proof generation. The dev-ceremony
-  // key (~5MB) is small enough to serve from the API; the prod ceremony key (~300MB)
-  // is expected to be hosted on R2/CDN instead (config.zkeyUrl overrides this route).
+  // Serve the Groth16 proving key for client-side proof generation. This circuit's key is
+  // ~5MB, small enough to serve from the API; a key too large for that goes on R2/CDN
+  // instead (config.zkeyUrl overrides this route).
   //
   // Once the ceremony is finalized this is the key its transcript names, and the
   // x-zkey-hash header names it here too — the same header /v1/ceremony/current.zkey

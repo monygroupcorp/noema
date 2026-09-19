@@ -20,7 +20,13 @@ src/platforms/web/app/dist
 research
 tests
 **/*.md
+# ...except the pages the web app renders. A `*` never crosses a `/`, so one line per directory
+# that holds them: `content/*.md` left every guide in `content/blog/` on the cutting-room floor,
+# and /blog served "Nothing published yet" over three published guides for six days. A new
+# content directory needs its own line here, and tests/unit/architecture/contentReachesImage
+# fails until it has one.
 !src/platforms/web/app/src/content/*.md
+!src/platforms/web/app/src/content/blog/*.md
 deploy.sh
 deploy-staging.sh
 docker-compose.yml

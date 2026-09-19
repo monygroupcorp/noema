@@ -1227,11 +1227,13 @@ async function main(): Promise<void> {
       })
     },
   })
-  // ANON_PURSE_ENABLED (noema-131) — default OFF. The arcanum ZK purse verifies against a
-  // committed SOLO DEV proving key: anonymity holds but SOUNDNESS does not (the dev-key holder
-  // can forge spend proofs). Until the trusted-setup ceremony runs, gate the forgeable money path
-  // off: arcanum issue/mint refuse, and an ownerless bursa spend is refused at the shared
-  // chokepoints (owned/identified-funded purses stay live). Flip true post-ceremony (one-flag flip).
+  // ANON_PURSE_ENABLED (noema-131) — default OFF. It was off because the committed proving key
+  // was a SOLO DEV key: anonymity held but SOUNDNESS did not, since the dev-key holder could
+  // forge spend proofs. The tracked key is now the ceremony's own output, so that reason is
+  // spent — soundness rests on one of its contributors having destroyed their randomness. What
+  // the flag still gates is the decision to open the money path, which is made deliberately and
+  // not by this comment: while it is off, arcanum issue/mint refuse and an ownerless bursa spend
+  // is refused at the shared chokepoints (owned/identified-funded purses stay live).
   const anonPurseEnabled = process.env.ANON_PURSE_ENABLED === 'true'
   if (anonPurseEnabled) log.warn('ANON_PURSE_ENABLED=true — the anonymous ZK purse (arcanum) is LIVE on this instance')
   else log.info('ANON_PURSE_ENABLED off — anonymous ZK purse gated (arcanum issue/mint + ownerless bursa spend refused)')

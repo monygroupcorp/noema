@@ -20,6 +20,11 @@ const log = makeLogger('ceremonia:custody')
 export interface ZkeyCustody {
   /** Raw zkey bytes for a given sha256, or null if absent. */
   get(hash: string): Promise<Buffer | null>
+  /**
+   * Is this key held? Asked on every status poll, so it must not pay for the bytes —
+   * the keys are ~5MB each and the /ceremony page polls while a contributor waits.
+   */
+  has(hash: string): Promise<boolean>
   /** Store zkey bytes under their sha256 (idempotent). */
   put(hash: string, bytes: Buffer): Promise<void>
 }
@@ -41,6 +46,10 @@ export class LocalZkeyCustody implements ZkeyCustody {
     const f = this.file(hash)
     if (!existsSync(f)) return null
     return readFile(f)
+  }
+
+  async has(hash: string): Promise<boolean> {
+    return existsSync(this.file(hash))
   }
 
   async put(hash: string, bytes: Buffer): Promise<void> {
