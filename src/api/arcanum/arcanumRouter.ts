@@ -6,6 +6,7 @@ import type { ArcanumTreeStore } from '../../arcanum/ArcanumTree.js'
 import type { ArcanumVerifier } from '../../arcanum/ArcanumVerifier.js'
 import type { Bursarum } from '../../types/bursa.js'
 import { createRepoProvingKeySource, type ProvingKeySource } from '../../arcanum/ProvingKeySource.js'
+import { createVerifierPairing } from '../../arcanum/verifierPairing.js'
 import { makeLogger } from '../../lib/logger.js'
 
 const log = makeLogger('arcanum:router')
@@ -65,6 +66,13 @@ export interface ArcanumRouterConfig {
    * key committed to the repo is served, which is the pre-ceremony state.
    */
   provingKey?: ProvingKeySource
+  /**
+   * The verification key this server judges spend proofs with — the parsed
+   * verification_key.json, the same object handed to `makeSnarkjsVerifier`. Given here
+   * so /config can say whether it is actually the served proving key's own half. When
+   * absent, the pairing is reported as unknown rather than assumed good.
+   */
+  verificationKey?: unknown
 }
 
 export function createArcanumRouter(
@@ -74,6 +82,7 @@ export function createArcanumRouter(
 ): Router {
   const router = Router()
   const provingKey = config.provingKey ?? createRepoProvingKeySource(REPO_ZKEY_PATH)
+  const verifierPairing = createVerifierPairing(config.verificationKey)
 
   // ── POST /issue ───────────────────────────────────────────────────────────────
   //
@@ -318,7 +327,17 @@ export function createArcanumRouter(
   //                        what a dev setup produces), 'external' (an ARCANUM_ZKEY_URL
   //                        host), or 'none'
   //   depth      number  — Merkle tree depth (32)
-  //   ready      boolean — false when wasm or zkey is not yet configured
+  //   verifierPaired
+  //              bool|null — whether the verification key this server holds is the served
+  //                        proving key's own half. null when it cannot be known here (no
+  //                        key served, none held, or the key is hosted elsewhere). The two
+  //                        halves of a setup arrive by different roads — the proving key
+  //                        follows the ceremony, the verification key is baked into the
+  //                        image — and only as a pair do they mean anything.
+  //   ready      boolean — false when wasm or zkey is not yet configured, and false on a
+  //                        known pairing mismatch: a key clients can fetch but whose proofs
+  //                        this server cannot verify is not a site that is ready to prove
+  //                        against, whatever else is in place.
 
   router.get('/config', async (_req, res) => {
     const serverUrl = normalizeServerUrl(config.serverUrl)
@@ -331,13 +350,17 @@ export function createArcanumRouter(
           ? `${serverUrl.replace(/\/$/, '')}/arcanum/circuit/zkey`
           : '/arcanum/circuit/zkey')
       : null)
+    // An externally hosted key is bytes we have never seen, so there is nothing here to
+    // pair against — the same reason zkeyHash is null on that path.
+    const pairing = config.zkeyUrl ? 'unknown' : await verifierPairing(key)
     return res.json({
       wasmUrl,
       zkeyUrl,
       zkeyHash: config.zkeyUrl ? null : key.hash,
       zkeySource: config.zkeyUrl ? 'external' : key.origin,
       depth: 32,
-      ready: WASM_READY && zkeyUrl !== null,
+      verifierPaired: pairing === 'unknown' ? null : pairing === 'paired',
+      ready: WASM_READY && zkeyUrl !== null && pairing !== 'mismatch',
       // ANON_PURSE_ENABLED (noema-131) — the security boundary is the backend gate; this just
       // lets the UI hide/coming-soon the purse consistently. false = purse issue/mint refuse.
       enabled: !!config.anonPurseEnabled,

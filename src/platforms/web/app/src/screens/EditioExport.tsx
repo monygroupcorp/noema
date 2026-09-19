@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { api, type Collection } from '../lib/api';
@@ -70,6 +70,28 @@ export function heldCollectionJob(editions: Editio[], collectionId: string): Job
   return null;
 }
 
+/**
+ * The job a destination switch leaves behind. Pure.
+ *
+ * Choosing a destination changes which half of the footer you are looking at; it does not
+ * undo a publication already filed with the server. The switch used to reset the job to
+ * idle, which threw away the very record the seed above exists to recover: one click on
+ * "Publish to hosting" and a collection a reviewer was holding read as one nobody had ever
+ * put forth, with the publish control back — and pressing it filed a second edition behind
+ * the first. A live hosting publication lost its Retract control the same way and was
+ * offered publishing again; an in-flight one lost the poll that was watching it.
+ *
+ * Nothing here is per-destination that the footer does not already read per-destination:
+ * every `ready` and `busy` job is rendered under the destination its `kind` names.
+ *
+ * Only an error is cleared, because it is the one state the footer renders under every
+ * destination, and it belongs to the attempt that produced it rather than to the destination
+ * being chosen.
+ */
+export function jobOnDestChange(j: Job): Job {
+  return j.s === 'err' ? { s: 'idle' } : j;
+}
+
 interface Option {
   key: Dest; glyph: string; title: React.ReactNode; tag: string; tagClass: string; desc: string; sub: string;
 }
@@ -89,6 +111,8 @@ export function EditioExport() {
   const [dest, setDest] = useState<Dest>('you');
   const [consent, setConsent] = useState(false);
   const [job, setJob] = useState<Job>({ s: 'idle' });
+  // The publisher has picked a destination themselves, so the seed below must not move them.
+  const chosen = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -100,7 +124,17 @@ export function EditioExport() {
     // still listed in /feed (the shelf carries model holds only), and refusing to render the
     // whole page over a missing seed would be worse than the button coming back.
     api.listReviewQueue()
-      .then((q) => { if (live) setJob((j) => (j.s === 'idle' ? heldCollectionJob(q.editions, id) ?? j : j)); })
+      .then((q) => {
+        if (!live) return;
+        const hold = heldCollectionJob(q.editions, id);
+        if (!hold) return;
+        setJob((j) => (j.s === 'idle' ? hold : j));
+        // The hold is about hosting, and every word of it is rendered under the hosting
+        // footer. This screen opens on "Export to you", so a recovered hold sat behind a
+        // click on the one control the hold exists to withhold, and a held collection looked
+        // untouched until the publisher pressed Publish. Open where the news is.
+        if (!chosen.current) setDest('hosting');
+      })
       .catch(() => {});
     return () => { live = false; };
   }, [id]);
@@ -134,6 +168,10 @@ export function EditioExport() {
     noesis: 'Minting arrives with the NOESIS launchpad — not yet available here.',
   };
   const crossing = dest !== 'you';
+  // A hosting publication already filed and still settling. The job outlives a destination
+  // switch now, so read its `kind`: a ZIP being bundled is a different edition and must not
+  // disable publishing, nor put “Publishing…” on the hosting button.
+  const hostingBusy = job.s === 'busy' && job.kind === 'hosting';
 
   async function run(kind: Kind) {
     if (!c) return;
@@ -173,7 +211,7 @@ export function EditioExport() {
             const off = blocked[o.key] !== '';
             return (
               <button key={o.key} className={`ex-opt${dest === o.key ? ' on' : ''}${off ? ' off' : ''}`} disabled={off}
-                onClick={() => { setDest(o.key); setConsent(false); setJob({ s: 'idle' }); }}>
+                onClick={() => { chosen.current = true; setDest(o.key); setConsent(false); setJob(jobOnDestChange); }}>
                 <span className={`radio${dest === o.key ? ' on' : ''}`} />
                 <span className={`hemi2 ${o.glyph} ex-hemi`} />
                 <span className="ex-opt-main">
@@ -225,8 +263,8 @@ export function EditioExport() {
               ) : (
                 <>
                   <label className="ex-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand this is a public, temporary bridge — I’ll migrate to permanent storage</label>
-                  <button className="btn accent lg" disabled={!consent || blocked.hosting !== '' || (job.s === 'busy')} onClick={() => run('hosting')}>
-                    {job.s === 'busy' ? 'Publishing…' : 'Publish to hosting →'} <span className="ex-btn-sub">public tokenURIs</span>
+                  <button className="btn accent lg" disabled={!consent || blocked.hosting !== '' || hostingBusy} onClick={() => run('hosting')}>
+                    {hostingBusy ? 'Publishing…' : 'Publish to hosting →'} <span className="ex-btn-sub">public tokenURIs</span>
                   </button>
                 </>
               )}
