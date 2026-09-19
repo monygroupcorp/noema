@@ -201,3 +201,29 @@ test('a fault that clears and returns is reported again — silence is not perma
   const second = await errorsWhile(async () => { await again() })
   assert.equal(second.length, 1)
 })
+
+test('a flapping ceremony record does not re-arm the standing key fault', async () => {
+  const { file } = repoKeyFile()
+  const finalHash = sha(randomBytes(4096))
+  const finalizedStore = await finalized(finalHash)
+
+  // The ceremony record answers every other call and throws on the rest, while the final
+  // key stays absent from custody throughout. The absent key is the standing condition —
+  // it holds the whole time, and the requests that never reach it must not make it news
+  // again. Each outage of the record is its own event and is reported as one.
+  let call = 0
+  const store = {
+    async status() {
+      if (call++ % 2 === 1) throw new Error('mongo is flapping')
+      return finalizedStore.status()
+    },
+  } as unknown as CeremoniaStore
+  const source = createProvingKeySource({ store, custody: new MemoryCustody(), repoZkeyPath: file })
+
+  const errors = await errorsWhile(async () => {
+    for (let i = 0; i < 20; i++) await source()
+  })
+
+  const absent = errors.filter((e) => /absent from custody/.test(String(e.msg)))
+  assert.equal(absent.length, 1, 'the standing fault is one line however often it is re-derived')
+})

@@ -89,21 +89,26 @@ export function createRepoProvingKeySource(repoZkeyPath: string): ProvingKeySour
  * repeats go to `debug` — off in production, back with `DEBUG=arcanum:*`. The condition
  * is keyed, so a fault that changes (a new final hash, a different failure) is news
  * again, and so is the same one recurring after it had cleared.
+ *
+ * Every standing condition is remembered, not just the most recent one: more than one can
+ * hold at a time, and a record that flaps between two of them is not two new faults per
+ * request. The set holds one short string per condition the deployment is actually in —
+ * the status fault, and three per final key a ceremony has published.
  */
 function faultReporter() {
-  let standing: string | null = null
+  const standing = new Set<string>()
   return {
     report(key: string, msg: string, fields: Record<string, unknown>): void {
-      if (standing === key) {
+      if (standing.has(key)) {
         log.debug(msg, { ...fields, standing: true })
         return
       }
-      standing = key
+      standing.add(key)
       log.error(msg, fields)
     },
     /** This condition no longer holds. If it comes back, it is reported again. */
     clear(key: string): void {
-      if (standing === key) standing = null
+      standing.delete(key)
     },
   }
 }
