@@ -662,6 +662,19 @@ export function applyAccountDefaults(
   return out
 }
 
+/**
+ * Keep the first item for each url and drop the rest.
+ *
+ * A media item's identity is the reference stored on it, not the uuid minted beside it: the
+ * uuid is fresh every time, so two mints of one url are two items that nothing can tell apart
+ * afterwards. Order is the caller's — first occurrence wins, so the earliest `addedAt` and the
+ * earliest contributor are what the dataset keeps.
+ */
+export function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
+  const seen = new Set<string>()
+  return items.filter((m) => (seen.has(m.url) ? false : (seen.add(m.url), true)))
+}
+
 export class CrystalApi {
   constructor(private readonly deps: CrystalApiDeps) {}
 
@@ -3232,7 +3245,9 @@ export class CrystalApi {
       if (!Array.isArray(input.mediaUrls) || input.mediaUrls.length === 0) {
         throw Errors.inputMalformed('mediaUrls is required and must be non-empty for an upload source')
       }
-      return input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now, ...addedBy }))
+      return dedupeByUrl(
+        input.mediaUrls.map((url) => ({ id: uuidv4(), url, source: 'upload' as const, addedAt: now, ...addedBy })),
+      )
     }
 
     if (!Array.isArray(input.actumIds) || input.actumIds.length === 0) {
@@ -3257,7 +3272,7 @@ export class CrystalApi {
         'none of the referenced Acta recorded a media reference in their exitus (no http(s) URL and no private-output marker)',
       )
     }
-    return media
+    return dedupeByUrl(media)
   }
 
   /**
@@ -3292,7 +3307,17 @@ export class CrystalApi {
       throw Errors.inputMalformed("source must be 'upload' or 'generation'")
     }
 
-    const items = await this._mintMedia(auctor, body as IngestMediaInput, new Date())
+    const minted = await this._mintMedia(auctor, body as IngestMediaInput, new Date())
+    // The same image added twice does not land twice. Identity is the stored `url` — the http(s)
+    // reference or the durable `noema-private://` marker, never a presign, which lapses. Adding a
+    // folder that overlaps one already added is the ordinary accident here, and before this it
+    // silently doubled the dataset: every item minted a fresh uuid, so nothing collided.
+    const held = new Set(d.media.map((m) => m.url))
+    const items = minted.filter((m) => !held.has(m.url))
+    // Everything was already here. Return the dataset untouched rather than calling the store:
+    // `addMedia` stamps a new DatasetVersion unconditionally, so appending nothing would record
+    // a version whose count never moved, and a version row is a snapshot somebody may train from.
+    if (items.length === 0) return this._resolveDatasetMedia(d)
     const updated = await this._datasetsStore().addMedia(d.id, items)
     if (!updated) throw new ApiError('not_found.dataset', `Dataset '${datasetId}' not found`, 404)
     return this._resolveDatasetMedia(updated)

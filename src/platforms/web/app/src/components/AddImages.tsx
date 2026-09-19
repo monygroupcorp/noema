@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { api, type Dataset as DatasetT } from '../lib/api';
 import { appendFailureNote, appendMediaRequest } from '../lib/muse';
+import { runBatch, uploadAsset } from '../lib/upload';
 import '../screens/muse.css';
 
 // Add images to a dataset (noema-260, given a home on the dataset screen by noema-265).
@@ -19,15 +20,6 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Upload one file to R2 through the signed-PUT path and return its permanent URL —
- *  the same two-step contract `Datasets.tsx` and `Profile.tsx` upload through, so there
- *  is one upload path in the app rather than a second one here. */
-async function uploadImage(file: File): Promise<string> {
-  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
-  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
-  if (!put.ok) throw new Error(`upload failed (${put.status})`);
-  return permanentUrl;
-}
 
 /** What one chosen file is doing, as words. A row that says nothing while a batch runs
  *  is a row the user cannot tell apart from a stuck one. */
@@ -87,18 +79,14 @@ export function AddImages({
     setMsg(null);
     setStates(Object.fromEntries(pending.map((_, i) => [i, 'waiting'])));
 
-    const uploaded: string[] = [];
-    const failed: string[] = [];
-    for (const [i, file] of pending.entries()) {
-      setStates((st) => ({ ...st, [i]: 'uploading' }));
-      try {
-        uploaded.push(await uploadImage(file));
-        setStates((st) => ({ ...st, [i]: 'added' }));
-      } catch {
-        failed.push(file.name);
-        setStates((st) => ({ ...st, [i]: 'failed' }));
-      }
-    }
+    // Concurrent, bounded, and each file settles on its own — a failure is reported against
+    // that file and the rest carry on. This ran one file at a time before, so fifty images
+    // took fifty round trips end to end.
+    const batch = await runBatch(pending, (file) => uploadAsset(file), {
+      onState: (i, st) => setStates((s) => ({ ...s, [i]: st === 'running' ? 'uploading' : st === 'done' ? 'added' : 'failed' })),
+    });
+    const uploaded = batch.ok;
+    const failed = batch.failedIndexes.map((i) => pending[i].name);
 
     const request = appendMediaRequest(uploaded);
     if (!request) {
