@@ -70,4 +70,30 @@ describe('one rule for the signed-out visitor', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // 3. No control explains its own deadness by asking for an account. The check above reads the
+  //    `disabled={...}` EXPRESSION, so it sees a control switched off by a session variable and
+  //    nothing else — and the account screen's own version of the second design was written
+  //    without one. It offered an anonymous visitor a permanently dead "Delete account & data",
+  //    disabled by a bare attribute with the reason in its title: "Sign in to erase a named
+  //    account". No expression to read, so the guard that was supposed to hold that half shut
+  //    passed over it; restoring the old file and running this suite is how that was found.
+  //
+  //    So read the REASON instead of the switch. A control carrying `disabled` whose own
+  //    attributes tell the visitor to sign in is the second design in a single line, whichever
+  //    spelling turned it off. Scoped to the element's own attributes, because "sign in" is
+  //    ordinary prose on the screens around the door: Onboard's "coming soon" buttons sit inside
+  //    it, and anything measuring nearby text would fail them for their neighbours' words.
+  it('explains no dead control by the want of an account', () => {
+    const control = /<(?:button|a|input|select|textarea|Link)\b((?:[^<>{}]|\{[^{}]*\})*)>/g;
+    const offenders: string[] = [];
+    for (const [f, src] of [...sources(SCREENS), ...sources(SHELL)]) {
+      if (!src.includes('useSession()') && !src.includes('useIdentity()')) continue;
+      for (const [, attrs] of src.matchAll(control)) {
+        if (!/\bdisabled\b/.test(attrs) || !/sign(ed)?[ -]in/i.test(attrs)) continue;
+        offenders.push(`${f}: ${attrs.trim().slice(0, 90)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
