@@ -110,6 +110,23 @@ test('a VOIDED call stays on the meter and is not billed', async () => {
   assert.equal((await meter.sumPeriod('anima-1', T0, T1)).calls, 0)
 })
 
+test('voiding a SETTLED call takes it off the bill, not just off the record', async () => {
+  // The sibling above voids a row that was never settled, so it would pass even if `void` did
+  // nothing at all — an unsettled row is unbillable either way. This one settles first, which is
+  // the only shape in which voiding has to actually decide something.
+  const meter = new MemoryPartnerUsage()
+  await meter.record({ actumId: 'actum-1', animaId: 'anima-1', keyPrefix: 'ms2_aaaabbbb', modusId: 'flux-schnell', calledAt: at('2026-09-10T00:00:00Z') })
+  await meter.settle('actum-1', { settledAt: at('2026-09-10T00:00:30Z'), impetus: '900', modusLabel: 'Flux Schnell', models: ['flux-schnell'] })
+  assert.equal((await meter.sumPeriod('anima-1', T0, T1)).calls, 1, 'billable once settled')
+
+  await meter.void('actum-1', at('2026-09-10T00:01:00Z'))
+
+  const rows = await meter.list('anima-1', T0, T1)
+  assert.equal(rows.length, 1, 'the call stays on the customer-visible meter')
+  assert.ok(rows[0].voidedAt, 'marked as struck')
+  assert.deepEqual(await meter.sumPeriod('anima-1', T0, T1), { calls: 0, impetus: '0', lines: [] }, 'and off the bill entirely')
+})
+
 test('the rollup itemizes per flow, biggest line first, and totals exactly', async () => {
   const meter = new MemoryPartnerUsage()
   const rows: Array<[string, string, string]> = [

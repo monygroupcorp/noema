@@ -2,9 +2,17 @@ import type { PartnerUsage, PartnerUsageRollup, PartnerUsageStore } from '../typ
 
 /** Roll a set of settled meter rows up into the figure an invoice is drawn from. Shared by
  *  both stores so the memory mirror and Mongo cannot disagree about what a period totals —
- *  the aggregation is the same arithmetic either way, and only the fetch differs. */
+ *  the aggregation is the same arithmetic either way, and only the fetch differs.
+ *
+ *  Billable is `settledAt` AND NOT `voidedAt`. Today a row only ever gets one of the two — the
+ *  completion webhook stamps `completus` and voids `fractus`, and it drops an actum that is
+ *  already terminal — so the second half of that predicate never decides anything. It is here
+ *  because `void` is documented as the way to make a row non-billable, and a reader reaching for
+ *  it to strike a call that was already settled would otherwise strike it from nothing: the row
+ *  would keep its `settledAt` and keep being invoiced. The rule the store states is the rule the
+ *  arithmetic applies, rather than one that happens to hold because of a guard in another file. */
 export function rollup(rows: PartnerUsage[]): PartnerUsageRollup {
-  const settled = rows.filter(r => r.settledAt !== undefined)
+  const settled = rows.filter(r => r.settledAt !== undefined && r.voidedAt === undefined)
   const perModus = new Map<string, { modusLabel: string; calls: number; impetus: bigint }>()
   let total = 0n
   for (const row of settled) {
