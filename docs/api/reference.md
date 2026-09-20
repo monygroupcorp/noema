@@ -12114,6 +12114,153 @@ The human-review queue: publications the moderation gate HELD for review (spec �
 }
 ```
 
+### GET /v1/editiones
+
+The caller's own publications of one artifact, newest first. The review queue above carries HELD items only, so a terminal outcome — a moderation refusal, or a publication already live — could not be read back after the session that filed it ended; a publish surface that reopens needs this rather than the memory of the tab that pressed the button. Author-scoped on the publication's own identity: an artifact the caller never published reads as the empty list.
+
+- **Auth:** required
+
+**Query parameters:**
+
+- `artifact` (string, required) — The artifact whose publications to list, as '<kind>:<id>' (kind: actum | intella | collectio). Required — an unfiltered listing is not offered here.
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "editions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "object",
+            "description": "The canonical artifact being published (referenced, never copied).",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "actum",
+                  "intella",
+                  "collectio"
+                ],
+                "description": "Which artifact kind."
+              },
+              "id": {
+                "type": "string",
+                "description": "The artifact's id."
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ]
+          },
+          "destination": {
+            "type": "string",
+            "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "unlisted",
+              "feed",
+              "marketplace"
+            ]
+          },
+          "custody": {
+            "type": "string",
+            "enum": [
+              "ours",
+              "theirs",
+              "both"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "published",
+              "rejected",
+              "failed",
+              "retracted"
+            ],
+            "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+          },
+          "reviewOutcome": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+          },
+          "moderationNote": {
+            "type": "string",
+            "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+          },
+          "owners": {
+            "type": "array",
+            "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "animaId": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "animaId",
+                "weight"
+              ]
+            }
+          },
+          "license": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "artifact",
+          "destination",
+          "visibility",
+          "custody",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "editions"
+  ]
+}
+```
+
 ### GET /v1/editiones/:id
 
 Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.

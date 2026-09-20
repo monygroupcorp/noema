@@ -45,29 +45,52 @@ export function exportJobFor(e: Editio, kind: Kind): Job | null {
   return null;
 }
 
+/** The destination a hosting publication is filed under (`run` below, and the server's
+ *  GalleryAdapter). "Export to you" is `archive`, and the two must not be read for each
+ *  other — the screen keeps one job per destination for exactly that reason. */
+const HOSTING_DESTINATION = 'gallery';
+
 /**
- * The held publication this collection already has, if any. Pure.
+ * What this collection's hosting publication already IS, from the server's own record. Pure.
  *
- * `exportJobFor` makes a hold terminal for the poll that is already running, which is only
- * half of it: the poll runs in the session that pressed the button. This screen mounts at
- * `{s:'idle'}` and fetches only the collection, so a reload dropped the hold entirely and
- * offered "Publish to hosting" again — the same bug the shelf had for models (a held card
- * read as an unpublished one, and the button filed a second edition behind the first). A
- * hold is the server's record, so seed from the caller's own review queue
- * (GET /v1/editiones/review, which returns an author their own held items).
+ * `exportJobFor` makes an outcome terminal for the poll that is already running, which is
+ * only half of it: the poll runs in the session that pressed the button. This screen mounts
+ * at `{s:'idle'}` and fetched only the collection, so reopening it dropped everything the
+ * publisher had been told and offered "Publish to hosting" again — the same bug the shelf
+ * had for models, where a card read as unpublished and the button filed a second edition
+ * behind the first.
  *
- * Only a hold can be recovered this way: the queue is the `reviewOutcome:'pending'` set, so
- * a refusal is not in it and this says nothing about one.
+ * Seeding from the review queue (`GET /v1/editiones/review`) recovered a HOLD, and only a
+ * hold, because that queue is the `reviewOutcome:'pending'` set. Every TERMINAL outcome was
+ * left in the closed tab:
  *
- * The queue is newest-first, so the first entry for this collection is the live one.
+ *   • a REFUSAL — which is the DEFAULT posture's answer, not an edge case: the gate is
+ *     fail-closed until a scanner is configured, so a public publish is refused rather than
+ *     held. The reason the server persisted for the publisher was shown once and then never
+ *     again, and the consent box and publish control came back to invite a republish that
+ *     cannot succeed.
+ *   • a publication already LIVE — read as one nobody had put forth, so the baseURI the
+ *     publisher came for was gone and pressing Publish filed a second edition of a
+ *     collection that was already hosted.
+ *
+ * So this reads the caller's own publications of this collection instead
+ * (`GET /v1/editiones?artifact=collectio:<id>`), newest first, and takes the newest one
+ * filed at the hosting destination.
+ *
+ * Two outcomes deliberately seed NOTHING, because for both of them the publish control is
+ * the right thing to be looking at: an adapter `failed` (the screen's own copy for it says
+ * to try again, and the button is that retry — a stale error is not news on mount), and a
+ * `retracted` publication (unpublishing in order to publish again is the whole point).
  */
-export function heldCollectionJob(editions: Editio[], collectionId: string): Job | null {
-  for (const e of editions) {
-    if (e.artifact.kind !== 'collectio' || e.artifact.id !== collectionId) continue;
-    if (publishOutcome(e) !== 'held') continue;
-    return { s: 'held', msg: publishNote(e) };
-  }
-  return null;
+export function hostingJobFor(editions: Editio[]): Job | null {
+  const e = editions.find((x) => x.destination === HOSTING_DESTINATION);
+  if (!e) return null;
+  const settled = exportJobFor(e, 'hosting');
+  if (settled) return settled.s === 'err' ? null : settled;
+  // Not settled: a publication an earlier session left in flight. Hand it to the poll
+  // rather than drop it — `exportJobFor` also returns null for a retraction, which must
+  // not be polled for a settle that already happened.
+  return publishOutcome(e) === 'withdrawn' ? null : { s: 'busy', editionId: e.id, kind: 'hosting' };
 }
 
 /**
@@ -149,22 +172,26 @@ export function EditioExport() {
     if (!id) return;
     let live = true;
     api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setErr(msg(e)); });
-    // A hold outlives the session that filed it, so recover it on mount. Only ever promotes
-    // an idle screen: a publish begun in THIS session owns the job and must not be clobbered
-    // by a snapshot taken before it. A failure here leaves the screen as it was — the hold is
-    // still listed in /feed (the shelf carries model holds only), and refusing to render the
-    // whole page over a missing seed would be worse than the button coming back.
-    api.listReviewQueue()
+    // What the server already has on this collection's hosting publication outlives the
+    // session that filed it, so recover it on mount. Only ever promotes an idle screen: a
+    // publish begun in THIS session owns the job and must not be clobbered by a snapshot
+    // taken before it. A failure here leaves the screen as it was — the publication is
+    // still listed in /feed while a reviewer holds it, and refusing to render the whole
+    // page over a missing seed would be worse than the button coming back.
+    api.listMyEditions({ kind: 'collectio', id })
       .then((q) => {
         if (!live) return;
-        const hold = heldCollectionJob(q.editions, id);
-        if (!hold) return;
-        setJobs((all) => (all.hosting.s === 'idle' ? putJob(all, 'hosting', hold) : all));
-        // The hold is about hosting, and every word of it is rendered under the hosting
-        // footer. This screen opens on "Export to you", so a recovered hold sat behind a
-        // click on the one control the hold exists to withhold, and a held collection looked
-        // untouched until the publisher pressed Publish. Open where the news is.
-        if (!chosen.current) setDest('hosting');
+        const job = hostingJobFor(q.editions);
+        if (!job) return;
+        setJobs((all) => (all.hosting.s === 'idle' ? putJob(all, 'hosting', job) : all));
+        // Every word of this is rendered under the hosting footer, and the screen opens on
+        // "Export to you" — so a recovered outcome sat behind a click on the one control it
+        // exists to withhold, and the collection looked untouched until the publisher
+        // pressed Publish. Open where the news is, for the two outcomes that ARE news: a
+        // hold and a refusal are things the publisher has not been told. A publication
+        // already live is not, and someone who came to bundle a ZIP should not be moved
+        // off the destination they came for.
+        if (!chosen.current && (job.s === 'held' || job.s === 'rejected')) setDest('hosting');
       })
       .catch(() => {});
     return () => { live = false; };
