@@ -198,9 +198,60 @@ export interface VestigiaProjection {
   n: number;
 }
 
+/**
+ * Read a response as the API's JSON, or throw an error written for a person.
+ *
+ * The body is read ONCE, as text — it can only be consumed once, and it is not always JSON. A
+ * proxy 502, an Express 404 for a route this build does not serve, and the SPA index served for
+ * an API path all answer HTML. Quoting that at the user put a whole error document on the
+ * screen; letting JSON.parse throw put "Unexpected token '<'" there instead. Neither is a
+ * sentence anybody can act on, and both were reaching real screens.
+ *
+ * What the user gets is the API's own message when there is one, and a short honest line about
+ * the status when there is not. What a developer gets is everything: `status`, `code`, and the
+ * raw body on the error object and in the console.
+ */
+async function readApiJson<T>(res: Response): Promise<T> {
+  const raw = await res.text().catch(() => '');
+  let parsed: unknown;
+  let parsedOk = false;
+  if (raw) { try { parsed = JSON.parse(raw); parsedOk = true; } catch { parsedOk = false; } }
+
+  if (!res.ok) {
+    const e = parsedOk ? (parsed as { error?: { code?: string; message?: string; details?: Record<string, unknown> } })?.error : undefined;
+    throw reportable(new ApiRequestError(
+      e?.code ?? `http.${res.status}`,
+      e?.message ?? statusLine(res),
+      res.status,
+      e?.details,
+      raw,
+    ));
+  }
+  // A 2xx that is not JSON is the transport answering for the API — the SPA index, a captive
+  // portal, a proxy error page with an optimistic status.
+  if (!parsedOk) {
+    throw reportable(new ApiRequestError('transport.not_json', statusLine(res, true), res.status, undefined, raw));
+  }
+  return parsed as T;
+}
+
+/** A sentence about the status, for when the body carried no message of its own. */
+function statusLine(res: Response, notJson = false): string {
+  if (notJson) return 'The server did not answer with data. It may be mid-deploy — try again in a moment.';
+  if (res.status === 404) return 'That is not here.';
+  if (res.status === 401 || res.status === 403) return 'You are not signed in, or not allowed to see this.';
+  if (res.status >= 500) return 'The server had a problem. It is not something you did.';
+  return res.statusText || `The server answered ${res.status}.`;
+}
+
+/** The raw body never reaches the screen, and never stops reaching the console. */
+function reportable(err: ApiRequestError): ApiRequestError {
+  try { console.debug('[api]', err.status, err.code, err.body ?? ''); } catch { /* no console */ }
+  return err;
+}
+
 async function j<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => res.statusText)}`);
-  return res.json() as Promise<T>;
+  return readApiJson<T>(res);
 }
 
 // Thrown when the BYO-secret store isn't configured server-side (SECRETA_MASTER_KEY unset).
@@ -478,20 +529,22 @@ export class ApiRequestError extends Error {
   code: string;
   status: number;
   details?: Record<string, unknown>;
-  constructor(code: string, message: string, status: number, details?: Record<string, unknown>) {
+  /** The response body as it arrived. For the console and for a bug report — never rendered. */
+  body?: string;
+  constructor(code: string, message: string, status: number, details?: Record<string, unknown>, body?: string) {
     super(message);
     this.name = 'ApiRequestError';
     this.code = code;
     this.status = status;
     this.details = details;
+    this.body = body;
   }
 }
+// jApi and j ask the same question and now answer it the same way. jApi was already the right
+// shape — it read the structured error and never quoted the body — but only eighteen call sites
+// used it against a hundred and twenty-three on the naive one.
 async function jApi<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null;
-    throw new ApiRequestError(body?.error?.code ?? `http.${res.status}`, body?.error?.message ?? res.statusText, res.status, body?.error?.details);
-  }
-  return res.json() as Promise<T>;
+  return readApiJson<T>(res);
 }
 
 // ── Tabula (canvas workspace, ADR-0008 follow-up) — mirrors types/tabula.ts ──────
