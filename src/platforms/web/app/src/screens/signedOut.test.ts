@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { holdsRight, sovereignRights } from './AccountSettings';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,5 +96,63 @@ describe('one rule for the signed-out visitor', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+
+// The account screen had its own copy of the two designs, and it is the one the cross-screen
+// guard above cannot see. Its controls were never DISABLED for want of an account — they were
+// LIVE and pointless: "go anonymous ▸" as a link beside an identity cell already reading
+// "anonymous", and "Go anonymous" as a button 250px under it, both offering a visitor the
+// footing they were already standing on, above a "Delete account & data" with nothing to erase.
+//
+// A live control that does nothing is not caught by reading `disabled`, so the rule it breaks
+// has to be stated positively: what rights does this visitor actually hold? `sovereignRights`
+// answers that and the JSX asks it, which is the only reason a machine can check this at all —
+// there is no jsdom in this app, so a rendering rule earns a test by being a function first.
+describe('the account screen offers only the rights the visitor holds', () => {
+  it('offers an anonymous visitor export, and neither control that acts on a named account', () => {
+    expect(sovereignRights(true)).toEqual(['export']);
+    expect(holdsRight(true, 'goAnonymous')).toBe(false);
+    expect(holdsRight(true, 'erase')).toBe(false);
+  });
+
+  it('offers a named account all three', () => {
+    expect(sovereignRights(false)).toEqual(['export', 'goAnonymous', 'erase']);
+  });
+
+  // The function is only the rule if the screen actually asks it. Every control in the
+  // sovereignty row must be rendered under `holdsRight(...)`; a control written back in beside
+  // them, or re-guarded by a hand-rolled `!anon`, is how the two designs returned last time.
+  it('renders every sovereignty control under that rule and not beside it', () => {
+    const src = readFileSync(join(SCREENS, 'AccountSettings.tsx'), 'utf8');
+    const row = src.match(/<div className="ac-sov">([\s\S]*?)<\/div>\s*\n/);
+    expect(row, 'the ac-sov row moved or was renamed — this guard is now blind').not.toBeNull();
+    const controls = [...row![1].matchAll(/<button\b/g)];
+    const guards = [...row![1].matchAll(/holdsRight\(anon, '/g)];
+    expect(controls.length).toBe(guards.length);
+    expect(controls.length).toBe(sovereignRights(false).length);
+  });
+
+  // The link the identity cell used to carry. It pointed at /account/security — a pane this app
+  // does not route — so for a named visitor it was a dead end, and for an anonymous one it was a
+  // dead end offering them where they already were.
+  //
+  // Matched as an AFFORDANCE, never per file: the first spelling of this guard excluded any file
+  // containing `holdsRight(anon, 'goAnonymous')`, which is every file that could hold the
+  // duplicate — the real control lives beside it. Restoring the link proved it passed. So read
+  // the elements: going anonymous is an action on this page, so its one control is a button with
+  // an onClick. Any ANCHOR offering it is the second affordance, whatever it links to.
+  it('spells "go anonymous" as one control, and never as a link', () => {
+    const anchors: string[] = [];
+    const buttons: string[] = [];
+    for (const [f, src] of [...sources(SCREENS), ...sources(SHELL), ...sources(COMPONENTS), ...sources(UI)]) {
+      for (const [el, tag] of src.matchAll(/<(Link|a|button)\b[\s\S]*?<\/\1>/g) as Iterable<[string, string]>) {
+        if (!/go anonymous/i.test(el)) continue;
+        (tag === 'button' ? buttons : anchors).push(`${f}: ${el.replace(/\s+/g, ' ').slice(0, 80)}`);
+      }
+    }
+    expect(anchors).toEqual([]);
+    expect(buttons.length).toBe(1);
   });
 });
