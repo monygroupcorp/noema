@@ -71,25 +71,29 @@ export function heldCollectionJob(editions: Editio[], collectionId: string): Job
 }
 
 /**
- * The job a destination switch leaves behind. Pure.
+ * One job per destination that can have one.
  *
- * Choosing a destination changes which half of the footer you are looking at; it does not
- * undo a publication already filed with the server. The switch used to reset the job to
- * idle, which threw away the very record the seed above exists to recover: one click on
- * "Publish to hosting" and a collection a reviewer was holding read as one nobody had ever
- * put forth, with the publish control back — and pressing it filed a second edition behind
- * the first. A live hosting publication lost its Retract control the same way and was
- * offered publishing again; an in-flight one lost the poll that was watching it.
+ * "Export to you" and "Publish to hosting" are two independent publications — a private ZIP
+ * and a public hosting run — and the screen kept ONE slot for both, which meant whichever
+ * moved last erased the other. The destination switch was taught not to clear that slot, but
+ * `run()` still overwrote it, so the seeded hold this screen exists to show did not survive
+ * the one thing a held publisher is explicitly invited to do instead: switch to "Export to
+ * you", press Prepare download, and come back. The hold was gone, the consent box and
+ * "Publish to hosting" were back, and pressing it filed a second edition behind the one a
+ * reviewer was still holding. A hold is the server's record about the HOSTING publication;
+ * nothing the download path does may discard it, and the reverse holds too — publishing to
+ * hosting used to abandon the poll watching a ZIP that was still being bundled.
  *
- * Nothing here is per-destination that the footer does not already read per-destination:
- * every `ready` and `busy` job is rendered under the destination its `kind` names.
- *
- * Only an error is cleared, because it is the one state the footer renders under every
- * destination, and it belongs to the attempt that produced it rather than to the destination
- * being chosen.
+ * Keyed by kind, that is structural rather than remembered, and a destination switch has
+ * nothing left to decide: the footer reads its own destination's job, so an error stays with
+ * the attempt that produced it instead of being rendered — and cleared — under all three.
  */
-export function jobOnDestChange(j: Job): Job {
-  return j.s === 'err' ? { s: 'idle' } : j;
+export type Jobs = Record<Kind, Job>;
+export const IDLE_JOBS: Jobs = { download: { s: 'idle' }, hosting: { s: 'idle' } };
+
+/** One destination's job replaced, every other destination's left standing. Pure. */
+export function putJob(all: Jobs, kind: Kind, j: Job): Jobs {
+  return { ...all, [kind]: j };
 }
 
 interface Option {
@@ -104,13 +108,40 @@ const OPTIONS: Option[] = [
     desc: 'The easy path — NOESIS mints the contract and lists the collection on-chain. Public & permanent.', sub: 'gacha · ERC-721 · coming with the NOESIS launchpad' },
 ];
 
+/**
+ * Watch one destination's pending publication until it settles.
+ *
+ * Keyed on the edition id rather than on the job object: a settle writes the job table, and
+ * an effect that depends on the table restarts the OTHER destination's poll every time.
+ */
+function usePublishPoll(kind: Kind, job: Job, setJobs: React.Dispatch<React.SetStateAction<Jobs>>) {
+  const editionId = job.s === 'busy' ? job.editionId : '';
+  useEffect(() => {
+    if (!editionId) return;
+    let live = true;
+    let t: ReturnType<typeof setTimeout>;
+    const put = (j: Job) => setJobs((all) => putJob(all, kind, j));
+    const tick = async () => {
+      try {
+        const { edition } = await api.getEdition(editionId);
+        if (!live) return;
+        const settled = exportJobFor(edition, kind);
+        if (settled) { put(settled); return; }
+        t = setTimeout(tick, 2500);
+      } catch (e) { if (live) put({ s: 'err', msg: msg(e) }); }
+    };
+    t = setTimeout(tick, 2500);
+    return () => { live = false; clearTimeout(t); };
+  }, [editionId, kind, setJobs]);
+}
+
 export function EditioExport() {
   const { id } = useParams();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dest, setDest] = useState<Dest>('you');
   const [consent, setConsent] = useState(false);
-  const [job, setJob] = useState<Job>({ s: 'idle' });
+  const [jobs, setJobs] = useState<Jobs>(IDLE_JOBS);
   // The publisher has picked a destination themselves, so the seed below must not move them.
   const chosen = useRef(false);
 
@@ -128,7 +159,7 @@ export function EditioExport() {
         if (!live) return;
         const hold = heldCollectionJob(q.editions, id);
         if (!hold) return;
-        setJob((j) => (j.s === 'idle' ? hold : j));
+        setJobs((all) => (all.hosting.s === 'idle' ? putJob(all, 'hosting', hold) : all));
         // The hold is about hosting, and every word of it is rendered under the hosting
         // footer. This screen opens on "Export to you", so a recovered hold sat behind a
         // click on the one control the hold exists to withhold, and a held collection looked
@@ -139,24 +170,10 @@ export function EditioExport() {
     return () => { live = false; };
   }, [id]);
 
-  // Poll a pending publication until it settles (ZIP built + hosted, or gate-rejected).
-  useEffect(() => {
-    if (job.s !== 'busy' || !job.editionId) return;
-    const kind = job.kind;
-    let live = true;
-    let t: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      try {
-        const { edition } = await api.getEdition((job as { editionId: string }).editionId);
-        if (!live) return;
-        const settled = exportJobFor(edition, kind);
-        if (settled) { setJob(settled); return; }
-        t = setTimeout(tick, 2500);
-      } catch (e) { if (live) setJob({ s: 'err', msg: msg(e) }); }
-    };
-    t = setTimeout(tick, 2500);
-    return () => { live = false; clearTimeout(t); };
-  }, [job]);
+  // Poll each pending publication until it settles (ZIP built + hosted, or gate-rejected).
+  // One per destination, because both can now be in flight at once.
+  usePublishPoll('download', jobs.download, setJobs);
+  usePublishPoll('hosting', jobs.hosting, setJobs);
 
   if (err) return <AppShell title="Export & publish"><div className="page"><div className="pw"><div className="warn">Couldn’t load this collection: {err}</div></div></div></AppShell>;
   if (!c) return <AppShell title="Export & publish"><div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
@@ -168,10 +185,14 @@ export function EditioExport() {
     noesis: 'Minting arrives with the NOESIS launchpad — not yet available here.',
   };
   const crossing = dest !== 'you';
-  // A hosting publication already filed and still settling. The job outlives a destination
-  // switch now, so read its `kind`: a ZIP being bundled is a different edition and must not
-  // disable publishing, nor put “Publishing…” on the hosting button.
-  const hostingBusy = job.s === 'busy' && job.kind === 'hosting';
+  // Each destination's own job. A ZIP being bundled is a different edition from a hosting
+  // publication and neither reads the other's state: a download in flight must not put
+  // “Publishing…” on the hosting button, and must not hide the hold standing behind it.
+  const dj = jobs.download;
+  const hj = jobs.hosting;
+  const hostingBusy = hj.s === 'busy';
+  // The job the footer is currently showing — NOESIS has none, and renders no job line.
+  const shown: Job | null = dest === 'you' ? dj : dest === 'hosting' ? hj : null;
 
   async function run(kind: Kind) {
     if (!c) return;
@@ -179,11 +200,12 @@ export function EditioExport() {
     const body: PublishRequest = kind === 'download'
       ? { artifact, destination: 'archive', visibility: 'private', custody: 'ours' }
       : { artifact, destination: 'gallery', visibility: 'marketplace', custody: 'ours' };
-    setJob({ s: 'busy', editionId: '', kind });
+    const put = (j: Job) => setJobs((all) => putJob(all, kind, j));
+    put({ s: 'busy', editionId: '', kind });
     try {
       const { edition } = await api.publish(body);
-      setJob(exportJobFor(edition, kind) ?? { s: 'busy', editionId: edition.id, kind });
-    } catch (e) { setJob({ s: 'err', msg: msg(e) }); }
+      put(exportJobFor(edition, kind) ?? { s: 'busy', editionId: edition.id, kind });
+    } catch (e) { put({ s: 'err', msg: msg(e) }); }
   }
 
   const crumb = <span className="ph-crumb"><Link to="/collections">{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>export &amp; publish</b></span>;
@@ -211,7 +233,7 @@ export function EditioExport() {
             const off = blocked[o.key] !== '';
             return (
               <button key={o.key} className={`ex-opt${dest === o.key ? ' on' : ''}${off ? ' off' : ''}`} disabled={off}
-                onClick={() => { chosen.current = true; setDest(o.key); setConsent(false); setJob(jobOnDestChange); }}>
+                onClick={() => { chosen.current = true; setDest(o.key); setConsent(false); }}>
                 <span className={`radio${dest === o.key ? ' on' : ''}`} />
                 <span className={`hemi2 ${o.glyph} ex-hemi`} />
                 <span className="ex-opt-main">
@@ -238,28 +260,28 @@ export function EditioExport() {
           {dest === 'you' ? (
             <>
               <div className="ex-foot-note mono">nothing leaves NOEMA as public · a private download link</div>
-              {job.s === 'ready' && job.kind === 'download'
-                ? <a className="btn good lg" href={job.url} download>Download collection ↓ <span className="ex-btn-sub">your ZIP is ready</span></a>
-                : job.s === 'busy' && job.kind === 'download'
+              {dj.s === 'ready'
+                ? <a className="btn good lg" href={dj.url} download>Download collection ↓ <span className="ex-btn-sub">your ZIP is ready</span></a>
+                : dj.s === 'busy'
                 ? <button className="btn good lg" disabled>Preparing… <span className="ex-btn-sub">bundling {c.completed.toLocaleString()} pieces</span></button>
                 : <button className="btn good lg" disabled={blocked.you !== ''} onClick={() => run('download')}>Prepare download ↓ <span className="ex-btn-sub">{blocked.you || 'bundle every approved piece + metadata'}</span></button>}
             </>
           ) : dest === 'hosting' ? (
             <>
-              {job.s === 'ready' && job.kind === 'hosting' ? (
+              {hj.s === 'ready' ? (
                 <div className="ex-hosted">
                   <div className="ex-foot-note mono">✓ hosted — set your contract’s <b>baseURI</b> to:</div>
-                  <code className="ex-baseuri">{job.url}/</code>
-                  <div className="ex-foot-note mono" style={{ marginTop: 6 }}>tokenURI resolves at <code>{job.url}/&lt;tokenId&gt;.json</code> · <span className="lnk">migrate to Arweave →</span> (coming soon) before you rely on it</div>
+                  <code className="ex-baseuri">{hj.url}/</code>
+                  <div className="ex-foot-note mono" style={{ marginTop: 6 }}>tokenURI resolves at <code>{hj.url}/&lt;tokenId&gt;.json</code> · <span className="lnk">migrate to Arweave →</span> (coming soon) before you rely on it</div>
                   <button className="btn ghost" style={{ marginTop: 8 }}
-                    onClick={() => { void api.retract(job.editionId).then(() => setJob({ s: 'idle' })).catch((e) => setJob({ s: 'err', msg: msg(e) })); }}>
+                    onClick={() => { void api.retract(hj.editionId).then(() => setJobs((all) => putJob(all, 'hosting', { s: 'idle' }))).catch((e) => setJobs((all) => putJob(all, 'hosting', { s: 'err', msg: msg(e) }))); }}>
                     Retract hosting <span className="ex-btn-sub">unpublish — the URIs stop resolving</span>
                   </button>
                 </div>
-              ) : job.s === 'held' ? (
-                <div className="warn">This collection isn’t hosted yet — {job.msg} Nothing more to do here; <Link to="/feed">track it in the feed</Link>, and your export-to-you download is unaffected.</div>
-              ) : job.s === 'rejected' ? (
-                <div className="warn">This collection wasn’t published to hosting — {job.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
+              ) : hj.s === 'held' ? (
+                <div className="warn">This collection isn’t hosted yet — {hj.msg} Nothing more to do here; <Link to="/feed">track it in the feed</Link>, and your export-to-you download is unaffected.</div>
+              ) : hj.s === 'rejected' ? (
+                <div className="warn">This collection wasn’t published to hosting — {hj.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
               ) : (
                 <>
                   <label className="ex-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand this is a public, temporary bridge — I’ll migrate to permanent storage</label>
@@ -275,7 +297,7 @@ export function EditioExport() {
               <button className="btn accent lg" disabled>Mint to NOESIS → <span className="ex-btn-sub">coming soon</span></button>
             </>
           )}
-          {job.s === 'err' && <div className="warn" style={{ marginTop: 8 }}>{job.msg}</div>}
+          {shown?.s === 'err' && <div className="warn" style={{ marginTop: 8 }}>{shown.msg}</div>}
         </div>
       </div></div>
     </AppShell>
