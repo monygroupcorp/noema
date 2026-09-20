@@ -100,6 +100,13 @@ export function createRepoProvingKeySource(repoZkeyPath: string): ProvingKeySour
 }
 
 /**
+ * How long a condition must stay clear before its return is news rather than a flap. The
+ * loop this exists to silence re-derives the source about once a minute, so anything that
+ * comes back inside a minute of clearing never actually went away.
+ */
+const SETTLE_MS = 60_000
+
+/**
  * A standing fault does not become news by repeating.
  *
  * The conditions below hold until someone changes the deployment, and the source is
@@ -111,27 +118,41 @@ export function createRepoProvingKeySource(repoZkeyPath: string): ProvingKeySour
  * So a condition is an error the first time it is seen, and while it still holds its
  * repeats go to `debug` — off in production, back with `DEBUG=arcanum:*`. The condition
  * is keyed, so a fault that changes (a new final hash, a different failure) is news
- * again, and so is the same one recurring after it had cleared.
+ * again, and so is the same one recurring after it had genuinely cleared.
  *
  * Every standing condition is remembered, not just the most recent one: more than one can
  * hold at a time, and a record that flaps between two of them is not two new faults per
  * request. The set holds one short string per condition the deployment is actually in —
  * the status fault, and three per final key a ceremony has published.
+ *
+ * A clear only counts if the condition stays clear. An intermittent dependency — a
+ * database that answers one request and refuses the next — otherwise clears and re-arms
+ * the same fault on alternating requests, and reporting each re-arm is the same flood one
+ * condition over: half of every request pair, for as long as the flapping lasts. So a
+ * fault returning within `SETTLE_MS` of its clear never settled, and its return is a
+ * repeat rather than news. Only an absence that outlasts that window makes the condition
+ * news again.
  */
-function faultReporter() {
+function faultReporter(now: () => number = Date.now) {
   const standing = new Set<string>()
+  /** When each condition last stopped holding — absent until one has actually cleared. */
+  const clearedAt = new Map<string, number>()
   return {
     report(key: string, msg: string, fields: Record<string, unknown>): void {
-      if (standing.has(key)) {
+      const cleared = clearedAt.get(key)
+      const flapped = cleared !== undefined && now() - cleared < SETTLE_MS
+      if (standing.has(key) || flapped) {
+        standing.add(key)
         log.debug(msg, { ...fields, standing: true })
         return
       }
       standing.add(key)
+      clearedAt.delete(key)
       log.error(msg, fields)
     },
-    /** This condition no longer holds. If it comes back, it is reported again. */
+    /** This condition no longer holds. If it stays clear, its return is reported again. */
     clear(key: string): void {
-      standing.delete(key)
+      if (standing.delete(key)) clearedAt.set(key, now())
     },
   }
 }
@@ -146,6 +167,8 @@ export interface ProvingKeySourceOpts {
   custody: ZkeyCustody
   /** The proving key committed to the repo, served until the ceremony concludes. */
   repoZkeyPath: string
+  /** Clock behind the settle window that tells a returning fault from a flapping one. */
+  now?: () => number
 }
 
 /**
@@ -156,7 +179,7 @@ export interface ProvingKeySourceOpts {
 export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySource {
   let ceremonyKey: ServedProvingKey | null = null
   const fromRepo = createRepoProvingKeySource(opts.repoZkeyPath)
-  const faults = faultReporter()
+  const faults = faultReporter(opts.now)
 
   /**
    * The committed key, but only if it is the one the transcript names. Serving it by path

@@ -238,7 +238,46 @@ test('a flapping ceremony record does not re-arm the standing key fault', async 
 
   const absent = errors.filter((e) => /neither custody nor the image/.test(String(e.msg)))
   assert.equal(absent.length, 1, 'the standing fault is one line however often it is re-derived')
+
+  // And the flapping record itself is one line, not one per outage. Each refusal clears
+  // and re-arms within milliseconds of the last, so the condition never settled — nine of
+  // these ten outages are the same fault still going, and only the first is news.
+  const unreadable = errors.filter((e) => /status unreadable/.test(String(e.msg)))
+  assert.equal(unreadable.length, 1, 'a flapping dependency is one fault, not one per flap')
 })
+
+test('a fault that settles before returning is news again — the window forgives, it does not gag',
+  async () => {
+    const { file } = repoKeyFile()
+    // A clock the test advances by hand, so the settle window is exercised rather than raced.
+    let clock = 1_000_000
+    let down = true
+    const healthy = new MemoryCeremoniaStore()
+    await healthy.open('00'.repeat(32), null)
+    const store = {
+      async status() {
+        if (down) throw new Error('mongo is down')
+        return healthy.status()
+      },
+    } as unknown as CeremoniaStore
+    const source = createProvingKeySource({
+      store, custody: new MemoryCustody(), repoZkeyPath: file, now: () => clock,
+    })
+
+    // Down: one error.
+    const first = await errorsWhile(async () => { await source(); await source() })
+    assert.equal(first.length, 1)
+
+    // Recovered, and it STAYS recovered for well past the settle window.
+    down = false
+    await source()
+    clock += 5 * 60_000
+
+    // The same outage returns after a real recovery. That is a new incident and is said.
+    down = true
+    const second = await errorsWhile(async () => { await source() })
+    assert.equal(second.length, 1, 'a fault that genuinely cleared is reported when it returns')
+  })
 
 test('an unreadable custody with the ceremony key in the image says so once, not per request', async () => {
   const { file, bytes } = repoKeyFile()
