@@ -1328,6 +1328,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cr-extend-n{width:74px;box-sizing:border-box;font-size:13px;padding:8px 10px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
 /* The mechanism, at the step where it runs. Above the rarity table, which is the evidence
    of it having run. */
+.cr-arrivals{border-top:1px solid var(--hair-soft);padding-top:16px;margin-bottom:20px}
+.cr-arr-h{font-size:var(--fs-s);font-weight:600;color:var(--text);margin:0}
+.cr-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
+@media(max-width:900px){.cr-strip{grid-template-columns:repeat(6,1fr)}}
+@media(max-width:560px){.cr-strip{grid-template-columns:repeat(4,1fr)}}
+.cr-arr{position:relative;aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid var(--hair);background:var(--bg)}
+.cr-arr.rejected{opacity:.42}
+.cr-arr-img{display:block;width:100%;height:100%;object-fit:cover}
 .cr-splice{border-left:2px solid color-mix(in srgb,var(--accent) 40%,var(--hair));padding:2px 0 2px 12px;margin:0 0 20px;font-size:12.5px;color:var(--muted);line-height:1.55;max-width:70ch}
 .cr-dist{border-top:1px solid var(--hair-soft);padding-top:16px}
 .cr-dist-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px} .cr-ok{font-size:11.5px;color:var(--accent-soft)}
