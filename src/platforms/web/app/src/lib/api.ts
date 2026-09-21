@@ -2,7 +2,7 @@
 // Phase 0: structure + a few live calls; screens still mostly use local mock data
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
-import type { Editio, EditionModerationDetail, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
+import type { ArtifactRef, Editio, EditionModerationDetail, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
 
 // Querela — an in-app report (bug/feature/feedback), noema-100's backend contract
 // (src/types/Querela.ts). Mirrored here (not imported) — the web app doesn't import
@@ -865,6 +865,13 @@ export const api = {
   // approve/reject/confirm-csam are PLATFORM-ADMIN ONLY server-side (403 otherwise).
   listReviewQueue: () => fetch('/v1/editiones/review', { headers: readHeaders() })
     .then(j<{ editions: Editio[] }>),
+  // GET /v1/editiones?artifact=<kind>:<id> — the caller's OWN publications of one
+  // artifact, newest first. The review queue above holds only what is still awaiting a
+  // reviewer, so a refusal and an already-live publication were both unreadable once the
+  // tab that filed them closed; a publish screen that reopens reads this instead.
+  listMyEditions: (artifact: ArtifactRef) =>
+    fetch(`/v1/editiones?artifact=${encodeURIComponent(`${artifact.kind}:${artifact.id}`)}`, { headers: readHeaders() })
+      .then(j<{ editions: Editio[] }>),
   // GET /v1/editiones/:id/preview — the media behind a held publication, for ANY artifact
   // kind (not just an actum generation run) — resolves the same view the moderation gate
   // used to make its hold decision. PLATFORM-ADMIN ONLY server-side (same gate as
