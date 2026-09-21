@@ -1931,9 +1931,27 @@ export class CrystalApi {
     await this.deps.collectioCursor?.approveActum(id, actumId)
   }
 
-  /** Review: reject a pending piece and reroll it with a fresh seed. Owner-scoped. */
+  /**
+   * Review: reject a pending piece and reroll it with a fresh seed. Owner-scoped + funder-only.
+   *
+   * A rejection is not a verdict that costs nothing. `CollectioCursor.rejectAndRevive` bumps
+   * `reiectae`, and the dispatch budget is `numerus + reiectae` — so every rejection raises the
+   * number of pieces the collection will generate by one, funded by the collection's `by`. That
+   * is the same new outflow `extendCollection` creates, reached by a different verb, and the
+   * ceiling is the number of times a reviewer chooses to press the button.
+   *
+   * Ownership is a team overlay, so without this gate any member of the collection's Sodalitas
+   * could spend the creator's balance a piece at a time. Approval is left to the whole team on
+   * purpose: accepting a piece settles work already paid for and dispatches nothing.
+   */
   async rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void> {
-    await this._ownedCollection(auctor, id)
+    // Dispute freeze (noema-082, freeze-boundary v2): a rejection dispatches a replacement piece —
+    // user-initiated outflow, gated while the anima is frozen like every other chokepoint.
+    await this._assertNotDisputeFrozen(auctor)
+    const c = await this._ownedCollection(auctor, id)
+    if (!this._isFunder(auctor, c)) {
+      throw Errors.authForbidden('only the collection funder can reject a piece (a rejection rerolls it at the funder’s expense)')
+    }
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
   }
 
