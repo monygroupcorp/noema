@@ -23,6 +23,7 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 class MemoryCustody implements ZkeyCustody {
   private m = new Map<string, Buffer>()
   async get(h: string) { return this.m.get(h) ?? null }
+  async has(h: string) { return this.m.has(h) }
   async put(h: string, b: Buffer) { this.m.set(h, b) }
 }
 
@@ -134,6 +135,17 @@ test('a missing committed key is reported without a hash — nothing to serve, n
 // real and worth one error; it is not worth one per request.
 // ---------------------------------------------------------------------------
 
+/** Every line this source emitted while `fn` ran. The logger fans out to `bus`. */
+async function linesWhile(fn: () => Promise<void>): Promise<LogEntry[]> {
+  const seen: LogEntry[] = []
+  const onLog = (e: LogEntry) => {
+    if (e.component === 'arcanum:provingkey' && e.level !== 'debug') seen.push(e)
+  }
+  bus.on('log', onLog)
+  try { await fn() } finally { bus.off('log', onLog) }
+  return seen
+}
+
 /** Errors this source emitted while `fn` ran. The logger fans out to `bus`. */
 async function errorsWhile(fn: () => Promise<void>): Promise<LogEntry[]> {
   const seen: LogEntry[] = []
@@ -157,7 +169,7 @@ test('a key absent from custody is an error once, not once per request', async (
   })
 
   assert.equal(errors.length, 1)
-  assert.match(String(errors[0].msg), /absent from custody/)
+  assert.match(String(errors[0].msg), /neither custody nor the image/)
   assert.equal(errors[0].finalHash, finalHash)
 })
 
@@ -224,6 +236,31 @@ test('a flapping ceremony record does not re-arm the standing key fault', async 
     for (let i = 0; i < 20; i++) await source()
   })
 
-  const absent = errors.filter((e) => /absent from custody/.test(String(e.msg)))
+  const absent = errors.filter((e) => /neither custody nor the image/.test(String(e.msg)))
   assert.equal(absent.length, 1, 'the standing fault is one line however often it is re-derived')
+})
+
+test('an unreadable custody with the ceremony key in the image says so once, not per request', async () => {
+  const { file, bytes } = repoKeyFile()
+  const finalHash = sha(bytes)   // the image IS carrying the key the transcript names
+  const custody = {
+    async get() { throw new Error('custody volume is not mounted') },
+    async put() { throw new Error('custody volume is not mounted') },
+  } as unknown as ZkeyCustody
+  const source = createProvingKeySource({
+    store: await finalized(finalHash), custody, repoZkeyPath: file,
+  })
+
+  const lines = await linesWhile(async () => {
+    for (let i = 0; i < 20; i++) {
+      const key = await source()
+      assert.equal(key.origin, 'ceremony')
+      assert.equal(key.path, file)
+    }
+  })
+
+  // The unreadable custody is one error, and the answer it fell back to is one info —
+  // identified on the first request and kept, not re-derived and re-announced on all 20.
+  assert.equal(lines.filter((e) => e.level === 'error').length, 1)
+  assert.equal(lines.filter((e) => e.level === 'info').length, 1)
 })

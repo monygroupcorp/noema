@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.29.0](https://github.com/monygroupcorp/noema/compare/v5.28.0...v5.29.0) (2026-09-09)
+
+
+### Features
+
+* **arcanum:** serve the proving key the ceremony transcript names, and let anyone check it ([#593](https://github.com/monygroupcorp/noema/issues/593)) ([3731475](https://github.com/monygroupcorp/noema/commit/37314754f437a344bb4e2e1a481c2b0c948ed905))
+* **concierge:** let the concierge propose a write you confirm and run ([#594](https://github.com/monygroupcorp/noema/issues/594)) ([aee14ed](https://github.com/monygroupcorp/noema/commit/aee14ed2dd26b47374631a88e65ea9ab4716a626))
+* **runs:** a waiting run says where it stands, wherever it is watched ([#586](https://github.com/monygroupcorp/noema/issues/586)) ([298ba15](https://github.com/monygroupcorp/noema/commit/298ba158065648357ab4927491e0542dce14c06e))
+* **vestigia:** the un-embedded trail can be counted, quoted and swept — on a CPU pod ([#590](https://github.com/monygroupcorp/noema/issues/590)) ([00ee474](https://github.com/monygroupcorp/noema/commit/00ee4743ca71e7c5443e5f010736c98eba469905))
+* **web:** every sign-in and every purchase returns to the page that started it ([#596](https://github.com/monygroupcorp/noema/issues/596)) ([7696c22](https://github.com/monygroupcorp/noema/commit/7696c22e1f3eb534fb86a3f51b9e44bbb8a69bd2))
+
+
+### Bug Fixes
+
+* **api:** declare the x-commitment credential in the openapi contract ([#597](https://github.com/monygroupcorp/noema/issues/597)) ([8d87c7f](https://github.com/monygroupcorp/noema/commit/8d87c7fe0ced86bbe74260fe03ee3501fdf76e8b))
+* **blog:** the guides describe the credentials, keys, queue and earnings that shipped ([#592](https://github.com/monygroupcorp/noema/issues/592)) ([aee482a](https://github.com/monygroupcorp/noema/commit/aee482af47d9df4d37cea372c07bdd3a40b21dd5))
+* **collections:** a collection run resolves to a page or an error, never a permanent "Loading…" ([#587](https://github.com/monygroupcorp/noema/issues/587)) ([55ed8c7](https://github.com/monygroupcorp/noema/commit/55ed8c773fe0d00d2c74f776457341728df241b3))
+* **crystal:** restore the split_files path on the weights that live under it ([#583](https://github.com/monygroupcorp/noema/issues/583)) ([cb8b61b](https://github.com/monygroupcorp/noema/commit/cb8b61be123960d3267a1bf512f6259baa830039))
+* **moderation:** a held or refused publication tells the publisher why, and the reviewer can see the verdict ([#589](https://github.com/monygroupcorp/noema/issues/589)) ([0f95e51](https://github.com/monygroupcorp/noema/commit/0f95e51e67220faf050ed6fe1b22148a832d257e))
+* **site:** make the published pages true to the running system, and guard the ways they drift ([#595](https://github.com/monygroupcorp/noema/issues/595)) ([2ef246c](https://github.com/monygroupcorp/noema/commit/2ef246c79c6be49e1a0c087ff9fef62afc59f919))
+
 ## [5.28.0](https://github.com/monygroupcorp/noema/compare/v5.27.0...v5.28.0) (2026-09-06)
 
 

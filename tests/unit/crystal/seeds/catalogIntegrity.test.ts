@@ -165,3 +165,53 @@ test("a manifest's download url is one the registry actually knows for that weig
     }
   }
 })
+
+test('every registry source carries an address that can be asked a question', () => {
+  // `guard:weight-addresses` is what actually asks whether an address resolves — that needs the
+  // network and cannot live here. This is the part that CAN: an address the guard could not even
+  // probe is dead in a way no probe will report, because `fetch` throws on it and the guard is
+  // careful never to convict on a throw. A relative path, an `hf://` scheme, an empty string:
+  // each reads as "could not tell" forever rather than as the broken record it is.
+  for (const i of CANONICAL_INTELLAE) {
+    assert.ok((i.sources ?? []).length > 0,
+      `intella '${i.id}' carries no source at all — nothing says where its weights come from`)
+    for (const [rank, s] of (i.sources ?? []).entries()) {
+      let url: URL
+      try {
+        url = new URL(s.uri)
+      } catch {
+        assert.fail(`intella '${i.id}' sources[${rank}] is not an absolute URL: ${JSON.stringify(s.uri)}`)
+      }
+      assert.ok(url.protocol === 'https:' || url.protocol === 'http:',
+        `intella '${i.id}' sources[${rank}] is ${url.protocol} — the pod downloader speaks http(s) and nothing else`)
+    }
+  }
+})
+
+test('a huggingface source and its own meta name the same file', () => {
+  // `meta` is the re-fetch record — repo, branch, filename — and the uri is what the pod wgets.
+  // They are written by hand, two lines apart, and correcting one and not the other leaves a
+  // record that documents an address nobody will ever download from. That is how the address in
+  // the uri and the address in the meta come apart, and the half that lies is whichever one the
+  // next person reads. Derive the uri from the meta and require the two to agree.
+  for (const i of CANONICAL_INTELLAE) {
+    for (const [rank, s] of (i.sources ?? []).entries()) {
+      if (s.provenance !== 'huggingface') continue
+      const meta = s.meta as { repo?: string; branch?: string; filename?: string } | undefined
+      assert.ok(meta?.repo, `intella '${i.id}' sources[${rank}] is huggingface but its meta names no repo`)
+      // Two honest shapes. A single-file weight resolves a path inside the repo at a branch; a
+      // whole-repo snapshot (`dest` is a directory, e.g. a transformers checkout) names the repo
+      // and nothing further, and its uri is the repo's own page. Both are checked against meta;
+      // neither is allowed to be a uri and a meta that describe different things.
+      if (meta.filename) {
+        assert.ok(meta.branch, `intella '${i.id}' sources[${rank}] names a file but no branch to resolve it at`)
+        const derived = `https://huggingface.co/${meta.repo}/resolve/${meta.branch}/${meta.filename}`
+        assert.equal(s.uri, derived,
+          `intella '${i.id}' sources[${rank}] downloads from ${s.uri} but its meta describes ${derived} — one of the two has been half-corrected`)
+      } else {
+        assert.equal(s.uri, `https://huggingface.co/${meta.repo}`,
+          `intella '${i.id}' sources[${rank}] names no filename, so it is a whole-repo snapshot and its uri must be that repo — got ${s.uri}`)
+      }
+    }
+  }
+})

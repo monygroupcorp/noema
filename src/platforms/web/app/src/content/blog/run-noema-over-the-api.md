@@ -96,13 +96,18 @@ On `complete`, read the outputs. On `failed`, read the failure's code and messag
 
 A `pending` run that is not moving may be in a line rather than stalled. A run that found no warm
 machine waits for one instead of being refused, and while it waits it carries
-`queue: { place, depth }` — its 1-based position and how many runs are ahead of it plus itself. The
-line is per machine image, not one global queue, and the field is gone the moment the run is called
-forward. Report it rather than leaving someone watching a `pending` that sits still.
+`queue: { place, depth }`. `place` is its 1-based position, 1 being next. `depth` is the whole
+line, this run included — the runs behind it count too, so read the pair as "3rd of 10" and never
+as "3 of 3". The line is per machine image, not one global queue, and the field is gone the moment
+the run is called forward. Report it rather than leaving someone watching a `pending` that sits
+still.
 
-Read that field off the invoke response or off a poll. The stream does not carry it: its opening
-snapshot is a fixed set of fields that does not include `queue`, and no later event adds it. An
-integration that watches by stream alone still has to poll once to answer "how long".
+Every way of watching carries it. It is on the invoke response and on a poll; the stream's opening
+snapshot carries it too, so a client that attaches to a run minutes after casting it still reads a
+waiting run as waiting rather than as merely `pending`. And as the line moves, every run still in
+it gets a fresh `queued` progress event — `progress` counting `place` of `depth`, and a message
+that reads "3rd in line for a warm pod". Watching by stream alone answers "how long" and keeps
+answering it; there is nothing here you have to poll for.
 
 ## Two kinds of error, and why the difference matters
 

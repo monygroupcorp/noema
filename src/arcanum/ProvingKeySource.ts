@@ -21,6 +21,23 @@ const log = makeLogger('arcanum:provingkey')
 // serves nothing at all and says why. Before the ceremony concludes it serves the key
 // committed to the repo, which is what it has always been and what the page does not
 // claim otherwise about.
+//
+// The key the transcript names can reach this server two ways, and it is the HASH that
+// decides, never where the bytes came from:
+//
+//   ceremony custody  — the sequencer's own chain, filled by a contribution or by
+//                       CEREMONY_FINAL_ZKEY at boot. This is the only route when the
+//                       finalized key is not the one the image was built with.
+//   the repo key      — once the ceremony's output is committed, the image already
+//                       carries the very bytes the transcript names, and asking an
+//                       operator to also copy them into custody is a step that can be
+//                       skipped, whose failure is silent to everyone but whoever reads
+//                       the boot log. So it is checked here instead: if the committed
+//                       key hashes to finalHash it IS the ceremony's key and is served
+//                       as such, streamed from disk.
+//
+// Neither route can serve a key the transcript does not name: custody bytes are re-hashed
+// before use, and the repo key is served as the ceremony's only on an exact hash match.
 
 export type ProvingKeyOrigin =
   /** The finalized ceremony's key, out of ceremony custody. */
@@ -45,6 +62,12 @@ export interface ServedProvingKey {
   path?: string
   /** Why nothing is served (origin 'none' only). */
   reason?: string
+  /**
+   * sha256 of the key the image is carrying, when that is NOT the one the transcript
+   * names (origin 'none' only). The two hashes side by side are the whole diagnosis:
+   * this box has a proving key, and it is the wrong one.
+   */
+  imageKeyHash?: string
 }
 
 export type ProvingKeySource = () => Promise<ServedProvingKey>
@@ -135,12 +158,35 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
   const fromRepo = createRepoProvingKeySource(opts.repoZkeyPath)
   const faults = faultReporter()
 
+  /**
+   * The committed key, but only if it is the one the transcript names. Serving it by path
+   * keeps the 5MB out of memory and means custody never has to be writable for the common
+   * case where the ceremony's output is what the image ships.
+   */
+  async function repoKeyIfItIsTheCeremonys(finalHash: string): Promise<ServedProvingKey | null> {
+    const repo = await fromRepo()
+    if (repo.origin !== 'repo' || repo.hash !== finalHash) return null
+    log.info('the committed proving key IS the ceremony final key — serving it from the image',
+      { finalHash, path: repo.path })
+    // Kept, exactly as custody bytes are. The hash matched, so every later request is
+    // answered from here rather than re-reading custody, re-hashing the image, and
+    // saying all of it again on a line of its own.
+    ceremonyKey = { origin: 'ceremony', hash: finalHash, path: repo.path }
+    return ceremonyKey
+  }
+
   async function fromCeremony(finalHash: string): Promise<ServedProvingKey> {
     if (ceremonyKey?.hash === finalHash) return ceremonyKey
-    const missing: ServedProvingKey = {
-      origin: 'none',
-      hash: finalHash,
-      reason: 'the ceremony is finalized but its proving key is not published on this server',
+    const missing = async (): Promise<ServedProvingKey> => {
+      const repo = await fromRepo()
+      return {
+        origin: 'none',
+        hash: finalHash,
+        reason: 'the ceremony is finalized but its proving key is not published on this server',
+        // Naming BOTH hashes is the whole diagnosis: the image is carrying some key, and
+        // it is not the one the transcript names.
+        ...(repo.hash ? { imageKeyHash: repo.hash } : {}),
+      }
     }
     let bytes: Buffer | null = null
     try {
@@ -148,14 +194,22 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
     } catch (err) {
       faults.report(`custody-unreadable:${finalHash}`,
         'ceremony custody read failed', { finalHash, error: String(err) })
-      return missing
+      // Custody being unreadable does not make the image's key wrong — if it is the
+      // ceremony's, it is still the ceremony's.
+      return (await repoKeyIfItIsTheCeremonys(finalHash)) ?? (await missing())
     }
     if (!bytes) {
+      // Nothing in custody. The image itself may be carrying the ceremony's output, which
+      // is the normal case once the finalized key is committed.
+      const fromImage = await repoKeyIfItIsTheCeremonys(finalHash)
+      if (fromImage) return fromImage
+      const repo = await fromRepo()
       faults.report(`custody-absent:${finalHash}`,
-        'ceremony finalized but the final proving key is absent from custody — ' +
-        'serving no key. Set CEREMONY_FINAL_ZKEY to publish it, or ARCANUM_ZKEY_URL to host it.',
-        { finalHash })
-      return missing
+        'ceremony finalized but the final proving key is in neither custody nor the ' +
+        'image — serving no key. Commit the key the transcript names, or set ' +
+        'CEREMONY_FINAL_ZKEY to publish it, or ARCANUM_ZKEY_URL to host it.',
+        { finalHash, imageKeyHash: repo.hash })
+      return missing()
     }
     // Custody is content-addressed, so this can only fail on a corrupt or hand-placed
     // file — exactly the case where serving the bytes anyway would be a lie about which
@@ -165,7 +219,8 @@ export function createProvingKeySource(opts: ProvingKeySourceOpts): ProvingKeySo
       faults.report(`custody-mismatch:${finalHash}`,
         'custody bytes do not hash to the published final key — serving no key',
         { finalHash, got })
-      return missing
+      // Corrupt custody is not a reason to withhold a correct key the image is carrying.
+      return (await repoKeyIfItIsTheCeremonys(finalHash)) ?? (await missing())
     }
     ceremonyKey = { origin: 'ceremony', hash: finalHash, bytes }
     faults.clear(`custody-unreadable:${finalHash}`)

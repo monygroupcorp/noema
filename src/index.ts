@@ -261,9 +261,13 @@ const TEE_AZURE_INGRESS_TEMPLATE = process.env.TEE_AZURE_INGRESS_TEMPLATE  // e.
 
 const _vKeyPath = path.join(__dirname, 'arcanum', 'circuit', 'artifacts', 'verification_key.json')
 let _arcanumVerifyFn: ReturnType<typeof makeSnarkjsVerifier> | undefined
+// Kept alongside the verify function so /config can check it against the key actually
+// being served. The two halves of a setup reach this process by different roads.
+let _arcanumVerificationKey: unknown
 if (existsSync(_vKeyPath)) {
   try {
-    _arcanumVerifyFn = makeSnarkjsVerifier(JSON.parse(readFileSync(_vKeyPath, 'utf8')))
+    _arcanumVerificationKey = JSON.parse(readFileSync(_vKeyPath, 'utf8'))
+    _arcanumVerifyFn = makeSnarkjsVerifier(_arcanumVerificationKey as object)
   } catch (err) {
     // Malformed vkey — proceed without ZK verification rather than crashing at startup
     console.error('[arcanum] verification_key.json is invalid, ZK proofs disabled:', err)
@@ -1223,17 +1227,20 @@ async function main(): Promise<void> {
       })
     },
   })
-  // ANON_PURSE_ENABLED (noema-131) — default OFF. The arcanum ZK purse verifies against a
-  // committed SOLO DEV proving key: anonymity holds but SOUNDNESS does not (the dev-key holder
-  // can forge spend proofs). Until the trusted-setup ceremony runs, gate the forgeable money path
-  // off: arcanum issue/mint refuse, and an ownerless bursa spend is refused at the shared
-  // chokepoints (owned/identified-funded purses stay live). Flip true post-ceremony (one-flag flip).
+  // ANON_PURSE_ENABLED (noema-131) — default OFF. It was off because the committed proving key
+  // was a SOLO DEV key: anonymity held but SOUNDNESS did not, since the dev-key holder could
+  // forge spend proofs. The tracked key is now the ceremony's own output, so that reason is
+  // spent — soundness rests on one of its contributors having destroyed their randomness. What
+  // the flag still gates is the decision to open the money path, which is made deliberately and
+  // not by this comment: while it is off, arcanum issue/mint refuse and an ownerless bursa spend
+  // is refused at the shared chokepoints (owned/identified-funded purses stay live).
   const anonPurseEnabled = process.env.ANON_PURSE_ENABLED === 'true'
   if (anonPurseEnabled) log.warn('ANON_PURSE_ENABLED=true — the anonymous ZK purse (arcanum) is LIVE on this instance')
   else log.info('ANON_PURSE_ENABLED off — anonymous ZK purse gated (arcanum issue/mint + ownerless bursa spend refused)')
   app.use('/arcanum', createArcanumRouter(ring.arcanumIssuer, ring.arcanumTree, {
     anonPurseEnabled,
     zkeyUrl: process.env.ARCANUM_ZKEY_URL,
+    verificationKey: _arcanumVerificationKey,
     // The key clients prove with follows the ceremony: once it is finalized, /circuit/zkey
     // serves the key its public transcript names, not whatever the image was built with.
     provingKey: createProvingKeySource({
