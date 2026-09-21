@@ -1253,6 +1253,7 @@ async function main(): Promise<void> {
     querelae: ring.querelae,
     identity: apiResolver,
     resolveRun: resolveRunForReport,
+    bursarium: ring.bursarium,
   }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather

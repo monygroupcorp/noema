@@ -2,9 +2,11 @@
 // bursaGate — the single place a presented bursa token is checked against its purse.
 // =============================================================================
 //
-// A `bursaToken` is a bearer credential: whoever holds the string is the caller. The
-// `/widget` embed hands one to a partner's visitor in a QUERY STRING (`?code=`), so a
-// code reaches browser history, shared links and access logs as a matter of course. The
+// A `bursaToken` is a bearer credential: whoever holds the string is the caller, and the
+// `/widget` embed hands one to a partner's visitor. It no longer rides the URL — the gate
+// passes it to the run panel inside the browser and it leaves only as `x-bursa-token`
+// (`widgetRouter.ts`) — but a bearer string is still copied, pasted and forwarded, and a
+// legacy `?code=` link minted before that change is still in somebody's history. The
 // owner's remedy for a leaked code is `POST /v1/purses/:token/revoke`.
 //
 // That remedy used to be a BALANCE fact rather than an ACCESS one: revoking drains the
