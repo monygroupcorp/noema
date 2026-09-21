@@ -9,6 +9,7 @@ import { createQuerelaRouter } from '../../../src/api/querela/querelaRouter.js'
 import type { Querela, QuerelaStore } from '../../../src/types/Querela.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
 import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
+import type { Bursa } from '../../../src/types/bursa.js'
 
 class MemoryQuerela implements QuerelaStore {
   records: Querela[] = []
@@ -49,10 +50,20 @@ const fakeIdentity = {
   },
 }
 
+/** The purse rows the terminal-purse rule is read against. An 'active' purse and one with no
+ *  status at all both spend as before; only an explicit terminal status refuses. */
+const PURSES: Record<string, Bursa> = {
+  'live-tok': { id: 'live-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'active' },
+  'legacy-tok': { id: 'legacy-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' } },
+  'revoked-tok': { id: 'revoked-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'revoked' },
+  'redeemed-tok': { id: 'redeemed-tok', credits: 0n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'redeemed', redeemedAt: new Date() },
+}
+const fakeBursarium = { async findByToken(token: string): Promise<Bursa | null> { return PURSES[token] ?? null } }
+
 function makeServer(querelae: QuerelaStore) {
   const app = express()
   app.use(express.json())
-  app.use('/v1/reports', createQuerelaRouter({ querelae, identity: fakeIdentity }))
+  app.use('/v1/reports', createQuerelaRouter({ querelae, identity: fakeIdentity, bursarium: fakeBursarium }))
   return new Promise<{ server: http.Server; url: string }>((resolve, reject) => {
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
@@ -160,5 +171,71 @@ test('POST /v1/reports rejects over the per-owner rate limit with 429', async ()
     }
     const over = await post(`${url}/v1/reports`, { authorization: 'Bearer anima-1' }, { kind: 'feedback', description: 'report 21' })
     assert.equal(over.status, 429)
+  } finally { await closeServer(server) }
+})
+
+// ── Revoked/redeemed purse (widget-security) ─────────────────────────────────
+// `/widget` hands a purse token to a partner's visitor, and the owner's remedy for a leaked
+// code is revocation. Reporting spends nothing, so what a revoked code buys here is not
+// credits: the token keys the report's owner and its rate-limit window, so an ungated
+// surface lets a code its owner killed go on writing rows under their name and go on eating
+// their budget. Revocation that held only where money moved would not be revocation.
+
+test('a REVOKED purse cannot file a report — 403 purse.revoked, nothing persisted', async () => {
+  const store = new MemoryQuerela()
+  const { server, url } = await makeServer(store)
+  try {
+    const res = await post(`${url}/v1/reports`, { 'x-bursa-token': 'revoked-tok' }, { kind: 'bug', description: 'broken' })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+    assert.equal(store.records.length, 0)
+  } finally { await closeServer(server) }
+})
+
+test('a REDEEMED purse cannot file a report — 403 purse.revoked', async () => {
+  const store = new MemoryQuerela()
+  const { server, url } = await makeServer(store)
+  try {
+    const res = await post(`${url}/v1/reports`, { 'x-bursa-token': 'redeemed-tok' }, { kind: 'bug', description: 'broken' })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'purse.revoked')
+    assert.equal(store.records.length, 0)
+  } finally { await closeServer(server) }
+})
+
+// The refusal is 403 with a reason and NOT the route's own 401 funnel: the holder of a
+// revoked code is entitled to know the code was revoked rather than to be sent looking for
+// a sign-in problem.
+test('a revoked purse is refused as a decided answer, not flattened into auth.invalid', async () => {
+  const { server, url } = await makeServer(new MemoryQuerela())
+  try {
+    const res = await post(`${url}/v1/reports`, { 'x-bursa-token': 'revoked-tok' }, { kind: 'bug', description: 'broken' })
+    assert.notEqual(res.status, 401)
+    assert.match(res.body.error.message, /revoked by its owner/)
+  } finally { await closeServer(server) }
+})
+
+test('a live purse still files, and so does one minted before the lifecycle existed', async () => {
+  const store = new MemoryQuerela()
+  const { server, url } = await makeServer(store)
+  try {
+    const live = await post(`${url}/v1/reports`, { 'x-bursa-token': 'live-tok' }, { kind: 'bug', description: 'crash on load' })
+    assert.equal(live.status, 200)
+    const legacy = await post(`${url}/v1/reports`, { 'x-bursa-token': 'legacy-tok' }, { kind: 'bug', description: 'crash on save' })
+    assert.equal(legacy.status, 200)
+    assert.equal(store.records.length, 2)
+  } finally { await closeServer(server) }
+})
+
+// An unknown token has no row to be terminal. This surface has no ANON_PURSE gate of its
+// own — an unfunded anonymous visitor is exactly who most needs to report a bug — so it
+// must not acquire one by way of the terminal-purse rule.
+test('an unknown purse token still files a report — no ANON_PURSE gate on this surface', async () => {
+  const store = new MemoryQuerela()
+  const { server, url } = await makeServer(store)
+  try {
+    const res = await post(`${url}/v1/reports`, { 'x-bursa-token': 'never-minted' }, { kind: 'bug', description: 'broken' })
+    assert.equal(res.status, 200)
+    assert.equal(store.records.length, 1)
   } finally { await closeServer(server) }
 })

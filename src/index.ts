@@ -1173,7 +1173,7 @@ async function main(): Promise<void> {
   // Querela reports (bug/feature/feedback) — anon-capable (animaId,
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
-  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver, bursarium: ring.bursarium }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
   // than shared via the CrystalApi facade.
