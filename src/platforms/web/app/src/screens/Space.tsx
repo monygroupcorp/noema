@@ -137,15 +137,45 @@ const base = (layer: Layer) => (layer === 'image' ? '/space-image' : '/space');
 // restored onto the layer it was carved in, never silently reprojected onto another.
 export type SelSphere = { x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' };
 export const selectionKey = (scope: string) => `noema-${scope}-space-selection`;
-export function loadStoredSelection(scope: string, layer: Layer): SelSphere[] {
+
+/** The stored entry as written — its spheres AND the layer they were carved in, or null when
+ *  there is nothing readable. Callers that need to know WHICH layer owns the stored set read
+ *  this; `loadStoredSelection` is the narrower question of what restores onto a given layer. */
+export function readStoredSelection(scope: string): { layer: Layer; spheres: SelSphere[] } | null {
   try {
     const raw = localStorage.getItem(selectionKey(scope));
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (v && v.layer === layer && Array.isArray(v.spheres)) return v.spheres;
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (v && (v.layer === 'text' || v.layer === 'image') && Array.isArray(v.spheres)) {
+      return { layer: v.layer, spheres: v.spheres };
     }
-  } catch { /* malformed entry restores to empty, never throws */ }
-  return [];
+  } catch { /* malformed entry reads as nothing, never throws */ }
+  return null;
+}
+
+export function loadStoredSelection(scope: string, layer: Layer): SelSphere[] {
+  const stored = readStoredSelection(scope);
+  return stored && stored.layer === layer ? stored.spheres : [];
+}
+
+/**
+ * Write-through for the selection: hold it, or drop it — but only the layer that OWNS the
+ * stored entry may drop it.
+ *
+ * Empty does not always mean emptied. Standing on a layer other than the one a set was carved
+ * in reads as empty too, and removing on that destroys a selection nobody touched: it is how
+ * arriving at this screen at all could lose one, on the way back from looking at a run.
+ */
+export function persistSelection(scope: string, layer: Layer, selection: SelSphere[]): void {
+  try {
+    if (selection.length > 0) {
+      localStorage.setItem(selectionKey(scope), JSON.stringify({ layer, spheres: selection }));
+      return;
+    }
+    const stored = readStoredSelection(scope);
+    if (stored && stored.layer !== layer) return;
+    localStorage.removeItem(selectionKey(scope));
+  } catch { /* storage unavailable — this is view-state only, safe to skip */ }
 }
 
 // The corpus explorer mounts on data presence, not a build flag (UX handoff 2, D7): it always
@@ -433,7 +463,11 @@ function CorpusSpace() {
   const { activeAnimaId } = useSession();
   const scope = activeAnimaId ?? 'anon';
   const [selScope, setSelScope] = useState(scope);
-  const [layer, setLayer] = useState<Layer>('text');
+  // Land on the layer a stored selection was carved in, not always on 'text'. A selection is
+  // only ever restored onto its own layer, so mounting on the default meant an image-layer set
+  // read as empty — and the write-through below then deleted it. Arriving at this screen at all
+  // destroyed it, which is how a selection was lost on the way to look at a failed run.
+  const [layer, setLayer] = useState<Layer>(() => readStoredSelection(scope)?.layer ?? 'text');
   const [imageLayerOk, setImageLayerOk] = useState(true);
   // Data source switch: null while the
   // caller's own history is being checked; true = real vestigia (their own space), false
@@ -478,10 +512,7 @@ function CorpusSpace() {
   // different projection. Selection emptied by any existing gesture (remove-one, clear-all)
   // clears the stored entry too — one effect covers every path, no per-gesture bookkeeping.
   useEffect(() => {
-    try {
-      if (selection.length === 0) localStorage.removeItem(selectionKey(scope));
-      else localStorage.setItem(selectionKey(scope), JSON.stringify({ layer, spheres: selection }));
-    } catch { /* storage unavailable — this is view-state only, safe to skip */ }
+    persistSelection(scope, layer, selection);
   }, [selection, layer, scope]);
 
   const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };

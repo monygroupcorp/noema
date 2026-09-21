@@ -326,6 +326,15 @@ export function createArcanumRouter(
   //                        ceremony's published key), 'repo' (the committed key, which is
   //                        what a dev setup produces), 'external' (an ARCANUM_ZKEY_URL
   //                        host), or 'none'
+  //   imageKeyHash
+  //              string|null — sha256 of the proving key THIS BUILD carries, reported only
+  //                        when that is not the key being served. Two very different boxes
+  //                        report `zkeySource: 'none'` under a finished transcript — one
+  //                        whose custody a deploy emptied, and one running a build older
+  //                        than the key the ceremony produced — and they need opposite
+  //                        remedies. This is the byte that tells them apart, and without it
+  //                        the only place the answer exists is the boot log, which is the
+  //                        one surface nobody outside the box can read.
   //   depth      number  — Merkle tree depth (32)
   //   verifierPaired
   //              bool|null — whether the verification key this server holds is the served
@@ -358,6 +367,7 @@ export function createArcanumRouter(
       zkeyUrl,
       zkeyHash: config.zkeyUrl ? null : key.hash,
       zkeySource: config.zkeyUrl ? 'external' : key.origin,
+      imageKeyHash: config.zkeyUrl ? null : (key.imageKeyHash ?? null),
       depth: 32,
       verifierPaired: pairing === 'unknown' ? null : pairing === 'paired',
       ready: WASM_READY && zkeyUrl !== null && pairing !== 'mismatch',
@@ -406,7 +416,15 @@ export function createArcanumRouter(
       // A hash means we know which key belongs here and do not have it — a gap on this
       // server. No hash means there is no such artifact at all.
       const status = key.hash ? 503 : 404
-      return res.status(status).json({ error: key.reason ?? 'no proving key available' })
+      // The refusal names both keys when it has them. This route is the one that fails,
+      // so it is where somebody looks first, and "which key does this box hold" is the
+      // difference between a custody that a deploy emptied and a build that predates the
+      // ceremony's output — two failures with opposite remedies and one error message.
+      return res.status(status).json({
+        error: key.reason ?? 'no proving key available',
+        ...(key.hash ? { expectedHash: key.hash } : {}),
+        ...(key.imageKeyHash ? { imageKeyHash: key.imageKeyHash } : {}),
+      })
     }
     res.setHeader('Content-Type', 'application/octet-stream')
     if (key.hash) {

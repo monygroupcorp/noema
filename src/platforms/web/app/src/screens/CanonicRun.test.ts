@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inFlightLine, pendingReviewLine, runLiveness, STALL_MESSAGE } from './CanonicRun';
+import { inFlightLine, pendingReviewLine, recentPieces, runLiveness, STALL_MESSAGE } from './CanonicRun';
 
 // No jsdom/@testing-library/react in this app's toolchain — so this exercises the run
 // screen's pure liveness classification rather than a full DOM render (see BuyCreditsModal.test.ts).
@@ -65,5 +65,34 @@ describe('display text', () => {
   it('singularizes the pending-review line at n=1', () => {
     expect(pendingReviewLine(1)).toBe('1 piece awaiting review');
     expect(pendingReviewLine(5)).toBe('5 pieces awaiting review');
+  });
+});
+
+describe('recentPieces — what the arrivals strip shows (collection-run-shows-nothing)', () => {
+  // listCollectionPieces walks the collection's acta in dispatch order, so it answers
+  // oldest-first. The strip is a window on what just landed, so it reads from the tail.
+  it('puts the newest arrival first', () => {
+    expect(recentPieces(['first', 'second', 'third'], 10)).toEqual(['third', 'second', 'first']);
+  });
+
+  it('keeps the newest N and drops the older ones, not the other way round', () => {
+    const made = Array.from({ length: 100 }, (_, i) => i);
+    const shown = recentPieces(made, 24);
+    expect(shown).toHaveLength(24);
+    expect(shown[0]).toBe(99);
+    expect(shown[23]).toBe(76);
+  });
+
+  it('is empty for a run that has made nothing, rather than throwing', () => {
+    expect(recentPieces([], 24)).toEqual([]);
+  });
+
+  it('shows everything when fewer pieces exist than the window holds', () => {
+    expect(recentPieces([1, 2], 24)).toEqual([2, 1]);
+  });
+
+  it('shows nothing for a non-positive window rather than slicing from the wrong end', () => {
+    expect(recentPieces([1, 2, 3], 0)).toEqual([]);
+    expect(recentPieces([1, 2, 3], -5)).toEqual([]);
   });
 });

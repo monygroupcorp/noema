@@ -254,6 +254,42 @@ the final key is not published, `/arcanum/circuit/zkey` answers 503 and `/arcanu
 reports `ready: false` — the committed key is *not* served in its place, because it is not
 the ceremony's output and serving it under a finished transcript would say that it was.
 
+### When it serves nothing, which nothing is it?
+
+`zkeySource: "none"` under a finished transcript is two different boxes wearing one answer,
+and they want opposite work:
+
+- **The custody was emptied**, by a deploy or a fresh box. Nothing else is wrong; publish the
+  key here (`CEREMONY_FINAL_ZKEY`, or the mount below) and it is over.
+- **The build predates the key.** This box is not missing a proving key at all — it is
+  carrying one, and the ceremony finished after the image was built. No act on the box helps;
+  what is deployed on it has to change.
+
+So the refusal names both keys. `/arcanum/config` reports `imageKeyHash` — the sha256 of the
+proving key *this build carries* — whenever that is not the key being served, and the 503 from
+`/arcanum/circuit/zkey` carries `expectedHash` and `imageKeyHash` beside its reason:
+
+```bash
+curl -s https://noema.art/arcanum/config | jq '{zkeySource, zkeyHash, imageKeyHash}'
+curl -s https://noema.art/api/health | jq -r .v     # which build that is
+```
+
+Two different hashes side by side is the second case; `imageKeyHash: null` is the first. Both
+readings are available to anyone, from anywhere — which is the point. This diagnosis used to
+exist only in the boot log, and a finished ceremony went unserved for ten days behind a page
+that could say "not published here yet" and nothing more, because the one fact that would have
+named the remedy was on the one surface nobody off the box can read.
+
+The `/ceremony` page reads the same two fields and says which case it is in words.
+
+The second case is now refused before it can ship. `tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts`
+hashes the tracked `arcanum_final.zkey` and compares it against the `finalHash` the ceremony
+published, transcribed into the test from `GET /v1/ceremony`. Every other test here derives its
+expected hash from the tracked file itself, so a key swapped for any other bytes proves itself and
+the suite stays green while the site serves nothing; this one is the only comparison against a
+number the tree does not get to choose. When a ceremony is re-run, that constant is updated from
+its new transcript in the same commit that lands the new key.
+
 `verification_key.json` must come from the same finalize run as the key being served: it is
 exported from that exact zkey, and a proof made against a proving key whose verification key
 the server does not hold will not verify.
@@ -292,6 +328,13 @@ with `CEREMONY_DIR`) at `/var/lib/noema/ceremony` and set `CEREMONY_ZKEY_DIR` to
 sequencer run any other way should have that directory pointed somewhere that outlives the
 process.
 
+That defence is two hand-written lines per file, and dropping either is invisible until a
+contributor asks for a head that is gone — so `tests/unit/architecture/ceremonyCustodyIsMounted.test.ts`
+holds them together. Whatever starts the production app has to set `CEREMONY_ZKEY_DIR` *and*
+bind-mount a host directory at exactly that path, and the two files have to name the same
+path as each other: a variable pointing at an unmounted directory is the in-image default
+wearing a different name, and a mount under a path nothing reads is custody nobody keeps.
+
 The status the page reads says which of the two is true. `acceptingContributions` is false
 whenever the sequencer cannot hand out the head, whatever the phase says, and the page reads
 "Ceremony open · contributions paused" rather than inviting a contribution into a 503.
@@ -308,6 +351,28 @@ CEREMONY_HEAD_ZKEY=/path/to/the/head.zkey   # restored into custody at boot
 It is checked against the head the transcript already publishes, and a file that hashes to
 anything else is refused rather than installed under a name the record gives to other bytes.
 Boot logs name the hash it is looking for when the head is missing.
+
+### Putting a lost FINAL key back
+
+`CEREMONY_HEAD_ZKEY` restores the head, and after the beacon the head is not what the site
+serves. The final key is bytes the beacon produced from the head — a different file under a
+different hash, and the one `/arcanum/circuit/zkey` resolves by, because the server looks up
+`finalHash` and nothing else. So a finalized ceremony serving no key is not fixed by
+restoring its head: that installs a real key, under a hash the record really does name, and
+changes nothing a client can see.
+
+```bash
+CEREMONY_FINAL_ZKEY=/path/to/arcanum_final.zkey   # published into custody at boot
+```
+
+Custody is content-addressed, so this is equivalent to dropping the file in
+`$CEREMONY_ZKEY_DIR/<its sha256>.zkey` by hand, and a running sequencer picks it up without
+a restart: the served key is re-resolved until the lookup succeeds. Unnecessary when the
+committed `arcanum_final.zkey` already hashes to the transcript's `finalHash` — the server
+recognises that and serves it out of the image.
+
+Both variables are one-time: once the bytes are in custody, and custody is the mount, they
+stay there and the variable can come back out of the environment.
 
 ## After the ceremony: wiring the verifier
 

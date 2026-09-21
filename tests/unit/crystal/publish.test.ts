@@ -646,6 +646,74 @@ test('A2 review queue: author sees only their OWN held items; admin sees all', a
   assert.equal((await api.listHeldEditions(admin)).length, 1, 'admin queue sees all held')
 })
 
+// The review queue answers "what is a person still looking at". A publish SURFACE that
+// reopens needs a different question — "what happened to this artifact" — because every
+// terminal outcome has left that queue by then. `listMyEditions` is that read.
+test('my publications of one artifact: the author sees their own, another identity sees none', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate })
+  const mine = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const ref = { kind: 'actum' as const, id: OWNED_ACTUM }
+  const asAuthor = await api.listMyEditions(anima1, ref)
+  assert.equal(asAuthor.length, 1)
+  assert.equal(asAuthor[0].id, mine.id)
+
+  assert.deepEqual(
+    await api.listMyEditions(anima2, ref), [],
+    'the artifact id is not a capability: another identity asking about it gets the empty ' +
+      'list, indistinguishable from an artifact nobody published',
+  )
+})
+
+test('my publications of one artifact: a REFUSED publication is readable, unlike on the review queue', async () => {
+  // The gap this read closes. A refusal is terminal, so it leaves the `reviewOutcome:'pending'`
+  // queue — and the fail-closed default gate refuses rather than holds, so this is the common
+  // outcome, not an edge case. Without this the reason the server persisted for the publisher
+  // could be read exactly once, by the session that filed it.
+  const gate: ModerationGate = { async scan() { return { ok: false, category: 'unavailable', reason: 'no scanner configured' } } }
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  assert.equal((await api.listHeldEditions(anima1)).length, 0, 'a refusal is not on the review queue')
+
+  const [mine] = await api.listMyEditions(anima1, { kind: 'actum', id: OWNED_ACTUM })
+  assert.equal(mine.id, ed.id)
+  assert.equal(mine.status, 'rejected')
+  assert.equal(
+    mine.moderationNote,
+    'Public publishing is closed right now, so this was never checked. Nothing was found in your content.',
+    'the author-safe note travels with it, so the publisher can be told why on a later visit',
+  )
+})
+
+test('my publications of one artifact: newest first, and only that artifact', async () => {
+  // Seeded directly with distinct `natum` values rather than published twice in a row:
+  // `Editionum.listByArtifact` promises no order at all, so what is under test is the API
+  // method's own sort, and two publishes in the same millisecond would not exercise it.
+  const { api, editiones } = makeApi({ noGate: true })
+  const seed = async (artifactRef: { kind: 'actum' | 'intella' | 'collectio'; id: string }, natum: Date) => {
+    const e = await editiones.create({
+      by: { animaId: 'anima-1' },
+      artifactRef,
+      destination: 'r2',
+      visibility: 'private',
+      custody: 'ours',
+    })
+    editiones.store.set(e.id, { ...e, natum, mutatum: natum })
+    return e.id
+  }
+  const older = await seed({ kind: 'actum', id: OWNED_ACTUM }, new Date('2026-09-01T00:00:00Z'))
+  const newer = await seed({ kind: 'actum', id: OWNED_ACTUM }, new Date('2026-09-02T00:00:00Z'))
+  const other = await seed({ kind: 'intella', id: 'lora-1' }, new Date('2026-09-03T00:00:00Z'))
+
+  const ids = (await api.listMyEditions(anima1, { kind: 'actum', id: OWNED_ACTUM })).map((e) => e.id)
+  assert.deepEqual(ids, [newer, older], 'newest first — the newest publication describes the artifact now')
+  assert.ok(!ids.includes(other), "another artifact's publication is not in this list")
+})
+
 test('A2 approve: an admin approval clears the hold → the item re-settles and publishes (gate bypassed)', async () => {
   const held = holdGate()
   const { api, editiones, flush } = makeApi({ gate: held.gate })

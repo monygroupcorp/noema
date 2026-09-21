@@ -1,0 +1,67 @@
+{
+ "line": "noema",
+ "branch": "moderation-visibility-2026-09-20",
+ "head": "3bb75267a29aa7112698495668985112c0809fdb",
+ "cwd": "/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02",
+ "base": "main",
+ "at": "2026-09-20T04:00:48.372Z",
+ "by": "arthurt",
+ "named": true,
+ "load": {
+  "before": {
+   "cores": 32,
+   "load1": 5.5,
+   "load5": 8.26,
+   "load15": 13.15,
+   "runnable": 8,
+   "procs": 5096
+  },
+  "after": {
+   "cores": 32,
+   "load1": 7.58,
+   "load5": 8.93,
+   "load15": 12.93,
+   "runnable": 3,
+   "procs": 4996
+  },
+  "cores": 32
+ },
+ "verdict": "fail",
+ "skipped": 0,
+ "provisioned": false,
+ "provision_commands": [],
+ "gates": [
+  {
+   "name": "verify",
+   "cmd": "npm install --legacy-peer-deps && npm run typecheck && npm run test:hermetic",
+   "status": 0,
+   "said": "pass",
+   "ms": 19824,
+   "tail": "… (550366 bytes cut)\nshed, never in running (0.034844ms)\n✔ activityBadgeCount: zero in-flight rows is zero, not a truthy placeholder (0.036302ms)\n✔ activityBadgeCount: counts only the running rows, ignoring settled ones (0.038315ms)\n✔ activityKindLabel / activityDoorLabel: the app's own nouns, labels match where the door leads (0.049064ms)\n✔ partitionHomeActivity: splits real activity rows into settled (capped) and running (0.095521ms)\n✔ partitionHomeActivity: chat-shaped (non-activity) input contributes to neither band (0.03389ms)\n✔ activityRowLabel: prefers modusLabel, falls back to the house noun for the kind (0.041946ms)\n✔ activityDoorHref: resolves each kind's door to its real destination (0.062081ms)\n✔ activityDoorHref: a row without the door fields its kind needs renders without a link, never a dead one (0.03516ms)\n✔ toggleLock: pins a fragment, unpins the same one, and replaces within a category (0.074455ms)\n✔ lockedCategories reads in taxonomy order, and the summary says what is held (0.078277ms)\n✔ a locked fragment is byte-identical across successive varies (0.468574ms)\n✔ an exclusive category yields at most one fragment per roll, locked or not (0.320153ms)\n✔ applyLocks: a locked category the roll could not sample is added exactly once (0.067066ms)\n✔ varyAt: a vary is a new roll at a new index, and the index reproduces it (0.866047ms)\n✔ the mining index space sits above the independent-roll space (0.1162ms)\n✔ stepping back returns the exact prior roll, not a re-sample of it (0.229972ms)\n✔ ancestry reads root-first, and every node is recomputable from its index and locks (0.312646ms)\n✔ stepTo and varyInto refuse an id the tree does not hold, rather than clearing it (0.052973ms)\n✔ varying with every category locked reports that nothing can change (0.130237ms)\n✔ a category with one fragment in the draw pins a vary exactly as a lock does (0.08194ms)\n✔ a varied roll goes through the existing keep rail exactly as an independent one does (0.138077ms)\n✔ a run holding a place in the warm-pod line reports it, and says so the way /status does (0.079154ms)\n✔ the line moving overrides the place the snapshot opened with (0.049145ms)\n✔ a pod taking the run clears its place, so the way out goes with the wait (0.060105ms)\n✔ a run that has ended holds no place, however it ended (0.027004ms)\n✔ a run that never queued carries no place at all (0.020326ms)\n(node:2072311) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n✔ formatQuote: the amount carries a formatted number and the shared unit word (14.174788ms)\n✔ formatQuote: the recipient is a short labeled detail, not the raw id jammed in (0.313371ms)\n✔ formatQuote: a short recipient is shown in full (nothing to truncate) (0.167788ms)\nℹ tests 3429\nℹ suites 15\nℹ pass 3429\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 14781.316626\nnpm warn allow-scripts 11 packages have install scripts not yet covered by allowScripts:\nnpm warn allow-scripts   @coinbase/x402@2.1.0 (install: (install scripts present))\nnpm warn allow-scripts   aws-sdk@2.1692.0 (install: (install scripts present))\nnpm warn allow-scripts   bigint-buffer@1.1.5 (install: node-gyp rebuild)\nnpm warn allow-scripts   blake-hash@2.0.0 (install: node-gyp rebuild)\nnpm warn allow-scripts   bufferutil@4.0.9 (install: node-gyp rebuild)\nnpm warn allow-scripts   es5-ext@0.10.64 (install: (install scripts present))\nnpm warn allow-scripts   esbuild@0.27.7 (install: (install scripts present))\nnpm warn allow-scripts   keccak@3.0.4 (install: node-gyp rebuild)\nnpm warn allow-scripts   onnxruntime-node@1.27.0 (install: (install scripts present))\nnpm warn allow-scripts   secp256k1@5.0.1 (install: node-gyp rebuild)\nnpm warn allow-scripts   utf-8-validate@5.0.10 (install: node-gyp rebuild)\nnpm warn allow-scripts\nnpm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow."
+  },
+  {
+   "name": "crystal-db",
+   "cmd": "npm run test:crystal",
+   "status": 1,
+   "said": "fail",
+   "ms": 63674,
+   "tail": "… (1689547 bytes cut)\n/process/task_queues:90:21) {\n      errorLabelSet: Set(1) { 'ResetPool' },\n      beforeHandshake: false,\n      [cause]: AggregateError [ECONNREFUSED]: \n          at internalConnectMultiple (node:net:1339:18)\n          at afterConnectMultiple (node:net:1942:7) {\n        code: 'ECONNREFUSED',\n        [errors]: [Array]\n      }\n    }\n  }\n\ntest at tests/unit/crystal/stripeRailConcurrent.test.ts:2:7480\n✖ MongoRedituum.reverse(): nets the Mongo-backed rollup and is idempotent on reversalOf (0.091148ms)\n  Error [MongoServerSelectionError]: connect ECONNREFUSED ::1:27017, connect ECONNREFUSED 127.0.0.1:27017\n      at Topology.selectServer (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:634:30)\n      at async Topology._connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:468:22)\n      at async Topology.connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/sdam/topology.ts:405:7)\n      at async topologyConnect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:638:9)\n      at async MongoClient._connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:650:7)\n      at async MongoClient.connect (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/mongo_client.ts:562:7)\n      at async TestContext.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts:83:3)\n      at async TestHook.run (node:internal/test_runner/test:1389:7) {\n    errorLabelSet: Set(0) {},\n    reason: { type: 'Unknown', servers: Map(1) { 'localhost:27017' => [Object] }, stale: false, compatible: true, heartbeatFrequencyMS: 10000, localThresholdMS: 15, setName: null, maxElectionId: null, maxSetVersion: null, commonWireVersion: 0, logicalSessionTimeoutMinutes: null },\n    code: undefined,\n    [cause]: Error [MongoNetworkError]: connect ECONNREFUSED ::1:27017, connect ECONNREFUSED 127.0.0.1:27017\n        at Socket.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/node_modules/mongodb/src/cmap/connect.ts:395:16)\n        at Object.onceWrapper (node:events:631:12)\n        at Socket.emit (node:events:509:20)\n        at emitErrorNT (node:internal/streams/destroy:170:8)\n        at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n        at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {\n      errorLabelSet: Set(1) { 'ResetPool' },\n      beforeHandshake: false,\n      [cause]: AggregateError [ECONNREFUSED]: \n          at internalConnectMultiple (node:net:1339:18)\n          at afterConnectMultiple (node:net:1942:7) {\n        code: 'ECONNREFUSED',\n        [errors]: [Array]\n      }\n    }\n  }\n\ntest at tests/unit/crystal/stripeRailConcurrent.test.ts:2:3424\n✖ /home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts (0.063285ms)\n  TypeError: Cannot read properties of undefined (reading 'dropDatabase')\n      at TestContext.<anonymous> (/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/tests/unit/crystal/stripeRailConcurrent.test.ts:112:12)\n      at TestHook.runInAsyncScope (node:async_hooks:226:14)\n      at TestHook.run (node:internal/test_runner/test:1382:25)\n      at TestHook.run (node:internal/test_runner/test:1726:18)\n      at TestHook.run (node:internal/util:581:20)\n      at Test.runHook (node:internal/test_runner/test:1269:20)\n      at after (node:internal/test_runner/test:1322:20)\n      at Test.run (node:internal/test_runner/test:1408:13)\n[run-with-env.sh] Executing: ./scripts/run-tests.sh tests/unit/crystal/*.test.ts tests/unit/crystal/**/*.test.ts tests/unit/lib/**/*.test.ts tests/unit/api/**/*.test.ts tests/unit/analytics/**/*.test.ts tests/unit/flow/MongoFlowContextStore.test.ts"
+  },
+  {
+   "name": "docker-build",
+   "cmd": "docker build .",
+   "status": 1,
+   "said": "fail",
+   "ms": 41,
+   "tail": "ERROR: permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
+  },
+  {
+   "name": "web-app",
+   "cmd": "( cd src/platforms/web/app && npm ci && npm run typecheck && npm run build )",
+   "status": 0,
+   "said": "pass",
+   "ms": 18322,
+   "tail": "\nadded 620 packages, and audited 621 packages in 4s\n\n266 packages are looking for funding\n  run `npm fund` for details\n\n31 vulnerabilities (12 low, 9 moderate, 10 high)\n\nTo address issues that do not require attention, run:\n  npm audit fix\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.\n\n> typecheck\n> tsc --noEmit\n\n\n> build\n> tsc -b && vite build\n\nvite v5.4.21 building for production...\ntransforming...\n✓ 3413 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                          1.46 kB │ gzip:     0.61 kB\ndist/assets/Canvas-C2DQafrE.css         20.55 kB │ gzip:     3.57 kB\ndist/assets/index-bF9H4Ej3.css         189.81 kB │ gzip:    33.58 kB\ndist/assets/Canvas-BTFU3gqq.js         192.31 kB │ gzip:    62.69 kB\ndist/assets/browser.esm-CHqh28X6.js    454.84 kB │ gzip:   107.99 kB\ndist/assets/Space-BVkFxG6b.js          893.65 kB │ gzip:   242.14 kB\ndist/assets/index-M-4wk40X.js          975.82 kB │ gzip:   288.26 kB\ndist/assets/Vault-zrKnx57M.js        2,874.47 kB │ gzip: 1,444.57 kB\n✓ built in 4.42s\nnpm warn deprecated three-mesh-bvh@0.7.8: Deprecated due to three.js version incompatibility. Please use v0.8.0, instead.\nnpm warn allow-scripts 3 packages have install scripts not yet covered by allowScripts:\nnpm warn allow-scripts   blake-hash@2.0.0 (install: node-gyp-build || exit 0)\nnpm warn allow-scripts   esbuild@0.21.5 (postinstall: node install.js)\nnpm warn allow-scripts   esbuild@0.28.2 (postinstall: node install.js)\nnpm warn allow-scripts\nnpm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.\n[plugin:vite:resolve] [plugin vite:resolve] Module \"assert\" has been externalized for browser compatibility, imported by \"/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/src/platforms/web/app/node_modules/circomlibjs/src/poseidon_reference.js\". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.\n[plugin:vite:resolve] [plugin vite:resolve] Module \"assert\" has been externalized for browser compatibility, imported by \"/home/arthurt/pinfactory/projects/.helm-worktrees/noema/slot-02/src/platforms/web/app/node_modules/circomlibjs/src/poseidon_opt.js\". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.\n\n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit."
+  }
+ ]
+}
