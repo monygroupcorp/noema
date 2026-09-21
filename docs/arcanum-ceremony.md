@@ -352,6 +352,28 @@ It is checked against the head the transcript already publishes, and a file that
 anything else is refused rather than installed under a name the record gives to other bytes.
 Boot logs name the hash it is looking for when the head is missing.
 
+### Putting a lost FINAL key back
+
+`CEREMONY_HEAD_ZKEY` restores the head, and after the beacon the head is not what the site
+serves. The final key is bytes the beacon produced from the head — a different file under a
+different hash, and the one `/arcanum/circuit/zkey` resolves by, because the server looks up
+`finalHash` and nothing else. So a finalized ceremony serving no key is not fixed by
+restoring its head: that installs a real key, under a hash the record really does name, and
+changes nothing a client can see.
+
+```bash
+CEREMONY_FINAL_ZKEY=/path/to/arcanum_final.zkey   # published into custody at boot
+```
+
+Custody is content-addressed, so this is equivalent to dropping the file in
+`$CEREMONY_ZKEY_DIR/<its sha256>.zkey` by hand, and a running sequencer picks it up without
+a restart: the served key is re-resolved until the lookup succeeds. Unnecessary when the
+committed `arcanum_final.zkey` already hashes to the transcript's `finalHash` — the server
+recognises that and serves it out of the image.
+
+Both variables are one-time: once the bytes are in custody, and custody is the mount, they
+stay there and the variable can come back out of the environment.
+
 ## After the ceremony: wiring the verifier
 
 Once `verification_key.json` is in `src/arcanum/circuit/artifacts/`, load it in
