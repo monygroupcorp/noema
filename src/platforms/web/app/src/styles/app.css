@@ -563,7 +563,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .phrase{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
 .phrase span{background:var(--raised);border:1px solid var(--hair);border-radius:7px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--text)}
 .phrase span i{color:var(--faint);font-style:normal;margin-right:7px}
-.warn{display:flex;gap:10px;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
+/* PROSE, not a row. This was `display:flex`, which makes every inline child its own flex
+   item: a sentence carrying a <Link> or a <b> was laid out as one narrow column per node.
+   At 1280 there was room and it read as a single line, so it only showed on a phone —
+   the vault notice broke into four columns at 390 with "coming soon" a word per line.
+   The two variants that really are icon-and-text rows, or carry a dismiss pushed right by
+   `margin-left:auto`, ask for flex back by name below. */
+.warn{display:block;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
 
 /* connected accounts (BYO gated-origin secrets) */
 .byo-row{border:1px solid var(--hair);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:10px}
@@ -578,7 +584,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .byo-idle{appearance:none;cursor:pointer;flex:0 0 auto}
 .byo-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
 .byo-note{margin-top:9px}
-.byo-warn{margin-top:10px;align-items:flex-start}
+.byo-warn{display:flex;gap:10px;margin-top:10px;align-items:flex-start}
 .byo-dismiss{margin-left:auto;flex:0 0 auto;background:none;border:0;color:inherit;opacity:.6;cursor:pointer;font-size:12px;line-height:1;padding:2px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
 .byo-dismiss:hover{opacity:1}
 
@@ -624,7 +630,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .fund-guide-pts .fg-n{flex:0 0 auto;font-family:var(--font-mono);font-size:11px;color:var(--faint);padding-top:1px}
 .fund-guide-pts b{color:var(--text);font-weight:500}
 
-.fund-warn{margin-top:14px;align-items:flex-start;color:var(--warn);border-color:color-mix(in srgb,#d8a657 32%,var(--hair));background:var(--warn-bg)}
+.fund-warn{display:flex;gap:10px;margin-top:14px;align-items:flex-start;color:var(--warn);border-color:color-mix(in srgb,#d8a657 32%,var(--hair));background:var(--warn-bg)}
 .fund-warn svg{flex:0 0 auto;width:16px;height:16px;margin-top:1px}
 .fund-warn b{font-weight:600}
 
