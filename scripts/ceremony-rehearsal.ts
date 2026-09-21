@@ -10,6 +10,10 @@
  * expensive, that is slow, and that nobody wants to discover is broken after asking
  * friends to spend their evening on it. So run this first.
  *
+ * The first contributor here is the page's own client module, imported and driven rather
+ * than imitated, so "the browser path works" is something this script observes instead of
+ * something a reader infers from a CLI invocation that resembles it.
+ *
  * Usage:
  *   npm run ceremony:rehearse
  *
@@ -95,6 +99,22 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
+  // The web client addresses its own origin with root-relative URLs, because in a tab that
+  // is what the site is. Point those at this server so the client can be driven here
+  // unmodified — the whole value of running it is that it is not a copy of itself.
+  // node's fetch keeps no cookie jar either, so the session cookie the sequencer sets is
+  // caught on the way past; step 3 needs it to prove a second contribution is refused.
+  const realFetch = globalThis.fetch
+  let lastSetCookie: string | null = null
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = typeof input === 'string' && input.startsWith('/') ? base + input : input
+    const r = await realFetch(url, init)
+    const sc = r.headers.get('set-cookie')
+    if (sc) lastSetCookie = sc.split(';')[0]
+    return r
+  }) as typeof fetch
+  const { ceremony: webClient } = await import('../src/platforms/web/app/src/lib/ceremony.js')
+
   const status = async (): Promise<Record<string, unknown>> =>
     (await fetch(`${base}/v1/ceremony`)).json() as Promise<Record<string, unknown>>
 
@@ -140,24 +160,67 @@ async function main(): Promise<void> {
     s0.phase === 'open' ? ok('phase is open') : bad(`phase is ${String(s0.phase)}`)
     s0.rootHash === root ? ok('rootHash is arcanum_0000.zkey') : bad('rootHash is not the root zkey')
 
+    // Two contributors, two roads to the same sequencer. The first is the contributor's
+    // own code — src/platforms/web/app/src/lib/ceremony.ts, the module their tab loads —
+    // driven here unmodified. It folds entropy in through snarkjs's in-memory API, on
+    // buffers, which is a different path through snarkjs than the CLI takes on files; a
+    // rehearsal that only ever shells out to the CLI leaves the code a friend actually
+    // runs untested, and that is the code whose failure costs them their evening. The
+    // second keeps the CLI road, because step 3 needs bytes in hand to build the refusals
+    // out of, and because the two roads landing the same chain is itself worth seeing.
     const contributors: Contributor[] = [{ name: 'rehearsal-one' }, { name: 'rehearsal-two' }]
-    for (const [i, c] of contributors.entries()) {
-      step(`2.${i + 1} ${c.name} contributes through the route the page uses`)
+
+    step('2.1 rehearsal-one contributes through the web client the page loads')
+    {
+      const c = contributors[0]
+      const t0 = Date.now()
+      const before = await fetchHead()
+      let landed: Record<string, unknown> | null = null
+      try {
+        landed = await webClient.contribute({
+          name: c.name,
+          entropy: randomBytes(32).toString('hex'),
+          onPhase: (p) => console.log(`  client: ${p}`),
+        }) as unknown as Record<string, unknown>
+      } catch (err) {
+        bad(`the web client's contribute() threw: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      if (landed) {
+        console.log(`  built on ${before.hash.slice(0, 16)}…, round trip ${secs(t0)}`)
+        c.cookie = lastSetCookie ?? undefined
+        ok('accepted')
+        landed.deepVerified === true
+          ? ok('DEEP-VERIFIED against arcanum.r1cs + the Hermez ptau')
+          : bad('accepted WITHOUT deep verification — the ptau was not read')
+        const chain = landed.chain as { name: string; outputHash: string }[] | undefined
+        chain?.at(-1)?.name === c.name && landed.headHash === chain?.at(-1)?.outputHash
+          ? ok('the chain head is now their key')
+          : bad('head is not their key')
+        c.cookie ? ok('the sequencer gave the tab a session') : bad('no session cookie came back')
+      }
+    }
+
+    step('2.2 rehearsal-two contributes through the raw route, as a script would')
+    {
+      const c = contributors[1]
       const head = await fetchHead()
       console.log(`  downloaded head ${head.hash.slice(0, 16)}… (${head.bytes.length} bytes)`)
       const t0 = Date.now()
       const out = contributeTo(head.bytes, c.name)
-      console.log(`  contributed in-browser in ${secs(t0)}`)
+      console.log(`  contributed in ${secs(t0)}`)
       const t1 = Date.now()
       const r = await upload(out, head.hash, c)
       console.log(`  sequencer answered ${r.status} in ${secs(t1)}`)
-      if (r.status !== 201) { bad(`rejected: ${await errorOf(r)}`); continue }
-      ok('accepted')
-      const body = await r.json() as Record<string, unknown>
-      body.deepVerified === true
-        ? ok('DEEP-VERIFIED against arcanum.r1cs + the Hermez ptau')
-        : bad('accepted WITHOUT deep verification — the ptau was not read')
-      body.headHash === sha(out) ? ok('the chain head is now their key') : bad('head is not their key')
+      if (r.status !== 201) {
+        bad(`rejected: ${await errorOf(r)}`)
+      } else {
+        ok('accepted')
+        const body = await r.json() as Record<string, unknown>
+        body.deepVerified === true
+          ? ok('DEEP-VERIFIED against arcanum.r1cs + the Hermez ptau')
+          : bad('accepted WITHOUT deep verification — the ptau was not read')
+        body.headHash === sha(out) ? ok('the chain head is now their key') : bad('head is not their key')
+      }
     }
     const chain = (await status()).chain as { name: string }[]
     chain.length === contributors.length
