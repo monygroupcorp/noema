@@ -28,6 +28,8 @@ import { createProvingKeySource } from '../../../src/arcanum/ProvingKeySource.js
 import type { ArcanumIssuer } from '../../../src/ledger/ArcanumIssuer.js'
 import type { ArcanumTreeStore } from '../../../src/arcanum/ArcanumTree.js'
 import { fakeZkey, type FakeLink } from './fakeZkey.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 
 // No ptau here, so `verifyContinuation` runs the chain check and skips the snarkjs deep
 // verify — the same degraded mode a sequencer without the 1.2GB ptau mounted runs in.
@@ -204,6 +206,48 @@ test('a finalized ceremony whose key was never published serves nothing rather t
     const served = await get(`${r.url}/arcanum/circuit/zkey`)
     assert.equal(served.status, 503)
     assert.match(JSON.parse(served.body.toString('utf8')).error, /not published on this server/)
+  } finally {
+    await r.close()
+  }
+})
+
+/** Every line the server actually emits while `fn` runs — what a log collector would keep. */
+async function linesWhile(fn: () => Promise<void>): Promise<LogEntry[]> {
+  const seen: LogEntry[] = []
+  const onLog = (e: LogEntry) => { if (e.level !== 'debug') seen.push(e) }
+  bus.on('log', onLog)
+  try { await fn() } finally { bus.off('log', onLog) }
+  return seen
+}
+
+test('the log a deployment stuck in that state writes does not grow with the traffic', async () => {
+  const r = await rig()
+  try {
+    await open(r)
+    await r.store.finalize(sha256Hex(fakeZkey([{ seed: 'never published' }])))
+
+    // The state above is one nobody notices for days, because nothing about it breaks a
+    // page — and while it lasts, every caller re-derives it. An uptime monitor on
+    // /config and a client retrying /circuit/zkey is an hour of this, and the flood it
+    // produced was not a big number of different lines: it was one line, 60 times an
+    // hour, with every real error in the deployment buried between the copies.
+    const hourOfPolling = async () => {
+      for (let i = 0; i < 60; i++) {
+        await json(`${r.url}/arcanum/config`)
+        await get(`${r.url}/arcanum/circuit/zkey`)
+      }
+    }
+
+    const first = await linesWhile(hourOfPolling)
+    const errors = first.filter((e) => e.level === 'error')
+    assert.equal(errors.length, 1, first.map((e) => e.msg).join('\n'))
+    assert.match(String(errors[0].msg), /neither custody nor the image/)
+
+    // And the second hour is silent. That is the property the goal is really after: what
+    // the log holds is set by the state the deployment is in, not by how often anyone
+    // asks about it, so no window is long enough for this message to take the log over.
+    const second = await linesWhile(hourOfPolling)
+    assert.deepEqual(second, [], second.map((e) => e.msg).join('\n'))
   } finally {
     await r.close()
   }
