@@ -24,6 +24,8 @@ import { mountCeremony } from '../../../src/api/arcanum/mountCeremony.js'
 import { MemoryCeremoniaStore } from '../../../src/arcanum/CeremoniaStore.js'
 import { LocalZkeyCustody, sha256Hex } from '../../../src/arcanum/CeremoniaCustody.js'
 import { fakeZkey, type FakeLink } from './fakeZkey.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
 
 const ROOT: FakeLink[] = []
 const after = (chain: FakeLink[], seed: string) => [...chain, { seed, name: seed }]
@@ -105,6 +107,56 @@ test('CEREMONY_HEAD_ZKEY refuses a file that is not the head the transcript publ
     // Nothing was written under any name: custody is empty, not wrong.
     const custody = new LocalZkeyCustody(dir)
     assert.equal(await custody.has(sha256Hex(fakeZkey(after(ROOT, 'somebody-elses')))), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Restoring a FINALIZED ceremony is a different variable, and the difference is invisible
+// until someone reads which hash the server looks up. The head is the last contribution's
+// output; the key the site serves is the beacon'd finalHash applied after it. So an
+// operator facing a finalized ceremony that serves nothing, reaching for the variable the
+// recovery docs name, restores a real key under a real hash and changes nothing.
+test('on a finalized ceremony the head is not the key the site serves — CEREMONY_FINAL_ZKEY is', async () => {
+  const { store, dir, root } = await openCeremony()
+  const contributed = fakeZkey(after(ROOT, 'c1'))
+  await store.appendContribution(
+    { index: 1, name: 'c1', outputHash: sha256Hex(contributed) }, sha256Hex(root), 'c1-key',
+  )
+  // The beacon is applied off the sequencer, so the final key is bytes no contribution
+  // produced and no hash in the chain names.
+  const final = fakeZkey(after(after(ROOT, 'c1'), 'beacon'))
+  await store.finalize(sha256Hex(final))
+
+  const headFile = path.join(dir, 'head.zkey')
+  const finalFile = path.join(dir, 'final.zkey')
+  writeFileSync(headFile, contributed)
+  writeFileSync(finalFile, final)
+  const custody = new LocalZkeyCustody(dir)
+  try {
+    // The head goes in — it IS the head, and the record names it — and the site still has
+    // nothing to serve, because what it resolves by is finalHash.
+    const said: LogEntry[] = []
+    const listen = (e: LogEntry) => said.push(e)
+    bus.on('log', listen)
+    try {
+      await boot(store, dir, { CEREMONY_HEAD_ZKEY: headFile })
+    } finally {
+      bus.off('log', listen)
+    }
+    assert.equal(await custody.has(sha256Hex(contributed)), true)
+    assert.equal(await custody.has(sha256Hex(final)), false)
+
+    // Which is a success the operator must not read as one: the restore is told it did
+    // nothing for the 503, and told which variable would.
+    const warned = said.find(e => e.level === 'warn' && /FINALIZED/.test(e.msg))
+    assert.ok(warned, 'restoring a head on a finalized ceremony said nothing about it')
+    assert.match(warned.msg, /CEREMONY_FINAL_ZKEY/)
+    assert.equal((warned as unknown as { finalHash: string }).finalHash, sha256Hex(final))
+
+    // The variable that ends the 503.
+    await boot(store, dir, { CEREMONY_FINAL_ZKEY: finalFile, CEREMONY_FINALIZE: sha256Hex(final) })
+    assert.equal(await custody.has(sha256Hex(final)), true)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

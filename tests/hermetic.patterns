@@ -142,3 +142,4 @@ tests/unit/crystal/collectionCancelCancelsActa.test.ts
 tests/unit/crystal/TesseraCursor.test.ts
 tests/unit/crystal/Vocator.test.ts
 tests/unit/execution/sessionSpendParity.test.ts
+tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts

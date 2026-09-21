@@ -115,11 +115,22 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
   const headZkey = process.env.CEREMONY_HEAD_ZKEY
   if (headZkey) {
     try {
-      const declared = headHash(await store.status())
+      const status = await store.status()
+      const declared = headHash(status)
       if (!declared) {
         log.error('CEREMONY_HEAD_ZKEY set but the ceremony has no published head — nothing to restore')
       } else {
         await publishKey(custody, 'CEREMONY_HEAD_ZKEY', headZkey, declared)
+        // The head is the last contribution's output. A finalized ceremony serves the
+        // beacon'd final key, which is different bytes under a different hash, so a head
+        // restored here is a real key that /arcanum/circuit/zkey will never reach for —
+        // and the restore otherwise reports success while the site goes on serving none.
+        if (status.phase === 'finalized' && status.finalHash && status.finalHash !== declared) {
+          log.warn('this ceremony is FINALIZED: the key the site serves is its finalHash, not ' +
+            'the chain head restored here. If /arcanum/circuit/zkey is answering 503, the ' +
+            'variable that ends it is CEREMONY_FINAL_ZKEY.',
+            { restoredHead: declared, finalHash: status.finalHash })
+        }
       }
     } catch (err) {
       log.error('restoring the ceremony chain head failed', { error: String(err) })

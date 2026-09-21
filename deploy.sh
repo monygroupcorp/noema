@@ -229,12 +229,38 @@ assert_alias_serving() {
   return 1
 }
 
+# A CEREMONY_ZKEY_DIR line in .env is the one way to move ceremony custody off its mount
+# without touching this script or docker-compose.prod.yml — which is to say, the one way the
+# tests that read those two files cannot see. It lands on the same `docker run` as the
+# explicit --env below, and which of the two the container ends up with is a detail of the
+# docker CLI; whether a finished ceremony survives the next deploy must not rest on that.
+# This script points custody at the mount itself, so a value in .env is either the same path
+# or a ceremony with a deploy's worth of life left in it.
+assert_custody_not_repointed() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+  local line
+  line=$(grep -E '^[[:space:]]*CEREMONY_ZKEY_DIR(=|$)' "${ENV_FILE}" | tail -n1 || true)
+  [[ -n "${line}" ]] || return 0
+  local value
+  value=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*CEREMONY_ZKEY_DIR=?//' | tr -d '\r"'"'"'')
+  [[ "${value}" == "${CEREMONY_DIR_IN_CONTAINER}" ]] && return 0
+  log "Refusing to deploy: ${ENV_FILE} points CEREMONY_ZKEY_DIR at '${value}', and ceremony"
+  log "custody is mounted at ${CEREMONY_DIR_IN_CONTAINER}. Nothing is mounted where that line"
+  log "points, so the trusted-setup keys would live inside the container and this deploy would"
+  log "be the one that destroys them, while the published transcript went on naming every one."
+  log "Delete the line — deploy.sh sets the variable itself — or mount the path it names."
+  exit 1
+}
+
 # ==================================================================
 # DEPLOY SEQUENCE
 # ==================================================================
 
 log "=== Noema deploy started (image: ${IMAGE}) ==="
 rotate_logs
+# Before anything is pulled or taken out of service: a box that would lose its ceremony
+# keys is refused while it is still serving them.
+assert_custody_not_repointed
 
 # 1. Free disk space before pull — remove all unused images (old versioned tags accumulate)
 log "Pruning unused Docker images to free disk space..."
