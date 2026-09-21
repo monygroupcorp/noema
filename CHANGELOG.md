@@ -1,5 +1,36 @@
 # Changelog
 
+## [5.30.0](https://github.com/monygroupcorp/noema/compare/v5.29.0...v5.30.0) (2026-09-21)
+
+
+### Features
+
+* **collections:** show a running collection's pieces on the run screen ([#610](https://github.com/monygroupcorp/noema/issues/610)) ([7c39e48](https://github.com/monygroupcorp/noema/commit/7c39e481d2bc0e1d8564a51c0b4b0276daa4fc42))
+* **publish:** tell a publisher why hosting refused their collection, on every visit ([#620](https://github.com/monygroupcorp/noema/issues/620)) ([adae1a5](https://github.com/monygroupcorp/noema/commit/adae1a562a67ec271078c2b9abdccb244b1c72d1))
+
+
+### Bug Fixes
+
+* **api:** gate a collection piece rejection on the funder ([#604](https://github.com/monygroupcorp/noema/issues/604)) ([bd06533](https://github.com/monygroupcorp/noema/commit/bd065339612a86d108a4662346857acfeae7a1af))
+* **api:** stop warning about a refusal that is the ordinary answer ([#616](https://github.com/monygroupcorp/noema/issues/616)) ([a115c07](https://github.com/monygroupcorp/noema/commit/a115c076e84ec0906acb47c0179952f29f7e803e))
+* **api:** tell a refused caller that an empty balance is a terminal answer ([#614](https://github.com/monygroupcorp/noema/issues/614)) ([58e4293](https://github.com/monygroupcorp/noema/commit/58e42932488b236810fca57cb7f1cbd763b3bba2))
+* **arcanum:** say which proving key a box is holding when it serves none ([#621](https://github.com/monygroupcorp/noema/issues/621)) ([eaa587b](https://github.com/monygroupcorp/noema/commit/eaa587bd31b9590605f23ec3a30cc21943636c5a))
+* **arcanum:** serve the proving key the ceremony's transcript names, and rehearse the flow before opening it ([#605](https://github.com/monygroupcorp/noema/issues/605)) ([67be3b2](https://github.com/monygroupcorp/noema/commit/67be3b2926ad565728c3aef0df498a861c4db9b5))
+* **arcanum:** the site cannot report a proving key ready that it cannot verify against ([#603](https://github.com/monygroupcorp/noema/issues/603)) ([e8ecd46](https://github.com/monygroupcorp/noema/commit/e8ecd460addc13d2b960aa9c31d5a8a724b2cd57))
+* **blog:** ship the guides in the image, and stop denying the queue on the stream ([#601](https://github.com/monygroupcorp/noema/issues/601)) ([674df84](https://github.com/monygroupcorp/noema/commit/674df846c3836166039d15d7560fd251838d5809))
+* **blog:** the guides stop offering a captionset road the app does not have ([#606](https://github.com/monygroupcorp/noema/issues/606)) ([4961472](https://github.com/monygroupcorp/noema/commit/49614726ed637441dd657d27b5e8a5f7e6395c01))
+* **catalog:** stop offering the Klein 9B edit, and let the guard say why ([#615](https://github.com/monygroupcorp/noema/issues/615)) ([31a3f13](https://github.com/monygroupcorp/noema/commit/31a3f133c0d926c642b93541ae9b47fdaed7046c))
+* **ceremony:** the trusted-setup chain survives a deploy, and says so when it has not ([#602](https://github.com/monygroupcorp/noema/issues/602)) ([16a24e1](https://github.com/monygroupcorp/noema/commit/16a24e1ebc7ad6457a57f1ffb2f4ad464e8a09f0))
+* **concierge:** close the panel when the viewport narrows under it ([#611](https://github.com/monygroupcorp/noema/issues/611)) ([258e039](https://github.com/monygroupcorp/noema/commit/258e039e93a3ab4e2de6d727511fac7850b6dd5a))
+* **crystal:** point the four Wan 2.2 unets at a repo that has them, and refuse a dead weight address ([#598](https://github.com/monygroupcorp/noema/issues/598)) ([99faac1](https://github.com/monygroupcorp/noema/commit/99faac11e3bc76933d8fcd2d0818e968b9270a0f))
+* **datasets:** index the collection, dedupe ingested media, and upload a batch concurrently ([#612](https://github.com/monygroupcorp/noema/issues/612)) ([ab7dbdc](https://github.com/monygroupcorp/noema/commit/ab7dbdc58134ed7d5e7cdbdfcf91e2630c58d95c))
+* **publish:** a held collection stays held after its export-to-you download ([#608](https://github.com/monygroupcorp/noema/issues/608)) ([dac8755](https://github.com/monygroupcorp/noema/commit/dac87559ed7376711413dd0ea98e9f35f3da7095))
+* **publish:** a held collection stays held on the export screen when a destination is picked ([#607](https://github.com/monygroupcorp/noema/issues/607)) ([249a5c2](https://github.com/monygroupcorp/noema/commit/249a5c2e99c6640c7cfd70671cf20791caa8877f))
+* **publish:** a held collection still says so when the export screen is reopened ([#600](https://github.com/monygroupcorp/noema/issues/600)) ([779941a](https://github.com/monygroupcorp/noema/commit/779941a5f979eb3414b5f31d11693a8351a243d1))
+* **space:** stop losing a selection to the layer it was not carved in ([#613](https://github.com/monygroupcorp/noema/issues/613)) ([8b0cb2c](https://github.com/monygroupcorp/noema/commit/8b0cb2c6c054a98c5f1de9f901cebac7b22226c3))
+* **web:** keep transport wreckage off the screen ([#617](https://github.com/monygroupcorp/noema/issues/617)) ([a75a168](https://github.com/monygroupcorp/noema/commit/a75a168cb9b7868e5c07e3bf0fce4439c47531ec))
+* **web:** stop asking for owner-scoped data without an account ([#618](https://github.com/monygroupcorp/noema/issues/618)) ([3bb7526](https://github.com/monygroupcorp/noema/commit/3bb75267a29aa7112698495668985112c0809fdb))
+
 ## [5.29.0](https://github.com/monygroupcorp/noema/compare/v5.28.0...v5.29.0) (2026-09-09)
 
 
