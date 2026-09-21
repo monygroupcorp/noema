@@ -3116,7 +3116,9 @@ export const API_CONTRACT: ApiContract = {
     { code: 'not_found.partner_request', httpStatus: 404 },
     { code: 'not_found.querela', httpStatus: 404 },
     { code: 'input.model_not_resolved', httpStatus: 422 },
-    { code: 'economy.insufficient_signa', httpStatus: 402 },
+    // The balance cannot cover the reservation. NOT retryable: only funding the account changes
+    // the answer, so a caller that asks again just refuses faster.
+    { code: 'economy.insufficient_signa', httpStatus: 402, retryable: false },
     { code: 'economy.cap_too_low', httpStatus: 422 },
     { code: 'conflict.slug_taken', httpStatus: 409 },
     // The same work is already running on the caller's own resource. Retryable: the request

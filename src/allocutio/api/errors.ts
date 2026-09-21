@@ -130,8 +130,15 @@ export const Errors = {
    *  both look identical from the caller's side: "you don't have partner access". */
   notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),
   notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
+  /**
+   * NOT retryable, said out loud. A balance that cannot cover a reservation is a terminal
+   * answer to THIS request: nothing the caller can do by asking again changes it, only funding
+   * the account does. Left unsaid, the field is simply absent from the body and an automated
+   * caller has nothing to read — which is how one zero-balance client produced 58 refused runs
+   * in ten seconds. `retryable: false` is the contract telling it to stop.
+   */
   insufficientSigna: (details?: Record<string, unknown>) =>
-    new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
+    new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { retryable: false, details }),
   capTooLow: (details?: Record<string, unknown>) =>
     new ApiError('economy.cap_too_low', 'maxImpetus is below the estimated reservation', 422, { details }),
   /** No GPU capacity could be procured for a studio (provision failed / no pods). Retryable. */
