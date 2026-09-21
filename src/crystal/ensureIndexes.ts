@@ -121,6 +121,21 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // corpora — training datasets
     db.collection('corpora').createIndex({ id: 1 }, { unique: true }),
 
+    // datasets — the dataset documents behind /v1/data/datasets (MongoDataset). This collection
+    // carried NO index at all, not even the unique id every other one here has, so a lookup by
+    // id and every page of every listing was a scan of every tenant's datasets. One index per
+    // arm of the two access predicates, each carrying the (mutatum, id) page sort, so a page is
+    // a bounded index walk — the same shape and the same reason as collectiones below.
+    db.collection('datasets').createIndex({ id: 1 }, { unique: true }),
+    // `listOwned`: { $or: [ { owner }, { sodalitasId: { $in: teams } } ] }
+    db.collection('datasets').createIndex({ owner: 1, mutatum: -1, id: -1 }),
+    db.collection('datasets').createIndex({ sodalitasId: 1, mutatum: -1, id: -1 }, { sparse: true }),
+    // `listPublic`: { $or: [ { access: 'public' }, { 'access.kind': 'public' } ] } — two arms
+    // because `Dataset.access` is written as the { kind } union and older documents carry the
+    // flat string; both are read, so both are backed.
+    db.collection('datasets').createIndex({ access: 1, mutatum: -1, id: -1 }),
+    db.collection('datasets').createIndex({ 'access.kind': 1, mutatum: -1, id: -1 }, { sparse: true }),
+
     // collectiones — batch containers
     db.collection('collectiones').createIndex({ id: 1 }, { unique: true }),
     // The owner-scoped listing (`MongoCollectio.listOwned`, behind `GET /v1/collectiones`) is a

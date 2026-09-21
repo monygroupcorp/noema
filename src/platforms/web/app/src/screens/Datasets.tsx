@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, type Readiness } from '../lib/datasets';
+import { runBatch, uploadAsset } from '../lib/upload';
 import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
 import { doorPath } from '../lib/entry';
 import { useProject, useProjectScope } from '../state/project';
@@ -12,15 +13,6 @@ import { liveRecords } from '../lib/muse';
 
 const MODALITIES: DatasetModality[] = ['image', 'video', 'audio', '3d'];
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-// Upload a file to R2 via the signed-PUT path, return its permanent public URL
-// (same two-step contract Profile.tsx uses for avatar/banner/background uploads).
-async function uploadAsset(file: File): Promise<string> {
-  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
-  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
-  if (!put.ok) throw new Error(`upload failed (${put.status})`);
-  return permanentUrl;
-}
 
 // Datasets library (train-datasets-library-spec.md, render noema-train-datasets-library.png) —
 // the entry to the training stack: a recognizable shelf of raw material with each set's own
@@ -131,8 +123,14 @@ export function Datasets() {
     try {
       if (source === 'upload') {
         if (files.length === 0) throw new Error('drop at least one file');
-        const mediaUrls = await Promise.all(files.map(uploadAsset));
-        await api.createDataset({ source: 'upload', name: name.trim(), modality, mediaUrls });
+        // Bounded and settled per file. `Promise.all` threw the whole batch away on one
+        // rejection, so forty-nine good uploads were discarded to report the fiftieth.
+        const batch = await runBatch(files, (file) => uploadAsset(file));
+        if (batch.ok.length === 0) throw new Error('nothing uploaded');
+        await api.createDataset({ source: 'upload', name: name.trim(), modality, mediaUrls: batch.ok });
+        if (batch.failedIndexes.length > 0) {
+          setErr(`${batch.failedIndexes.length} of ${files.length} did not upload and are not in the set: ${batch.failedIndexes.map((i) => files[i].name).join(', ')}`);
+        }
       } else {
         const actumIds = Array.from(pickedActa);
         if (actumIds.length === 0) throw new Error('pick at least one generation');
