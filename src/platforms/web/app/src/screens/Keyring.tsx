@@ -4,6 +4,7 @@ import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { FUNDING_LABEL } from '../lib/idents';
+import { addAccountPath } from '../lib/entry';
 import { Chip } from '../shell/Chip';
 
 // Keyring — the real multi-account switcher (Twitter model). One browser holds several
@@ -18,7 +19,8 @@ export function Keyring() {
   const navigate = useNavigate();
 
   const select = (id: string) => { if (id === ident.id) return; if (id === 'anon') goAnonymous(); else void switchAccount(id); };
-  const addAccount = () => navigate('/onboard?add=1');
+  // No return path: this button IS on the keyring, which is where the door lands by default.
+  const addAccount = () => navigate(addAccountPath());
 
   return (
     <AppShell crumb="keyring">

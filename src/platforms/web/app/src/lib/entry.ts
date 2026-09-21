@@ -31,6 +31,15 @@ export const clearOnboarded = (): void => {
 export const doorPath = (next?: string | null): string =>
   next ? `/onboard?next=${encodeURIComponent(next)}` : '/onboard';
 
+/**
+ * The door in ADDITIVE mode — bring another login without dropping the one you hold. It returns
+ * the same way an ordinary sign-in does: someone who reached for a second account from the
+ * account menu was standing on a page, and that page is where they wanted the account. Without
+ * a `next` it falls back to the keyring, which is right for the keyring's own button.
+ */
+export const addAccountPath = (next?: string | null): string =>
+  next ? `/onboard?add=1&next=${encodeURIComponent(next)}` : '/onboard?add=1';
+
 /** Where "Open app" should land: the app for anyone who has been through the door or holds a
  *  login, else the door itself. */
 export const entryPath = (): string => {

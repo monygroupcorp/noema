@@ -8,7 +8,7 @@ import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { doorPath } from '../lib/entry';
-import { safeNext } from './Onboard';
+import { creditsLanded } from '../lib/balance';
 import { Hemisphere, Meter } from './IdentityMeter';
 import { BuyCreditsModal } from './BuyCreditsModal';
 
@@ -46,18 +46,6 @@ const NATIVE_ETH = '0x0000000000000000000000000000000000000000';
 const fmt = (n: number) => n.toLocaleString('en-US');
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
-// Inline alert glyph (kept local so we don't touch the shared icon registry).
-function WarnIc() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
-    </svg>
-  );
-}
-
 export function Funding() {
   const { session, ready } = useSession();
   const navigate = useNavigate();
@@ -66,11 +54,6 @@ export function Funding() {
   // rather than only highlighting a chip they would have to press again.
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get('pack');
-  // The page the buyer was on when they reached for credits, handed to us by the door when
-  // signing in was a step on the way here. Held in state because the auto-buy below strips the
-  // query before it leaves, and this has to outlive that. Same guard as everything else that
-  // arrives in a URL we were sent to.
-  const [cameFrom] = useState(() => safeNext(searchParams.get('back')));
   const [pack, setPack] = useState(preselected ?? 'plus_50');
   // The credit-pack catalog, loaded from the single server source (no hardcoded numbers).
   const [packs, setPacks] = useState<Pack[]>([]);
@@ -94,13 +77,10 @@ export function Funding() {
   const [purse, setPurse] = useState<ArcanumConfig | null>(null);
   const purseOff = purseIsOff(purse);
 
-  // Fiat/card rail — Stripe Checkout redirect + post-return credit poll.
+  // Fiat/card rail — start a Stripe Checkout redirect. What comes BACK from Stripe is the
+  // shell's (shell/CheckoutReturn): the buyer now lands on the page they left, not here.
   const [checkoutBusy, setCheckoutBusy] = useState<string | null>(null);
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
-  const [checkoutStatus, setCheckoutStatus] = useState<'idle' | 'polling' | 'settled' | 'timeout' | 'cancelled'>('idle');
-  // The page the buyer was on when they reached for credits, carried through Stripe by
-  // buildCheckoutRequest. Stripe returns everyone here; this is how they get back.
-  const [backTo, setBackTo] = useState<string | null>(null);
 
   // Invite code → balance. Someone mints a purse from their balance and sends you the token;
   // redeeming moves its whole remaining balance onto your account, once.
@@ -118,6 +98,7 @@ export function Funding() {
       const out = await api.redeemPurse(token);
       setCode('');
       setRedeemed({ credited: out.credited });
+      creditsLanded();   // the top bar's number is the one people check; it was standing stale
       // The credit is already landed server-side; read the balance back so the confirmation
       // shows the account's real state rather than only the delta we were told about.
       try { const s = await api.meStatus(); setRedeemed({ credited: out.credited, balance: s.balanceImpetus }); }
@@ -129,11 +110,10 @@ export function Funding() {
     }
   }
 
-  // The pack an anon visitor is holding: named by ?pack= and real in the server catalog. A
-  // ?pack= that is not a SKU resolves to nothing, and the page falls back to asking them to pick.
-  const chosen = !session && preselected ? packs.find((p) => p.id === preselected) ?? null : null;
-  // ...but not before the catalog has arrived. Until it does there is no pack to name AND no
-  // chip to press, so "pick a pack" would be the same wrong instruction, just briefly.
+  // A ?pack= that is not a real SKU resolves to nothing and the page falls back to asking the
+  // visitor to pick — but not before the catalog has arrived, because until it does there is no
+  // pack to name AND no chip to press, so "pick a pack" would be the same wrong instruction,
+  // just briefly.
   const namingPending = preselected != null && packs.length === 0;
 
   async function connect() {
@@ -152,32 +132,33 @@ export function Funding() {
   // door with this pack in hand — signing in returns them here and the purchase resumes.
   function buyPack(packId: string) {
     setCheckoutErr(null);
-    if (!canCheckout(session)) { navigate(signInThenBuy(packId, cameFrom)); return; }
+    if (!canCheckout(session)) { navigate(signInThenBuy(packId)); return; }
     setCheckoutBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom))
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
   }
 
-  // Arriving as /funding?pack=<id> — from a pricing card's Buy, or handed back by the door after
-  // signing in — starts that purchase straight away. Pressing Buy already WAS the choice; making
-  // it again on this page is the step this removes. It fires once (a ref, not state, so a
-  // re-render can't double-charge) and only once auth has settled, so a signed-in visitor whose
-  // session is still hydrating isn't mistaken for an anon one.
+  // Arriving as /funding?pack=<id> — from a pricing card's Buy — carries a decision the visitor
+  // already made by pressing Buy. So this page does not ask for it again: `buyPack` starts the
+  // checkout for a signed-in visitor, and takes an anon one to the door holding the pack, where
+  // making an account leads straight on to that same checkout. Either way this page is not a
+  // stop, which is the step this removes.
   //
-  // Without a session it deliberately does NOT route to the door: someone who took this pack to
-  // the door and then chose "Enter anonymously" comes back here still anon, and bouncing them
-  // again would loop forever. They land on the highlighted pack with the sign-in note under it,
-  // and clicking is what takes them to the door.
-  const autoBuyFired = useRef(false);
+  // It fires once (a ref, not state, so a re-render can't double-charge) and only once auth has
+  // settled, so a signed-in visitor whose session is still hydrating isn't mistaken for an anon
+  // one. A pack that isn't a real SKU is left alone, and the page falls back to asking them to
+  // pick from the chips.
+  //
+  // The pack leaves the URL before we do, the way the return-from-Stripe flag is dropped: this
+  // page is where Stripe sends a buyer who came from nowhere in particular, and where the browser
+  // Back button lands from the door — either arriving on a URL that would start the whole thing
+  // over, with no way out but forward.
+  const resumeFired = useRef(false);
   useEffect(() => {
-    if (!ready || autoBuyFired.current || !preselected || packs.length === 0) return;
-    if (!canCheckout(session)) return;
+    if (!ready || resumeFired.current || !preselected || packs.length === 0) return;
     if (!packs.some((p) => p.id === preselected)) return;   // not a real SKU — leave them on the page
-    autoBuyFired.current = true;
-    // Drop the pack from the URL before leaving, the way the return-from-Stripe flag is dropped:
-    // otherwise coming BACK from Stripe lands on this URL again and starts the same checkout,
-    // and the back button never escapes.
+    resumeFired.current = true;
     window.history.replaceState({}, '', window.location.pathname);
     buyPack(preselected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,48 +176,6 @@ export function Funding() {
       // If the CTA's ?pack= wasn't a real SKU, fall back to a valid selection.
       setPack((cur) => (p.some((x) => x.id === cur) ? cur : (p[0]?.id ?? cur)));
     }).catch(() => {});
-    return () => { live = false; };
-  }, []);
-
-  // On return from Stripe (success_url carries ?checkout=success), poll /v1/me/status
-  // until the balance moves — the webhook credits asynchronously, so the redirect itself
-  // is not proof of a landed credit. Strip the flag so a refresh doesn't re-poll.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const flag = params.get('checkout');
-    if (flag !== 'success' && flag !== 'cancel') return;
-    // Read the return target before the query goes: `safeNext` is the door's own guard, and
-    // this value is in the same position — handed back to us through a URL Stripe redirects to.
-    setBackTo(safeNext(params.get('back')));
-    // Strip the flag either way, so a refresh neither re-polls nor re-announces an old return.
-    window.history.replaceState({}, '', window.location.pathname);
-    // Backing out of Stripe returns here too, and used to return in silence. Say it: nothing
-    // was charged, and the packs above are still there.
-    if (flag === 'cancel') { setCheckoutStatus('cancelled'); return; }
-    let live = true;
-    setCheckoutStatus('polling');
-    const start = Date.now();
-    const timeoutMs = 5 * 60_000;
-    let baseline: number | null = null;
-    // Every way out of this loop lands on a state the page has words for — settled, or timeout.
-    // Stopping on a run of failed reads without saying so left the visitor watching "waiting for
-    // the credit to land" with nothing behind it.
-    const again = () => {
-      if (Date.now() - start < timeoutMs) setTimeout(poll, 3000);
-      else setCheckoutStatus('timeout');
-    };
-    const poll = () => {
-      api.meStatus().then((s) => {
-        if (!live) return;
-        const bal = Number(s.balanceImpetus);
-        if (baseline == null) { baseline = bal; }
-        else if (bal > baseline) { setCheckoutStatus('settled'); return; }
-        again();
-      }).catch(() => {
-        if (live) again();
-      });
-    };
-    poll();
     return () => { live = false; };
   }, []);
 
@@ -312,32 +251,15 @@ export function Funding() {
                 </div>
               </div>
 
-              {/* Someone holding a pack they cannot buy has already made the choice this
-                  section asks for, and telling them to make it again is the loop: they pressed
-                  Buy, went to the door, chose to stay anonymous, and came back to "pick a pack".
-                  Say which pack is waiting, put the door one click away rather than behind
-                  finding the chip again, and — for the visitor who chose anonymity on purpose —
-                  name the rail that actually serves them instead of leaving them on this one. */}
-              {!session && chosen && (
+              {/* A visitor who arrived holding a pack is already on their way to the door with
+                  it; this only speaks to someone browsing the rails with no pack in hand. */}
+              {!session && !namingPending && (
                 <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
-                  <WarnIc />
-                  <span>
-                    The {chosen.label} pack — {fmt(chosen.credits)} credits for ${chosen.usd} —
-                    is waiting on an account: a card purchase is the one rail that can't be
-                    anonymous, so it needs an identified one.{' '}
-                    <Link to={signInThenBuy(chosen.id, cameFrom)}>Sign in and buy it →</Link>{' '}
-                    Staying anonymous instead? No card can fund an anonymous session at all — the
-                    on-chain wallet below is the rail that can.
-                  </span>
-                </div>
-              )}
-              {!session && !chosen && !namingPending && (
-                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
-                  <WarnIc />
+                  <Ic name="triangle-alert" />
                   <span>
                     A card purchase needs an identified account (fiat can't fund an anonymous
-                    purse). Pick a pack and we'll take you to the door — you come straight back
-                    here to it.
+                    purse). Pick a pack and we'll take you to the door — make an account there and
+                    you go straight on to the card checkout.
                   </span>
                 </div>
               )}
@@ -347,35 +269,6 @@ export function Funding() {
                 </div>
               )}
               {checkoutErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{checkoutErr}</div>}
-              {checkoutStatus === 'polling' && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Payment received — waiting for the credit to land…
-                </div>
-              )}
-              {checkoutStatus === 'settled' && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Credited — your balance is updated.
-                  {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
-                </div>
-              )}
-              {checkoutStatus === 'timeout' && (
-                <div className="warn fund-warn" style={{ marginTop: 'var(--s3)' }}>
-                  <WarnIc />
-                  <span>
-                    Stripe sent you back as paid, but the credit has not landed here yet. It is
-                    credited by a webhook, so it can arrive after this page stops watching —
-                    reload in a few minutes. If it is still missing, send us the Stripe receipt
-                    and we will place it by hand.
-                    {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
-                  </span>
-                </div>
-              )}
-              {checkoutStatus === 'cancelled' && (
-                <div className="fund-guide-h" style={{ marginTop: 'var(--s3)' }}>
-                  Checkout cancelled — nothing was charged. Pick a pack whenever you're ready.
-                  {backTo && <> <Link to={backTo}>Back to what you were doing →</Link></>}
-                </div>
-              )}
             </div>
           </section>
 
@@ -502,7 +395,7 @@ export function Funding() {
             <div className="fund-guide">
               {purseOff && (
                 <div className="warn fund-warn" style={{ marginBottom: 'var(--s3)' }}>
-                  <WarnIc />
+                  <Ic name="triangle-alert" />
                   <span>
                     The ZK bearer purse is <b>coming soon</b> — it unlocks after the trusted-setup
                     ceremony. Funding anonymously from a shielded or fresh wallet (above) works today;
@@ -594,7 +487,7 @@ export function Funding() {
                 </form>
               ) : (
                 <div className="warn fund-warn">
-                  <WarnIc />
+                  <Ic name="triangle-alert" />
                   <span>
                     {/* Back to the bare page, deliberately: this URL may still carry a ?pack= that
                         an anon visitor never chose to buy, and returning to it would start that

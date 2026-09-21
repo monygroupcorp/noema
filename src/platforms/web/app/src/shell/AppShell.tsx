@@ -3,6 +3,7 @@ import { Rail } from './Rail';
 import { Account } from './Account';
 import { Concierge } from './Concierge';
 import { ReportModal } from './ReportModal';
+import { CheckoutReturn } from './CheckoutReturn';
 
 // The persistent frame (dashboard-spec.md §A): left rail (global nav) + a top bar carrying
 // the current surface TITLE (left) and the always-on POSTURE CLUSTER (right). Screens compose
@@ -25,6 +26,9 @@ export function AppShell({
           {heading && <div className="surface-title">{heading}</div>}
           <Account />
         </div>
+        {/* What happened to a card purchase, said on the page Stripe returned the buyer to.
+            Renders nothing on an ordinary page load. */}
+        <CheckoutReturn />
         {children}
       </section>
       {context && <aside className="context">{context}</aside>}

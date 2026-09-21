@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { api } from '../lib/api';
-import { clearOnboarded, doorPath } from '../lib/entry';
+import { addAccountPath, clearOnboarded, doorPath } from '../lib/entry';
+import { onCreditsLanded } from '../lib/balance';
 import { Ic } from '../lib/icons';
 import { Chip } from './Chip';
 import { BuyCreditsModal } from '../screens/BuyCreditsModal';
@@ -32,11 +33,22 @@ export function Account() {
   const [buyOpen, setBuyOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
+  // The balance, re-read whenever a credit lands. It used to be read once, on mount, so the
+  // number in the top bar — the one people look at to see whether their money arrived — was
+  // the one thing a successful purchase could not change until a reload.
   useEffect(() => {
     let live = true;
-    api.meStatus()
-      .then((s) => { if (live && s?.balanceImpetus != null) setLiveCredits(Number(s.balanceImpetus).toLocaleString()); })
-      .catch(() => { /* mock fallback */ });
+    const read = () => {
+      api.meStatus()
+        .then((s) => { if (live && s?.balanceImpetus != null) setLiveCredits(Number(s.balanceImpetus).toLocaleString()); })
+        .catch(() => { /* mock fallback */ });
+    };
+    read();
+    const off = onCreditsLanded(read);
+    return () => { live = false; off(); };
+  }, []);
+  useEffect(() => {
+    let live = true;
     // Reveal the moderation surface only to the platform reviewer (server-authoritative).
     api.getMe().then((me) => { if (live) setAdmin(!!me.admin); }).catch(() => { /* not admin */ });
     return () => { live = false; };
@@ -75,8 +87,11 @@ export function Account() {
   }
   // Switch among held logins (or the anon slot) — a real act via the account list below.
   const switchTo = (id: string) => { setIdentity(id); setOpen(false); };
-  // Additive sign-in: bring another account without dropping the current one.
-  const addAccount = () => guardedNavigate(navigate, '/onboard?add=1');
+  // Additive sign-in: bring another account without dropping the current one — and land back on
+  // the page it was reached from, the way Sign in below does. This menu is open over some screen
+  // the visitor is working on; dropping them on the keyring afterwards is a step they then have
+  // to walk back.
+  const addAccount = () => guardedNavigate(navigate, addAccountPath(location.pathname + location.search));
   // Sign out of the ACTIVE account — drops to the next held login, or the anon path.
   const signOut = () => { signOutActive(); setOpen(false); };
   // Drop every held login, clear the local onboarded flag, and return to the front door. The

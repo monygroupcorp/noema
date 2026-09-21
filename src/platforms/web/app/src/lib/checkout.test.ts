@@ -10,7 +10,7 @@ describe('buildCheckoutRequest', () => {
     expect(buildCheckoutRequest('standard_25', 'https://noema.example').packId).toBe('standard_25');
   });
 
-  it('points success/cancel back at /funding with a checkout flag', () => {
+  it('falls back to /funding when the buyer came from nowhere in particular', () => {
     const req = buildCheckoutRequest('starter_10', 'https://noema.example');
     expect(req.successUrl).toBe('https://noema.example/funding?checkout=success');
     expect(req.cancelUrl).toBe('https://noema.example/funding?checkout=cancel');
@@ -34,33 +34,44 @@ describe('canCheckout — the identified-account gate', () => {
   });
 });
 
-describe('signInThenBuy — the door returns you to the pack you picked', () => {
-  it('sends the visitor to the door carrying the purchase they started', () => {
-    expect(signInThenBuy('creator_100')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dcreator_100');
+describe('signInThenBuy — the door finishes the purchase it interrupted', () => {
+  it('sends the visitor to the door carrying the pack, and nowhere in between', () => {
+    expect(signInThenBuy('creator_100')).toBe('/onboard?buy=creator_100');
   });
 
-  it('round-trips to the funding page for that exact pack', () => {
-    const url = new URL(signInThenBuy('plus_50'), 'https://noema.example');
-    expect(url.searchParams.get('next')).toBe('/funding?pack=plus_50');
+  it('names no intermediate page — the door starts the checkout itself', () => {
+    const url = new URL(signInThenBuy('plus_50', '/canvas?doc=17'), 'https://noema.example');
+    expect(url.pathname).toBe('/onboard');
+    expect(url.searchParams.get('buy')).toBe('plus_50');
+    expect(url.searchParams.get('next')).not.toContain('/funding');
   });
 });
 
-describe('buildCheckoutRequest — carrying the page the buyer came from', () => {
-  it('carries a same-origin app path on both outcomes, so the return can offer the way back', () => {
+describe('buildCheckoutRequest — Stripe returns you to where you were', () => {
+  it('returns to the page the buyer left, on both outcomes — not to a page nobody asked for', () => {
     const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/app');
-    expect(new URL(req.successUrl).searchParams.get('back')).toBe('/app');
-    expect(new URL(req.cancelUrl).searchParams.get('back')).toBe('/app');
+    expect(req.successUrl).toBe('https://noema.example/app?checkout=success');
+    expect(req.cancelUrl).toBe('https://noema.example/app?checkout=cancel');
   });
 
   it('keeps the query of the page it came from — a task is often identified by it', () => {
-    const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/canvas?doc=17');
-    expect(new URL(req.successUrl).searchParams.get('back')).toBe('/canvas?doc=17');
+    const url = new URL(buildCheckoutRequest('plus_50', 'https://noema.example', '/canvas?doc=17').successUrl);
+    expect(url.pathname).toBe('/canvas');
+    expect(url.searchParams.get('doc')).toBe('17');
+    expect(url.searchParams.get('checkout')).toBe('success');
   });
 
-  it('carries nothing when there is nowhere in particular to go back to', () => {
-    const req = buildCheckoutRequest('plus_50', 'https://noema.example');
+  it('refuses an off-site return — the value comes back through a URL Stripe redirects to', () => {
+    for (const evil of ['https://evil.example', '//evil.example', 'app']) {
+      expect(buildCheckoutRequest('plus_50', 'https://noema.example', evil).successUrl)
+        .toBe('https://noema.example/funding?checkout=success');
+    }
+  });
+
+  it('never returns to a /funding URL holding a pack, which would re-start the purchase', () => {
+    const req = buildCheckoutRequest('plus_50', 'https://noema.example', '/funding?pack=plus_50');
     expect(req.successUrl).toBe('https://noema.example/funding?checkout=success');
-    expect(req.cancelUrl).toBe('https://noema.example/funding?checkout=cancel');
+    expect(req.successUrl).not.toContain('pack=');
   });
 });
 
@@ -76,7 +87,7 @@ describe('safeReturn — what is worth carrying through Stripe', () => {
     expect(safeReturn('app')).toBe(false);
   });
 
-  it('drops the funding page itself, which is where the return already lands', () => {
+  it('drops the funding page itself, which is where a return with nowhere to go already lands', () => {
     expect(safeReturn('/funding')).toBe(false);
     expect(safeReturn('/funding?pack=plus_50')).toBe(false);
   });
@@ -89,20 +100,23 @@ describe('safeReturn — what is worth carrying through Stripe', () => {
 });
 
 describe('signInThenBuy — the page they came from survives the door', () => {
-  it('carries the page alongside the pack, so the return is not lost by signing in', () => {
+  it('carries the page as the door\'s own next, which is what Stripe returns them to', () => {
     const url = new URL(signInThenBuy('plus_50', '/canvas?doc=17'), 'https://noema.example');
-    const next = new URL(url.searchParams.get('next') as string, 'https://noema.example');
-    expect(next.pathname).toBe('/funding');
-    expect(next.searchParams.get('pack')).toBe('plus_50');
-    expect(next.searchParams.get('back')).toBe('/canvas?doc=17');
+    expect(url.searchParams.get('next')).toBe('/canvas?doc=17');
   });
 
   it('drops an off-site return the same way the checkout request does', () => {
-    expect(signInThenBuy('plus_50', 'https://evil.example')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
-    expect(signInThenBuy('plus_50', '//evil.example')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
+    expect(signInThenBuy('plus_50', 'https://evil.example')).toBe('/onboard?buy=plus_50');
+    expect(signInThenBuy('plus_50', '//evil.example')).toBe('/onboard?buy=plus_50');
   });
 
-  it('drops the funding page itself — the pack already lands there', () => {
-    expect(signInThenBuy('plus_50', '/funding')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
+  it('drops the funding page itself — a return with nowhere to go already lands there', () => {
+    expect(signInThenBuy('plus_50', '/funding')).toBe('/onboard?buy=plus_50');
+  });
+
+  it('escapes a pack id rather than letting it open a second query parameter', () => {
+    const url = new URL(signInThenBuy('a&next=/evil'), 'https://noema.example');
+    expect(url.searchParams.get('buy')).toBe('a&next=/evil');
+    expect(url.searchParams.get('next')).toBeNull();
   });
 });
