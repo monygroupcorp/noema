@@ -80,12 +80,14 @@ export const ceremony = {
         zkeyHash?: string | null;
         zkeySource?: ServedKey['source'];
         verifierPaired?: boolean | null;
+        imageKeyHash?: string | null;
       };
       if (cfg.zkeySource === undefined) return null;
       return {
         hash: cfg.zkeyHash ?? null,
         source: cfg.zkeySource ?? null,
         paired: cfg.verifierPaired ?? null,
+        imageKeyHash: cfg.imageKeyHash ?? null,
       };
     } catch {
       return null;
@@ -175,6 +177,11 @@ export interface ServedKey {
    * half. null when the site cannot say — an older server, or a key hosted elsewhere.
    */
   paired?: boolean | null;
+  /**
+   * sha256 of the proving key this build carries, when that is not the key being served.
+   * Null when there is nothing to disambiguate, and on a server that predates the field.
+   */
+  imageKeyHash?: string | null;
 }
 
 export type ServedKeyVerdict =
@@ -182,8 +189,17 @@ export type ServedKeyVerdict =
   | 'match'
   /** The site serves a key the transcript does not name. */
   | 'mismatch'
-  /** The transcript names a final key the site has not got. */
+  /** The transcript names a final key the site has not got, and it holds no other. */
   | 'absent'
+  /**
+   * The transcript names a final key the site has not got, and the key it IS holding is a
+   * different one — so it serves nothing rather than pass that off as the ceremony's.
+   * Same refusal as `absent`, opposite remedy: this box has a proving key and it is the
+   * wrong one, which is what a build older than the ceremony's output looks like from
+   * outside. Splitting the two is the difference between "publish the key here" and
+   * "this site is not running the build that carries it".
+   */
+  | 'withheld'
   /** The key is hosted elsewhere, so the API has not seen those bytes and cannot name them. */
   | 'external'
   /**
@@ -218,7 +234,9 @@ export function checkServedKey(
   if (!status || status.phase !== 'finalized' || !status.finalHash) return 'unknown';
   if (!served || served.source === null) return 'unknown';
   if (served.source === 'external') return 'external';
-  if (served.source === 'none' || !served.hash) return 'absent';
+  if (served.source === 'none' || !served.hash) {
+    return served.imageKeyHash ? 'withheld' : 'absent';
+  }
   if (served.hash.toLowerCase() !== status.finalHash.toLowerCase()) return 'mismatch';
   // Only an explicit false downgrades the verdict: a server that does not report the
   // pairing is the older build, and 'match' is what it was always able to say.

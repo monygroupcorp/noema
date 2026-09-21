@@ -1,0 +1,5 @@
+# The hermetic pattern list is append-only and every branch appends to its end, so two branches
+# adding a test collide on the last line even though neither read the other's. The union driver
+# keeps both sides' lines instead of asking. Duplicates that come out of it are harmless:
+# scripts/run-tests.sh dedupes the resolved file list before it runs anything.
+tests/hermetic.patterns merge=union

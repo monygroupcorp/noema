@@ -378,7 +378,7 @@ export const ESSENTIA_FLUXI2I: Essentia = {
 export const ESSENTIA_KONTEXTEDIT: Essentia = {
   id: 'kontext-edit',
   nomen: 'FLUX.1 Kontext — instruction edit',
-  descriptio: 'FLUX.1 Kontext instruction edit — follows plain-language edits ("add a hat", "make it night") and works with flux.1 LoRAs. Pick it for targeted edits; use FLUX.2 Klein for stronger, newer edits.',
+  descriptio: 'FLUX.1 Kontext instruction edit — follows plain-language edits ("add a hat", "make it night") and works with flux.1 LoRAs. Pick it for targeted edits; use FLUX.2 Klein 4B for newer edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -1333,7 +1333,12 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_KREA_TURBO,
   ESSENTIA_FLUXI2I,
   ESSENTIA_KONTEXTEDIT,
-  ESSENTIA_KLEINEDIT,
+  // ESSENTIA_KLEINEDIT (Klein 9B edit) is NOT offered. Its only weight source is gated on
+  // HuggingFace and a pod downloads with unauthenticated wget, so the flow could never run: the
+  // machine is provisioned and paid for, then dies at the weights pull. An offer that fails after
+  // the money is spent is worse than no offer. ESSENTIA_KLEINEDIT_4B does the same edit on the 4B
+  // stack, whose weights are reachable. Put this line back when the 9B is mirrored to an auth-free
+  // source as sources[0] — the definition is untouched below, and so is the fundamentum.
   ESSENTIA_KLEINEDIT_4B,
   ESSENTIA_KLEIN,
   ESSENTIA_RMBG,

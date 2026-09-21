@@ -19,6 +19,7 @@ import { RunStageline, Stageline } from '../components/RunStageline';
 import { AccountModal } from './AccountModal';
 import { BuyCreditsModal } from './BuyCreditsModal';
 import { getSession } from '../lib/api';
+import { doorPath } from '../lib/entry';
 import { fragmentKey } from '../../../../../crystal/muse/taxonomy.js';
 import {
   canFireDecompose,
@@ -3260,14 +3261,21 @@ export function MuseSessions() {
   const [query, setQuery] = useState('');
   const [name, setName] = useState<string | null>(null);
 
+  // Muse sessions belong to an account, so there is nothing to ask for without one. Asking
+  // anyway sent the anonymous commitment header at an owner-scoped route, which answers
+  // auth.missing every time — a 401 the visitor could do nothing about, printed at them, and a
+  // warn in the log for a question that was never answerable.
+  const signedIn = getSession() !== null;
+
   useEffect(() => {
     if (!id) return;
+    if (!signedIn) { setSessions([]); return; }
     let live = true;
     api.listMuseSessions(id)
       .then(({ sessions: list }) => { if (live) setSessions(list); })
       .catch((e) => { if (!live) return; setSessions([]); setError(errText(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, signedIn]);
 
   // The dataset's name, for the crumb only — the list above does not wait on it.
   // `getDatasetFull` covers a public dataset's own name too (noema-dataset-access-field).
@@ -3316,9 +3324,19 @@ export function MuseSessions() {
           <span className="gt-sub mono">{rows.length === 0 ? '' : `${shown.length} of ${rows.length}`}</span>
         </div>
 
-        {error && <div className="sub mono">{error}</div>}
-        {sessions === null && <div className="sub mono">loading…</div>}
-        {emptyNote && <div className="empty"><div className="t">{emptyNote}</div></div>}
+        {!signedIn && (
+          <div className="empty">
+            <div className="t">sessions belong to an account</div>
+            <div className="s">
+              <Link to={doorPath(`/datasets/${id}/muse/sessions`)}>Sign in</Link> to see the sessions
+              broken off this dataset. Anonymous work is not kept under a name, so there is nothing
+              here to look up yet.
+            </div>
+          </div>
+        )}
+        {signedIn && error && <div className="sub mono">{error}</div>}
+        {signedIn && sessions === null && <div className="sub mono">loading…</div>}
+        {signedIn && emptyNote && <div className="empty"><div className="t">{emptyNote}</div></div>}
 
         <ul className="muse-hist">
           {shown.map((row, i) => (

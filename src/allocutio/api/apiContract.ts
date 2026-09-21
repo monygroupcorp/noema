@@ -2875,6 +2875,16 @@ export const API_CONTRACT: ApiContract = {
     },
     {
       method: 'GET',
+      path: '/editiones',
+      summary: "The caller's own publications of one artifact, newest first. The review queue above carries HELD items only, so a terminal outcome — a moderation refusal, or a publication already live — could not be read back after the session that filed it ended; a publish surface that reopens needs this rather than the memory of the tab that pressed the button. Author-scoped on the publication's own identity: an artifact the caller never published reads as the empty list.",
+      auth: true,
+      query: [
+        { name: 'artifact', description: "The artifact whose publications to list, as '<kind>:<id>' (kind: actum | intella | collectio). Required — an unfiltered listing is not offered here.", required: true, schema: { type: 'string' } },
+      ],
+      response: EditionListEnvelopeSchema,
+    },
+    {
+      method: 'GET',
       path: '/editiones/:id',
       summary: 'Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.',
       auth: true,
