@@ -48,6 +48,8 @@ const fakeApi = {
       })
     }
     if (id === 'unhandled') throw new TypeError('not an ApiError')
+    // An ordinary refusal: the caller asked a fair question and "no" is simply true.
+    if (id === 'expected') throw Errors.notFoundPartner()
     throw Errors.notFoundRun(id)
   },
 } as unknown as ApiFacade
@@ -265,4 +267,23 @@ test('an unhandled (non-ApiError) throw logs the template, not the populated pat
   assert.equal(typeof entry.requestId, 'string')
   assert.equal(typeof entry.durationMs, 'number')
   assert.ok(!JSON.stringify(entry).includes('/v1/runs/unhandled'), 'the populated path must not be logged')
+})
+
+test('an EXPECTED 4xx still answers, and emits no api-error warn', async () => {
+  const res = await call('/v1/runs/expected', AUTHED)
+  assert.equal(res.status, 404, 'the caller still gets its answer')
+  assert.equal(JSON.parse(res.body).error.code, 'not_found.partner')
+
+  // `GET /v1/me/partner` answers this to every user who is not a partner, on every dashboard
+  // load — sixty a day, and the single largest source of warns in the log. It is logged at
+  // debug now, which is below the default threshold, so at default level the line is gone.
+  assert.deepEqual(entries, [], 'an ordinary refusal emits no entry at the default level')
+})
+
+test('an ordinary refusal does not take the ordinary 4xx warn with it', async () => {
+  const res = await call(`/v1/runs/${SAMPLE_RUN_ID}`, AUTHED)
+  assert.equal(res.status, 404)
+  const entry = only()
+  assert.equal(entry.level, 'warn', 'a refusal that is NOT marked expected still warns')
+  assert.equal(entry.code, 'not_found.run')
 })

@@ -376,6 +376,11 @@ export function createApiRouter(deps: {
             // A deliberate 5xx (fail-closed gates included) is an operator-facing condition,
             // so the message is carried. `opts.details` is not: it is caller-shaped.
             log.error('api error', { ...base, message: err.message })
+          } else if (err.opts.expected) {
+            // Ordinary traffic, and named as such by the error itself: the caller asked a fair
+            // question and "no" is the true answer. A warn per occurrence buries the refusals
+            // that DO mean something — these were sixty a day and the largest single source.
+            log.debug('api refusal', base)
           } else {
             // 4xx carries the code and nothing else from the error — the message can quote
             // caller input. `warn`, not `error`: 401s on public routes are ordinary traffic.

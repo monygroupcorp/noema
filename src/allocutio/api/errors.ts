@@ -19,6 +19,17 @@ export interface ApiErrorBody {
 }
 
 export interface ApiErrorOpts {
+  /**
+   * This refusal is an ordinary answer, not an operator concern: the caller asked a reasonable
+   * question and "no" is simply what is true. Read only by the router's logging, never
+   * serialized — a caller has no use for it and it is not part of the published surface.
+   *
+   * Every 4xx is otherwise logged at `warn`, which is right for a refusal that might mean
+   * something is wrong and wrong for one that is just traffic. `GET /v1/me/partner` answers 404
+   * to every user who is not a partner — the dashboard asks on every load and branches on the
+   * code — and those sixty a day were the single largest source of warns in the log.
+   */
+  expected?: boolean
   retryable?: boolean
   retryAfter?: number
   details?: Record<string, unknown>
@@ -125,10 +136,10 @@ export const Errors = {
    *  `not_found.partner_request` code with the by-id variant above — same resource, and the
    *  dashboard branches on the code, not on which lookup missed. */
   notFoundOwnPartnerRequest: () =>
-    new ApiError('not_found.partner_request', 'No partner request found for this account', 404),
+    new ApiError('not_found.partner_request', 'No partner request found for this account', 404, { expected: true }),
   /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
    *  both look identical from the caller's side: "you don't have partner access". */
-  notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),
+  notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404, { expected: true }),
   notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
   /**
    * NOT retryable, said out loud. A balance that cannot cover a reservation is a terminal
