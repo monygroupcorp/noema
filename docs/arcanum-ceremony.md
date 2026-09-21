@@ -282,6 +282,14 @@ named the remedy was on the one surface nobody off the box can read.
 
 The `/ceremony` page reads the same two fields and says which case it is in words.
 
+The second case is now refused before it can ship. `tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts`
+hashes the tracked `arcanum_final.zkey` and compares it against the `finalHash` the ceremony
+published, transcribed into the test from `GET /v1/ceremony`. Every other test here derives its
+expected hash from the tracked file itself, so a key swapped for any other bytes proves itself and
+the suite stays green while the site serves nothing; this one is the only comparison against a
+number the tree does not get to choose. When a ceremony is re-run, that constant is updated from
+its new transcript in the same commit that lands the new key.
+
 `verification_key.json` must come from the same finalize run as the key being served: it is
 exported from that exact zkey, and a proof made against a proving key whose verification key
 the server does not hold will not verify.
