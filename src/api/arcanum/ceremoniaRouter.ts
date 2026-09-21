@@ -12,6 +12,7 @@ import {
 import { readSession } from '../../crystal/sessionToken.js'
 import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { makeLogger } from '../../lib/logger.js'
+import { faultReporter } from '../../lib/standingFault.js'
 
 const log = makeLogger('ceremonia:router')
 
@@ -37,6 +38,9 @@ const MAX_ZKEY_BYTES = 64 * 1024 * 1024 // arcanum zkey is ~5MB; cap generously.
 //     of the cookie's uuid, not the raw cookie (never store/expose a bearer-ish secret
 //     verbatim — mirrors `ownerKeyOf`'s bursaToken/commitment discriminants).
 const CEREMONY_COOKIE = 'noema-cer-sid'
+
+/** The one standing fault on the polled status route: the ceremony record cannot be read. */
+const STATUS_UNREADABLE = 'ceremony-status-unreadable'
 
 // Cookie HMAC secret: reuse JWT_SECRET (already the app's session-signing secret) when
 // set; else a per-process random secret. The cookie is a low-stakes anti-spam token
@@ -95,6 +99,8 @@ export interface CeremoniaRouterConfig {
   custody?: ZkeyCustody
   /** snarkjs continuation-verifier inputs (r1cs always; ptau when mounted). */
   verifier?: ContinuationVerifierOpts
+  /** Clock behind the settle window that tells a returning fault from a flapping one. */
+  now?: () => number
 }
 
 export function createCeremoniaRouter(
@@ -102,6 +108,13 @@ export function createCeremoniaRouter(
   config: CeremoniaRouterConfig = {},
 ): Router {
   const router = Router()
+  // GET / is polled — by the /ceremony page in every open browser, and by whatever
+  // monitors the sequencer. A store that cannot be read is a condition that holds until
+  // someone fixes the store, so reporting it from here unguarded is one log.error per
+  // poll per viewer, for as long as the outage lasts, and the outage's real cause is
+  // somewhere underneath it. See `faultReporter`: first occurrence is the error, repeats
+  // go to debug while it still holds.
+  const faults = faultReporter(log, config.now)
 
   /**
    * Can a contributor actually start right now? An open phase is not enough: the chain
@@ -121,13 +134,15 @@ export function createCeremoniaRouter(
   router.get('/', async (_req, res) => {
     try {
       const status = await store.status()
-      return res.json({
+      const body = {
         ...status,
         headHash: headHash(status),
         acceptingContributions: await acceptingContributions(status),
-      })
+      }
+      faults.clear(STATUS_UNREADABLE)
+      return res.json(body)
     } catch (err) {
-      log.error('ceremony status error', { error: String(err) })
+      faults.report(STATUS_UNREADABLE, 'ceremony status error', { error: String(err) })
       return res.status(500).json({ error: 'internal error' })
     }
   })

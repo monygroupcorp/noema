@@ -8,6 +8,9 @@ import { MemoryCeremoniaStore } from '../../../src/arcanum/CeremoniaStore.js'
 import type { ZkeyCustody } from '../../../src/arcanum/CeremoniaCustody.js'
 import { mintSession } from '../../../src/crystal/sessionToken.js'
 import { fakeZkey, type FakeLink } from '../../unit/arcanum/fakeZkey.js'
+import { bus } from '../../../src/lib/bus.js'
+import type { LogEntry } from '../../../src/lib/logger.js'
+import { SETTLE_MS } from '../../../src/lib/standingFault.js'
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
@@ -334,4 +337,99 @@ test('the status returned with an accepted contribution reports the new head is 
   // bytes it just stored have to be retrievable under the hash it just published.
   assert.equal(res.body.acceptingContributions, true)
   assert.equal(res.body.headHash, sha(fakeZkey(after(ROOT, 'c1'))))
+})
+
+// ── The polled status route does not flood the log ──────────────────────────────────
+//
+// GET /v1/ceremony is polled by the /ceremony page in every open browser and by whatever
+// watches the sequencer. A store it cannot read is a condition that holds until someone
+// repairs the store, so an unguarded report of it is one log.error per poll per viewer —
+// the same flood, on the same component, that buried the log once already, and the outage
+// it is reporting has its real cause somewhere underneath the noise.
+
+/** A store whose status() fails while `down` is set — a database that went away. */
+class FlakyStore extends MemoryCeremoniaStore {
+  down = true
+  async status() {
+    if (this.down) throw new Error('connection refused')
+    return super.status()
+  }
+}
+
+/** Errors the router emitted while `fn` ran. The logger fans out to `bus`. */
+async function routerErrorsWhile(fn: () => Promise<void>): Promise<LogEntry[]> {
+  const seen: LogEntry[] = []
+  const onLog = (e: LogEntry) => {
+    if (e.component === 'ceremonia:router' && e.level === 'error') seen.push(e)
+  }
+  bus.on('log', onLog)
+  try { await fn() } finally { bus.off('log', onLog) }
+  return seen
+}
+
+/** An app on a given store and clock — the clock is what the settle window is read from. */
+function appOn(store: MemoryCeremoniaStore, now?: () => number) {
+  const app = express()
+  app.use('/v1/ceremony', express.json(), createCeremoniaRouter(store, {
+    custody: new MemoryCustody(),
+    verifier: { r1csPath: '/nonexistent.r1cs', ptauPath: undefined },
+    now,
+  }))
+  return app
+}
+
+test('an unreadable ceremony record is one error, not one per poll', async () => {
+  const store = new FlakyStore()
+  const app = appOn(store)
+  const errors = await routerErrorsWhile(async () => {
+    for (let i = 0; i < 20; i++) {
+      assert.equal((await request(app).get('/v1/ceremony')).status, 500)
+    }
+  })
+  // Twenty polls is twenty minutes of one monitor, or one page-view's worth of a browser
+  // on the poll interval. The log is bounded by the outage, not by either.
+  assert.equal(errors.length, 1)
+  assert.match(String(errors[0].msg), /ceremony status error/)
+})
+
+test('a ceremony record that comes back and fails again is news the second time', async () => {
+  const store = new FlakyStore()
+  let clock = 1_000_000
+  const app = appOn(store, () => clock)
+  const first = await routerErrorsWhile(async () => {
+    await request(app).get('/v1/ceremony')
+    await request(app).get('/v1/ceremony')
+  })
+  assert.equal(first.length, 1)
+
+  // The store is repaired, answers, and stays answering well past the settle window.
+  store.down = false
+  assert.equal((await request(app).get('/v1/ceremony')).status, 200)
+  clock += SETTLE_MS * 2
+
+  // A second outage is a second fault, not a repeat of the one that already cleared.
+  store.down = true
+  const second = await routerErrorsWhile(async () => {
+    await request(app).get('/v1/ceremony')
+    await request(app).get('/v1/ceremony')
+  })
+  assert.equal(second.length, 1)
+})
+
+test('a store that flaps in and out is one fault, not one per recovery', async () => {
+  const store = new FlakyStore()
+  let clock = 1_000_000
+  const app = appOn(store, () => clock)
+  const errors = await routerErrorsWhile(async () => {
+    // A database answering one poll and refusing the next: without the settle window
+    // this clears and re-arms forever, which is the same flood at half the rate.
+    for (let i = 0; i < 10; i++) {
+      store.down = false
+      await request(app).get('/v1/ceremony')
+      store.down = true
+      await request(app).get('/v1/ceremony')
+      clock += 1_000
+    }
+  })
+  assert.equal(errors.length, 1)
 })
