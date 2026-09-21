@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 
 // The trusted-setup ceremony is two things kept in two places. The transcript — who
 // contributed, in what order, and the hash of the key each one produced — is a database
@@ -150,4 +152,95 @@ test('docker-compose.prod.yml mounts the ceremony custody, at the path deploy.sh
     'docker-compose.prod.yml and deploy.sh point ceremony custody at different paths, so which ' +
       'keys the sequencer can find depends on which one last started it.'
   )
+})
+
+// The two tests above read the two files a deploy is written in, and between them that is
+// every path by which custody is *configured*. It is not every path by which custody moves.
+// The production `docker run` also carries --env-file, and a CEREMONY_ZKEY_DIR line in that
+// file repoints custody with the mount still in place and both tests above still green —
+// custody back inside the image under a variable that looks deliberate. `.env-example`
+// recommended exactly that path for as long as the mount has existed.
+//
+// So deploy.sh refuses it, and this runs that refusal rather than reading it: the guard's own
+// text is lifted out of the script and executed, because a test that greps for a guard proves
+// the guard is present and nothing about what it does.
+
+/** A shell function's text, from `name() {` to the `}` in column 0 that closes it. */
+function shellFunction(script: string, name: string): string | null {
+  const lines = script.split('\n')
+  const at = lines.findIndex(l => l.startsWith(`${name}() {`))
+  if (at < 0) return null
+  const end = lines.findIndex((l, i) => i > at && l === '}')
+  return end < 0 ? null : lines.slice(at, end + 1).join('\n')
+}
+
+/** deploy.sh's own in-container custody path, so this test cannot drift from the script. */
+function custodyPathInDeploy(script: string): string {
+  const run = continuedBlock(script, '--env CEREMONY_ZKEY_DIR=')
+  const declared = run && /--env CEREMONY_ZKEY_DIR="?([^"\s\\]+)"?/.exec(run)
+  assert.ok(declared, 'deploy.sh sets no CEREMONY_ZKEY_DIR on its docker run')
+  return expand(declared![1], shellVars(script))
+}
+
+/** Run deploy.sh's preflight against an `.env`, or against no `.env` at all when null. */
+function runCustodyGuard(envFileBody: string | null): { status: number, out: string } {
+  const script = readFileSync(join(ROOT, 'deploy.sh'), 'utf8')
+  const fn = shellFunction(script, 'assert_custody_not_repointed')
+  assert.ok(
+    fn,
+    'deploy.sh has no assert_custody_not_repointed — a .env line can move ceremony custody ' +
+      'back inside the image, and the next deploy ends the ceremony with every file this ' +
+      'test reads unchanged.'
+  )
+
+  const dir = mkdtempSync(join(tmpdir(), 'ceremony-custody-'))
+  const envFile = join(dir, '.env')
+  if (envFileBody !== null) writeFileSync(envFile, envFileBody)
+
+  const r = spawnSync('bash', ['-c', [
+    'set -euo pipefail',
+    `ENV_FILE=${JSON.stringify(envFile)}`,
+    `CEREMONY_DIR_IN_CONTAINER=${JSON.stringify(custodyPathInDeploy(script))}`,
+    `log() { printf '%s\\n' "$1"; }`,
+    fn!,
+    'assert_custody_not_repointed',
+  ].join('\n')], { encoding: 'utf8' })
+
+  rmSync(dir, { recursive: true, force: true })
+  return { status: r.status ?? -1, out: `${r.stdout}${r.stderr}` }
+}
+
+test('deploy.sh lets a box whose .env leaves ceremony custody alone deploy', () => {
+  const mounted = custodyPathInDeploy(readFileSync(join(ROOT, 'deploy.sh'), 'utf8'))
+  for (const [what, body] of [
+    ['no .env file at all', null],
+    ['an .env that says nothing about custody', 'BOT_TOKEN=x\nMONGO_PASS=y\n'],
+    ['an .env naming the mounted path', `BOT_TOKEN=x\nCEREMONY_ZKEY_DIR=${mounted}\n`],
+    ['a commented-out line, as .env-example ships it', '# CEREMONY_ZKEY_DIR=/usr/src/app/storage/ceremony\n'],
+  ] as [string, string | null][]) {
+    const r = runCustodyGuard(body)
+    assert.equal(r.status, 0, `deploy.sh refused to deploy with ${what}:\n${r.out}`)
+  }
+})
+
+test('deploy.sh refuses a box whose .env moves ceremony custody off the mount', () => {
+  // The path .env-example used to recommend, which is inside the image.
+  const r = runCustodyGuard('BOT_TOKEN=x\nCEREMONY_ZKEY_DIR=/usr/src/app/storage/ceremony\n')
+  assert.notEqual(
+    r.status, 0,
+    'deploy.sh deployed a box whose .env points ceremony custody inside the image. The mount ' +
+      'is still there and unused; the next deploy takes the trusted-setup keys with it.'
+  )
+  assert.match(r.out, /\/usr\/src\/app\/storage\/ceremony/,
+    `the refusal does not name the path that caused it:\n${r.out}`)
+  assert.match(r.out, /CEREMONY_ZKEY_DIR/, `the refusal does not name the variable:\n${r.out}`)
+
+  // `CEREMONY_ZKEY_DIR=` is not "unset" to docker — it is the empty string, which
+  // ceremonyCustodyDir() passes through (`??` catches null, not ''), leaving custody at no
+  // path at all. A bare `CEREMONY_ZKEY_DIR` takes whatever the host exports.
+  for (const line of ['CEREMONY_ZKEY_DIR=', 'CEREMONY_ZKEY_DIR']) {
+    const empty = runCustodyGuard(`${line}\n`)
+    assert.notEqual(empty.status, 0,
+      `deploy.sh accepted \`${line}\` in .env, which does not resolve to the mount:\n${empty.out}`)
+  }
 })
