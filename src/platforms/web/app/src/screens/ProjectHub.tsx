@@ -193,7 +193,7 @@ export function ProjectHub() {
                 removes the project (a grouping lens); its assets stay in your account. */}
             <div style={{ marginTop: 'var(--s5, 20px)' }}>
               {armDelete ? (
-                <div className="warn" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="warn" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span>Delete <b>{p.name}</b>? The project (its grouping + holdings references) goes away — the datasets, models and collections themselves stay in your account.</span>
                   <span style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                     <button className="btn ghost bad" onClick={doDelete}><Ic name="trash-2" /> Delete permanently</button>
