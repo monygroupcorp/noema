@@ -84,6 +84,7 @@ tests/unit/arcanum/verifierPairing.test.ts
 tests/unit/arcanum/verifierPairingReal.test.ts
 tests/unit/arcanum/ceremonyKeyPublish.test.ts
 tests/unit/arcanum/ceremonyCustody.test.ts
+tests/unit/api/ceremoniaRouter.test.ts
 tests/unit/crystal/SecurePodClient.test.ts
 tests/unit/execution/ActumCompletor.test.ts
 tests/unit/crystal/executionWebhook.test.ts
