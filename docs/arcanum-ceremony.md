@@ -328,6 +328,13 @@ with `CEREMONY_DIR`) at `/var/lib/noema/ceremony` and set `CEREMONY_ZKEY_DIR` to
 sequencer run any other way should have that directory pointed somewhere that outlives the
 process.
 
+That defence is two hand-written lines per file, and dropping either is invisible until a
+contributor asks for a head that is gone — so `tests/unit/architecture/ceremonyCustodyIsMounted.test.ts`
+holds them together. Whatever starts the production app has to set `CEREMONY_ZKEY_DIR` *and*
+bind-mount a host directory at exactly that path, and the two files have to name the same
+path as each other: a variable pointing at an unmounted directory is the in-image default
+wearing a different name, and a mount under a path nothing reads is custody nobody keeps.
+
 The status the page reads says which of the two is true. `acceptingContributions` is false
 whenever the sequencer cannot hand out the head, whatever the phase says, and the page reads
 "Ceremony open · contributions paused" rather than inviting a contribution into a 503.
