@@ -4,7 +4,12 @@
   background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px)}
 .lab-bar .lab-tag{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase}
 .lab-bar .lab-meta{color:var(--faint);font-size:var(--fs-xs)}
-.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1)}
+/* `flex-wrap` here and not only on `.lab-bar`: the bar wraps between its children, but each
+   control group was an unbreakable inline-flex row, and the widest of them — the five display
+   faces — is itself wider than a phone. That pushed the document to 500px on a 390px viewport
+   and gave the whole page a horizontal scroll, while every other route in the walk measured
+   exactly 390. A group that cannot break makes its parent's wrapping irrelevant. */
+.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1);flex-wrap:wrap}
 .lab-bar .lab-ctl > .mono{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
 .lab-bar button{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);
   background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-sm);
