@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, checkServedKey, contributionsPaused, type CeremonyStatus, type ContributePhase, type ServedKey } from '../lib/ceremony';
+import { ceremony, checkServedKey, contributionsPaused, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import { entryPath } from '../lib/entry';
 import './landing.css';
@@ -207,7 +207,10 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
   const verdict = checkServedKey(status, served);
   if (verdict === 'unknown') return null;
 
-  const NOTE = {
+  // Typed so a new verdict cannot be added without the words that go with it: an
+  // unhandled case here would render an empty banner under a finished transcript, which
+  // is the one place on this page that must never be silent.
+  const NOTES: Record<Exclude<ServedKeyVerdict, 'unknown'>, { icon: string; text: string }> = {
     match: {
       icon: 'check',
       text: 'The proving key this site serves is the key above, hash for hash. Check it yourself: '
@@ -223,6 +226,13 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
       text: 'This site is serving no proving key: the ceremony is finalized but its key is not '
         + 'published here yet. It serves nothing rather than serve a key the record does not name.',
     },
+    withheld: {
+      icon: 'flag',
+      text: 'This site is serving no proving key. It is holding one — but a different key from '
+        + 'the one this transcript names, so it is not handed out: a key outside the record has '
+        + 'no ceremony behind it. The ceremony above stands; what is missing is its key on this '
+        + 'server. Compare zkeyHash against imageKeyHash at /arcanum/config to see both.',
+    },
     external: {
       icon: 'file-text',
       text: 'The proving key is hosted off this API, so we cannot name its bytes for you. '
@@ -234,7 +244,8 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
         + 'key it judges proofs with came from a different setup, so a proof made with it '
         + 'will not verify here. The ceremony is not yet in force on this site.',
     },
-  }[verdict];
+  };
+  const NOTE = NOTES[verdict];
 
   return (
     <div className={`cer-served cer-served-${verdict}`}>

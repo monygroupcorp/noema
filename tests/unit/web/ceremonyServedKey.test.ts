@@ -92,3 +92,52 @@ test('the pairing never rescues a key the transcript does not name', () => {
   // Wrong key, vouched for: still the wrong key. The hash comparison comes first.
   assert.equal(checkServedKey(finalized(), { hash: OTHER, source: 'ceremony', paired: true }), 'mismatch')
 })
+
+// ---------------------------------------------------------------------------
+// "Serves nothing" has two causes and one message, and they want opposite work.
+//
+// A box whose custody a deploy emptied is missing bytes: publish the key there
+// and it is done. A box running a build older than the ceremony's output is not
+// missing anything — it is holding a proving key, just the wrong one, and no
+// amount of publishing on that box helps because the build itself predates the
+// key. Both read `zkeySource: 'none'` and both said "not published here yet".
+//
+// The byte that separates them is the hash of the key the build carries, which
+// /arcanum/config now reports whenever that is not the key being served.
+// ---------------------------------------------------------------------------
+
+test('serving nothing while holding a different key is withheld, not absent', () => {
+  assert.equal(
+    checkServedKey(finalized(), { hash: null, source: 'none', imageKeyHash: OTHER }),
+    'withheld',
+  )
+})
+
+test('serving nothing and holding nothing is still absent', () => {
+  // Nothing to name, so nothing to tell apart — the message that was always right here.
+  assert.equal(
+    checkServedKey(finalized(), { hash: null, source: 'none', imageKeyHash: null }),
+    'absent',
+  )
+  // A server that predates the field omits it, and keeps the verdict it always gave.
+  assert.equal(checkServedKey(finalized(), { hash: null, source: 'none' }), 'absent')
+})
+
+test('the site can name the key it belongs to and still be withholding another', () => {
+  // The live shape: /config reports zkeyHash (the transcript's key, which this box does
+  // not have) beside imageKeyHash (the key it does). Naming the expected key is not the
+  // same as serving it, and the verdict follows the source, not the hash.
+  assert.equal(
+    checkServedKey(finalized(), { hash: null, source: 'none', imageKeyHash: OTHER, paired: null }),
+    'withheld',
+  )
+})
+
+test('a build carrying the right key is never withheld — it is serving it', () => {
+  // imageKeyHash is only reported when the image key is NOT the served key, so a match
+  // can never carry one. Belt and braces: the source decides first.
+  assert.equal(
+    checkServedKey(finalized(), { hash: FINAL, source: 'ceremony', imageKeyHash: null }),
+    'match',
+  )
+})

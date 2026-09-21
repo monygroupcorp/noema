@@ -254,6 +254,34 @@ the final key is not published, `/arcanum/circuit/zkey` answers 503 and `/arcanu
 reports `ready: false` — the committed key is *not* served in its place, because it is not
 the ceremony's output and serving it under a finished transcript would say that it was.
 
+### When it serves nothing, which nothing is it?
+
+`zkeySource: "none"` under a finished transcript is two different boxes wearing one answer,
+and they want opposite work:
+
+- **The custody was emptied**, by a deploy or a fresh box. Nothing else is wrong; publish the
+  key here (`CEREMONY_FINAL_ZKEY`, or the mount below) and it is over.
+- **The build predates the key.** This box is not missing a proving key at all — it is
+  carrying one, and the ceremony finished after the image was built. No act on the box helps;
+  what is deployed on it has to change.
+
+So the refusal names both keys. `/arcanum/config` reports `imageKeyHash` — the sha256 of the
+proving key *this build carries* — whenever that is not the key being served, and the 503 from
+`/arcanum/circuit/zkey` carries `expectedHash` and `imageKeyHash` beside its reason:
+
+```bash
+curl -s https://noema.art/arcanum/config | jq '{zkeySource, zkeyHash, imageKeyHash}'
+curl -s https://noema.art/api/health | jq -r .v     # which build that is
+```
+
+Two different hashes side by side is the second case; `imageKeyHash: null` is the first. Both
+readings are available to anyone, from anywhere — which is the point. This diagnosis used to
+exist only in the boot log, and a finished ceremony went unserved for ten days behind a page
+that could say "not published here yet" and nothing more, because the one fact that would have
+named the remedy was on the one surface nobody off the box can read.
+
+The `/ceremony` page reads the same two fields and says which case it is in words.
+
 `verification_key.json` must come from the same finalize run as the key being served: it is
 exported from that exact zkey, and a proof made against a proving key whose verification key
 the server does not hold will not verify.
