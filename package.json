@@ -12,6 +12,7 @@
     "guard:legal-mirror": "node scripts/guard-legal-mirror.mjs",
     "guard:site-truth": "node scripts/guard-site-truth.mjs",
     "guard:weight-addresses": "npx tsx scripts/guard-weight-addresses.ts",
+    "guard:widget-security": "node scripts/guard-widget-security.mjs",
     "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
     "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
