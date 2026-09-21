@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportJobFor, heldCollectionJob, jobOnDestChange } from './EditioExport';
+import { exportJobFor, heldCollectionJob, IDLE_JOBS, putJob } from './EditioExport';
 import type { Editio } from '../lib/editio';
 
 // Publishing a collection to hosting goes out at visibility 'marketplace' — a moderated
@@ -104,37 +104,48 @@ describe('heldCollectionJob — a hold is still there on the next visit', () => 
   });
 });
 
-// The seed only runs on mount, and the held note lives under the hosting footer — which the
-// screen does not open on. So reaching the hold meant clicking "Publish to hosting", and that
-// click reset the job to idle: the recovered hold was thrown away before it was ever drawn,
-// and the publish control came back for a collection a reviewer was already holding. These
-// pin what a destination switch is allowed to discard.
-describe('jobOnDestChange — a destination switch does not undo a filed publication', () => {
-  it('keeps a hold, so it survives the click that reveals the hosting footer', () => {
-    expect(jobOnDestChange({ s: 'held', msg: 'Waiting for a person to look at it.' }))
-      .toEqual({ s: 'held', msg: 'Waiting for a person to look at it.' });
+// The two destinations are two independent publications, and the screen kept ONE slot for
+// both — so whichever moved last erased the other. The held publisher is explicitly told
+// their "export-to-you download is unaffected", and taking that invitation is what destroyed
+// the hold: prepare the ZIP, come back to hosting, and the collection a reviewer was still
+// holding read as one nobody had put forth, with the consent box and Publish button back.
+// These pin that one destination's job never reaches into another's.
+const HELD = { s: 'held', msg: 'Waiting for a person to look at it.' } as const;
+
+describe('putJob — a destination keeps its own job', () => {
+  it('leaves a hosting hold standing while the ZIP is prepared, and after it is ready', () => {
+    const held = putJob(IDLE_JOBS, 'hosting', HELD);
+    const bundling = putJob(held, 'download', { s: 'busy', editionId: 'e2', kind: 'download' });
+    expect(bundling.hosting).toEqual(HELD);
+    const done = putJob(bundling, 'download', { s: 'ready', url: 'https://cdn.example/z', kind: 'download', editionId: 'e2' });
+    expect(done.hosting).toEqual(HELD);
   });
 
-  it('keeps a refusal — looking at another destination does not make it retryable', () => {
-    expect(jobOnDestChange({ s: 'rejected', msg: 'Automated review flagged something in this content, so it was not published.' }))
-      .toEqual({ s: 'rejected', msg: 'Automated review flagged something in this content, so it was not published.' });
+  it('leaves a refusal standing the same way — the download path cannot make it retryable', () => {
+    const refused = { s: 'rejected', msg: 'Automated review flagged something in this content, so it was not published.' } as const;
+    const after = putJob(putJob(IDLE_JOBS, 'hosting', refused), 'download', { s: 'busy', editionId: 'e2', kind: 'download' });
+    expect(after.hosting).toEqual(refused);
   });
 
-  it('keeps a live hosting publication, which owns the baseURI and the only Retract control', () => {
-    const live = { s: 'ready', url: 'https://cdn.example/c1', kind: 'hosting', editionId: 'e1' } as const;
-    expect(jobOnDestChange(live)).toEqual(live);
+  it('does not abandon a ZIP still bundling when a hosting publication starts', () => {
+    const bundling = putJob(IDLE_JOBS, 'download', { s: 'busy', editionId: 'e2', kind: 'download' });
+    const after = putJob(bundling, 'hosting', { s: 'busy', editionId: 'e3', kind: 'hosting' });
+    expect(after.download).toEqual({ s: 'busy', editionId: 'e2', kind: 'download' });
   });
 
-  it('keeps an in-flight publication, so the poll watching it is not abandoned mid-flight', () => {
-    const busy = { s: 'busy', editionId: 'e1', kind: 'hosting' } as const;
-    expect(jobOnDestChange(busy)).toEqual(busy);
+  it('keeps an error with the attempt that produced it, not with the whole screen', () => {
+    const after = putJob(putJob(IDLE_JOBS, 'hosting', HELD), 'download', { s: 'err', msg: 'the network went away' });
+    expect(after.download).toEqual({ s: 'err', msg: 'the network went away' });
+    expect(after.hosting).toEqual(HELD);
   });
 
-  it('clears an error, the one state the footer renders under every destination', () => {
-    expect(jobOnDestChange({ s: 'err', msg: 'the network went away' })).toEqual({ s: 'idle' });
+  it('starts both destinations idle, so an untouched collection gets both its buttons', () => {
+    expect(IDLE_JOBS).toEqual({ download: { s: 'idle' }, hosting: { s: 'idle' } });
   });
 
-  it('leaves an untouched screen alone', () => {
-    expect(jobOnDestChange({ s: 'idle' })).toEqual({ s: 'idle' });
+  it('does not mutate the table it was given', () => {
+    const before = putJob(IDLE_JOBS, 'hosting', HELD);
+    putJob(before, 'hosting', { s: 'idle' });
+    expect(before.hosting).toEqual(HELD);
   });
 });

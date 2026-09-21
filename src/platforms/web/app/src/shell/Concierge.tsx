@@ -60,6 +60,14 @@ function agentDictumToResult(corpus: string): ConciergeResult {
   return { kind: 'reply', text: corpus, tokenUsage: { totalTokens: 0 } };
 }
 
+/**
+ * The width at or below which the panel must not hold the screen — it is 312px wide and the
+ * OS keyboard takes the rest. The same query the stylesheet switches the shell on; it appears
+ * three times below (two open decisions and the one that closes) and is named once here so a
+ * change to the breakpoint cannot move two of them and leave the third behind.
+ */
+const NARROW_VIEWPORT = '(max-width:760px)';
+
 // Chat collapses into this on every screen except full chat (utilitarian co-pilot).
 // When a form's prompt field is focused it slides open with tailored augmentation:
 // a copyable example, and a "write it for me" draft from the user's brief.
@@ -145,13 +153,13 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
 
   // A fresh target (new object on each field focus) slides the panel open and resets.
   // On mobile (<=760px) the panel must not auto-open — it collides with the OS keyboard —
-  // so `.cbtn` remains the sole open trigger there. Checked live (not cached at mount)
-  // since the viewport can rotate or resize mid-session.
+  // so `.cbtn` remains the sole open trigger there. Read at the moment the decision is made
+  // rather than cached at mount; staying shut as the viewport narrows AFTER it opened is a
+  // separate question, and the effect below is what answers it.
   useEffect(() => {
     setBrief(''); setDraft(null); setCopied(false);
     if (!target) return;
-    const mq = window.matchMedia('(max-width:760px)');
-    if (!mq.matches) setOpen(true);
+    if (!window.matchMedia(NARROW_VIEWPORT).matches) setOpen(true);
   }, [target]);
 
   // First-visit activation (noema-226, IA ruling #5): the first time this browser lands on a given
@@ -162,9 +170,22 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
     const key = `concierge-seen:${location.pathname}`;
     if (window.localStorage.getItem(key)) return;
     window.localStorage.setItem(key, '1');
-    const mq = window.matchMedia('(max-width:760px)');
-    if (!mq.matches) setOpen(true);
+    if (!window.matchMedia(NARROW_VIEWPORT).matches) setOpen(true);
   }, [location.pathname]);
+
+  // Both guards above decide whether to OPEN. Nothing decided whether to STAY open, so a panel
+  // opened at 1280 survived a narrowing to 390 and sat 312px over the screen — the state the
+  // guards exist to prevent, reached by resizing into it instead of loading into it. The same
+  // query, subscribed, closes it on the crossing. Only a crossing fires this: a panel the user
+  // opened deliberately with `.cbtn` while already narrow is left alone, which is the one case
+  // where the panel on a small screen is what they asked for.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(NARROW_VIEWPORT);
+    const onChange = (e: MediaQueryListEvent) => { if (e.matches) setOpen(false); };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   function gen() {
     if (!target) return;
