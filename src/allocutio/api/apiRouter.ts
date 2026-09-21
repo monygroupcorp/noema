@@ -18,7 +18,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage, EarningsView } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { FeedFilter } from '../../types/editio.js'
+import type { ArtifactKind, FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
 import type { PackView } from '../../ledger/stripePacks.js'
@@ -198,6 +198,7 @@ export interface ApiFacade {
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
+  listMyEditions(auctor: AuctorKey, ref: { kind: ArtifactKind; id: string }): Promise<Edition[]>
   getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail>
   previewHeldEdition(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').EditionPreview>
   approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
@@ -262,6 +263,31 @@ function isPublicPublishTarget(destination: unknown, visibility: unknown): boole
         ? 'marketplace'
         : 'private'
   return vis === 'feed' || vis === 'marketplace'
+}
+
+const ARTIFACT_KINDS: ArtifactKind[] = ['actum', 'intella', 'collectio']
+
+/**
+ * `?artifact=<kind>:<id>` for `GET /v1/editiones`, as one `kind:id` token rather than a
+ * pair of params, so a request naming one without the other cannot be formed.
+ *
+ * The kind is closed and the id must be non-empty, both refused as `input.malformed`: an
+ * unfiltered "every publication I ever made" is a different read with a different cost,
+ * and silently answering it for a typo'd param would be the wrong one.
+ */
+export function parseArtifactQuery(raw: unknown): { kind: ArtifactKind; id: string } {
+  if (typeof raw !== 'string' || raw === '') {
+    throw Errors.inputMalformed("query parameter 'artifact' is required, as '<kind>:<id>'")
+  }
+  const sep = raw.indexOf(':')
+  const kind = raw.slice(0, sep === -1 ? raw.length : sep)
+  const id = sep === -1 ? '' : raw.slice(sep + 1)
+  if (!ARTIFACT_KINDS.includes(kind as ArtifactKind) || id === '') {
+    throw Errors.inputMalformed(
+      `query parameter 'artifact' must read '<kind>:<id>', kind one of ${ARTIFACT_KINDS.join(' | ')}`,
+    )
+  }
+  return { kind: kind as ArtifactKind, id }
 }
 
 /** Owner key for the publish rate limiter — mirrors `CrystalApi._editionBy` (animaId | commitment;
@@ -725,6 +751,16 @@ export function createApiRouter(deps: {
   // declared before '/editiones/:id' so the literal path isn't captured as an id.
   router.get('/editiones/review', wrap(async (req, res) => {
     res.json({ editions: await api.listHeldEditions(await auth(req)) })
+  }))
+
+  // GET /v1/editiones?artifact=<kind>:<id> — the caller's OWN publications of one
+  // artifact, newest first. The review queue above carries held items only, so every
+  // terminal outcome — a gate refusal, a publication already live — was unreadable to
+  // its author once the session that filed it ended. A publish surface that reopens
+  // needs the record, not the memory of the tab that pressed the button.
+  router.get('/editiones', wrap(async (req, res) => {
+    const ref = parseArtifactQuery(req.query.artifact)
+    res.json({ editions: await api.listMyEditions(await auth(req), ref) })
   }))
 
   // GET /v1/editiones/:id — one publication (author-scoped). Polled to watch an async

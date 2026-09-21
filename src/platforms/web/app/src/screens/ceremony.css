@@ -120,5 +120,6 @@
   border-top:1px solid var(--hair);font-size:11.5px;line-height:1.6;color:var(--muted)}
 .cer-served .cer-link-i{margin-top:2px}
 .cer-served-match .cer-link-i{color:var(--accent)}
-.cer-served-mismatch,.cer-served-absent{color:var(--color-danger)}
-.cer-served-mismatch .cer-link-i,.cer-served-absent .cer-link-i{color:var(--color-danger)}
+.cer-served-mismatch,.cer-served-absent,.cer-served-withheld{color:var(--color-danger)}
+.cer-served-mismatch .cer-link-i,.cer-served-absent .cer-link-i,
+.cer-served-withheld .cer-link-i{color:var(--color-danger)}

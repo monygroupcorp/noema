@@ -2165,6 +2165,35 @@ export class CrystalApi {
   }
 
   /**
+   * The caller's OWN publications of one artifact, newest first.
+   *
+   * `listHeldEditions` is the review queue, so it holds `reviewOutcome:'pending'` and
+   * nothing else. That makes a hold recoverable on a later visit but leaves every
+   * TERMINAL outcome unreadable to the author the moment the session that filed it ends:
+   * a gate refusal (the default posture refuses every public publish, since the gate is
+   * fail-closed until a scanner is configured) and a publication that is already live
+   * both read as "never put forth". So the publisher was shown the refusal reason once
+   * and never again, and was offered the publish control back for an artifact that was
+   * refused — or already hosted — which files a second edition behind the first.
+   *
+   * Author-scoped on the edition's own `by`, the same identity test as `getEdition`: the
+   * artifact id is not a capability here, and a caller asking about someone else's
+   * artifact gets the empty list, indistinguishable from an artifact nobody published.
+   *
+   * `Editionum.listByArtifact` promises no order, so the ordering is applied here rather
+   * than assumed — the newest publication of an artifact is the one that describes it.
+   */
+  async listMyEditions(auctor: AuctorKey, ref: ArtifactRef): Promise<Edition[]> {
+    const editiones = this.deps.editiones
+    if (!editiones) return []
+    const all = await editiones.listByArtifact(ref)
+    return all
+      .filter((e) => this._isEditionAuthor(auctor, e))
+      .sort((a, b) => b.natum.getTime() - a.natum.getTime())
+      .map(toEdition)
+  }
+
+  /**
    * Admin-only raw moderation-verdict read (docs/spec/moderation-reject-reason.md §3(a)).
    * `listHeldEditions` only surfaces items still `reviewOutcome:'pending'` — a TERMINAL
    * `rejected` Editio has no queue entry to inspect, so a reviewer asking "why was X
