@@ -90,6 +90,11 @@ export interface ExecuteFlowDeps {
    * reference is refused, the same fail-closed rule the REST run route follows.
    */
   ownedResources?: OwnedResourceStores
+  /**
+   * Where credits are bought — the web funding page. Absent → the insufficient-balance step
+   * still says how to top up, it just has no link to tap.
+   */
+  fundingUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +116,20 @@ const EFFECT_CATEGORIES = [
   { id: 'video', label: 'Video', description: 'Apply video effects' },
   { id: 'sound', label: 'Sound', description: 'Apply audio effects' },
 ]
+
+/**
+ * The insufficient-balance step's text. Credits are bought on the web, signed in as the
+ * same account this chat resolves to — `/recover` is how a Telegram identity gets there.
+ */
+export function topUpCopy(required: bigint, balance: bigint, fundingUrl?: string): string {
+  const where = fundingUrl ? `at ${fundingUrl}` : 'on the web'
+  return [
+    `This run costs ${required} impetus and your balance is ${balance}.`,
+    '',
+    `To top up: send /recover, then ${where} choose "Recover with Telegram", paste the code,`,
+    'and buy credits on the Funding page. Then tap Try again.',
+  ].join('\n')
+}
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow
@@ -180,9 +199,11 @@ export class ExecuteFlow implements Flow {
 
       // Required-complete → fast-path submit. We validate-and-strip first so the
       // submitted aditus is canonical (defaults applied, unknowns dropped).
+      // Through the same balance gate the card walks, so an empty balance is answered with
+      // the top-up step rather than an exception the adapter can only turn into one sentence.
       if (this._requiredSatisfied(modus.aditus, state.aditus)) {
         state.aditus = validateAditus(modus.aditus, state.aditus)
-        return this._submit(ctx, state) as Promise<Step>
+        return this._runBalanceGateAndSubmit(ctx, state, modus) as Promise<Step>
       }
 
       // Partial — some aditus given but a required field is still missing →
@@ -244,12 +265,20 @@ export class ExecuteFlow implements Flow {
       const opts = this._buildReplyOpts(state, result.exitus)
       return this._buildResultStep(result.exitus, state.actumId ?? '', opts)
     } else {
+      // Back to CONFIGURE with the aditus kept: "Try again" re-submits this exact run. Left in
+      // AWAITING_COMPLETION, every tap on the failure card answered "Working…" for a result that
+      // was never coming — the only exits were /cancel and /make.
+      state.step = 'CONFIGURE'
+      state.actumId = undefined
       return {
         primitives: [{
           kind: 'Detail',
           label: 'Generation failed',
           content: classifyError(result.error),
-          actions: [{ id: 'run_again', label: 'Try again' }],
+          actions: [
+            { id: 'run_again', label: 'Try again' },
+            { id: 'cancel',    label: '✕'         },
+          ],
         }],
       }
     }
@@ -277,7 +306,12 @@ export class ExecuteFlow implements Flow {
   }
 
   private async _handleSelectCategory(ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Promise<Step | Resolution> {
-    if (event.kind !== 'select') return { primitives: [{ kind: 'Select', label: 'Choose a category', options: [] }] }
+    // Anything but a category tap (a stray message, say) re-asks the question WITH its
+    // options — an empty option list rendered as a question with no buttons to answer it.
+    if (event.kind !== 'select') {
+      const categories = state.mode === 'effect' ? EFFECT_CATEGORIES : CREATE_CATEGORIES
+      return { primitives: [{ kind: 'Select', label: 'Choose a category', options: categories }] }
+    }
 
     state.category = event.selectedId
     state.step = 'BROWSE_TOOLS'
@@ -330,11 +364,18 @@ export class ExecuteFlow implements Flow {
       }
 
       // Execute tap → validate (rejects on a missing required field, so a half-filled
-      // card cannot submit) and submit exactly as the fast path does.
-      if (event.actionId === 'execute') {
+      // card cannot submit) and submit exactly as the fast path does. "Try again" on a
+      // failure or top-up card is the same submit: the aditus is still here.
+      if (event.actionId === 'execute' || event.actionId === 'run_again') {
         const validated = validateAditus(modus.aditus, state.aditus)  // throws if a required field is missing
         state.aditus = validated
         return this._runBalanceGateAndSubmit(ctx, state, modus)
+      }
+
+      // ✕ on a card → the flow ends, and says so. A silent abandon would leave the card's
+      // buttons live with nothing behind them.
+      if (event.actionId === 'cancel') {
+        return { kind: 'complete', output: { cancelled: true } }
       }
 
       return this._buildConfigureStep(state)
@@ -408,15 +449,19 @@ export class ExecuteFlow implements Flow {
     const reservation = await cursor.reserve(modus, state.aditus)
 
     if (balance < reservation && !process.env.DEV_FREE_EXECUTION) {
+      // The way out is on the web, so the step says the whole route — the bot cannot take a
+      // payment itself — and offers the link when it knows one. Every button here does
+      // something: a "connect wallet" tap that re-drew the card was the dead end this replaces.
+      const fundingUrl = this.deps.fundingUrl
       return {
         primitives: [{
           kind: 'Detail',
           label: 'Insufficient balance',
-          content: `This tool costs ${reservation} but your balance is ${balance}.\n\nTop up to continue.`,
+          content: topUpCopy(reservation, balance, fundingUrl),
           actions: [
-            { id: 'connect_wallet', label: 'connect wallet' },
-            { id: 'buy_credits',    label: 'buy credits'   },
-            { id: 'cancel',         label: '✕'             },
+            ...(fundingUrl ? [{ id: 'buy_credits', label: 'Buy credits', url: fundingUrl }] : []),
+            { id: 'run_again', label: 'Try again' },
+            { id: 'cancel',    label: '✕'         },
           ],
         }],
       }

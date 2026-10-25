@@ -49,7 +49,17 @@ export type Primitive =
        */
       values?: Record<string, unknown>
     }
-  | { kind: 'Detail';      label: string; content: string; actions: Array<{ id: string; label: string }> }
+  | {
+      kind: 'Detail'
+      label: string
+      content: string
+      /**
+       * An action is a tap the flow answers (`id`), or, when `url` is set, a link the adapter
+       * opens for the user (Telegram: a URL button). A way out that lives on the web — paying
+       * for credits — is still an action on the primitive; a field, not a new primitive (ADR-0001).
+       */
+      actions: Array<{ id: string; label: string; url?: string }>
+    }
   | { kind: 'Stream';      label: string; actumId: string; status: 'running' | 'complete' | 'failed'; content?: string }
   | { kind: 'Prompt';      label: string; placeholder?: string }
   | {

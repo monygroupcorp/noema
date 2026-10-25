@@ -99,3 +99,16 @@ test('a Form card shows a chained PRIVATE input as (image), never as its key', (
   assert.ok(!out.text.includes('noema-private://'), 'no private-output key on the card')
   assert.match(out.text, /Image: \(image\)/)
 })
+
+test('a Detail action with a url renders as a link button, not a callback', () => {
+  const { extra } = renderPrimitive({
+    kind: 'Detail', label: 'Insufficient balance', content: 'x',
+    actions: [
+      { id: 'buy_credits', label: 'Buy credits', url: 'https://example.test/funding' },
+      { id: 'run_again',   label: 'Try again' },
+    ],
+  })
+  const rows = extra!.reply_markup!.inline_keyboard
+  assert.deepEqual(rows[0], [{ text: 'Buy credits', url: 'https://example.test/funding' }])
+  assert.deepEqual(rows[1], [{ text: 'Try again', callback_data: 'a:run_again' }])
+})

@@ -54,7 +54,10 @@ export function classifyError(err: unknown): string {
   if (/insufficient funds/i.test(msg))
     return "You don't have enough credits. Use /status to check your balance."
 
-  if (/modus.*not found/i.test(msg))
+  // A flow whose modus is missing, or whose weights were never registered with a download
+  // address, fails before any pod exists and fails the same way next time. "Try again" would
+  // be a lie; this is the operator's to fix.
+  if (/modus.*not found/i.test(msg) || /No URL for model/i.test(msg) || /MODEL_NOT_RESOLVED/.test(msg))
     return "This workflow isn't set up correctly. Please contact support."
 
   if (

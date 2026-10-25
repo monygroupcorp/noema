@@ -280,3 +280,16 @@ test('classifyError: no sentence claims credits were not charged — it cannot s
     )
   }
 })
+
+// ---------------------------------------------------------------------------
+// An unregistered model is a setup fault, not something a retry fixes
+// ---------------------------------------------------------------------------
+
+test('classifyError: a model with no download address is a setup error, not "try again"', () => {
+  const result = classifyError(new Error("No URL for model 'intella-with-no-address' — register it in the model registry"))
+  assert.equal(result, "This workflow isn't set up correctly. Please contact support.")
+})
+
+test('classifyError: the MODEL_NOT_RESOLVED code reads the same way', () => {
+  assert.equal(classifyError('CompilerError MODEL_NOT_RESOLVED'), "This workflow isn't set up correctly. Please contact support.")
+})
