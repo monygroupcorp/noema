@@ -34,10 +34,10 @@ function makeCtx(overrides: Partial<FlowContext> = {}): FlowContext {
   }
 }
 
-function makeStore(docs: Array<Record<string, unknown>> = []) {
+function makeStore(docs: Array<Record<string, unknown>> = [], opts?: { ttlMs?: number; now?: () => number }) {
   const { MongoFlowContextStore } = require('../../../src/flow/MongoFlowContextStore.js')
   const col = makeMockCollection(docs)
-  const store = new MongoFlowContextStore(col as unknown, 'flowContexts')
+  const store = new MongoFlowContextStore(col as unknown, 'flowContexts', opts)
   return { store, col }
 }
 
@@ -311,4 +311,31 @@ test('key returns platform:userId:chatId format', () => {
   const { store } = makeStore()
   assert.equal(store.key('telegram', 'abc', 'chat1'), 'telegram:abc:chat1')
   assert.equal(store.key('discord', '123', 'chat2'), 'discord:123:chat2')
+})
+
+// ---------------------------------------------------------------------------
+// The cache expires on the same clock as the document
+// ---------------------------------------------------------------------------
+
+test('a cached context untouched past the TTL reads as absent', () => {
+  let now = 0
+  const { store } = makeStore([], { ttlMs: 100, now: () => now })
+  store.set('telegram', 'user1', 'chat1', makeCtx({ pendingActumId: 'act-1' }))
+  now = 99
+  assert.ok(store.get('telegram', 'user1', 'chat1'))
+  now = 100
+  assert.equal(store.get('telegram', 'user1', 'chat1'), undefined)
+  assert.equal(store.findByPendingActumId('act-1'), undefined)
+})
+
+test('hydrate carries the persisted write time, so a context already old at boot is not renewed', async () => {
+  const now = 10_000_000
+  const docs = [
+    { _id: 'telegram:u:c-old', ctx: makeCtx({ platformUserId: 'u', platformChatId: 'c-old' }), pendingActumId: null, updatedAt: new Date(now - 200) },
+    { _id: 'telegram:u:c-new', ctx: makeCtx({ platformUserId: 'u', platformChatId: 'c-new' }), pendingActumId: null, updatedAt: new Date(now - 50) },
+  ]
+  const { store } = makeStore(docs, { ttlMs: 100, now: () => now })
+  await store.hydrate()
+  assert.equal(store.get('telegram', 'u', 'c-old'), undefined, 'already past its lifetime when loaded')
+  assert.ok(store.get('telegram', 'u', 'c-new'), 'written 50 ago, lives 50 more')
 })
