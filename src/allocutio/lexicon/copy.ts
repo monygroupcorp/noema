@@ -12,16 +12,19 @@ export const HELP_TEXT = `\
 noema
 
   Creative
-  /make    — generate images and art
-  /chat    — chat with an AI model
-  /flows   — browse all available tools
+  /make <prompt>        — generate an image
+  /run <flow> [prompt]  — run any flow by name
+  /chat                 — chat with an AI model
+  /flows                — browse all available tools
+  /arm                  — set up a warm studio
 
   Account
-  /status  — view balance and account
-  /wallet  — manage connected wallets
+  /status   — balance and running gens
+  /wallet   — how to top up credits
+  /recover  — sign in on the web as this account
 
-  /cancel  — cancel current action
-  /help    — show this message\
+  /cancel   — cancel current action
+  /help     — show this message\
 `
 
 export const COPY = {
@@ -160,7 +163,24 @@ export const COPY = {
     help: HELP_TEXT,
     cancelled: 'Cancelled.',
     statusComingSoon: 'Balance and account info coming soon.',
-    walletComingSoon: 'Wallet management coming soon.',
+    /**
+     * How a Telegram user gets credits. The bot cannot take a payment; the web can, signed in
+     * as the account this chat resolves to, and /recover is the way in. Said in full every time
+     * it is needed — on /wallet, under a refused run, and in place of a bare "not enough credits".
+     */
+    topUp: (fundingUrl?: string): string => [
+      'Credits are bought on the web, signed in as this account:',
+      '1. Send /recover here and copy the code.',
+      `2. ${fundingUrl ? `At ${fundingUrl}` : 'On the web'}, choose “Recover with Telegram” and paste it.`,
+      '3. Buy credits on the Funding page.',
+      'Then come back and run again.',
+    ].join('\n'),
+    /** A plain message with nothing running: say what would start something. Private chats only. */
+    idleText: 'Nothing is running. Send /make <your prompt> to generate an image, or /help for every command.',
+    /** A photo or clip with nothing running: it fills nothing on its own, so say how it would. */
+    idleMedia: 'To use this, send it again with /make <prompt> as the caption, or reply to it with /make <prompt>.',
+    /** A tap on a button whose menu is gone — answered as a toast, never as a chat message. */
+    menuExpired: 'This menu has expired. Send /make to start again.',
     unknown: `Unknown command. Type /help to see what's available.`,
     /** Bare or malformed /run — show how to call the universal runner. */
     runUsage: `Usage: /run <flow> [prompt]\nExample: /run flux-schnell a red fox`,

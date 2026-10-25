@@ -21,6 +21,7 @@ function makeSender() {
   const sent: Array<{ chatId: number; text: string; extra?: unknown }> = []
   const edited: Array<{ chatId: number; messageId: number; text: string; extra?: unknown }> = []
   const answered: string[] = []
+  const toasts: Array<{ id: string; text?: string }> = []
   const photos: Array<{ chatId: number; url: string; extra?: unknown }> = []
   const videos: Array<{ chatId: number; url: string; extra?: unknown }> = []
   const mediaGroups: Array<{ chatId: number; media: unknown[] }> = []
@@ -33,6 +34,7 @@ function makeSender() {
     sent,
     edited,
     answered,
+    toasts,
     photos,
     videos,
     mediaGroups,
@@ -48,8 +50,9 @@ function makeSender() {
     editMessageText: async (chatId: number, messageId: number, text: string, extra?: unknown) => {
       edited.push({ chatId, messageId, text, extra })
     },
-    answerCallbackQuery: async (id: string) => {
+    answerCallbackQuery: async (id: string, text?: string) => {
       answered.push(id)
+      toasts.push({ id, text })
     },
     sendPhoto: async (chatId: number, url: string, extra?: unknown) => {
       photos.push({ chatId, url, extra })
@@ -258,7 +261,7 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined> } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined> } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -284,6 +287,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     identity,
     botStartupTime: opts.botStartupTime,
     ...(opts.botUsername ? { botUsername: opts.botUsername } : {}),
+    ...(opts.fundingUrl ? { fundingUrl: opts.fundingUrl } : {}),
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     ...(opts.resolvePrivateMedia ? { resolvePrivateMedia: opts.resolvePrivateMedia } : {}),
     acta,
@@ -2001,4 +2005,122 @@ test('a public result still falls back to the URL as text when the send fails', 
   await new Promise(r => setImmediate(r))
 
   assert.equal(sender.sent[0].text, 'https://example.com/image.png', 'the public fallback is unchanged')
+})
+
+// =============================================================================
+// Dead ends found walking the bot (audit): every tap and every idle message answers
+// =============================================================================
+
+const FUNDING = 'https://example.test/funding'
+const linkButtons = (extra: unknown) =>
+  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } } | undefined)
+    ?.reply_markup?.inline_keyboard ?? []).flat()
+
+test('a tap on a button whose flow is gone is answered with a toast, not silence', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  // No flow was ever entered in this chat: a button on an old card.
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42', 'cb-stale'))
+  assert.deepEqual(sender.toasts, [{ id: 'cb-stale', text: 'This menu has expired. Send /make to start again.' }])
+  assert.equal(sender.sent.length, 0, 'nothing is posted into the chat')
+  assert.equal(router.calls.find(c => c.method === 'handle'), undefined)
+})
+
+test('a tap the flow consumes is answered plainly (no toast)', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42', 'cb-live'))
+  assert.deepEqual(sender.toasts, [{ id: 'cb-live', text: undefined }])
+})
+
+test('a dead tap does not make the next /make overwrite that old message', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42'))       // stale: message_id 99
+  // The next /make's first card comes straight out of enter, as in production (the default
+  // mock emits an empty step there, which would quietly consume any stamped edit target).
+  router.enter = async (intent, platform, userId, chatId) => {
+    router.seedContext(platform, userId, {}, chatId)
+    router.triggerStep(router.peek(platform, userId, chatId)!, {
+      primitives: [{ kind: 'Select', label: 'Pick', options: [{ id: 'a', label: 'A' }] }],
+    })
+    void intent
+  }
+  sender.sent.length = 0; sender.edited.length = 0
+  await allocutio.receive(msgUpdate(123, 456, '/make', 7))
+  await new Promise(r => setImmediate(r))
+  assert.equal(sender.edited.length, 0, 'the old message is left alone')
+  assert.equal(sender.sent.length, 1, 'the card is posted fresh at the bottom')
+})
+
+test('start screen: the make button runs the bound /make flow, not the generic picker', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  router.calls.length = 0
+  await allocutio.receive(cbUpdate(123, 456, 's:make'))
+  const enter = router.calls.find(c => c.method === 'enter')
+  assert.ok(enter, 'enters the execute flow')
+  const init = enter!.args[5] as { state?: { modusId?: string } }
+  assert.equal(init.state?.modusId, 'flux-schnell', 'with the canon /make flow, exactly as /make does')
+})
+
+test('start screen: second row is status + a top-up link; the dead wallet/balance buttons are gone', async () => {
+  const { allocutio, sender } = makeAllocutio({ fundingUrl: FUNDING })
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  const buttons = linkButtons(sender.sent[0].extra)
+  assert.ok(buttons.some(b => b.callback_data === 's:status'))
+  assert.ok(buttons.some(b => b.url === FUNDING && /top up/i.test(b.text)))
+  assert.ok(!buttons.some(b => b.callback_data?.startsWith('a:')), 'no action button with no handler behind it')
+
+  sender.sent.length = 0
+  await allocutio.receive(cbUpdate(123, 456, 's:status'))
+  assert.equal(sender.sent.length, 1, 'the status button answers with a status message')
+})
+
+test('start screen without a funding url offers no top-up button (no link beats a dead one)', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url), 'no url button')
+})
+
+test('plain text into an idle private chat gets the hint, once a minute', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, 'a cat on a bike'))
+  await allocutio.receive(msgUpdate(123, 456, 'hello?'))
+  assert.equal(sender.sent.length, 1, 'one hint for the burst')
+  assert.match(sender.sent[0].text, /Nothing is running/)
+  assert.match(sender.sent[0].text, /\/make/)
+})
+
+test('a photo into an idle private chat says how it would be used', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-1']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /\/make <prompt>/)
+})
+
+test('unaddressed text in a group with nothing running stays silent (no hint)', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+  await allocutio.receive(groupMsgUpdate(123, -100, 'just chatting among ourselves'))
+  assert.equal(sender.sent.length, 0)
+})
+
+test('an empty balance reaching the adapter is answered with the top-up route and link', async () => {
+  const { allocutio, sender, router } = makeAllocutio({ fundingUrl: FUNDING })
+  const realEnter = router.enter
+  router.enter = async () => { throw new Error('Insufficient funds: balance 0 < required 900') }
+  await allocutio.receive(msgUpdate(123, 456, '/make a cat'))
+  router.enter = realEnter
+  const msg = sender.sent.find(m => /Credits are bought on the web/.test(m.text))
+  assert.ok(msg, 'says how to top up, not just that the balance is short')
+  assert.match(msg!.text, /\/recover/)
+  assert.ok(linkButtons(msg!.extra).some(b => b.url === FUNDING), 'with the link')
+})
+
+test('a flow completed by ✕ says Cancelled, not Done', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  const ctx = router.peek('telegram', '123', '456')!
+  sender.sent.length = 0
+  router.triggerResolution(ctx, { kind: 'complete', output: { cancelled: true } })
+  await new Promise(r => setImmediate(r))
+  assert.equal(sender.sent[0]?.text, 'Cancelled.')
 })

@@ -3,7 +3,7 @@
 // =============================================================================
 // Parallel to bulletin/affordances.ts but a richer surface: per-row Cancel for
 // each gen, per-row Bulletin link for each studio, per-row Join for each
-// joinable studio, plus a footer with Refresh / History / Settings.
+// joinable studio, plus a footer with Refresh.
 //
 // Action ids encode the target id when needed (cancel:<actumId>, etc.). The
 // callback prefix is `stat:` — added in exactly one place (packAffordances).
@@ -46,11 +46,10 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
     ])
   }
 
-  // Footer — always present.
+  // Footer — always present. Only what works: History and Settings were buttons that answered
+  // "coming soon", which is a dead end with a label.
   rows.push([
     { id: 'refresh',  label: '↻ Refresh',  kind: 'action', scope: 'any' },
-    { id: 'history',  label: 'History',    kind: 'action', scope: 'any' },
-    { id: 'settings', label: 'Settings',   kind: 'action', scope: 'any' },
   ])
 
   return rows

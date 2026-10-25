@@ -26,6 +26,12 @@ export function urlBtn(text: string, url: string): InlineButton {
   return { text, url }
 }
 
+/** The one button under every "you need credits" message: a link to where they are bought.
+ *  Undefined when the deployment has not said where that is — no button beats a dead one. */
+export function topUpMarkup(fundingUrl?: string): { reply_markup: InlineKeyboard } | undefined {
+  return fundingUrl ? { reply_markup: inlineKeyboard([[urlBtn('Buy credits', fundingUrl)]]) } : undefined
+}
+
 // ── renderPrimitive — Telegram rendering for each primitive kind ─────────────
 
 export interface RenderResult {

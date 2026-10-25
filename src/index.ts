@@ -212,6 +212,10 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
 const R2_OUTPUTS_BUCKET = process.env.R2_OUTPUTS_BUCKET ?? process.env.R2_BUCKET_NAME
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
+// Public origin for absolute links the bot and the agent card hand out.
+const PUBLIC_BASE = process.env.PUBLIC_BASE ?? 'https://noema.art'
+// Where credits are bought — linked from every "not enough credits" the bot says.
+const FUNDING_URL = `${PUBLIC_BASE}/funding`
 
 // TEE private compute — optional. Set TEE_IMAGE_ID to enable real pod provisioning.
 const TEE_IMAGE_ID        = process.env.TEE_IMAGE_ID         // e.g. "monyrth/tee-runner:latest"
@@ -778,6 +782,7 @@ async function main(): Promise<void> {
       sodalitatum: ring.sodalitates,
       inline: raw => parseManifest(raw) !== null,
     },
+    fundingUrl: FUNDING_URL,
   })
   router.register(executeFlow)
 
@@ -857,6 +862,7 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     vocator: ring.vocator,
     consuetudinum,
+    fundingUrl: FUNDING_URL,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     // Private generation (noema-347): a private run's output is a marker, so the bot mints a
     // short-lived link per send and lets Telegram fetch the bytes server-side — the chat holds
@@ -1532,7 +1538,7 @@ async function main(): Promise<void> {
   // ERC-8004 platform agent card (ADR-0011 §5): advertises Noema itself as the x402
   // capability execution target an external agent resolves → pays → runs against.
   // Mounted at `/` (specific paths only).
-  const cardBase = process.env.PUBLIC_BASE ?? 'https://noema.art'
+  const cardBase = PUBLIC_BASE
   app.use(createAgentCardRouter({
     legati: ring.legati,
     modorum: ring.modorum,
@@ -1940,13 +1946,16 @@ async function main(): Promise<void> {
   // that is already serving HTTP. Every Telegram call inside it is bounded by a timeout, and the
   // polling start is not awaited to completion. See src/allocutio/telegram/startTelegram.ts.
   const BOT_COMMANDS = [
-    { command: 'make',   description: 'Generate images and art'        },
-    { command: 'chat',   description: 'Chat with an AI model'          },
-    { command: 'flows',  description: 'Browse all available tools'     },
-    { command: 'status', description: 'View your balance and account'  },
-    { command: 'wallet', description: 'Manage connected wallets'       },
-    { command: 'cancel', description: 'Cancel current action'          },
-    { command: 'help',   description: 'Show available commands'        },
+    { command: 'make',    description: 'Generate an image from a prompt'      },
+    { command: 'run',     description: 'Run any flow by name'                 },
+    { command: 'chat',    description: 'Chat with an AI model'                },
+    { command: 'flows',   description: 'Browse all available tools'           },
+    { command: 'arm',     description: 'Set up a warm studio'                 },
+    { command: 'status',  description: 'Balance and running gens'             },
+    { command: 'wallet',  description: 'How to top up credits'                },
+    { command: 'recover', description: 'Sign in on the web as this account'   },
+    { command: 'cancel',  description: 'Cancel current action'                },
+    { command: 'help',    description: 'Show available commands'              },
   ]
 
   const tgStart = await startTelegram({
