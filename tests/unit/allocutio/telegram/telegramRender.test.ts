@@ -2,6 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderPrimitive, decodeCallbackData } from '../../../../src/allocutio/telegram/telegramRender.js'
 import type { Primitive } from '../../../../src/flow/types.js'
+import type { InlineButton } from '../../../../src/allocutio/telegram/telegramRender.js'
+
+/** The tap a button sends, or undefined for a link button, which sends nothing. */
+const tapData = (b: InlineButton): string | undefined => ('callback_data' in b ? b.callback_data : undefined)
 
 // ---------------------------------------------------------------------------
 // Form card (TASK-004)
@@ -30,20 +34,20 @@ test('Form card lists every field with current/default value + required marker',
 
 test('Form card has an edit button per field', () => {
   const r = renderPrimitive(cardForm({}))
-  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(b => b.callback_data)
+  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(tapData)
   assert.ok(datas.includes('a:edit_prompt'), 'edit button for prompt')
   assert.ok(datas.includes('a:edit_steps'), 'edit button for steps')
 })
 
 test('Form card hides Execute while a required field is unfilled', () => {
   const r = renderPrimitive(cardForm({}))
-  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(b => b.callback_data)
+  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(tapData)
   assert.ok(!datas.includes('a:execute'), 'no Execute while required prompt is empty')
 })
 
 test('Form card shows Execute once every required field has a value', () => {
   const r = renderPrimitive(cardForm({ prompt: 'a cat' }))
-  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(b => b.callback_data)
+  const datas = r.extra!.reply_markup!.inline_keyboard.flat().map(tapData)
   assert.ok(datas.includes('a:execute'), 'Execute appears when required filled')
   assert.match(r.text, /a cat/, 'current value shown')
 })
