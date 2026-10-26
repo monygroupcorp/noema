@@ -131,16 +131,17 @@ export function ProjectHub() {
           ))}
         </div>
 
-        {/* tabs — asset tabs are LINKS into the canonical surface scoped to this project */}
+        {/* tabs — asset tabs are LINKS into the canonical surface scoped to this project.
+            A tab's count badge is only drawn when it is non-zero (DESIGN.md D-58). */}
         <div className="ph-tabs">
           {tabs.map((t) => (
             SCOPED[t.key] ? (
               <Link key={t.key} className="ph-tab" to={`${SCOPED[t.key]}?project=${p.id}`}>
-                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+                {t.key}{t.n ? <span className="tn">{t.n}</span> : null}
               </Link>
             ) : (
               <button key={t.key} className={`ph-tab${tab === t.key ? ' on' : ''}`} onClick={() => setTab(t.key)}>
-                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+                {t.key}{t.n ? <span className="tn">{t.n}</span> : null}
               </button>
             )
           ))}

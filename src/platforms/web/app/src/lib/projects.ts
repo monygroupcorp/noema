@@ -33,6 +33,16 @@ export const counts = (p: Project) => ({
   datasets: p.datasetIds.length, models: p.modelIds.length, collections: p.collectionIds.length,
 });
 
+// The stat line under a project card. Zero counts are left out (DESIGN.md D-58: render the
+// counts that are non-zero); a project with nothing in it yet gets one line saying so.
+export function countsLine(c: { chats: number; cards: number; canvases: number; gens: number }): string {
+  const axes: [number, string, string][] = [
+    [c.chats, 'chat', 'chats'], [c.cards, 'card', 'cards'], [c.canvases, 'canvas', 'canvases'], [c.gens, 'gen', 'gens'],
+  ];
+  const parts = axes.filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
+  return parts.length ? parts.join(' · ') : 'nothing in it yet';
+}
+
 // Map a server RemoteProject onto the client Project, layering any client-local view
 // state (chats/canvases/favorites/gens) that has no backend store yet. Holdings + identity
 // come from the server; the overlay fills the ephemeral axes.

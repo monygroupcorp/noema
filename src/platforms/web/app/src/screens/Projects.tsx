@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useProject } from '../state/project';
-import { counts } from '../lib/projects';
+import { counts, countsLine } from '../lib/projects';
 import { Ic } from '../lib/icons';
 
 // The workspace overview. Top: every project as a card (the unit you switch into / share).
@@ -52,7 +52,7 @@ export function Projects() {
                   {active && <span className="badge accent">active</span>}
                 </div>
                 <div className="pc-desc">{p.desc}</div>
-                <div className="pc-counts mono">{c.chats} chats · {c.cards} cards · {c.canvases} canvases · {c.gens} gens<span className="upd">· {p.updated}</span></div>
+                <div className="pc-counts mono">{countsLine(c)}<span className="upd">· {p.updated}</span></div>
               </Link>
             );
           })}

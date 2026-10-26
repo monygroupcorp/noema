@@ -11,6 +11,18 @@ import './feed.css';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// The feed reads the newest FEED_LIMIT editions; GET /v1/feed offers no narrowing beyond that
+// and no total. The intro therefore states what these are and how many (DESIGN.md D-55):
+// an exact count when the read came back short, "the latest N" when it filled the page.
+export const FEED_LIMIT = 60;
+export function feedShape(items: FeedItem[] | null, limit = FEED_LIMIT): string {
+  const base = 'What people are making and choosing to share';
+  if (!items || items.length === 0) return `${base}.`;
+  const n = items.length;
+  if (n >= limit) return `${base} — the latest ${limit} pieces.`;
+  return `${base} — ${n} ${n === 1 ? 'piece' : 'pieces'}.`;
+}
+
 // Relative "3m ago" without pulling a date library.
 function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -101,7 +113,7 @@ export function Feed() {
 
   useEffect(() => {
     let live = true;
-    api.feed({ visibility: 'feed', limit: 60 })
+    api.feed({ visibility: 'feed', limit: FEED_LIMIT })
       .then((r) => { if (live) setItems(r.feed); })
       .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
@@ -128,7 +140,7 @@ export function Feed() {
         <div className="pagehead">
           <div>
             <h1>Feed</h1>
-            <div className="sub">What people are making and choosing to share. Publish your own from any result.</div>
+            <div className="sub">{feedShape(items)} Publish your own from any result.</div>
           </div>
           <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
         </div>

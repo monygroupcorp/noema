@@ -397,10 +397,15 @@ export function Vault() {
           </div>
         )}
 
+        {/* An empty section says what will appear here and the one action that fills it
+            (DESIGN.md D-60). While the purse is gated off, the only thing that fills it is the
+            ceremony the banner above already links to, so the line names that and nothing else. */}
         {purses.length === 0 ? (
-          purseOff
-            ? null
-            : <div className="csec">No purses yet. Fund a note, then mint a purse to spend anonymously.</div>
+          <div className="csec">
+            {purseOff
+              ? 'No purses yet. Purses you mint will be listed here once the anonymous purse unlocks.'
+              : 'No purses yet. Fund a note, then mint a purse from it to spend anonymously.'}
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
             {purses.map((p) => {
