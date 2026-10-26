@@ -36,6 +36,15 @@ const EARNING_LABEL: Record<EarningKind, string> = {
   referral: 'referrals',
 };
 
+// The royalties tile's figure. Before the read lands it holds its place with a dash (D-61);
+// once the read has landed, a lifetime of nothing is not printed as a large 0 (DESIGN.md D-58,
+// P-1c) — the tile is then carried by its foot line alone, which says what would fill it.
+export function royaltyFigure(e: EarningsView | null): string | null {
+  if (!e) return '—';
+  const n = Number(e.lifetime.impetus);
+  return n > 0 ? n.toLocaleString() : null;
+}
+
 // What the royalties tile says under the number. Before the read lands there is nothing to
 // claim, so it says nothing. Once it has, the streams that actually paid are named; an
 // account that has earned nothing yet is told what would pay it, not promised a future.
@@ -116,9 +125,9 @@ export function Dashboard() {
             </div>
             <div className="ib-cell">
               <div className="ib-l">royalties · lifetime</div>
-              <div className="ib-n gold">
-                <span className="gem">◈</span> {earnings ? Number(earnings.lifetime.impetus).toLocaleString() : '—'}
-              </div>
+              {royaltyFigure(earnings) !== null && (
+                <div className="ib-n gold"><span className="gem">◈</span> {royaltyFigure(earnings)}</div>
+              )}
               <div className="ib-sub">{royaltyFoot(earnings)}</div>
             </div>
           </div>
@@ -152,11 +161,15 @@ export function Dashboard() {
           <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
         </div>
 
-        {/* AWAITING YOU — finished work, each row a door to what it produced */}
+        {/* AWAITING YOU — finished work, each row a door to what it produced. Empty, it says
+            what lands here and carries the one action that fills it (DESIGN.md D-60). */}
         <div className="sectionhead">AWAITING YOU</div>
         <div className="dbrecent">
           {awaiting.length === 0 ? (
-            <div className="empty"><div className="t">Nothing finished yet</div></div>
+            <div className="empty">
+              <div className="t">Nothing finished yet — a completed run lands here.</div>
+              <div className="s"><Link to="/catalog">Start one from the catalogue ▸</Link></div>
+            </div>
           ) : awaiting.map((r) => {
             const href = activityDoorHref(r);
             const row = (
@@ -179,7 +192,7 @@ export function Dashboard() {
         <div className="sectionhead">RUNNING NOW</div>
         <div className="dbrecent">
           {running.length === 0 ? (
-            <div className="empty"><div className="t">Nothing running — start something</div></div>
+            <div className="empty"><div className="t">Nothing running — <Link to="/catalog">start something ▸</Link></div></div>
           ) : running.map((r) => (
             <div className="dbrec-row" key={r.actumId}>
               <Ic name={ACTIVITY_ICON[r.kind]} />

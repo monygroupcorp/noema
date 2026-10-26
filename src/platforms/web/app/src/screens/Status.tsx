@@ -8,6 +8,26 @@ import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivi
 
 const IMPETUS_USD = 0.000337;
 
+// The stat cards under the page head. The balance is drawn whatever it reads: next to "Add
+// credits" a zero balance is the fact the button acts on, the one case P-1c admits. Runs and
+// studios are counts, and a count of nothing is not printed (DESIGN.md D-58) — the Running now
+// and Recently finished bands below already say what fills them. Before the read lands every
+// card holds its place with an ellipsis (D-61).
+export interface StatCard { l: string; n: string; d: string }
+export function statCards(me: MeStatus | null, usdPerCredit = IMPETUS_USD): StatCard[] {
+  if (!me) return [
+    { l: 'Balance', n: '…', d: 'credits' },
+    { l: 'Runs', n: '…', d: 'all time' },
+    { l: 'Studios', n: '…', d: 'warm sessions' },
+  ];
+  const credits = Number(me.balanceImpetus);
+  const usd = me.balanceUsd || credits * usdPerCredit;
+  const cards: StatCard[] = [{ l: 'Balance', n: credits.toLocaleString(), d: `credits · ≈ $${usd.toFixed(2)}` }];
+  if (me.gens.length > 0) cards.push({ l: 'Runs', n: String(me.gens.length), d: 'all time' });
+  if (me.studios.length > 0) cards.push({ l: 'Studios', n: String(me.studios.length), d: 'warm sessions' });
+  return cards;
+}
+
 export function Status() {
   const { ident } = useIdentity();
   const [me, setMe] = useState<MeStatus | null>(null);
@@ -63,10 +83,6 @@ export function Status() {
   const { rows: activityRows, loaded: activityLoaded } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
   const { running, finished } = partitionActivity(activityRows);
 
-  const credits = me ? Number(me.balanceImpetus) : 0;
-  const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
-  const runs = me?.gens.length ?? 0;
-  const studios = me?.studios.length ?? 0;
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
@@ -133,9 +149,9 @@ export function Status() {
         {err && <div className="warn">Couldn’t reach your account on staging.</div>}
 
         <div className="stats">
-          <div className="stat"><div className="l">Balance</div><div className="n">{me ? credits.toLocaleString() : '…'}</div><div className="d">credits · ≈ ${usd.toFixed(2)}</div></div>
-          <div className="stat"><div className="l">Runs</div><div className="n">{me ? runs : '…'}</div><div className="d">all time</div></div>
-          <div className="stat"><div className="l">Studios</div><div className="n">{me ? studios : '…'}</div><div className="d">warm sessions</div></div>
+          {statCards(me).map((c) => (
+            <div className="stat" key={c.l}><div className="l">{c.l}</div><div className="n">{c.n}</div><div className="d">{c.d}</div></div>
+          ))}
         </div>
 
         <div className="sectionhead">Running now</div>

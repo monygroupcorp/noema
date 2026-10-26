@@ -28,6 +28,9 @@ import {
 
 type Busy = { kind: 'idle' } | { kind: 'funding' } | { kind: 'minting'; nullifier: string };
 
+// What a purse is for, in one line — the empty Purses section leads with it.
+export const PURSE_PURPOSE = 'A purse is bearer credit: it spends without naming you.';
+
 function short(hex: string, head = 8, tail = 6) {
   return hex.length > head + tail ? `${hex.slice(0, head)}…${hex.slice(-tail)}` : hex;
 }
@@ -333,8 +336,16 @@ export function Vault() {
       </div>
       <div className="csec">
         <div className="ctitle">Purse</div>
-        <div className="meta-line"><span>balance</span><span className="v mono">{totalPurseCredits.toString()} credits</span></div>
-        <div className="meta-line"><span>purses</span><span className="v mono">{purses.length}</span></div>
+        {/* A count of nothing is not printed (DESIGN.md D-58): with no purse held, one line
+            says so, and the balance and count appear once there is one to count. */}
+        {purses.length > 0 ? (
+          <>
+            <div className="meta-line"><span>balance</span><span className="v mono">{totalPurseCredits.toString()} credits</span></div>
+            <div className="meta-line"><span>purses</span><span className="v mono">{purses.length}</span></div>
+          </>
+        ) : (
+          <div className="meta-line"><span>none held yet</span></div>
+        )}
         <div className="meta-line"><span>paying with</span><span className="v mono">{active ? short(active, 6, 4) : 'identified balance'}</span></div>
       </div>
     </>
@@ -397,14 +408,16 @@ export function Vault() {
           </div>
         )}
 
-        {/* An empty section says what will appear here and the one action that fills it
-            (DESIGN.md D-60). While the purse is gated off, the only thing that fills it is the
-            ceremony the banner above already links to, so the line names that and nothing else. */}
+        {/* An empty section says what the thing is for and gives the one action that fills it
+            (DESIGN.md D-60), and promises no future (D-63). While the purse is gated off, what a
+            visitor can do about credits is fund them, so the line offers that door; with the
+            purse on, the note form below is the action, and the line points at it. */}
         {purses.length === 0 ? (
           <div className="csec">
+            {PURSE_PURPOSE}{' '}
             {purseOff
-              ? 'No purses yet. Purses you mint will be listed here once the anonymous purse unlocks.'
-              : 'No purses yet. Fund a note, then mint a purse from it to spend anonymously.'}
+              ? <>None held yet — <Link to="/funding">add credits ▸</Link></>
+              : 'None held yet — fund a note below, then mint a purse from it.'}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>

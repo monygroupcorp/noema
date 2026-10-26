@@ -187,12 +187,12 @@ export function ProjectHub() {
             {/* bottom band */}
             <div className="ph-band">
               <div className="ph-about">
-                <div className="ph-l">about this project</div>
+                <div className="ph-l">About this project</div>
                 <p>A project <b>groups</b> your work — it isn’t a wall. Anything here can be referenced from other projects; the only hard boundary is your account.</p>
                 <div className="ph-meta mono">{p.shared ? `${p.shared} members · ` : ''}updated {p.updated} · mixed custody (TEE · local · public)</div>
               </div>
               <div className="ph-activity">
-                <div className="ph-l">activity</div>
+                <div className="ph-l">Activity</div>
                 <div className="ph-ev"><span className="av" style={{ background: p.color }} /><span className="ev-t"><b>you</b> started a chat <span className="mono ev-meta"><span className="hemi2 lit" /> shared · {p.updated}</span></span></div>
                 {p.shared ? <div className="ph-ev"><span className="av" /><span className="ev-t"><b>a teammate</b> added work <span className="mono ev-meta"><span className="hemi2 ring" /> private · 1d</span></span></div> : null}
               </div>

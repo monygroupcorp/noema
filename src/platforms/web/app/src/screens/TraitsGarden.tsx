@@ -17,6 +17,20 @@ import { axisSplice, SPLICE_WHEN } from '../lib/collections';
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
 
+// The count line beside the title — "3 axes · 24 combinations · 100 pieces". A count of nothing
+// is not printed (DESIGN.md D-58): with no axis there is no grid to count combinations of, and a
+// supply of nothing is not a fact worth a glyph. Null when nothing is countable — the axes
+// column below already says "no axes yet", and that one line is enough.
+export function gardenCountLine(axes: readonly Tractus[], total: number): string | null {
+  const parts: string[] = [];
+  if (axes.length > 0) {
+    parts.push(`${axes.length} ${axes.length === 1 ? 'axis' : 'axes'}`);
+    parts.push(`${combos([...axes]).toLocaleString()} combinations`);
+  }
+  if (total > 0) parts.push(`${total} pieces`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 export function TraitsGarden() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -107,7 +121,7 @@ export function TraitsGarden() {
         <div className="garden-head">
           <div><h1>{c.nomen || 'Untitled collection'}</h1></div>
           <div className="garden-nudge">
-            <span className="gn-count mono">{axes.length} {axes.length === 1 ? 'axis' : 'axes'} · <b className="accent">{combos(axes).toLocaleString()}</b> combinations · {c.total} pieces</span>
+            {gardenCountLine(axes, c.total) && <span className="gn-count mono">{gardenCountLine(axes, c.total)}</span>}
             {!editable && <span className="gn-ai"><span className="hemi2 lit" /> This collection is fired — traits are locked.</span>}
           </div>
         </div>

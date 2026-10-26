@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { BACK, LoadFailure } from '../components/LoadFailure';
-import { custodyGlyph, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
+import { custodyGlyph, datasetStatsLine, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
   ARCHIVE_MEANING,
@@ -390,7 +390,7 @@ export function Dataset() {
             <h1 className="ds-d-name">{d.name} <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span></h1>
             {/* The count is the LIVE media — archiving two of nine and still reading nine would
                 contradict the coverage line beside it, which the server has already moved. */}
-            <div className="sub mono">{live.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
+            <div className="sub mono">{datasetStatsLine(d, live.length, `updated ${d.mutatum}`)}</div>
           </div>
           {/* Archiving the SET, with the set's own identity — not buried in a menu. It asks
               once, says what archive means, and offers the set back after. */}
@@ -529,7 +529,7 @@ export function Dataset() {
           {/* the panels */}
           <aside className="ds-side">
             <div className="ds-panel">
-              <div className="ds-panel-l">captionsets · {d.captionsets.length} · pick to train</div>
+              <div className="ds-panel-l">captionsets{d.captionsets.length ? ` · ${d.captionsets.length}` : ''} · pick to train</div>
               {d.captionsets.length === 0 ? (
                 <p className="ds-panel-note">no captionset yet — a model learns from a caption layer. Run a caption job to make one.</p>
               ) : d.captionsets.map((cs) => (
