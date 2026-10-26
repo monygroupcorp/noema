@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   aditusFor, applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
-  FlowNode, hasEditablePorts, nodesToTabula, portType, publishErrorState, resolveTabulaForModus, restoreEdges,
+  FlowNode, hasEditablePorts, loadCanvas, nodesToTabula, portType, publishErrorState, resolveTabulaForModus, restoreEdges,
   restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
 } from './Canvas';
-import type { ApiRequestError, JsonSchema } from '../lib/api';
+import { loadFailureKind } from '../components/LoadFailure';
+import { ApiRequestError, type JsonSchema } from '../lib/api';
 import type { Node, Edge } from '@xyflow/react';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
@@ -242,5 +243,104 @@ describe('node parameter panel — per-node aditus editing (noema-217)', () => {
   it('editing node A leaves node B\'s values untouched — clicking node B does not show node A\'s values', () => {
     const updated = setNodeAditus([nodeA, nodeB], 'n1', 'prompt', 'a new dragon');
     expect(aditusFor(updated, 'n2')).toEqual({ prompt: 'a phoenix' });
+  });
+});
+
+// ── loadCanvas — the screen's one load, and what a visitor sees when it fails ──────────
+// The canvas used to await its reads in an effect with no catch: a visitor whose load failed
+// — a refused caller, a 5xx, a dropped connection — stayed on "Loading canvas…" for good.
+// The load now rejects to the screen, which maps the rejection to a LoadFailure kind. No
+// jsdom here (see above): an in-memory localStorage stands in for the anonymous commitment
+// store and a fetch stub for the server.
+describe('loadCanvas — the rejection reaches the screen, with the kind it shows', () => {
+  const store = new Map<string, string>();
+  const localStorageStub = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const flows = [{ id: 'f1', nomen: 'Flow one', versio: '1.0.0' }];
+  const described = { id: 'f1', nomen: 'Flow one', versio: '1.0.0', input: { type: 'object', properties: {} }, output: { type: 'object', properties: {} } };
+  const draft = { id: 't1', nomen: 'Untitled canvas', nodi: [], vincula: [] };
+
+  // The server as an anonymous visitor meets it, with one path's answer overridden.
+  function serve(overrides: Record<string, () => Response> = {}) {
+    return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const key = `${method} ${url}`;
+      if (overrides[key]) return overrides[key]();
+      if (key === 'GET /v1/flows') return json({ flows });
+      if (key === 'GET /v1/me/flows') return json({ flows: [] });
+      if (key === 'GET /v1/flows/f1') return json(described);
+      if (key === 'GET /v1/tabulae') return json({ tabulae: [] });
+      if (key === 'POST /v1/tabulae') return json({ tabula: draft }, 201);
+      return json({ error: { code: 'not_found', message: `no route ${key}` } }, 404);
+    });
+  }
+
+  beforeEach(() => {
+    store.clear();
+    vi.stubGlobal('localStorage', localStorageStub);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('a visitor with no session gets the palette and a draft of their own — no gate', async () => {
+    const fetchSpy = serve();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { palette, tabula } = await loadCanvas(undefined);
+    expect(palette.map((p) => p.modusId)).toEqual(['f1']);
+    expect(tabula.id).toBe('t1');
+    // Every owner-scoped read carried the anonymous commitment; nothing was refused.
+    const ownerScoped = fetchSpy.mock.calls.filter(([u]) => /\/v1\/(me\/flows|tabulae)$/.test(String(u)));
+    expect(ownerScoped).toHaveLength(3);
+    for (const [, init] of ownerScoped) expect((init?.headers as Record<string, string>)['x-commitment']).toMatch(/^0x/);
+  });
+
+  it('a server that refuses the caller rejects with its 403, which the screen shows as the door', async () => {
+    vi.stubGlobal('fetch', serve({ 'GET /v1/tabulae': () => json({ error: { code: 'auth.forbidden', message: 'tabulae require an identified account' } }, 403) }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiRequestError);
+    expect(err).toMatchObject({ status: 403 });
+    expect(loadFailureKind(err)).toBe('signin');
+  });
+
+  it('a 5xx on any read rejects, which the screen shows with a retry', async () => {
+    vi.stubGlobal('fetch', serve({ 'GET /v1/me/flows': () => json({ error: { code: 'internal', message: 'upstream unavailable' } }, 503) }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiRequestError);
+    expect(err).toMatchObject({ status: 503 });
+    expect(loadFailureKind(err)).toBe('transient');
+  });
+
+  it('a connection that drops rejects too — the loader is never terminal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TypeError);
+    expect(loadFailureKind(err)).toBe('transient');
+  });
+
+  it('a load the screen has left creates no draft on its behalf', async () => {
+    const fetchSpy = serve();
+    vi.stubGlobal('fetch', fetchSpy);
+    const controller = new AbortController();
+    controller.abort();
+    const err = await loadCanvas(undefined, controller.signal).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(fetchSpy.mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
+  });
+
+  it('?modusId= reopens that flow\'s own tabula without creating a draft', async () => {
+    const mine = { id: 't9', nomen: 'Mine', modusId: 'f1', nodi: [], vincula: [] };
+    const fetchSpy = serve({ 'GET /v1/tabulae': () => json({ tabulae: [draft, mine] }) });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { tabula } = await loadCanvas('f1');
+    expect(tabula.id).toBe('t9');
+    expect(fetchSpy.mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
   });
 });

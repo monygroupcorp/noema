@@ -7,9 +7,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import {
-  api, ApiRequestError,
+  api, ApiRequestError, withReadTimeout,
   type FlowDescription, type FlowSummary, type JsonSchema, type Tabula, type TabulaNodus, type TabulaVinculum,
 } from '../lib/api';
 import './canvas.css';
@@ -131,6 +132,31 @@ export function tabulaToEdges(tabula: Pick<Tabula, 'vincula'>): Edge[] {
 export function resolveTabulaForModus<T extends Pick<Tabula, 'modusId'>>(tabulae: T[], modusId?: string): T | undefined {
   const match = modusId ? tabulae.find((t) => t.modusId === modusId) : undefined;
   return match ?? tabulae[0];
+}
+
+// Everything the canvas needs before it can draw: the palette (the canonical catalogue plus
+// the caller's own flows, each described for its real ports) and the caller's current
+// Tabula — the most recently saved one, or a fresh draft when they have none.
+//
+// Tabulae are owned by whoever asks, a named account or the anonymous commitment alike, so
+// a visitor with no session gets a draft of their own here rather than a sign-in gate. Any
+// of these reads can still fail — a dropped connection, a server answering 5xx, a deployment
+// that refuses the caller — and the rejection is the screen's to show: it is not caught
+// here, so the one catch at the screen sees it whichever read it came from.
+//
+// The three lists are independent and go out together; only the flow descriptions wait on
+// the lists, and only the draft waits on the tabulae. The signal is the screen's: once it
+// leaves (or asks again), the describes are abandoned and no draft is created on its behalf.
+export async function loadCanvas(modusId: string | undefined, signal?: AbortSignal): Promise<{ palette: PaletteEntry[]; tabula: Tabula }> {
+  const [{ flows: canonical }, { flows: mine }, { tabulae }] = await Promise.all([api.listFlows(), api.listMyFlows(), api.listTabulae()]);
+  const described = await Promise.all(dedupeFlows(canonical, mine).map((f) => api.getFlow(f.id, signal)));
+  const palette = buildPalette(described);
+  let tabula = resolveTabulaForModus(tabulae, modusId);
+  if (!tabula) {
+    if (signal?.aborted) throw new DOMException('The canvas load was abandoned', 'AbortError');
+    tabula = (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
+  }
+  return { palette, tabula };
 }
 
 // ── Publish-error-on-edge (AMENDMENT v2 — the one judgment call in this item) ────
@@ -314,6 +340,11 @@ export function Canvas() {
   const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node<FlowData>>([]);
   const [edges, setEdges, onEdgesChangeRaw] = useEdgesState<Edge>([]);
   const [loading, setLoading] = useState(true);
+  // Why the canvas is not on screen, once the load has settled against it. Null while the
+  // load is in flight — and the load is bounded (withReadTimeout), so null is never permanent.
+  const [loadFailure, setLoadFailure] = useState<LoadFailureKind | null>(null);
+  // Bumped by "Try again": runs the load again without leaving the screen.
+  const [attempt, setAttempt] = useState(0);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<PublishErrorState | null>(null);
@@ -331,29 +362,41 @@ export function Canvas() {
   const pendingUndo = useRef<{ node: Node<FlowData>; edges: Edge[] } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load the palette (canonical + owner's own flows, real ports) and the caller's
-  // current Tabula — the most recently saved one, or a fresh draft if they have none.
-  // Reopening /canvas lands back on the same workspace (no separate picker UI in scope).
+  // Load the palette and the caller's current Tabula (see loadCanvas). Reopening /canvas
+  // lands back on the same workspace (no separate picker UI in scope).
+  //
+  // The load is bounded and its failure is shown: a read the server never answers, or one it
+  // refuses, becomes a state with a way out instead of a loading screen that outlives the
+  // tab (D-62). Before this, any rejection here went unobserved and "Loading canvas…" stayed
+  // up for good.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const [{ flows: canonical }, { flows: mine }] = await Promise.all([api.listFlows(), api.listMyFlows()]);
-      const described = await Promise.all(dedupeFlows(canonical, mine).map((f) => api.getFlow(f.id)));
-      if (cancelled) return;
-      const built = buildPalette(described);
-      setPalette(built);
-
-      const { tabulae } = await api.listTabulae();
-      const current = resolveTabulaForModus(tabulae, modusId) ?? (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
-      if (cancelled) return;
-      setTabula(current);
-      setNodes(tabulaToNodes(current, built));
-      setEdges(tabulaToEdges(current));
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
+    // One signal for the whole load: the deadline pulls it, and so does leaving the screen.
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadFailure(null);
+    withReadTimeout((deadline) => {
+      deadline.addEventListener('abort', () => controller.abort(), { once: true });
+      return loadCanvas(modusId, controller.signal);
+    })
+      .then(({ palette: built, tabula: current }) => {
+        if (cancelled) return;
+        skipNextSave.current = true;
+        setPalette(built);
+        setTabula(current);
+        setNodes(tabulaToNodes(current, built));
+        setEdges(tabulaToEdges(current));
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setLoadFailure(loadFailureKind(e));
+        setLoading(false);
+      });
+    return () => { cancelled = true; controller.abort(); };
+    // `modusId` only picks the tabula on load; a later change to the query must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   // Autosave — debounced ~1.5s after any node/edge change, skipping the initial load.
   useEffect(() => {
@@ -469,10 +512,20 @@ export function Canvas() {
   // an in-flight load, instead of holding a copy that can go stale.
   const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null;
 
+  // The load settled without a canvas: say what happened and offer the way out — a retry,
+  // the door when the server refused this visitor, and home either way.
+  if (loadFailure) {
+    return (
+      <AppShell crumb="Canvas">
+        <LoadFailure noun="canvas" kind={loadFailure} back={BACK.home} onRetry={() => setAttempt((n) => n + 1)} />
+      </AppShell>
+    );
+  }
+
   if (loading) {
     return (
       <AppShell crumb="Canvas">
-        <div className="canvas-wrap canvas-loading">Loading canvas…</div>
+        <div className="canvas-wrap canvas-loading" aria-busy="true">Loading canvas…</div>
       </AppShell>
     );
   }
