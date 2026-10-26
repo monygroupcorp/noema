@@ -1,5 +1,5 @@
 import {
-  Children, cloneElement, createContext, isValidElement, useContext,
+  Children, cloneElement, createContext, isValidElement, useContext, useEffect, useMemo,
   type HTMLAttributes, type ReactElement, type ReactNode,
 } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -57,7 +57,90 @@ function Row({ node: _node, children, ...props }: RowProps) {
   return <tr {...props}>{labels.length ? labelled(children, labels) : children}</tr>;
 }
 
+// A long document is finished more often when its shape is visible before its body is read
+// (REFERENCES.md REF-3). The terms run ten numbered sections and the features page seven, each
+// a single scroll on a phone with nothing to say what lies below the fold. So every document with
+// three or more `##` headings carries an "On this page" list under its title: the headings, as
+// in-page anchors, inside a `<details>` that opens on request and otherwise costs one row, so the
+// list never pushes the prose down on a phone. Fewer than three headings is not a shape worth a
+// list, and such a page shows none.
+//
+// The ids come from the heading text, the same way on both sides: the list reads the markdown's
+// `## ` lines (skipping any fenced code), the h2 component reads its hast node, and both run the
+// text through `slugOf`. Two headings with the same text would share an id, so the second is
+// dropped from the list rather than linked to the wrong place.
+const MIN_SECTIONS = 3;
+
+type Section = { id: string; text: string };
+
+function slugOf(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Inline markdown stripped from a heading line, leaving what the reader sees. */
+function plainOf(line: string): string {
+  return line
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_~]/g, '')
+    .trim();
+}
+
+function sectionsOf(md: string): Section[] {
+  const out: Section[] = [];
+  const seen = new Set<string>();
+  let fenced = false;
+  for (const line of md.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const m = /^## +(.+?)\s*#*\s*$/.exec(line);
+    if (!m) continue;
+    const text = plainOf(m[1]);
+    const id = slugOf(text);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, text });
+  }
+  return out;
+}
+
+const Sections = createContext<Section[]>([]);
+
+function SectionList() {
+  const sections = useContext(Sections);
+  if (sections.length < MIN_SECTIONS) return null;
+  return (
+    <details className="doc-sections">
+      <summary>On this page</summary>
+      <ol>
+        {sections.map((s) => (
+          <li key={s.id}><a href={`#${s.id}`}>{s.text}</a></li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+type HeadingProps = { node?: unknown; children?: ReactNode } & HTMLAttributes<HTMLHeadingElement>;
+
+// The title carries the list directly beneath it, so the list sits where a reader looks for the
+// shape of the page: after the name of the thing, before the first word of its body.
+function Title({ node: _node, children, ...props }: HeadingProps) {
+  return (
+    <>
+      <h1 {...props}>{children}</h1>
+      <SectionList />
+    </>
+  );
+}
+
+function Heading({ node, children, ...props }: HeadingProps) {
+  const id = props.id ?? (slugOf(textOf(node as HastNode | undefined)) || undefined);
+  return <h2 {...props} id={id}>{children}</h2>;
+}
+
 const components: Components = {
+  h1: Title,
+  h2: Heading,
   table: ({ node, ...props }) => (
     <Headers.Provider value={headerLabels(node as HastNode | undefined)}>
       <div className="table-wrap"><table {...props} /></div>
@@ -72,6 +155,13 @@ const components: Components = {
 
 // Generic markdown content page (about / features / pricing / blog / legal/*).
 export function Doc({ md }: { md: string }) {
+  const sections = useMemo(() => sectionsOf(md), [md]);
+  // A link that arrives carrying a fragment finds nothing to scroll to until the markdown has
+  // rendered, so the jump is made here, once the headings exist.
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, [md]);
   return (
     <div className="doc-page">
       <nav className="topnav">
@@ -85,7 +175,9 @@ export function Doc({ md }: { md: string }) {
         </div>
       </nav>
       <article className="prose">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{md}</ReactMarkdown>
+        <Sections.Provider value={sections}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{md}</ReactMarkdown>
+        </Sections.Provider>
       </article>
       <SiteFooter />
     </div>

@@ -7,7 +7,28 @@
 }
 .prose > :first-child { margin-top: 0; }
 .prose h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.03em; color: var(--text); margin: 0 0 10px; font-weight: 600; line-height: 1.1; }
-.prose h2 { font-size: 22px; letter-spacing: -.02em; color: var(--text); margin: 40px 0 12px; font-weight: 600; }
+/* A heading reached by its anchor stops clear of the sticky .topnav (86px tall on a phone), not under it. */
+.prose h2 { font-size: 22px; letter-spacing: -.02em; color: var(--text); margin: 40px 0 12px; font-weight: 600; scroll-margin-top: 100px; }
+/* "On this page": the document's h2 headings as in-page anchors, under the title (Doc.tsx
+   renders it for any document with three or more). Closed by default so a phone sees the title,
+   one row saying the list exists, and then the prose; the summary row is the touch hit height
+   (D-43) and the list items are the same height when open. */
+.doc-sections { margin: 0 0 var(--s6); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+.doc-sections summary { display: flex; align-items: center; gap: var(--s2); min-height: 44px; padding: 0 var(--s1); cursor: pointer; list-style: none; font-size: var(--fs-s); font-weight: 600; letter-spacing: .02em; color: var(--text); }
+.doc-sections summary::-webkit-details-marker { display: none; }
+.doc-sections summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }
+.doc-sections[open] summary::before { transform: rotate(45deg); }
+.doc-sections summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.prose .doc-sections ol { list-style: none; margin: 0; padding: 0 0 var(--s2); columns: 1; }
+.prose .doc-sections li { margin: 0; }
+.prose .doc-sections a { display: flex; align-items: center; min-height: 44px; padding: 0 var(--s1); color: var(--muted); font-size: var(--fs-base); }
+.prose .doc-sections a:hover { color: var(--text); text-decoration: none; }
+.prose .doc-sections a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+/* With the width for it the list opens into two columns, so eight sections cost four rows. */
+@media (min-width: 641px) {
+  .prose .doc-sections ol { columns: 2; column-gap: var(--s6); }
+  .prose .doc-sections a { min-height: 36px; }
+}
 .prose h3 { font-size: 17px; color: var(--text); margin: 28px 0 8px; font-weight: 600; }
 .prose h4 { font-size: 14px; color: var(--text); margin: 22px 0 6px; font-weight: 600; }
 .prose p { margin: 0 0 16px; }
