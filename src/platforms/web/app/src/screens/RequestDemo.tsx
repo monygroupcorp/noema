@@ -50,7 +50,13 @@ export function RequestDemo() {
   const canSubmit = contactEmail.trim() !== '' && useCase.trim() !== '' && phase !== 'submitting';
 
   async function submit() {
-    if (!canSubmit) return;
+    if (phase === 'submitting') return;
+    // Pressable even while incomplete (D-46): it names what is missing rather than sitting dimmed.
+    if (!canSubmit) {
+      setPhase('error');
+      setError('Add a contact email and a short description of how you want to use noema.');
+      return;
+    }
     setPhase('submitting');
     setError(null);
     try {
@@ -198,7 +204,7 @@ export function RequestDemo() {
 
             {phase === 'error' && <div className="warn">{error}</div>}
 
-            <button className="btn" type="submit" disabled={!canSubmit} style={{ alignSelf: 'flex-start' }}>
+            <button className="btn" type="submit" style={{ alignSelf: 'flex-start' }}>
               {phase === 'submitting' ? 'Submitting…' : 'Submit request'}
             </button>
           </form>

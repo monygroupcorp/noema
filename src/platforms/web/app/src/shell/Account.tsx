@@ -100,7 +100,7 @@ export function Account() {
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
         <Chip d={ident} /><span className="nm">{anon ? 'anonymous' : 'you'}</span><span className="cv"><Ic name="chevron-down" /></span>
       </button>
-      <Link to="/chat" className="pc-start" onClick={guardedClick}><Ic name="plus" /> start</Link>
+      <Link to="/chat" className="pc-pill pc-start" onClick={guardedClick}><Ic name="plus" /> start</Link>
 
       {open && (
         <div id="acctpop" className="acctmenu" style={pos}>

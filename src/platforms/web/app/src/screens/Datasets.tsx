@@ -203,11 +203,6 @@ export function Datasets() {
               </Link>
             );
           })}
-          <button className="dscard new" onClick={openModal}>
-            <Ic name="plus" />
-            <div className="t">new dataset</div>
-            <div className="s mono">drop media · or seed from a generation</div>
-          </button>
         </div>
 
         {/* ── The public catalog ───────────────────────────────────────────────

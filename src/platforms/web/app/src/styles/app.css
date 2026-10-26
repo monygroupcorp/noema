@@ -825,7 +825,8 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .pc-pill.compute{font-family:var(--font-mono);color:var(--muted)}
 .pc-pill.id-chip{padding-left:6px} .pc-pill.id-chip .chip{width:20px;height:20px;font-size:10px}
 .pc-pill.id-chip .nm{font-weight:500} .pc-pill.id-chip .cv svg.lucide{width:13px;height:13px;color:var(--faint)}
-.pc-start{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border:1px solid var(--accent);border-radius:999px;background:var(--accent);color:#0b1020;font-size:12.5px;font-weight:600;text-decoration:none}
+/* ghost like its sibling pills (D-42): the screen's own action is the one filled button */
+.pc-start{font-weight:600}
 .pc-start svg.lucide{width:14px;height:14px}
 
 /* account dropdown — restrained, posture-rich (noema-account-dropdown.png) */
@@ -970,8 +971,6 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .rdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .rdot.good{background:var(--good)} .rdot.amber{background:var(--amber)}
 .ds-action{font-size:12px;color:var(--accent-soft)}
-.dscard.new{align-items:center;justify-content:center;gap:7px;border-style:dashed;background:none;color:var(--muted);cursor:pointer;min-height:200px;font:inherit}
-.dscard.new svg.lucide{width:18px;height:18px} .dscard.new .t{font-size:13px} .dscard.new .s{font-size:11px;color:var(--faint)}
 
 /* ── dataset detail (train-dataset-spec.md) ────────────────────────────────── */
 .ds-d-name{display:flex;align-items:center;gap:11px}

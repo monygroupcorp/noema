@@ -505,7 +505,7 @@ export function Ceremony() {
 
       <div className="endcta">
         <h2>Make the keys no one can forge — including us.</h2>
-        <a className="btn lg" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+        <a className="btn-ghost" href="#contribute">Contribute <Ic name="arrow-right" /></a>
       </div>
 
       <SiteFooter />

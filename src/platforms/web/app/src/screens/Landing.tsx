@@ -173,7 +173,7 @@ export function Landing({
             <Link to="/pricing">Pricing</Link>
           </span>
           <span className="right">
-            <Link className="btn" to={entryPath()}>Open app</Link>
+            <Link className="btn-ghost" to={entryPath()}>Open app</Link>
           </span>
         </nav>
 
@@ -289,7 +289,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
               Everything on this page was put here by someone. Add the next thing.
             </p>
             <span className="lp-beat-cta">
-              <Link className="btn lg" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
+              <Link className="btn-ghost" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
             </span>
           </div>
         </section>
