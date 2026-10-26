@@ -69,9 +69,9 @@ This isn't a chatbot wrapper. It's a production workspace for people who build w
 
 Signing up asks for no email address: an account is a username and a password.
 
-Funding from a shielded or fresh on-chain wallet puts no identity behind the address. That is the
-strongest funding path available today. It is not invisibility: the depositing address reaches us
-through our deposit provider, and we keep it for sanctions screening.
+Funding from a shielded or fresh on-chain wallet puts no identity behind the address. It is not
+invisibility: the depositing address reaches us through our deposit provider, and we keep it for
+sanctions screening.
 
 We never train on your prompts or outputs. Run records are retained, and erasing your account
 severs them from you rather than deleting them; the [privacy policy](/legal/privacy) says exactly
