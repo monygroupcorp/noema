@@ -12,9 +12,9 @@ import {
   type Admitted,
   type Finding,
   type GateContext,
-} from '../../../src/platforms/web/app/walk/critique.ts'
+} from '../../../src/platforms/web/app/walk/gate.js'
 
-// The Phase-2 critic (`src/platforms/web/app/walk/critique.ts`) stands between a multimodal model
+// The Phase-2 critic (`src/platforms/web/app/walk/critique.ts`, its gate in `walk/gate.ts`) stands between a multimodal model
 // and rth. A multimodal critic reports issues it never observed, confidently and in the house
 // format, and the only thing that catches an invented finding is a citation that can be checked:
 // the shot it came from, a rule that exists, and what that rule says. This suite proves the gate
