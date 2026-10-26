@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  api, AuthApiError, getAccounts, upsertAccount, setActiveAnimaId, dropActiveAccount, clearAllAccounts,
+  api, AuthApiError, getAccounts, upsertAccount, setActiveAnimaId, dropAccount, dropActiveAccount, clearAllAccounts,
   setPendingToken, takeLegacySession, type AuthResult, type StoredAccount, type SessionStore,
 } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
@@ -40,6 +40,7 @@ interface SessionCtx {
   recoverWithTelegram: (code: string) => Promise<void>;   // paste a bot recovery code → add + activate
   switchAccount: (animaId: string) => Promise<void>;      // re-point the active account
   goAnonymous: () => void;            // deactivate to the anon slot, KEEPING held logins
+  forgetAccount: (animaId: string) => void;   // drop one held account from this browser (active or not)
   signOutActive: () => void;          // drop the active account → next held, else anon
   signOutAll: () => void;             // drop every account → anon
 }
@@ -168,13 +169,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStore(setActiveAnimaId(null));
   };
 
-  // Sign out of the ACTIVE account only — activate the next held account, or fall to anon.
-  const signOutActive = () => {
-    const next = dropActiveAccount();
+  // Forget one held account on this browser — the row-level "remove" on /keyring. Only the
+  // client store changes: the account itself is untouched and signs back in as before. If it
+  // was the active one, the next held account takes over (or anon), and the refresh timer
+  // follows whichever is active now.
+  const forgetAccount = (animaId: string) => {
+    const next = dropAccount(animaId);
     setStore(next);
     const active = next.accounts.find((a) => a.animaId === next.activeAnimaId);
     if (active) scheduleRefresh(active.expiresAt);
     else if (refreshTimer.current) clearTimeout(refreshTimer.current);
+  };
+
+  // Sign out of the ACTIVE account only — activate the next held account, or fall to anon.
+  const signOutActive = () => {
+    const active = getAccounts().activeAnimaId;
+    if (active) forgetAccount(active);
+    else setStore(dropActiveAccount());
   };
 
   const signOutAll = () => {
@@ -185,7 +196,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{
       session, accounts: store.accounts, activeAnimaId: store.activeAnimaId, ready,
-      register, login, signUpWithWallet, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, signOutActive, signOutAll,
+      register, login, signUpWithWallet, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, forgetAccount, signOutActive, signOutAll,
     }}>
       {children}
     </Ctx.Provider>
