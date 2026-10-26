@@ -28,8 +28,9 @@ export function AppShell({
         {children}
       </section>
       {context && <aside className="context">{context}</aside>}
-      {concierge && <Concierge hasContext={!!context} />}
-      <ReportModal />
+      {/* One floating control per corner (D-53): the concierge hosts the report trigger in its
+          panel; only a screen without the concierge floats the trigger on its own. */}
+      {concierge ? <Concierge hasContext={!!context} /> : <ReportModal />}
     </div>
   );
 }

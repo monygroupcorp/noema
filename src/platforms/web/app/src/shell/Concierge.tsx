@@ -9,6 +9,7 @@ import { ProposalCard } from '../components/ProposalCard';
 import { WriteProposalCard } from '../components/WriteProposalCard';
 import { commitMemoryDelta } from '../lib/conciergeMemory';
 import { pickConciergeThread } from '../lib/conciergeThread';
+import { ReportModal } from './ReportModal';
 
 // NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
 // (starts with "/"); the agent-side allowlist is the real gate.
@@ -246,12 +247,14 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   return (
     <div className={`concierge${hasContext ? ' has-context' : ''}${open ? ' open' : ''}${target ? ' assist' : ''}`}>
       {/* The open panel is modal: the page beneath it is not being read, and a tap there dismisses
-          the panel (P-2c, D-52) without clearing what was typed. */}
+          the panel (P-2c, D-52) without clearing what was typed. While it is open the launcher
+          below is hidden (D-53): the panel's own close control is the one way back. */}
       <div className="cscrim" onClick={() => setOpen(false)} />
       <div className="cpanel">
         <div className="chead">
           <span className="orb" /><b>Concierge</b>
           {target && <span className="ctxtag">{target.flowName} · {target.fieldLabel}</span>}
+          <ReportModal placement="docked" />
           <span className="x" onClick={() => { setOpen(false); clear(); }}><Ic name="x" /></span>
         </div>
 
