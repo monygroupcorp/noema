@@ -65,9 +65,19 @@ export function Profile() {
           <div className="sub">This is how your identity looks across NOEMA. Saved to your account (works anonymously too).</div>
         </div></div>
 
+        {/* Each section below is its own jump target (REF-34: GitHub's settings pages make every
+            section individually linkable). Mobile-first app, so a compact anchor row stands in
+            for a sidebar/table of contents. */}
+        <nav className="profile-jump" aria-label="Jump to a section">
+          <a className="fchip" href="#profile-assets">Assets</a>
+          <a className="fchip" href="#profile-backup">Account backup &amp; recovery</a>
+          <a className="fchip" href="#profile-connected">Connected accounts</a>
+          <a className="fchip" href="#profile-purses">Purses</a>
+        </nav>
+
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
 
-        <div className="sectionhead">Assets</div>
+        <div className="sectionhead" id="profile-assets">Assets</div>
         <div className="sub" style={{ marginBottom: 'var(--s4)' }}>Bring your own — drop an image to upload.</div>
         <AssetSlot label="Banner — click to upload" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
         <div style={{ display: 'flex', gap: 'var(--s4)', marginTop: 'var(--s4)', alignItems: 'flex-end' }}>
@@ -142,7 +152,7 @@ function Purses({ signedIn }: { signedIn: boolean }) {
   if (!signedIn) {
     return (
       <>
-        <div className="sectionhead">Purses</div>
+        <div className="sectionhead" id="profile-purses">Purses</div>
         <div className="sub">
           <Link to={doorPath(here)}>Sign in</Link> to a named account to mint shareable purses — a bearer
           token others can spend on your credits. Anonymous sessions can’t own purses.
@@ -153,7 +163,7 @@ function Purses({ signedIn }: { signedIn: boolean }) {
 
   return (
     <>
-      <div className="sectionhead">Purses</div>
+      <div className="sectionhead" id="profile-purses">Purses</div>
       <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
         Turn some of your credits into a shareable <b>bearer token</b>. Anyone with the token spends it on runs —
         you keep a dashboard over the balance (you see it drain, never who spent it). Reclaim pulls leftover credits back; revoke retires it.
@@ -227,7 +237,7 @@ function BackupRecovery({ signedIn }: { signedIn: boolean }) {
   const anyLinked = signedIn;
   return (
     <>
-      <div className="sectionhead">Account backup &amp; recovery</div>
+      <div className="sectionhead" id="profile-backup">Account backup &amp; recovery</div>
       {!anyLinked ? (
         <div className="sub">
           <Link to={doorPath(here)}>Sign in</Link> to a username account to add a wallet or Telegram backup
@@ -347,7 +357,7 @@ function ConnectedAccounts({ initial, available, anon }: {
 
   return (
     <>
-      <div className="sectionhead">Connected accounts</div>
+      <div className="sectionhead" id="profile-connected">Connected accounts</div>
       {unavailable ? (
         <div className="sub">Connecting Civitai / HuggingFace accounts isn’t available on this deployment.</div>
       ) : (
