@@ -24,6 +24,7 @@ tests/unit/crystal/Compiler.ltx.test.ts
 tests/unit/crystal/Compiler.wan22.test.ts
 tests/unit/crystal/Compiler.privateModel.test.ts
 tests/unit/crystal/Compiler.gatedProxy.test.ts
+tests/unit/crystal/Compiler.addressless.test.ts
 tests/unit/crystal/jobToken.test.ts
 tests/unit/crystal/sessionToken.test.ts
 tests/unit/lib/classifyError.test.ts

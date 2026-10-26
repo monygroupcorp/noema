@@ -54,6 +54,16 @@ export function classifyError(err: unknown): string {
   if (/insufficient funds/i.test(msg))
     return "You don't have enough credits. Use /status to check your balance."
 
+  // A weight the USER added to the run — a LoRA their prompt triggered, a model they pinned —
+  // whose registry record names no file. The Compiler refuses before any pod exists and names
+  // the model as the user knows it; the way forward is theirs (drop the word, unpin it), so the
+  // sentence says that rather than sending them to support for their own loadout.
+  const unfetchable = /'([^']+)' has no downloadable file yet/.exec(msg)
+  if (unfetchable || /MODEL_UNFETCHABLE/.test(msg)) {
+    const name = unfetchable ? `'${unfetchable[1]}' ` : ''
+    return `The model ${name}has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.`
+  }
+
   // A flow whose modus is missing, or whose weights were never registered with a download
   // address, fails before any pod exists and fails the same way next time. "Try again" would
   // be a lie; this is the operator's to fix.

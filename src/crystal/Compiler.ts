@@ -5,6 +5,7 @@ import type { Intella, Intellarum } from '../types/intelligendi.js'
 import type { ModelRef } from '../types/actum.js'
 import { podDiskGbFor, DEFAULT_POD_DISK_GB } from './podDisk.js'
 import { WorkflowTemplateRegistry, WorkflowTemplateError } from './WorkflowTemplateRegistry.js'
+import { hasDownloadAddress } from './weightAddress.js'
 import { resolveLoraTriggers, type ResolvedLora } from './loraResolver.js'
 import { importSecretProviderForUrl } from './modelImportResolver.js'
 import { ownsBy as ownsIntella } from './ownerKey.js'
@@ -229,6 +230,10 @@ export interface CompileOptions {
   pinnedModels?: ModelRef[]
 }
 
+/** Whose weight a ref is: `base` comes from the fundament/flow manifest (the catalogue's), `extra` is
+ *  one the user added to this run — a prompt-triggered LoRA or a pinned model. */
+type WeightKind = 'base' | 'extra'
+
 export class CompilerError extends Error {
   readonly code: string
   constructor(code: string, message: string) {
@@ -444,7 +449,7 @@ export class Compiler {
     this._assertPinnedRefIds(opts.pinnedModels ?? [])
     const seen = new Set([...weightRefs.map(r => r.id), ...loraRefs.map(r => r.id)])
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
-    const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs], ownerKey)
+    const extraModels = await this._resolveModels([...loraRefs, ...pinnedRefs], ownerKey, 'extra')
     const models = [...baseWeights, ...extraModels].sort(byRoleThenId)
 
     // ── Pod disk ───────────────────────────────────────────────────────────
@@ -538,8 +543,9 @@ export class Compiler {
   private async _resolveModels(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
     ownerKey?: string,
+    kind: WeightKind = 'base',
   ): Promise<Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number; gated?: boolean }>> {
-    const { resolved } = await this._resolveModelsWithRecords(refs, ownerKey)
+    const { resolved } = await this._resolveModelsWithRecords(refs, ownerKey, kind)
     return resolved.sort(byRoleThenId)
   }
 
@@ -563,6 +569,7 @@ export class Compiler {
   private async _resolveModelsWithRecords(
     refs: Array<{ role: string; id: string; url?: string; dest: string; sizeBytes?: number }>,
     ownerKey?: string,
+    kind: WeightKind = 'base',
   ): Promise<{
     resolved: Array<{ role: string; id: string; url: string; dest: string; sizeBytes?: number; gated?: boolean }>
     records: Map<string, Intella>
@@ -593,6 +600,18 @@ export class Compiler {
           // No-op unless the proxy is configured (see `gatedProxyUrl`).
           const proxied = this.gatedProxyUrl(intella)
           if (proxied) { url = proxied; gated = true }
+          // The record exists but names no file. For a weight the USER added — a LoRA their
+          // prompt triggered, a model they pinned — that is their choice to undo, and the
+          // refusal has to name the model as they know it, not its registry id: a legacy LoRA
+          // migrated without a download URL keeps its trigger word, so this is the first wall
+          // an old customer hits. A base weight in the same state is the catalogue's fault and
+          // stays MODEL_NOT_RESOLVED below, which the caller reads as "not set up correctly".
+          if (!url && kind === 'extra' && !hasDownloadAddress(intella)) {
+            throw new CompilerError(
+              'MODEL_UNFETCHABLE',
+              `'${intella.nomen || intella.slug || ref.id}' has no downloadable file yet — leave out its trigger word or unpin it, then run again`,
+            )
+          }
         }
       }
       if (!url) {
@@ -643,7 +662,7 @@ export class Compiler {
     this._assertPinnedRefIds(opts.pinnedModels ?? [])
     const seen = new Set(weightRefs.map(r => r.id))
     const pinnedRefs = (opts.pinnedModels ?? []).filter(r => !seen.has(r.id))
-    const extraModels = await this._resolveModels(pinnedRefs, ownerKey)
+    const extraModels = await this._resolveModels(pinnedRefs, ownerKey, 'extra')
     const models = [...withRepo, ...extraModels].sort(byRoleThenId)
 
     // ── The user prompt, affix-woven (same seam as ComfyUI's text Portae) ──────

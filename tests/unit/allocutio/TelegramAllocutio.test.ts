@@ -1377,10 +1377,10 @@ test('warm window auto-settles (confirms) if the host does not interact', async 
 
 function fakeIntellarum() {
   const ALL = [
-    { id: 'intella.flux', nomen: 'FLUX Schnell', genus: 'model', architectura: 'dit', dest: 'checkpoints/flux.safetensors' },
-    { id: 'intella.sdxl', nomen: 'SDXL', genus: 'model', architectura: 'dit', dest: 'checkpoints/sdxl.safetensors' },
-    { id: 'intella.milady', nomen: 'Milady', genus: 'lora', dest: 'loras/milady.safetensors', baseIntellaId: 'intella.flux', slug: 'milady', trigger: 'milady' },
-    { id: 'intella.retro', nomen: 'Retro Style', genus: 'lora', dest: 'loras/retro.safetensors', baseIntellaId: 'intella.flux', slug: 'retro', trigger: 'retro artstyle' },
+    { id: 'intella.flux', nomen: 'FLUX Schnell', genus: 'model', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], architectura: 'dit', dest: 'checkpoints/flux.safetensors' },
+    { id: 'intella.sdxl', nomen: 'SDXL', genus: 'model', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], architectura: 'dit', dest: 'checkpoints/sdxl.safetensors' },
+    { id: 'intella.milady', nomen: 'Milady', genus: 'lora', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], dest: 'loras/milady.safetensors', baseIntellaId: 'intella.flux', slug: 'milady', trigger: 'milady' },
+    { id: 'intella.retro', nomen: 'Retro Style', genus: 'lora', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], dest: 'loras/retro.safetensors', baseIntellaId: 'intella.flux', slug: 'retro', trigger: 'retro artstyle' },
   ]
   return {
     async list(_genus?: string) { return ALL },   // the catalog filters by mount itself
