@@ -25,9 +25,11 @@ export function Profile() {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<Record<SecretProvider, 'connected' | 'absent'>>();
-  // undefined until /me loads (older servers omit it) → the panel assumes available; false = store
-  // unconfigured → the panel shows "unavailable" proactively without a failed connect (F3).
-  const [secretsAvailable, setSecretsAvailable] = useState<boolean>();
+  // Whether this deployment can seal a BYO token at all (`/me.secretsAvailable`; older servers omit
+  // it, which counts as available). When it cannot, the Connected-accounts section and its jump link
+  // are not rendered: an unavailable capability is absent from the interface, not announced (D-63).
+  // Also flipped reactively if a connect/disconnect reveals it on a server that omitted the field.
+  const [secretsUnavailable, setSecretsUnavailable] = useState(false);
   const { ident } = useIdentity();
   const { session } = useSession();
   const anon = ident.funding === 'bearer';
@@ -39,7 +41,7 @@ export function Profile() {
         if (!live) return;
         if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance }));
         setSecrets(me.secrets);
-        setSecretsAvailable(me.secretsAvailable);
+        setSecretsUnavailable(me.secretsAvailable === false);
         setLoaded(true);
       })
       .catch(() => { if (live) setLoaded(true); });
@@ -56,6 +58,7 @@ export function Profile() {
 
   const accent = appr.accent || '#5b8cff';
   const pageStyle = { ['--accent' as keyof CSSProperties]: accent } as CSSProperties;
+  const connecting = loaded && !secretsUnavailable;
 
   return (
     <AppShell crumb="Profile">
@@ -72,7 +75,7 @@ export function Profile() {
         <nav className="section-jump" aria-label="Jump to a section">
           <a href="#profile-assets">Assets</a>
           <a href="#profile-backup">Account backup &amp; recovery</a>
-          <a href="#profile-connected">Connected accounts</a>
+          {connecting && <a href="#profile-connected">Connected accounts</a>}
           <a href="#profile-purses">Purses</a>
         </nav>
 
@@ -88,7 +91,7 @@ export function Profile() {
 
         <BackupRecovery signedIn={!!session} />
 
-        {loaded && <ConnectedAccounts initial={secrets} available={secretsAvailable} anon={anon} />}
+        {connecting && <ConnectedAccounts initial={secrets} anon={anon} onUnavailable={() => setSecretsUnavailable(true)} />}
 
         <Purses signedIn={!!session} />
       </div></div>
@@ -348,31 +351,22 @@ function TelegramRow() {
   );
 }
 
-function ConnectedAccounts({ initial, available, anon }: {
-  initial?: Record<SecretProvider, 'connected' | 'absent'>; available?: boolean; anon: boolean;
+// Rendered only where the deployment can seal a token (the parent decides from `/me`); a server
+// that omitted the flag and then refuses a connect reports back through `onUnavailable`, and the
+// parent removes the section.
+function ConnectedAccounts({ initial, anon, onUnavailable }: {
+  initial?: Record<SecretProvider, 'connected' | 'absent'>; anon: boolean; onUnavailable: () => void;
 }) {
-  // Seeded from /me (`available === false` → store unconfigured, known before any attempt) and also
-  // flipped reactively if a connect/disconnect reveals it (belt-and-suspenders for older servers that
-  // omit `secretsAvailable`).
-  const [unavailable, setUnavailable] = useState(available === false);
-
   return (
     <>
       <div className="sectionhead" id="profile-connected">Connected accounts</div>
-      {unavailable ? (
-        <div className="sub">Connecting Civitai / HuggingFace accounts isn’t available on this deployment.</div>
-      ) : (
-        <>
-          <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
-            Connect a Civitai or HuggingFace token to import gated models and LoRAs. Your token is
-            stored sealed — it is never shown again, only its connection state.
-          </div>
-          {SECRET_PROVIDERS.map((p) => (
-            <SecretRow key={p} provider={p} initialStatus={initial?.[p] ?? 'absent'} anon={anon}
-              onUnavailable={() => setUnavailable(true)} />
-          ))}
-        </>
-      )}
+      <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
+        Connect a Civitai or HuggingFace token to import gated models and LoRAs. Your token is
+        stored sealed — it is never shown again, only its connection state.
+      </div>
+      {SECRET_PROVIDERS.map((p) => (
+        <SecretRow key={p} provider={p} initialStatus={initial?.[p] ?? 'absent'} anon={anon} onUnavailable={onUnavailable} />
+      ))}
     </>
   );
 }
