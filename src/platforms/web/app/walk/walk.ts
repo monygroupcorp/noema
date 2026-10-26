@@ -204,11 +204,26 @@ async function login(browser: Browser): Promise<boolean> {
   }
 }
 
+async function probeWebgl(browser: Browser): Promise<boolean> {
+  const ctx = await browser.newContext();
+  try {
+    const page = await ctx.newPage();
+    return await page.evaluate("(function(){try{var c=document.createElement('canvas');return !!(c.getContext('webgl')||c.getContext('experimental-webgl'))}catch(e){return false}})()") as boolean;
+  } catch { return false; } finally { await ctx.close(); }
+}
+
 async function walkAll(rows: RouteRow[]): Promise<void> {
   mkdirSync(SHOTS_DIR, { recursive: true });
   mkdirSync(REPORT_DIR, { recursive: true });
 
   const browser: Browser = await chromium.launch();
+  // Headless Chromium here draws no WebGL (no GPU, and the bundled build has no software fallback
+  // that answers getContext('webgl')), so a screen that needs it shows its own "needs WebGL"
+  // notice in every shot. That is a fact about the camera, not the screen, and the first critique
+  // run filed it as blocking three passes out of three. Probed once per run and written to the
+  // manifest, so the critic is told and a reader of the shot knows what it cannot show.
+  const webgl = await probeWebgl(browser);
+  if (!webgl) console.log('this browser draws no WebGL — WebGL screens will show their fallback notice (recorded in the manifest).');
   const authenticated = await login(browser);
 
   const report: { route: string; viewport: string; violations: unknown[] }[] = [];
@@ -301,6 +316,9 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         // the inner scroller's height before the shot (each shot says what it scrolled and how
         // tall the window became). Runs before this flag photographed app routes at one viewport.
         fullScreenCapture: true,
+        // Whether the capturing browser could draw WebGL. False means a WebGL screen's shot shows
+        // its fallback notice, which is the camera's limit and not a finding about the screen.
+        webgl,
         viewports: VIEWPORTS,
         routes: rows.length,
         failed,
