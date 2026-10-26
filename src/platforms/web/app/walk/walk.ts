@@ -213,6 +213,20 @@ async function login(browser: Browser): Promise<boolean> {
   }
 }
 
+const BLANK_JS = "(function(){return (document.body && document.body.innerText || '').trim().length === 0})()";
+const BLANK_RETRY_MS = 3_000;
+
+/** True when the document is still empty after one retry. */
+async function retryIfBlank(page: import('playwright').Page): Promise<boolean> {
+  const empty = await page.evaluate(BLANK_JS).catch(() => false) as boolean;
+  if (!empty) return false;
+  await page.waitForTimeout(BLANK_RETRY_MS);
+  await settle(page);
+  const still = await page.evaluate(BLANK_JS).catch(() => false) as boolean;
+  if (still) console.log('  ! empty document after retry — shot as is, marked blank in the manifest');
+  return still;
+}
+
 async function probeWebgl(browser: Browser): Promise<boolean> {
   const ctx = await browser.newContext();
   try {
@@ -240,6 +254,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
   const shots: {
     route: string; viewport: string; file: string; bytes: number;
     scrollContainer: string; viewportHeightAtShot: number; grown: boolean; capped: boolean;
+    blank: boolean;
   }[] = [];
   const failed: { route: string; viewport: string; error: string }[] = [];
 
@@ -263,6 +278,12 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
         await page.waitForLoadState('load').catch(() => {});
         await settle(page);
+        // An empty document is not a screen. One run photographed a blank white page for a route
+        // that renders in a second: the dev server was reloading under the walk. A shot with no
+        // text in it is retried once after a pause; if it is still empty it is shot as it is and
+        // the manifest says so, because a blank that reproduces is a finding and one that does not
+        // is noise.
+        const blank = await retryIfBlank(page);
 
         const dir = resolve(SHOTS_DIR, slug(row.path));
         mkdirSync(dir, { recursive: true });
@@ -278,6 +299,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
           file: `${slug(row.path)}/${vp.name}.png`,
           bytes: statSync(file).size,
           ...capture,
+          blank,
         });
 
         // Scanned at the width that was photographed, and recorded under that width. A contrast or
