@@ -220,7 +220,9 @@ Two registers, deliberately: **calm in the app, fierce in advertising**. Geist c
 in-product surface. Martian Mono carries marketing display type and the wordmark only.
 
 - **D-16** In-product text is `--font-sans`, or `--font-mono` when the content is an identifier, a
-  hash, a version, a count, or code. Mono is for things that are *read as data*.
+  hash, a version, a count, or code. Mono is for things that are *read as data*. Headings
+  (`h1`–`h4`) take the display role, `--font-display` (Fraunces, EX-3) — the one departure from
+  sans in running text, and a heading only.
 - **D-17** `--font-marquee` appears only in marketing display type and the wordmark. It never
   appears inside the application shell.
 - **D-18** Every text-bearing element resolves to a house family. Form controls do not inherit
@@ -439,8 +441,10 @@ already been rejected, and it must be discarded.**
 - **EX-2 — The desaturated slate/grey trust palette.** `#7d8aa6` and `#6a7079` are intentionally
   low-chroma; the fade *is* the mechanic (D-12). "Low contrast accent" against these values is not
   a finding.
-- **EX-3 — Geist / Geist Mono.** The typeface pairing is settled. Font-choice findings are not
-  admissible.
+- **EX-3 — Geist body, Geist Mono data, Fraunces display.** The typeface trio is settled: Geist
+  carries body text, Geist Mono carries data, and Fraunces carries `h1`–`h4` (D-16, commit
+  `58528d44`, measured across a signed-in walk of fifty routes). Font-choice findings against any
+  of the three are not admissible.
 - **EX-4 — Honest black elevation shadows, no glow.** Shadow colour findings proposing accent
   tint or emission are rejected (D-35, D-36).
 - **EX-5 — No gradient text, anywhere.** Rejected on sight (D-37).
