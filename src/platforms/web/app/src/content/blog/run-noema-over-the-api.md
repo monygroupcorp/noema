@@ -54,10 +54,9 @@ holder's balance and handed on — whoever holds it is the caller. That is also 
 working with nothing wrong at your end: whoever minted it can revoke it, and a code that has been
 redeemed into an account stops spending too.
 
-One honest note on the API key: **it is not minted from your account settings.** That pane says
-"coming soon" rather than showing you a button that does nothing. The key rides on partner
-approval instead — ask via [the partner form](/partners) — and once you are approved you generate
-and rotate it yourself from your [partner dashboard](/partner). The raw key is shown once, in the
+One honest note on the API key: **it is not minted from your account settings** — there is no
+key control there at all. The key rides on partner approval instead — ask via
+[the partner form](/partners) — and once you are approved you generate and rotate it yourself from your [partner dashboard](/partner). The raw key is shown once, in the
 response that mints it, and rotating retires the previous one the moment the new one appears.
 
 ## Invoke

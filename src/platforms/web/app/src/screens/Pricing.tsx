@@ -17,8 +17,10 @@ import './doc.css';
 // The ZK purse copy is gated the same way Funding.tsx gates it: on `enabled` from GET
 // /arcanum/config (ANON_PURSE_ENABLED, noema-131), read through `purseIsOff` so every page that
 // makes the offer decides it the same way. The rail is off until the trusted-setup ceremony runs
-// — POST /arcanum/purse answers "anonymous purse coming soon" — so a page that offers minting
-// outright sells a visitor something the server refuses.
+// and POST /arcanum/purse refuses to mint, so a page that offers minting outright sells a
+// visitor something the server refuses. While it is off the purse is absent from the lede, the
+// pack cards and the API answer, and the one sentence that says what it waits on sits under
+// "Private spending" (DESIGN.md D-63, P-1b), never a line that promises it for later.
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 export function Pricing() {
@@ -71,10 +73,8 @@ export function Pricing() {
           a fresh or shielded on-chain wallet and no identity sits behind the address, though the
           address itself reaches us through our deposit provider and is kept for sanctions
           screening — the{' '}
-          <Link to="/legal/privacy">privacy policy</Link> says exactly what is retained.{' '}
-          {purseOff
-            ? 'An unlinkable ZK bearer purse, whose spends tie back to nothing, is coming soon.'
-            : 'For spends nothing can tie back to you, mint a ZK purse from your balance (see below).'}
+          <Link to="/legal/privacy">privacy policy</Link> says exactly what is retained.
+          {!purseOff && ' For spends nothing can tie back to you, mint a ZK purse from your balance (see below).'}
         </p>
 
         <h2>Packs</h2>
@@ -115,7 +115,7 @@ export function Pricing() {
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 <li>Never expire</li>
                 <li>No subscription, no recurring charge</li>
-                <li>{purseOff ? 'ZK purse — unlinkable spending, coming soon' : 'Mint a ZK purse to spend unlinkably'}</li>
+                {!purseOff && <li>Mint a ZK purse to spend unlinkably</li>}
                 <li>Spend across every modality</li>
               </ul>
               <Link
@@ -140,26 +140,25 @@ export function Pricing() {
         <p>
           {purseOff ? (
             <>
-              An unlinkable ZK bearer purse is <b>coming soon</b>: you will mint one from your
-              balance and its spends will be cryptographically unlinkable to what you funded. It
-              unlocks after the trusted-setup <Link to="/ceremony">ceremony</Link> — until then the
-              rail is switched off and minting is refused, because the proving key it would verify
-              against is not yet one nobody controls. Direct-to-commitment deposits, where we
-              never see the funding wallet, are further out on the roadmap.
+              Spending from a ZK bearer purse that is linked to no account waits on one thing: the
+              trusted-setup <Link to="/ceremony">ceremony</Link>, which produces a proving key
+              nobody controls. Until it has run, minting is refused and every credit is an
+              account-tied credit.
             </>
           ) : (
             <>
               On top of that, mint a ZK purse from your balance: its spends are cryptographically
               unlinkable to what you funded. Minting a purse needs a signed-in account, so it's an
               unlinkable spend layer over an identified balance — strongest when you fund from a
-              shielded wallet. Direct-to-commitment deposits, where we never see the funding
-              wallet, are on the roadmap.
+              shielded wallet.
             </>
           )}
         </p>
-        <p>
-          <Link to="/funding">How purse works →</Link>
-        </p>
+        {!purseOff && (
+          <p>
+            <Link to="/funding">How purse works →</Link>
+          </p>
+        )}
 
         <h2>FAQ</h2>
         <h3>Do credits expire?</h3>
@@ -175,18 +174,15 @@ export function Pricing() {
 
         <h3>What's the difference between a purse credit and a regular credit?</h3>
         <p>
-          {purseOff && (
-            <>
-              <b>Today, none — every credit is a regular account-tied credit</b>, because the ZK
-              bearer purse has not unlocked yet.{' '}
-            </>
-          )}
-          {purseOff ? 'When it ships, the two will be' : 'They are'} functionally identical — both
-          buy the same compute, same GPU, same models. The difference is the billing layer: a
-          regular credit is tied to your account, while a purse credit spends from a ZK bearer token
-          whose spends are cryptographically unlinkable to how it was funded. How anonymous the
-          funding itself was still depends on your funding source — a shielded wallet reveals no
-          identity; a card is identified.
+          They are functionally identical — both buy the same compute, same GPU, same models. The
+          difference is the billing layer: a regular credit is tied to your account, while a purse
+          credit spends from a bearer token minted out of a balance, so whoever holds the token is
+          the caller.{' '}
+          {purseOff
+            ? 'Today that token is still tied to the account that minted it.'
+            : 'A ZK purse goes further: its spends are cryptographically unlinkable to how it was funded.'}{' '}
+          How anonymous the funding itself was still depends on your funding source — a shielded
+          wallet reveals no identity; a card is identified.
         </p>
 
         <h3>Do you offer a free trial?</h3>
@@ -201,9 +197,7 @@ export function Pricing() {
           — no identity sits behind the address, though we do keep the address itself for sanctions
           screening. Calls authenticate with a session key, or with a purse token in an{' '}
           <code>x-bursa-token</code> header; that purse is still tied to the account that minted it.
-          {purseOff
-            ? ' Spending from a bearer purse that is linked to no account is the part that is coming soon, after the trusted-setup ceremony.'
-            : ' A bearer purse linked to no account spends unlinkably.'}{' '}
+          {!purseOff && ' A ZK bearer purse linked to no account spends unlinkably.'}{' '}
           The contract is self-describing and public:{' '}
           <a href="/v1/openapi.json" target="_blank" rel="noreferrer">
             <code>GET /v1/openapi.json</code>

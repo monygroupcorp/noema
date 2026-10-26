@@ -11,9 +11,11 @@ import { publishNote, publishOutcome, type Editio, type PublishRequest } from '.
 //   • hosting          — GalleryAdapter: public ERC-721 tokenURIs, a TEMPORARY bridge NOESIS
 //                        leans on. Public surface → moderation gate (fail-closed until CSAM;
 //                        works on staging's permissive gate). Strongly warned as non-permanent.
-//   • NOESIS mint      — our launchpad (deploying separately); disabled here for now.
+// Minting on the NOESIS launchpad is not a destination this screen offers: a disabled option
+// promising it for later is a placeholder, not a choice (DESIGN.md D-63), so until the
+// launchpad can take a collection the screen lists only the two destinations that work.
 
-type Dest = 'you' | 'hosting' | 'noesis';
+type Dest = 'you' | 'hosting';
 type Kind = 'download' | 'hosting';
 type Job =
   | { s: 'idle' }
@@ -128,8 +130,6 @@ const OPTIONS: Option[] = [
     desc: 'Bundle every approved piece + its metadata into a ZIP, hosted for you to download. NOEMA keeps nothing public — mint or host it anywhere you like.', sub: 'images/ + metadata/ + manifest.json · content-addressed provenance' },
   { key: 'hosting', glyph: 'ring', title: 'Publish to hosting', tag: '⇧ a temporary bridge', tagClass: 'slate',
     desc: 'NOEMA hosts your pieces as public ERC-721 tokenURIs — point any contract’s baseURI at them and mint anywhere. A launch bridge, not permanent storage.', sub: 'public base URI + per-token metadata · migrate to Arweave/IPFS before you rely on it' },
-  { key: 'noesis', glyph: 'lit', title: <>Publish to <span className="noesis-wm">NOESIS</span></>, tag: '↗ our launchpad', tagClass: 'egress',
-    desc: 'The easy path — NOESIS mints the contract and lists the collection on-chain. Public & permanent.', sub: 'gacha · ERC-721 · coming with the NOESIS launchpad' },
 ];
 
 /**
@@ -211,7 +211,6 @@ export function EditioExport() {
   const blocked: Record<Dest, string> = {
     you: noPieces ? 'No approved pieces yet — approve some in curation first.' : '',
     hosting: noPieces ? 'No approved pieces yet — approve some in curation first.' : '',
-    noesis: 'Minting arrives with the NOESIS launchpad — not yet available here.',
   };
   const crossing = dest !== 'you';
   // Each destination's own job. A ZIP being bundled is a different edition from a hosting
@@ -220,8 +219,8 @@ export function EditioExport() {
   const dj = jobs.download;
   const hj = jobs.hosting;
   const hostingBusy = hj.s === 'busy';
-  // The job the footer is currently showing — NOESIS has none, and renders no job line.
-  const shown: Job | null = dest === 'you' ? dj : dest === 'hosting' ? hj : null;
+  // The job the footer is currently showing.
+  const shown: Job = dest === 'you' ? dj : hj;
 
   async function run(kind: Kind) {
     if (!c) return;
@@ -278,10 +277,8 @@ export function EditioExport() {
         {/* adaptive consequences */}
         {dest === 'you' ? (
           <div className="ex-note good"><span className="hemi2 dashed" /> <b>Stays yours.</b> The download is your whole approved supply + metadata — a private, our-hosted ZIP. Nothing is published; mint or host it wherever you choose.</div>
-        ) : dest === 'hosting' ? (
-          <div className="ex-note egress">↗ <b>This crosses to public.</b> NOEMA hosts your pieces as public tokenURIs so you can mint on your own contract. <b>This is a bridge, not permanent storage</b> — NOEMA is an AI-generation platform and does not guarantee indefinite hosting. Migrate to Arweave/IPFS before you rely on these URIs long-term.</div>
         ) : (
-          <div className="ex-note egress">↗ <b>{blocked.noesis}</b></div>
+          <div className="ex-note egress">↗ <b>This crosses to public.</b> NOEMA hosts your pieces as public tokenURIs so you can mint on your own contract. <b>This is a bridge, not permanent storage</b> — NOEMA is an AI-generation platform and does not guarantee indefinite hosting. Migrate to Arweave/IPFS before you rely on these URIs long-term.</div>
         )}
 
         {/* footer — action per destination */}
@@ -295,13 +292,13 @@ export function EditioExport() {
                 ? <button className="btn good lg" disabled>Preparing… <span className="ex-btn-sub">bundling {c.completed.toLocaleString()} pieces</span></button>
                 : <button className="btn good lg" disabled={blocked.you !== ''} onClick={() => run('download')}>Prepare download ↓ <span className="ex-btn-sub">{blocked.you || 'bundle every approved piece + metadata'}</span></button>}
             </>
-          ) : dest === 'hosting' ? (
+          ) : (
             <>
               {hj.s === 'ready' ? (
                 <div className="ex-hosted">
                   <div className="ex-foot-note mono">✓ hosted — set your contract’s <b>baseURI</b> to:</div>
                   <code className="ex-baseuri">{hj.url}/</code>
-                  <div className="ex-foot-note mono" style={{ marginTop: 6 }}>tokenURI resolves at <code>{hj.url}/&lt;tokenId&gt;.json</code> · <span className="lnk">migrate to Arweave →</span> (coming soon) before you rely on it</div>
+                  <div className="ex-foot-note mono" style={{ marginTop: 6 }}>tokenURI resolves at <code>{hj.url}/&lt;tokenId&gt;.json</code></div>
                   <button className="btn ghost" style={{ marginTop: 8 }}
                     onClick={() => { void api.retract(hj.editionId).then(() => setJobs((all) => putJob(all, 'hosting', { s: 'idle' }))).catch((e) => setJobs((all) => putJob(all, 'hosting', { s: 'err', msg: msg(e) }))); }}>
                     Retract hosting <span className="ex-btn-sub">unpublish — the URIs stop resolving</span>
@@ -320,13 +317,8 @@ export function EditioExport() {
                 </>
               )}
             </>
-          ) : (
-            <>
-              <div className="ex-foot-note mono">NOESIS is our launchpad · deploying separately</div>
-              <button className="btn accent lg" disabled>Mint to NOESIS → <span className="ex-btn-sub">coming soon</span></button>
-            </>
           )}
-          {shown?.s === 'err' && <div className="warn" style={{ marginTop: 8 }}>{shown.msg}</div>}
+          {shown.s === 'err' && <div className="warn" style={{ marginTop: 8 }}>{shown.msg}</div>}
         </div>
       </div></div>
     </AppShell>

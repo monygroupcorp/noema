@@ -63,7 +63,7 @@ This isn't a chatbot wrapper. It's a production workspace for people who build w
 [Explore the canvas →](/canvas)
 
 
-## Anonymous credits — coming soon
+## Anonymous credits
 
 **Pay without an identity.**
 
@@ -74,14 +74,13 @@ our deposit provider and we keep it for sanctions screening. We never train on y
 outputs. Run records are retained, and erasing your account severs them from you rather than
 deleting them; the [privacy policy](/legal/privacy) says exactly what is kept and why.
 
-On top of that, an unlinkable ZK bearer purse is coming soon: purse credits will be spent via
-Groth16 zero-knowledge proofs — you prove you have credits, we verify the math and dispatch your
-compute, and we cannot link the spend to your account, your prior sessions, or any identity. That
-rail is switched off until the trusted-setup [ceremony](/ceremony) concludes, because until then
-the key it verifies against is not yet one nobody controls. Today, every credit is an ordinary
-account-tied credit.
+The layer above that is an unlinkable ZK bearer purse: purse credits spent through Groth16
+zero-knowledge proofs — you prove you have credits, we verify the math and dispatch your compute,
+and we cannot link the spend to your account, your prior sessions, or any identity. That rail
+waits on the trusted-setup [ceremony](/ceremony), because until it has run the key it verifies
+against is not yet one nobody controls. Today, every credit is an ordinary account-tied credit.
 
-[How purse works →](/funding)
+[The ceremony →](/ceremony)
 
 
 ## API
@@ -92,7 +91,6 @@ Every modality through a single API: text, image, video, audio and 3D. Discover 
 exist, run one, and watch the run — `GET /v1/flows`, `POST /v1/runs`, and an MCP endpoint at
 `/v1/mcp` for agents. There is no roster to keep in sync here because the contract is served live
 and the catalogue is discovered, never baked in. Authenticate with a session key, or with a purse
-token in an `x-bursa-token` header; bearer-token billing from a purse tied to no account is coming
-soon, after the trusted-setup ceremony.
+token in an `x-bursa-token` header.
 
 [The live contract →](/v1/openapi.json)
