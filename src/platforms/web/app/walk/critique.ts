@@ -95,6 +95,7 @@ Discipline:
 - Before filing, re-read the rule's own words against the shot. A finding the rule's words do not support is an invented one: a label that is one capitalised word is sentence case; a control that is visible is not "hidden"; a count that is shown is not "missing".
 - One finding per distinct observation. Prefer few, certain findings over many. Zero findings is a legitimate answer and is better than an invented one.
 - Severity: blocking — a user cannot do the screen's job, or a P-* priority is violated outright; should — a rule is plainly broken; nit — a small break of a rule.
+- D-27 reserves uppercase for marquee display type and for overline labels carrying \`--tracking-caps\` — it sets a ceiling on how many such uppercase runs the site carries, not a ban on the overline role itself. An overline label in the shot is not a D-27 finding on its own; file D-27 only when you can show the count of uppercase runs has gone past the census ceiling (9 across 32 routes), not for the label being uppercase.
 
 Quote text from the shot where you can; name positions. Write for a reader who has the shot open beside your words.
 
