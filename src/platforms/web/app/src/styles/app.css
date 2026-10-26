@@ -897,8 +897,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .dbrec-row .rd{color:var(--text)} .dbrec-row .rp{margin-left:auto;color:var(--muted);font-size:11.5px}
 
 /* ── project hub (project-hub-spec.md) ─────────────────────────────────────── */
-.ph-crumb a{color:var(--muted);text-decoration:none} .ph-crumb a:hover{color:var(--text)}
-.ph-crumb .sep{color:var(--faint);margin:0 7px} .ph-crumb b{color:var(--text);font-weight:600}
+/* The crumb gives up its parent segments before the current screen's name: parents shrink and
+   ellipsize, the current name (<b>) never shrinks (D-50 — the crumb says where you are). */
+.ph-crumb{display:inline-flex;align-items:baseline;max-width:100%;min-width:0;white-space:nowrap}
+.ph-crumb a{color:var(--muted);text-decoration:none;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis} .ph-crumb a:hover{color:var(--text)}
+.ph-crumb .sep{color:var(--faint);margin:0 7px;flex:none} .ph-crumb b{color:var(--text);font-weight:600;flex:none}
 .ph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .ph-kick{display:block;margin-bottom:8px}
 .ph-name{font-size:clamp(24px,3vw,32px);font-weight:600;letter-spacing:-.02em;margin:0}

@@ -1,10 +1,17 @@
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Link } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
 import { entryPath } from '../lib/entry';
 import './landing.css'; // reuse .topnav / .btn chrome
 import './doc.css';
+
+// A table wider than a phone scrolls sideways inside its own container instead of being
+// clipped at the page edge (REFERENCES.md REF-3: long prose a reader finishes on any width).
+// The table itself keeps real table layout, so its columns stay readable and aligned.
+const components: Components = {
+  table: ({ node, ...props }) => <div className="table-wrap"><table {...props} /></div>,
+};
 
 // Generic markdown content page (about / features / pricing / blog / legal/*).
 export function Doc({ md }: { md: string }) {
@@ -21,7 +28,7 @@ export function Doc({ md }: { md: string }) {
         </div>
       </nav>
       <article className="prose">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{md}</ReactMarkdown>
       </article>
       <SiteFooter />
     </div>

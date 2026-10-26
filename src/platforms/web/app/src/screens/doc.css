@@ -22,8 +22,12 @@
 .prose pre code { background: none; border: 0; padding: 0; font-size: 12.5px; }
 .prose blockquote { border-left: 1px solid color-mix(in srgb, var(--accent) 50%, var(--hair)); margin: 0 0 16px; padding: 2px 0 2px 16px; color: var(--faint); }
 .prose hr { border: 0; border-top: 1px solid var(--hair); margin: 32px 0; }
-.prose table { width: 100%; border-collapse: collapse; margin: 4px 0 22px; font-size: 13.5px; display: block; overflow-x: auto; }
-.prose th, .prose td { border: 1px solid var(--hair); padding: 9px 12px; text-align: left; vertical-align: top; }
+/* A table wider than the measure scrolls sideways inside .table-wrap (Doc.tsx wraps every
+   table in one) rather than being clipped at the page edge. Cells keep a floor width so a
+   phone shows readable columns to scroll through, not one word per line. */
+.prose .table-wrap { max-width: 100%; overflow-x: auto; margin: var(--s1) 0 var(--s6); }
+.prose table { width: 100%; border-collapse: collapse; margin: 0; font-size: 13.5px; }
+.prose th, .prose td { border: 1px solid var(--hair); padding: 9px 12px; text-align: left; vertical-align: top; min-width: 8em; }
 .prose th { background: var(--panel); color: var(--text); font-weight: 600; white-space: nowrap; }
 .prose td { color: var(--muted); }
 .prose td strong { color: var(--text); }
