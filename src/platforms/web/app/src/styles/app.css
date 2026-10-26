@@ -737,11 +737,12 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cbtn .lab small{display:block;color:var(--faint);font-weight:400;font-size:10.5px}
 .cpanel{width:312px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;transform-origin:bottom left;animation:cpop .18s var(--ease)}
 .concierge.open .cpanel{display:block}
+.concierge.open .cbtn{display:none}   /* one affordance at a time (D-53): the open panel replaces its launcher */
 @keyframes cpop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 .cpanel .chead{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hair-soft)}
 .cpanel .chead .orb{width:22px;height:22px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);flex:0 0 auto}
 .cpanel .chead b{font-size:13px;font-weight:600}
-.cpanel .chead .x{margin-left:auto;color:var(--faint);cursor:pointer;font-size:15px;line-height:1}
+.cpanel .chead .x{color:var(--faint);cursor:pointer;font-size:15px;line-height:1}   /* the docked report trigger before it carries the margin-left:auto */
 .cpanel .cbody{padding:14px;color:var(--muted);font-size:12.5px;line-height:1.5}
 .cpanel .cbody .verb{color:var(--accent-soft)}
 .cpanel .cinput{display:flex;gap:8px;padding:10px;border-top:1px solid var(--hair-soft)}

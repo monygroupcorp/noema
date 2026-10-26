@@ -1,13 +1,22 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { api, type QuerelaKind } from '../lib/api';
 import './report-modal.css';
 
-// ReportModal — the global "report an issue" affordance. Mounted once
-// in AppShell so it's reachable from every app screen, including Chat/Run. Low-friction and
-// functional-not-polished by design (Decision record) — the visual de-AI-tell pass is a
-// separately-backlogged item.
+// ReportModal — the global "report an issue" affordance, reachable from every app screen.
+// Low-friction and functional-not-polished by design (Decision record) — the visual de-AI-tell
+// pass is a separately-backlogged item.
+//
+// Where the trigger lives depends on what else floats at the foot of the screen (D-53: a
+// persistent surface presents one affordance at a time). On a screen with the concierge, the
+// trigger is `docked` in the concierge panel's head, so the corner holds one launcher and the
+// report control is reachable on a phone instead of sitting under the launcher. On a screen
+// without it (full chat), the trigger `floating`s in the corner on its own.
+//
+// The dialog itself is portaled to <body>: rendered in place it would sit inside the concierge
+// panel's overflow:hidden box and under the dock's stacking context.
 
 const PROMPTS: Record<QuerelaKind, string> = {
   bug: "what went wrong?",
@@ -24,7 +33,7 @@ function runIdFromPath(pathname: string): string | undefined {
 
 type Phase = 'idle' | 'submitting' | 'success' | 'error';
 
-export function ReportModal() {
+export function ReportModal({ placement = 'floating' }: { placement?: 'floating' | 'docked' }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<QuerelaKind>('bug');
@@ -62,11 +71,17 @@ export function ReportModal() {
 
   return (
     <>
-      <button className="report-trigger" title="Report an issue" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={`report-trigger ${placement}`}
+        title="Report an issue"
+        aria-label="Report an issue"
+        onClick={() => setOpen(true)}
+      >
         <Ic name="flag" />
       </button>
 
-      {open && (
+      {open && createPortal(
         <div className="report-overlay" onClick={close}>
           <div className="report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="report-head">
@@ -115,7 +130,8 @@ export function ReportModal() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
