@@ -465,6 +465,16 @@ already been rejected, and it must be discarded.**
   panel instead. Ruled by rth, 2026-10-26 (deliverable 2026-10-26-mqdz00, picked over
   `meter-on-phones`): the account panel satisfies "one tap away," and D-50 findings against a
   phone topbar's missing meter are not admissible.
+- **EX-20 — The concierge's arrival greeting opens once per browser, without a scrim.** It
+  used to re-open on the first visit to every route (up to 55 times per visitor) under a full
+  scrim that swallowed the dismissing click. It now sets one `concierge-seen` key the first time
+  any route is reached, opens beside the page rather than over it, and folds away on the first
+  pointer-down anywhere outside the panel — which still lands on whatever it was aimed at. The
+  focus-triggered assist is a separate path and keeps its scrim; it was not in question. Ruled by
+  rth, 2026-10-26 (deliverable 2026-10-26-z8vwq6, picked `once-per-browser` over
+  `per-route-no-scrim` / `never-greet` / `as-is`): this satisfies D-52 without a reserved-space
+  change, because the greeting no longer occludes anything, and findings against the old
+  per-route/modal behaviour are not admissible.
 
 ### Open debts — real, tracked, not to be re-filed as new
 
@@ -496,7 +506,8 @@ Collected for one pass, in priority order:
   ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`).
 - **R-4** (§9) — **resolved, rth 2026-08-26.** Exceptions list confirmed complete, no additions
   or removals. Superseded in part 2026-10-26: EX-19 added by a specific ruling (deliverable
-  2026-10-26-mqdz00) on a D-50 finding R-4 did not anticipate.
+  2026-10-26-mqdz00) on a D-50 finding R-4 did not anticipate, and EX-20 added by a specific
+  ruling (deliverable 2026-10-26-z8vwq6) on the concierge's arrival greeting.
 
 All four ratification questions are answered. DESIGN.md is fully ratified as of 2026-08-26; the
 Phase-2 critic may cite it.
