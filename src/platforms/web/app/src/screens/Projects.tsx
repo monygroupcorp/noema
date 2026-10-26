@@ -48,8 +48,13 @@ export function Projects() {
                 <div className="pc-head">
                   <span className="pg" style={{ background: p.color }}>{p.glyph}</span>
                   <b>{p.name}</b>
-                  {p.shared && <span className="psh"><Ic name="circle-user" />{p.shared}</span>}
-                  {active && <span className="badge accent">active</span>}
+                  {/* Every card says what state it is in, from what the data holds (REFERENCES.md
+                      REF-11): whether it is the workspace you are in, and who can see it. A
+                      collaborator count is a number with a label, never a bare digit. */}
+                  <span className="pc-state">
+                    {active && <span className="badge accent">active</span>}
+                    <span className="badge">{p.shared ? `shared with ${p.shared}` : 'only you'}</span>
+                  </span>
                 </div>
                 <div className="pc-desc">{p.desc}</div>
                 <div className="pc-counts mono">{countsLine(c)}<span className="upd">· {p.updated}</span></div>
