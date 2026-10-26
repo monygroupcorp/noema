@@ -600,6 +600,10 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .phrase span{background:var(--raised);border:1px solid var(--hair);border-radius:7px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--text)}
 .phrase span i{color:var(--faint);font-style:normal;margin-right:7px}
 .warn{display:flex;gap:10px;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
+/* A gate: the sentence, then its one action as a button on its own row with the touch hit
+   height (D-43), rather than a link wrapping inside the sentence. */
+.warn.gate{flex-direction:column;align-items:flex-start}
+.warn.gate .btn{min-height:44px}
 
 /* connected accounts (BYO gated-origin secrets) */
 .byo-row{border:1px solid var(--hair);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:10px}
