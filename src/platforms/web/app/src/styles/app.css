@@ -475,6 +475,11 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .fchip{border:1px solid var(--hair);background:var(--panel);color:var(--muted);font:inherit;font-size:12px;padding:7px 12px;border-radius:999px;cursor:pointer;transition:.14s var(--ease)}
 .fchip:hover{color:var(--text)} .fchip.on{background:var(--accent-bg);color:var(--text);border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))}
 
+/* profile: in-page section jump row (REF-34) — each chip is an anchor onto a .sectionhead id,
+   so every section is individually reachable without a desktop sidebar on this mobile-first screen */
+.profile-jump{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:28px}
+.profile-jump a{text-decoration:none}
+
 /* badges / pills */
 .badge{font-family:var(--font-mono);font-size:10.5px;padding:2px 7px;border-radius:5px;border:1px solid var(--hair);color:var(--muted)}
 .badge.accent{color:var(--accent-soft);background:var(--accent-bg);border-color:color-mix(in srgb,var(--accent) 30%,var(--hair))}
