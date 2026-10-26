@@ -245,6 +245,9 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
 
   return (
     <div className={`concierge${hasContext ? ' has-context' : ''}${open ? ' open' : ''}${target ? ' assist' : ''}`}>
+      {/* The open panel is modal: the page beneath it is not being read, and a tap there dismisses
+          the panel (P-2c, D-52) without clearing what was typed. */}
+      <div className="cscrim" onClick={() => setOpen(false)} />
       <div className="cpanel">
         <div className="chead">
           <span className="orb" /><b>Concierge</b>
