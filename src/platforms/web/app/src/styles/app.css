@@ -452,6 +452,9 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .pw.narrow{max-width:680px} .pw.wide{max-width:1160px}
 .pagehead{display:flex; align-items:flex-end; gap:14px; margin-bottom:34px}
 .pagehead h1{font-size:22px; font-weight:600; letter-spacing:-.022em; margin:0}
+/* A section head inside a page: one step below the screen's h1 (D-24), never the
+   browser's default 1.5em bold, which lands within a pixel of the h1 above it. */
+.pagehead h2{font-size:var(--fs-lg); font-weight:600; letter-spacing:-.018em; margin:0}
 .pagehead .sub{color:var(--muted); font-size:13px; margin-top:6px}
 .pagehead .right{margin-left:auto; display:flex; gap:8px; align-items:center}
 .sectionhead{font-size:13px;font-weight:600;color:var(--muted);margin:38px 0 18px;display:flex;align-items:center;gap:8px}
