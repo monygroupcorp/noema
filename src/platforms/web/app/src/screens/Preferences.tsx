@@ -149,14 +149,6 @@ export function Preferences() {
             </div>
           </div>
           <div className="pref-card">
-            <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
-            <label className="ac-row"><span className="ac-rk mono">adult content</span>
-              <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
-            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
-              <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
-            </div>
-          </div>
-          <div className="pref-card">
             <div className="pref-card-h"><Ic name="sparkles" /><b>What the concierge remembers</b></div>
             {notes.length === 0 && (
               <div className="pref-note mono" style={{ color: 'var(--faint)' }}>Nothing yet. The concierge adds a line here when it learns something durable about how you work.</div>
@@ -188,6 +180,20 @@ export function Preferences() {
             <div className="pref-card-h"><span className="accent mono">/make</span><span className="pref-kind">image</span></div>
             <div className="pref-preview"><span className="pp-l mono">resolves to</span><span className="pp-v mono">{makeModel}</span></div>
             <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">the <b>default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
+          </div>
+        </div>
+
+        {/* the one age-gated, policy-sensitive toggle on this screen — its own section, set apart
+            from the routine cosmetic cards above, last on the page (REF-34, mirrors .ac-danger). */}
+        <div className="pref-restricted">
+          <div className="pref-restricted-l mono">Restricted</div>
+          <div className="pref-card pref-card-restricted">
+            <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
+            <label className="ac-row"><span className="ac-rk mono">adult content</span>
+              <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
+            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
+              <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
+            </div>
           </div>
         </div>
       </div></div>
