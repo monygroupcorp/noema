@@ -870,7 +870,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 
 /* posture cluster */
 .posture{display:flex;align-items:center;gap:8px}
-.pc-pill{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--hair);border-radius:999px;background:var(--panel);font:inherit;font-size:12.5px;color:var(--text);text-decoration:none;cursor:pointer;transition:.14s var(--ease)}
+.pc-pill{position:relative;display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--hair);border-radius:999px;background:var(--panel);font:inherit;font-size:12.5px;color:var(--text);text-decoration:none;cursor:pointer;transition:.14s var(--ease)}
 .pc-pill:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))}
 .pc-pill.credits{font-family:var(--font-mono);color:var(--gold,#d9b25f)} .pc-pill.credits .u{color:var(--faint)}
 .pc-pill.compute{font-family:var(--font-mono);color:var(--muted)}
@@ -880,6 +880,18 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
    action is the one filled button, and nothing in the topbar outranks it. */
 .pc-start{font-weight:500}
 .pc-start svg.lucide{width:14px;height:14px}
+/* The ring follows the visible pill, not the hit extension below (D-44). */
+.pc-pill:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* On a phone or any coarse pointer the three pressable pills (credits, identity, start) keep
+   their 32px visible height but tap as 44px (D-43): a transparent pseudo extends the hit box
+   above and below. It is placed against the padding box, 30px inside the 1px border, so -7px
+   each way makes 44. Padding would have grown the bar from 57px to 69px; the extension lives in
+   the bar's own 12px vertical padding, so the bar, the crumb and the row stay as they are.
+   Horizontal reach is unchanged so the pills' 7px gap never overlaps. The compute readout is a
+   span, not a control, and gets none. */
+@media (max-width:760px),(hover:none) and (pointer:coarse){
+  .pc-pill.credits::before, .pc-pill.id-chip::before, .pc-pill.pc-start::before{content:"";position:absolute;inset:-7px 0}
+}
 
 /* account dropdown — restrained, posture-rich (noema-account-dropdown.png) */
 .acctmenu{position:fixed;z-index:var(--z-pop,60);min-width:300px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);padding:12px;animation:cpop .16s var(--ease)}
