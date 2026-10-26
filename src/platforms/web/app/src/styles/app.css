@@ -1548,17 +1548,19 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .cat-controls .cat-select-mod{flex:1 1 100%}
   .cat-count{margin-left:auto}
 
-  /* registry on a phone: one grid for the header and every row, so the modality,
-     version and pin sit in the same columns whether the id is "rmbg" or
+  /* registry on a phone: one grid for the header and every row, so the modality
+     and pin sit in the same columns whether the id is "rmbg" or
      "modus.dataset-decompose" (DESIGN.md D-59). The name stacks over its id in the
      first column instead of the row wrapping by content length. */
-  .reg-bar,.reg-row{display:grid; grid-template-columns:minmax(0,1fr) 64px 44px 44px; column-gap:8px; align-items:center}
+  .reg-bar,.reg-row{display:grid; grid-template-columns:minmax(0,1fr) 64px 44px; column-gap:8px; align-items:center}
   .reg-bar .c-mod{width:auto; font-size:8.5px}
-  .reg-bar .c-ver{width:auto; font-size:8.5px}
+  /* The version neither tells a flow apart (almost every row reads 1.0.0) nor lets the
+     user act on it, so at this width it goes to the card, where it already is
+     (DESIGN.md D-57). The desktop table has the room and keeps it. */
+  .reg-bar .c-ver,.reg-ver{display:none}
   .reg-name{flex-direction:column; align-items:flex-start; gap:2px; min-width:0}
   .reg-name .nm,.reg-name .id{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .reg-mod{width:auto; font-size:10px; gap:6px}
-  .reg-ver{width:auto; font-size:10px}
   .reg-row .pin{margin-left:0; width:44px; height:44px}
   .reg-row .pin svg{width:16px; height:16px}
 }
