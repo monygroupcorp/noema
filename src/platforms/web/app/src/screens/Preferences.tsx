@@ -18,8 +18,9 @@ import { useProject } from '../state/project';
 // are deleted with the account. "land in (project)" is a live picker persisting
 // generatio.defaultProjectId (Provincia) — stored + portable; cast-time auto-filing is the
 // marked next step. The "default /make flow" picker is WIRED — it rebinds the `make` verb
-// (PUT /v1/me/bindings/make), resolved at cast time server-side. MARKED gap: /animate·/effect·
-// /upscale aren't canon verbs yet.
+// (PUT /v1/me/bindings/make), resolved at cast time server-side. Only verbs that exist are
+// shown: a card for a verb with no flow behind it is unbuilt capability, which is absent from
+// the interface rather than announced (DESIGN.md D-63).
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -178,9 +179,9 @@ export function Preferences() {
           </div>
         </div>
 
-        {/* per-command defaults — backend ready (affines); inline editor is next */}
+        {/* per-command defaults — persisted as affines, applied at cast time */}
         <div className="pref-note mono" style={{ color: 'var(--faint)', marginBottom: 'var(--s3)' }}>
-          <span className="hemi2 ring" /> Per-command param defaults (model · size · steps · cfg · count) persist as <b>affines</b> and apply at cast time — the inline editor lands next. <b>/animate · /effect · /upscale</b> aren't canon verbs yet.
+          <span className="hemi2 ring" /> Per-command param defaults (model · size · steps · cfg · count) persist as <b>affines</b> and apply at cast time.
         </div>
         <div className="pref-grid">
           <div className="pref-card">
@@ -188,12 +189,6 @@ export function Preferences() {
             <div className="pref-preview"><span className="pp-l mono">resolves to</span><span className="pp-v mono">{makeModel}</span></div>
             <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">the <b>default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
           </div>
-          {['/animate', '/effect', '/upscale'].map((cmd) => (
-            <div key={cmd} className="pref-card" style={{ opacity: 0.6 }}>
-              <div className="pref-card-h"><span className="accent mono">{cmd}</span><span className="pref-kind">no canon verb yet</span></div>
-              <div className="pref-preview"><span className="pp-l mono">status</span><span className="pp-v mono"><span className="hemi2 dashed" /> needs a flow + canon binding</span></div>
-            </div>
-          ))}
         </div>
       </div></div>
     </AppShell>

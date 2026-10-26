@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, type Readiness } from '../lib/datasets';
+import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, datasetStatsLine, type Readiness } from '../lib/datasets';
 import { runBatch, uploadAsset } from '../lib/upload';
 import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
 import { doorPath } from '../lib/entry';
@@ -69,10 +69,12 @@ export function Datasets() {
     return () => { live = false; };
   }, [signedIn]);
 
-  // The public catalog (GET /v1/data/datasets/public) — collapsed until asked for, mirroring
-  // Shelf.tsx's "your shelf" + "browse the catalog" split: this list above is YOUR OWN
-  // datasets, this one is everything the platform publishes for anyone to start Muse-ing on.
-  const [catOpen, setCatOpen] = useState(false);
+  // The public catalog (GET /v1/data/datasets/public) — mirroring Shelf.tsx's "your shelf" +
+  // "browse the catalog" split: this list above is YOUR OWN datasets, this one is everything
+  // the platform publishes for anyone to start Muse-ing on. A signed-in visitor opens it when
+  // asked; a signed-out one has no shelf of their own, and the sign-in note above says the
+  // catalog is open to anyone, so it is open from the first paint (REFERENCES.md REF-20).
+  const [catOpen, setCatOpen] = useState(!signedIn);
   const [catalog, setCatalog] = useState<Dataset[] | null>(null);
   const [catErr, setCatErr] = useState<string | null>(null);
 
@@ -175,7 +177,6 @@ export function Datasets() {
           {list.map((d) => {
             const readiness = readinessOf(d);
             const r = READINESS[readiness];
-            const version = d.versions[d.versions.length - 1]?.v ?? '—';
             const media = liveRecords(d.media);
             const hasMedia = media.length > 0;
             const tiles = hasMedia ? media.slice(0, 4).map((m) => m.url) : TILE_FALLBACK;
@@ -192,7 +193,7 @@ export function Datasets() {
                     <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
                     <span className={`hemi2 ${custodyGlyph(d.custody)} ds-cust`} title={CUSTODY_LABEL[d.custody]} />
                   </div>
-                  <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'} · {d.captionsets.length} captionsets · {version}</div>
+                  <div className="ds-stats mono">{datasetStatsLine(d, media.length)}</div>
                   <div className="ds-meta mono">updated {relativeTime(d.mutatum)} · <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {CUSTODY_LABEL[d.custody]}</div>
                   <div className="ds-ready">
                     <span className="ds-state"><span className={`rdot ${r.dot}`} /> {r.label}</span>
@@ -211,7 +212,7 @@ export function Datasets() {
             onto the fun part, with nothing here that isn't yours to click. */}
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>no set of your own yet?</div>
+            <div className="noema-kicker" style={{ marginBottom: 8 }}>No set of your own yet?</div>
             <h2>Browse the catalog</h2>
             <div className="sub">Published boards, ready to Muse on right now.</div>
           </div>
@@ -244,7 +245,7 @@ export function Datasets() {
                           <b>{d.name}</b>
                           <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
                         </div>
-                        <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'}</div>
+                        <div className="ds-stats mono">{datasetStatsLine({ ...d, captionsets: [], versions: [] }, media.length)}</div>
                         <div className="ds-ready">
                           <span className="ds-action">muse on this →</span>
                         </div>

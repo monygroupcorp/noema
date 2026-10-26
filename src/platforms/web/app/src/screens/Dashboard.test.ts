@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_HOLDINGS, computeRow, holdings, royaltyFoot } from './Dashboard';
+import { EMPTY_HOLDINGS, computeRow, holdings, royaltyFigure, royaltyFoot } from './Dashboard';
 import type { EarningsView } from '../lib/api';
 import type { Project } from '../lib/projects';
 
@@ -36,6 +36,21 @@ describe('computeRow — TEE roadmap line visibility (noema-344)', () => {
 function view(over: Partial<EarningsView> = {}): EarningsView {
   return { lifetime: { impetus: '0', usd: 0 }, streams: [], earnings: [], ...over };
 }
+
+// The royalties tile used to print a large "◈ 0" for an account that has earned nothing.
+// DESIGN.md D-58: the figure appears once there is one; before the read lands the tile holds
+// its place (D-61); the foot line carries the empty tile.
+describe('royaltyFigure — the number on the royalties tile', () => {
+  it('holds its place with a dash before the read lands', () => {
+    expect(royaltyFigure(null)).toBe('—');
+  });
+  it('is absent for a lifetime of nothing, so the foot line carries the tile', () => {
+    expect(royaltyFigure(view())).toBeNull();
+  });
+  it('prints the lifetime once there is one', () => {
+    expect(royaltyFigure(view({ lifetime: { impetus: '12500', usd: 4.2 } }))).toBe('12,500');
+  });
+});
 
 describe('royaltyFoot — what the royalties tile says under the number', () => {
   it('says nothing before the read lands, rather than claiming a state it has not seen', () => {

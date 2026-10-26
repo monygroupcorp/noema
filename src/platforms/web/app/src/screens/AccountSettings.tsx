@@ -17,6 +17,13 @@ import { SECTIONS, AVAIL, resolveSection, readAvailability, SectionPane } from '
 //
 // The section list, the sub-nav and the /account/:section router all read `accountSections`.
 
+// What the posture instrument says beside "the meter". A count of nothing is not printed
+// (DESIGN.md D-58): with no studio warm, the line says so in words.
+export function liveLine(liveStudios: number): string {
+  if (liveStudios === 0) return 'the meter · nothing running';
+  return `the meter · ${liveStudios} live ${liveStudios === 1 ? 'session' : 'sessions'}`;
+}
+
 export function AccountSettings() {
   const { section } = useParams();
   const { ident, idents } = useIdentity();
@@ -124,7 +131,7 @@ export function AccountSettings() {
             </div>
             <div className="ac-pcell">
               <div className="ac-l">Live · what we can see</div>
-              <div className="ac-v">the meter · {liveStudios} live {liveStudios === 1 ? 'session' : 'sessions'}</div>
+              <div className="ac-v">{liveLine(liveStudios)}</div>
             </div>
             <div className="ac-pcell">
               <div className="ac-l">Reach</div>
@@ -161,7 +168,10 @@ export function AccountSettings() {
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
               <Row k="Availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
-              <Row k="Live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
+              {/* The credits row above is the one balance this page prints, zero or not — it is
+                  the figure "add credits" acts on (P-1c). A live-session count of nothing is not
+                  printed; the row offers what fills it instead (D-58, D-60). */}
+              <Row k="Live sessions" v={liveStudios ? <><span className="rdot good" /> {liveStudios} live</> : <Link className="accent" to="/catalog">none yet — run something ▸</Link>} />
               <div className="ac-note mono">every run executes on our compute — we can see the work.</div>
             </SectionCard>
             <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
