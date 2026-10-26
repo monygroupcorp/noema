@@ -235,7 +235,7 @@ export function EditioExport() {
     } catch (e) { put({ s: 'err', msg: msg(e) }); }
   }
 
-  const crumb = <span className="ph-crumb"><Link to="/collections">{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>export &amp; publish</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections">{c.nomen || 'Collection'}</Link> <span className="sep">/</span> <b>Export &amp; publish</b></span>;
 
   return (
     <AppShell title={crumb}>

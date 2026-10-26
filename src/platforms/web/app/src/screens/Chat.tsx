@@ -92,7 +92,7 @@ function ProvMeter({ p, onCanvas }: { p: Prov; onCanvas: (p: Prov) => void }) {
           ? <span className="prov-egress">↗ left noema → {p.egress.to}</span>
           : <span className="prov-sealed">{p.egress.note}</span>}
       </span>
-      {p.canvas && <button className="canvas-btn" onClick={() => onCanvas(p)}>→ canvas</button>}
+      {p.canvas && <button className="canvas-btn" onClick={() => onCanvas(p)}>→ Canvas</button>}
     </div>
   );
 }
@@ -339,7 +339,7 @@ export function Chat() {
   const groups = groupThreads(threads, projectNameOf);
 
   return (
-    <AppShell crumb="chat" concierge={false}>
+    <AppShell crumb="Chat" concierge={false}>
       {/* Thread history (noema-111) — a project-grouped drawer of the caller's past threads. */}
       {listOpen && <div style={H.backdrop} onClick={() => setListOpen(false)} />}
       {listOpen && (

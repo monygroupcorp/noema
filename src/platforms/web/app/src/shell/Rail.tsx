@@ -213,10 +213,10 @@ export function Rail() {
         <NavLink to="/account" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings
         </NavLink>
-        <Link to="/profile" onClick={guardedClick} className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · identity`}>
+        <Link to="/profile" onClick={guardedClick} className="railavatar" title={`${ident.funding === 'bearer' ? 'Anonymous' : ident.name} · identity`}>
           <Chip d={ident} />
           <span className="ra-main">
-            <span className="nm">{ident.funding === 'bearer' ? 'anonymous' : ident.name}</span>
+            <span className="nm">{ident.funding === 'bearer' ? 'Anonymous' : ident.name}</span>
             <span className="ra-sub"><Ic name={who[0]} /> {who[1]}</span>
           </span>
         </Link>

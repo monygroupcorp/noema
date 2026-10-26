@@ -96,7 +96,7 @@ export function TraitsGarden() {
     catch (e) { setErr(msg(e)); setBusy(false); }
   }
 
-  const crumb = <span className="ph-crumb"><Link to="/collections" onClick={guardedClick}>collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>traits</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections" onClick={guardedClick}>Collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'Collection'}</Link> <span className="sep">/</span> <b>Traits</b></span>;
 
   return (
     <AppShell title={crumb}>
@@ -157,7 +157,7 @@ export function TraitsGarden() {
                       : <b>{cat.label || cat.porta}</b>}
                     <span className="gt-badge">shows on nft</span>
                   </span>
-                  {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> remove axis</button>}
+                  {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> Remove axis</button>}
                 </div>
                 <div className="gt-sub mono">
                   varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b>
@@ -192,7 +192,7 @@ export function TraitsGarden() {
                       {editable && <button className="tc-del" onClick={() => removeValor(active, j)} title="remove value"><Ic name="x" /></button>}
                     </div>
                   ))}
-                  {editable && <button className="traitcard add" onClick={() => addValor(active)}><Ic name="plus" /><span>add value</span></button>}
+                  {editable && <button className="traitcard add" onClick={() => addValor(active)}><Ic name="plus" /><span>Add value</span></button>}
                 </div>
               </>
             ) : (

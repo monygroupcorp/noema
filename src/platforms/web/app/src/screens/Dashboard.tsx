@@ -110,7 +110,7 @@ export function Dashboard() {
             <div className="ib-cell">
               <div className="ib-l">credits</div>
               <div className="ib-n gold"><span className="gem">◈</span> {cr}</div>
-              <div className="ib-sub"><Link to="/funding">fund from a wallet ▸</Link></div>
+              <div className="ib-sub"><Link to="/funding">Fund from a wallet ▸</Link></div>
             </div>
             <div className="ib-cell">
               <div className="ib-l">royalties · lifetime</div>
@@ -152,7 +152,7 @@ export function Dashboard() {
         <div className="sectionhead">AWAITING YOU</div>
         <div className="dbrecent">
           {awaiting.length === 0 ? (
-            <div className="empty"><div className="t">nothing finished yet</div></div>
+            <div className="empty"><div className="t">Nothing finished yet</div></div>
           ) : awaiting.map((r) => {
             const href = activityDoorHref(r);
             const row = (
@@ -175,7 +175,7 @@ export function Dashboard() {
         <div className="sectionhead">RUNNING NOW</div>
         <div className="dbrecent">
           {running.length === 0 ? (
-            <div className="empty"><div className="t">nothing running — start something</div></div>
+            <div className="empty"><div className="t">Nothing running — start something</div></div>
           ) : running.map((r) => (
             <div className="dbrec-row" key={r.actumId}>
               <Ic name={ACTIVITY_ICON[r.kind]} />

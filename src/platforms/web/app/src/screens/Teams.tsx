@@ -68,7 +68,7 @@ export function Teams() {
   }
 
   return (
-    <AppShell crumb="teams">
+    <AppShell crumb="Teams">
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Teams</h1>
@@ -112,7 +112,7 @@ export function Teams() {
                     <div className="li-right">
                       {isFounder
                         ? <span className="badge accent">founder</span>
-                        : <button className="btn ghost" onClick={() => removeMember(t.id, m)} disabled={busy === t.id}><Ic name="x" /> remove</button>}
+                        : <button className="btn ghost" onClick={() => removeMember(t.id, m)} disabled={busy === t.id}><Ic name="x" /> Remove</button>}
                     </div>
                   </div>
                 );

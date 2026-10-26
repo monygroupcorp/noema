@@ -471,14 +471,14 @@ export function Canvas() {
 
   if (loading) {
     return (
-      <AppShell crumb="canvas">
+      <AppShell crumb="Canvas">
         <div className="canvas-wrap canvas-loading">Loading canvas…</div>
       </AppShell>
     );
   }
 
   return (
-    <AppShell crumb="canvas">
+    <AppShell crumb="Canvas">
       <div className="canvas-wrap">
         {error && (
           <div className="canvas-error-banner">

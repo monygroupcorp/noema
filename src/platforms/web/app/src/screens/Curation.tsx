@@ -63,8 +63,8 @@ export function Curation() {
     return () => window.removeEventListener('keydown', onKey);
   }, [decide]);
 
-  const name = col?.nomen || 'collection';
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>curation</b></span>;
+  const name = col?.nomen || 'Collection';
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>Curation</b></span>;
   const reviewed = kept + rejected;
   const totalQ = queue ? queue.length : 0;
 
@@ -132,7 +132,7 @@ export function Curation() {
         <div className="cu-foot">
           <span className="mono"><span className="hemi2 dashed" /> Progress is saved · nothing is published until you export</span>
           <div className="right" style={{ display: 'flex', gap: 'var(--s3)' }}>
-            <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
+            <Link className="btn ghost" to={`/collections/${id}/run`}>← Run</Link>
             <Link className="btn accent" to={`/collections/${id}/export`}>Export →</Link>
           </div>
         </div>

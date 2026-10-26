@@ -157,7 +157,7 @@ export function Datasets() {
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
-          <div className="right"><button className="btn" onClick={openModal}><Ic name="plus" /> new dataset</button></div>
+          <div className="right"><button className="btn" onClick={openModal}><Ic name="plus" /> New dataset</button></div>
         </div>
 
         {scope && <ScopeBanner project={scope} noun="datasets" />}
@@ -165,7 +165,7 @@ export function Datasets() {
         <div className="dsgrid">
           {!signedIn && (
             <div className="empty">
-              <div className="t">your datasets live under an account</div>
+              <div className="t">Your datasets live under an account</div>
               <div className="s">
                 <Link to={doorPath('/datasets')}>Sign in</Link> to see the sets you have built. The
                 published catalog below is open to anyone.
@@ -279,8 +279,8 @@ export function Datasets() {
               </div>
 
               <div className="seg custody-seg" style={{ marginBottom: 14 }}>
-                <button className={source === 'upload' ? 'on' : ''} disabled={busy} onClick={() => setSource('upload')}>drop media</button>
-                <button className={source === 'generation' ? 'on' : ''} disabled={busy} onClick={() => setSource('generation')}>from a generation</button>
+                <button className={source === 'upload' ? 'on' : ''} disabled={busy} onClick={() => setSource('upload')}>Drop media</button>
+                <button className={source === 'generation' ? 'on' : ''} disabled={busy} onClick={() => setSource('generation')}>From a generation</button>
               </div>
 
               {source === 'upload' ? (
@@ -319,7 +319,7 @@ export function Datasets() {
               {err && <div className="sub" style={{ color: 'var(--danger, #d66f6f)', marginTop: 10 }}>{err}</div>}
 
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-                <button className="btn ghost" disabled={busy} onClick={closeModal}>cancel</button>
+                <button className="btn ghost" disabled={busy} onClick={closeModal}>Cancel</button>
                 <button className="btn accent" disabled={busy} onClick={submitCreate}>{busy ? 'creating…' : 'create'}</button>
               </div>
             </div>

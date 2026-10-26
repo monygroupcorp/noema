@@ -177,7 +177,7 @@ export function Collections() {
           </div>
           {/* The empty state below carries this same action; while it is on screen the header
               does not repeat it (P-1d). */}
-          {!emptyShown && <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>}
+          {!emptyShown && <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'New collection'}</button></div>}
         </div>
 
         {scope && <ScopeBanner project={scope} noun="collections" />}
@@ -202,7 +202,7 @@ export function Collections() {
           <div className="empty">
             <div className="t">{scope ? `No collections filed into ${scope.name} yet` : 'No collections yet'}</div>
             <div className="s">Name one — it costs nothing. You pick the flow and the traits afterwards.</div>
-            <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> new collection</button>
+            <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> New collection</button>
           </div>
         )}
 

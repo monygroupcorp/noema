@@ -56,7 +56,7 @@ export function Run() {
 
   if (!id) {
     return (
-      <AppShell crumb={<>runs</>} context={context}>
+      <AppShell crumb={<>Runs</>} context={context}>
         <div className="page"><div className="pw narrow">
           <div className="empty">
             <div className="t">No run selected</div>
@@ -69,14 +69,14 @@ export function Run() {
 
   return (
     <AppShell
-      crumb={<>runs <span className="sep">/</span> <span className="mono">{id}</span></>}
+      crumb={<>Runs <span className="sep">/</span> <span className="mono">{id}</span></>}
       context={context}
     >
       <div className="page"><div className="pw narrow">
 
         <div className="pagehead">
           <div>
-            <h1>run</h1>
+            <h1>Run</h1>
             <div className={`sub mono`}>{status}</div>
           </div>
           <div className="right">

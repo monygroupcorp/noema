@@ -145,7 +145,7 @@ export function CanonicRun() {
   const pct = c.total ? Math.min(100, (c.completed / c.total) * 100) : 0;
   const lit = Math.round((pct / 100) * CELLS);
   const name = c.nomen || 'collection';
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>canonic run</b></span>;
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>Canonic run</b></span>;
 
   return (
     <AppShell title={crumb}>

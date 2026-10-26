@@ -1888,10 +1888,10 @@ export function Muse() {
 
   const crumb = (
     <span className="ph-crumb">
-      <Link to="/datasets">datasets</Link> <span className="sep">/</span>{' '}
+      <Link to="/datasets">Datasets</Link> <span className="sep">/</span>{' '}
       <Link to={`/datasets/${id}`}>{d?.name ?? id}</Link> <span className="sep">/</span>{' '}
       {sessionParam
-        ? <><Link to={sessionHistoryHref(id ?? '')}>muse sessions</Link> <span className="sep">/</span> <b>this session</b></>
+        ? <><Link to={sessionHistoryHref(id ?? '')}>Muse sessions</Link> <span className="sep">/</span> <b>This session</b></>
         : <b>muse</b>}
     </span>
   );
@@ -3294,8 +3294,8 @@ export function MuseSessions() {
 
   const crumb = (
     <span className="ph-crumb">
-      <Link to="/datasets">datasets</Link> <span className="sep">/</span>{' '}
-      <Link to={`/datasets/${id}`}>{name ?? id}</Link> <span className="sep">/</span> <b>muse sessions</b>
+      <Link to="/datasets">Datasets</Link> <span className="sep">/</span>{' '}
+      <Link to={`/datasets/${id}`}>{name ?? id}</Link> <span className="sep">/</span> <b>Muse sessions</b>
     </span>
   );
 
@@ -3304,9 +3304,9 @@ export function MuseSessions() {
       <div className="page"><div className="pw wide">
         <div className="pagehead">
           <div>
-            <h1>muse sessions</h1>
-            <div className="sub mono">
-              every session broken off this dataset, most recently worked first. Opening one is a read —
+            <h1>Muse sessions</h1>
+            <div className="sub">
+              Every session broken off this dataset, most recently worked first. Opening one is a read —
               it does not change which session the muse door comes back to.
             </div>
           </div>
@@ -3316,8 +3316,8 @@ export function MuseSessions() {
           <input
             className="cer-input"
             type="search"
-            placeholder="search the fragments these sessions were drawn from"
-            aria-label="search muse sessions"
+            placeholder="Search the fragments these sessions were drawn from"
+            aria-label="Search muse sessions"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -3326,7 +3326,7 @@ export function MuseSessions() {
 
         {!signedIn && (
           <div className="empty">
-            <div className="t">sessions belong to an account</div>
+            <div className="t">Sessions belong to an account</div>
             <div className="s">
               <Link to={doorPath(`/datasets/${id}/muse/sessions`)}>Sign in</Link> to see the sessions
               broken off this dataset. Anonymous work is not kept under a name, so there is nothing
@@ -3335,7 +3335,7 @@ export function MuseSessions() {
           </div>
         )}
         {signedIn && error && <div className="sub mono">{error}</div>}
-        {signedIn && sessions === null && <div className="sub mono">loading…</div>}
+        {signedIn && sessions === null && <div className="sub">Loading…</div>}
         {signedIn && emptyNote && <div className="empty"><div className="t">{emptyNote}</div></div>}
 
         <ul className="muse-hist">
@@ -3358,7 +3358,7 @@ export function MuseSessions() {
                   )}
                 </div>
               )}
-              <Link className="btn ghost sm" to={sessionHref(id ?? '', row.id)}>open →</Link>
+              <Link className="btn ghost sm" to={sessionHref(id ?? '', row.id)}>Open →</Link>
             </li>
           ))}
         </ul>

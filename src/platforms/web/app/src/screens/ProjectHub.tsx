@@ -80,7 +80,7 @@ export function ProjectHub() {
 
   const crumb = (
     <span className="ph-crumb">
-      <Link to="/app">Home</Link> <span className="sep">/</span> <Link to="/projects">projects</Link> <span className="sep">/</span> <b>{p.name}</b>
+      <Link to="/app">Home</Link> <span className="sep">/</span> <Link to="/projects">Projects</Link> <span className="sep">/</span> <b>{p.name}</b>
     </span>
   );
 
@@ -102,7 +102,7 @@ export function ProjectHub() {
               </div>
             ) : (
               <>
-                <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>rename ▸</button></h1>
+                <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>Rename ▸</button></h1>
                 <p className="ph-desc">{p.desc || 'No description yet.'}</p>
               </>
             )}
@@ -119,7 +119,7 @@ export function ProjectHub() {
                 </select>
               </label>
             ) : (
-              <Link className="btn" to="/teams"><Ic name="circle-user" /> share via a team ▸</Link>
+              <Link className="btn" to="/teams"><Ic name="circle-user" /> Share via a team ▸</Link>
             )}
           </div>
         </div>
@@ -242,7 +242,7 @@ function HoldingCard({ ico, name, n, foot, onTo, to, children }: {
       <div className="hc-body">{children}</div>
       <div className="hc-foot">
         <span className="hc-sig">{foot}</span>
-        {to ? <Link className="hc-open" to={to}>open ▸</Link> : <button className="hc-open" onClick={onTo}>open ▸</button>}
+        {to ? <Link className="hc-open" to={to}>Open ▸</Link> : <button className="hc-open" onClick={onTo}>Open ▸</button>}
       </div>
     </div>
   );

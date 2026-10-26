@@ -141,7 +141,7 @@ export function Derive() {
     }
   };
 
-  const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>train</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>Train</b></span>;
 
   return (
     <AppShell title={crumb}>

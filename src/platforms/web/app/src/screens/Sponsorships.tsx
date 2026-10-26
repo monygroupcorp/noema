@@ -68,7 +68,7 @@ export function Sponsorships() {
   }
 
   return (
-    <AppShell crumb="sponsorships">
+    <AppShell crumb="Sponsorships">
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Sponsorships</h1>

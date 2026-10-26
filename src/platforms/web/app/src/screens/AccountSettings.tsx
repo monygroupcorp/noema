@@ -126,15 +126,15 @@ export function AccountSettings() {
           {/* posture instrument — the dashboard device, reused */}
           <div className="noema-frame ac-posture">
             <div className="ac-pcell">
-              <div className="ac-l">identity</div>
+              <div className="ac-l">Identity</div>
               <div className="ac-v"><span className={`hemi2 ${anon ? 'dashed' : 'lit'}`} /> {anon ? 'anonymous' : 'you · signed in'} <Link className="ac-link" to="/account/security">go anonymous ▸</Link></div>
             </div>
             <div className="ac-pcell">
-              <div className="ac-l">live · what we can see</div>
+              <div className="ac-l">Live · what we can see</div>
               <div className="ac-v">the meter · {liveStudios} live {liveStudios === 1 ? 'session' : 'sessions'}</div>
             </div>
             <div className="ac-pcell">
-              <div className="ac-l">reach</div>
+              <div className="ac-l">Reach</div>
               <div className="ac-v">web · Telegram · API</div>
             </div>
           </div>
@@ -201,22 +201,22 @@ export function AccountSettings() {
               devices, local runner) is gated "soon", same as Export/Delete above. */}
           <div className="ac-cards">
             <SectionCard to="/account/billing" ico="wallet" name="Billing &amp; credits">
-              <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
-              <Row k="plan · card" v={<span className="muted">coming soon — no subscriptions or card billing yet</span>} />
+              <Row k="Credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
+              <Row k="Plan · card" v={<span className="muted">coming soon — no subscriptions or card billing yet</span>} />
               <div className="ac-note mono"><span className="hemi2 dashed" /> credits fund on-chain today — <Link className="accent" to="/funding">deposit from a wallet ▸</Link></div>
             </SectionCard>
             <SectionCard to="/account/api" ico="key-round" name="API keys">
-              <Row k="keys" v={<span className="muted">coming soon</span>} />
+              <Row k="Keys" v={<span className="muted">coming soon</span>} />
               <div className="ac-note mono"><span className="hemi2 dashed" /> the /v1 API is live; personal key management isn’t wired here yet.</div>
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
-              <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
-              <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
+              <Row k="Availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
+              <Row k="Live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
               <div className="ac-note mono">every run executes on our compute — we can see the work.</div>
             </SectionCard>
             <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
-              <Row k="scope" v={<>portable across web · Telegram · API</>} />
-              <Row k="applies to" v={<span className="mono">/make · style · output · delivery</span>} />
+              <Row k="Scope" v={<>portable across web · Telegram · API</>} />
+              <Row k="Applies to" v={<span className="mono">/make · style · output · delivery</span>} />
               <div className="ac-note mono">generation defaults that travel with you — override inline anytime.</div>
             </SectionCard>
           </div>
