@@ -1,5 +1,57 @@
 # Changelog
 
+## [5.31.0](https://github.com/monygroupcorp/noema/compare/v5.30.0...v5.31.0) (2026-10-26)
+
+
+### Features
+
+* **walk:** measure which controls are filled, and tell the critic as fact ([#656](https://github.com/monygroupcorp/noema/issues/656)) ([5ab8fa0](https://github.com/monygroupcorp/noema/commit/5ab8fa0dc609c76f459c17d2e50cd71bcb401ebb))
+* **web:** a saved login's row carries its own switch and remove actions ([#666](https://github.com/monygroupcorp/noema/issues/666)) ([56e9726](https://github.com/monygroupcorp/noema/commit/56e9726144a735dbff41468bdac763c25e37bbd3))
+* **web:** long documents carry an on-page section list ([#659](https://github.com/monygroupcorp/noema/issues/659)) ([5080998](https://github.com/monygroupcorp/noema/commit/5080998c41dec3980302ce9558ede1f88e502db2))
+
+
+### Bug Fixes
+
+* **crystal:** a weight with no download address is refused by name, and never offered ([#636](https://github.com/monygroupcorp/noema/issues/636)) ([367f973](https://github.com/monygroupcorp/noema/commit/367f9738dde38dd98a8b083fe06b4730531ddd57))
+* **telegram:** every path a user can reach has a way forward ([#623](https://github.com/monygroupcorp/noema/issues/623)) ([650dea9](https://github.com/monygroupcorp/noema/commit/650dea998e52e3a75bf671a3480629bb9886d7cc))
+* **walk:** critique --resume reruns only the screens whose passes failed ([#663](https://github.com/monygroupcorp/noema/issues/663)) ([b5d1949](https://github.com/monygroupcorp/noema/commit/b5d19498415ee0c0adcd699bf6544c7c4c58cb0c))
+* **walk:** retry a shot of an empty document once, and mark it in the manifest ([#653](https://github.com/monygroupcorp/noema/issues/653)) ([9019c8d](https://github.com/monygroupcorp/noema/commit/9019c8d7c2b2c0c1bd1019fb2dc36bb6211f2552))
+* **walk:** say in the manifest when the camera could draw no WebGL, and tell the critic ([#639](https://github.com/monygroupcorp/noema/issues/639)) ([033f49d](https://github.com/monygroupcorp/noema/commit/033f49dd284073e35908445173273b9a3477ee4e))
+* **walk:** tell the critic what a filled button is ([#646](https://github.com/monygroupcorp/noema/issues/646)) ([bddf4ca](https://github.com/monygroupcorp/noema/commit/bddf4cada2dfc1713cb219e622b9f16467521c17))
+* **web:** a record gate has one primary, a lowercase way back, and tells a visitor they are not signed in ([#641](https://github.com/monygroupcorp/noema/issues/641)) ([6934edd](https://github.com/monygroupcorp/noema/commit/6934edd98f644d7ace482f5126d5ae6b5a6176ae))
+* **web:** a screen that cannot load its record says so plainly and offers the way back ([#627](https://github.com/monygroupcorp/noema/issues/627)) ([637ec0b](https://github.com/monygroupcorp/noema/commit/637ec0b953b7c5445849d5de816fb0b5819ea583))
+* **web:** account sections render their content, the destructive control goes last, and one control goes anonymous ([#630](https://github.com/monygroupcorp/noema/issues/630)) ([bc2a4cf](https://github.com/monygroupcorp/noema/commit/bc2a4cf00228acd399b23db12e4c8688606c88e4))
+* **web:** catalog rows share one column grid on a phone, and labels read in sentence case ([#640](https://github.com/monygroupcorp/noema/issues/640)) ([c736dd3](https://github.com/monygroupcorp/noema/commit/c736dd36843f76c4e4c99107ae2909e5e8a96067))
+* **web:** doc tables reflow on a phone, pack cards say what a pack buys, and the landing primary takes the accent ([#642](https://github.com/monygroupcorp/noema/issues/642)) ([6dfabfb](https://github.com/monygroupcorp/noema/commit/6dfabfb9119e6fa90e5c2d23a38ff6d797e45f36))
+* **web:** empty counts print no zeros, and every empty state offers the action that fills it ([#643](https://github.com/monygroupcorp/noema/issues/643)) ([79d6cbf](https://github.com/monygroupcorp/noema/commit/79d6cbf846554331cd3e32ecce413c7daa96aad8))
+* **web:** empty holdings print no zeros, and a sessionless visit asks for no partner record ([#637](https://github.com/monygroupcorp/noema/issues/637)) ([0f87554](https://github.com/monygroupcorp/noema/commit/0f875544b791501177b02e65a033e304b0def63b))
+* **web:** gate links become buttons, empty and error states say what to do ([#658](https://github.com/monygroupcorp/noema/issues/658)) ([9d7df55](https://github.com/monygroupcorp/noema/commit/9d7df559ba3563a431c92e3e4694686d55cc6cd9))
+* **web:** isolate spicy mode in its own restricted section on preferences ([#650](https://github.com/monygroupcorp/noema/issues/650)) ([7beb46b](https://github.com/monygroupcorp/noema/commit/7beb46be991ad34fbc95871ff2f5720a21902dd5))
+* **web:** one activity list on /status, newest first ([#652](https://github.com/monygroupcorp/noema/issues/652)) ([1d87259](https://github.com/monygroupcorp/noema/commit/1d87259a421da441bceb0b8bb73c464ca8b63987))
+* **web:** one door per screen, one instruction per error, and empty states that act ([#664](https://github.com/monygroupcorp/noema/issues/664)) ([a3800d8](https://github.com/monygroupcorp/noema/commit/a3800d8e249c8419c6b501a31299d9a548e9bab4))
+* **web:** one filled primary action per screen, and the topbar start pill stops competing with it ([#624](https://github.com/monygroupcorp/noema/issues/624)) ([daa22d2](https://github.com/monygroupcorp/noema/commit/daa22d2ae2d21711b7f02a5cf55cca8a8934ecf3))
+* **web:** one floating control per corner, and one filled action per marketing page ([#634](https://github.com/monygroupcorp/noema/issues/634)) ([4f0415a](https://github.com/monygroupcorp/noema/commit/4f0415ae59af5463a7270c8522b217fe41ebabca))
+* **web:** one noun per screen, accent only where it acts, and lists that state their shape ([#667](https://github.com/monygroupcorp/noema/issues/667)) ([8cfe28a](https://github.com/monygroupcorp/noema/commit/8cfe28a6db50ba94f1c19950d752e83d5db87e32))
+* **web:** pricing, export and account settings no longer say coming soon, and go anonymous is absent when already anonymous ([#635](https://github.com/monygroupcorp/noema/issues/635)) ([5a4394d](https://github.com/monygroupcorp/noema/commit/5a4394d1f5f2478adf3c6c8dce111a109e4253e3))
+* **web:** profile settings sections are each a jump target ([#651](https://github.com/monygroupcorp/noema/issues/651)) ([649ddc8](https://github.com/monygroupcorp/noema/commit/649ddc816920b9321e8eb09d3bc1aadff4783d60))
+* **web:** prose in sans, headings that descend, and a ceremony primary that follows its status ([#662](https://github.com/monygroupcorp/noema/issues/662)) ([8ff40e1](https://github.com/monygroupcorp/noema/commit/8ff40e120db2eaaac11458503c7e9f4a7fa62adc))
+* **web:** sentence case for the shell's labels and the screens that still read lowercase ([#626](https://github.com/monygroupcorp/noema/issues/626)) ([61c0fa0](https://github.com/monygroupcorp/noema/commit/61c0fa0028590c02a8be2b562a40c12c151c7a3c))
+* **web:** sentence-case the preferences labels and give the checkboxes a 44px row ([#655](https://github.com/monygroupcorp/noema/issues/655)) ([bfe664a](https://github.com/monygroupcorp/noema/commit/bfe664ade2835e7f927c10f37c0a135cb385f40d))
+* **web:** settings sections are reachable, their controls visible, and unavailable ones absent ([#665](https://github.com/monygroupcorp/noema/issues/665)) ([7e2ff02](https://github.com/monygroupcorp/noema/commit/7e2ff0258e3fd1f3cdd25da02cfa150b1154204b))
+* **web:** show what a pledge targets and does on the sponsorship form ([#648](https://github.com/monygroupcorp/noema/issues/648)) ([257b4f7](https://github.com/monygroupcorp/noema/commit/257b4f71e9d78d7225ae12a03406a60633be8bc4))
+* **web:** stop the mobile nav's Build group from being called Projects ([#649](https://github.com/monygroupcorp/noema/issues/649)) ([db91844](https://github.com/monygroupcorp/noema/commit/db91844db571c3a088520a843d0a74488c97d277))
+* **web:** surface a project's custody state at the top of its page ([#647](https://github.com/monygroupcorp/noema/issues/647)) ([d4720f3](https://github.com/monygroupcorp/noema/commit/d4720f31dbe703a879d26ee1d077435a01f70050))
+* **web:** the canvas keeps its stage at phone width and summons the tools as a sheet ([#660](https://github.com/monygroupcorp/noema/issues/660)) ([ce96fee](https://github.com/monygroupcorp/noema/commit/ce96fee19fb9bddbd1781513bb90c8ac24f38354))
+* **web:** the canvas leaves its loader when a read fails, with a retry or the door ([#645](https://github.com/monygroupcorp/noema/issues/645)) ([df183e9](https://github.com/monygroupcorp/noema/commit/df183e9164d6d8aadf71c547921a966f57ac1475))
+* **web:** the catalogue filters with one control row, and a model card never loads forever ([#631](https://github.com/monygroupcorp/noema/issues/631)) ([e3ab7be](https://github.com/monygroupcorp/noema/commit/e3ab7becf5eda42a7e2c92003e8c77b70f987067))
+* **web:** the concierge dock reserves its footprint on a phone instead of sitting on the page ([#625](https://github.com/monygroupcorp/noema/issues/625)) ([b8368fc](https://github.com/monygroupcorp/noema/commit/b8368fc2be0201a05468a5a758f6afb1c6ef7744))
+* **web:** the funding screen is headed by its name and lists both ways in, and vault, funding and onboard no longer say coming soon ([#628](https://github.com/monygroupcorp/noema/issues/628)) ([1e7c3a4](https://github.com/monygroupcorp/noema/commit/1e7c3a4585629564584e87f265cf7c12bc26d544))
+* **web:** the home's return surface comes first, and six phone-width screens lose what answered nothing ([#654](https://github.com/monygroupcorp/noema/issues/654)) ([c0678ff](https://github.com/monygroupcorp/noema/commit/c0678ff7a05bc6013c70ee4c2e586c21838c609e))
+* **web:** the profile asset tiles are buttons the keyboard can reach, and the account row labels are sentence case ([#657](https://github.com/monygroupcorp/noema/issues/657)) ([9202426](https://github.com/monygroupcorp/noema/commit/9202426df0e10124e3c901726e271181644ba0cf))
+* **web:** the topbar yields on every screen, a gate withholds Start, and a crumb ends in an ellipsis ([#644](https://github.com/monygroupcorp/noema/issues/644)) ([848515c](https://github.com/monygroupcorp/noema/commit/848515c8537e2dd7c17b26a140ee63316a8ff20a))
+* **web:** topbar pills meet the 44px touch target on phones ([#661](https://github.com/monygroupcorp/noema/issues/661)) ([2303c30](https://github.com/monygroupcorp/noema/commit/2303c303b2bd153bfb10e1562b6665257d777573))
+* **web:** zero counts stay silent, empty sections say what fills them, and document tables scroll instead of clipping ([#629](https://github.com/monygroupcorp/noema/issues/629)) ([e5eba5c](https://github.com/monygroupcorp/noema/commit/e5eba5cab49c7e5a577b4788340607f67fb25bf2))
+
 ## [5.30.0](https://github.com/monygroupcorp/noema/compare/v5.29.0...v5.30.0) (2026-09-21)
 
 
