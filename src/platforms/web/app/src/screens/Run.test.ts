@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { START_MAX, startList } from './Run';
+import { START_MAX, startList, startShape } from './Run';
 import { toUI } from './Catalog';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./Run.tsx', import.meta.url)), 'utf8');
@@ -17,6 +17,19 @@ describe('startList — the flows the /run landing offers to start from', () => 
     const out = startList(flows(START_MAX + 7));
     expect(out.shown).toHaveLength(START_MAX);
     expect(out.more).toBe(7);
+  });
+});
+
+describe('startShape — the header states how many flows are listed out of how many exist (DESIGN.md D-55)', () => {
+  it('is the plain title until the flows have loaded', () => {
+    expect(startShape(0, 0)).toBe('Start a run');
+  });
+  it('states shown of total when the list is capped', () => {
+    expect(startShape(START_MAX, 41)).toBe(`Start a run · ${START_MAX} of 41 flows`);
+  });
+  it('states the one count when every flow is listed', () => {
+    expect(startShape(3, 3)).toBe('Start a run · 3 flows');
+    expect(startShape(1, 1)).toBe('Start a run · 1 flow');
   });
 });
 

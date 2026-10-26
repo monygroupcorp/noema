@@ -23,6 +23,14 @@ export const START_MAX = 10;
 export function startList(flows: readonly StartRow[]): { shown: StartRow[]; more: number } {
   return { shown: flows.slice(0, START_MAX), more: Math.max(0, flows.length - START_MAX) };
 }
+// The section's header states its shape before its rows (DESIGN.md D-55): how many flows are
+// listed here out of how many the catalogue holds, the way /projects and the feed count theirs.
+// Until the flows have loaded there is no count to state, and the header is the plain title.
+export function startShape(shown: number, total: number): string {
+  if (total === 0) return 'Start a run';
+  if (shown < total) return `Start a run · ${shown} of ${total} flows`;
+  return `Start a run · ${total} ${total === 1 ? 'flow' : 'flows'}`;
+}
 
 export function Run() {
   const { ident } = useIdentity();
@@ -110,7 +118,7 @@ export function Run() {
             </>
           )}
 
-          <div className="sectionhead">Start a run</div>
+          <div className="sectionhead">{startShape(start.shown.length, flows?.length ?? 0)}</div>
           {flows === null ? (
             <div className="empty"><div className="t">Loading the flows you can start…</div></div>
           ) : flows.length === 0 ? (

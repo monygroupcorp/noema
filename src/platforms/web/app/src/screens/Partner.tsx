@@ -170,7 +170,7 @@ export function Partner() {
     <AppShell crumb="Partner">
       <div className="page"><div className="pw">
         <div className="pagehead">
-          <div><h1>Partner dashboard</h1><div className="sub">Your organization, balance, spend history, and API key status.</div></div>
+          <div><h1>Partner</h1><div className="sub">Your organization, balance, spend history, and API key status.</div></div>
         </div>
 
         {gate === 'loading' && <div className="sub">Loading…</div>}

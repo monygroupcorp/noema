@@ -90,7 +90,7 @@ const EXPORT = [
 
 const FOOTER = [
   { h: 'Make', links: [['Catalogue', '/catalog'], ['Run a workflow', '/run'], ['Collections', '/collections'], ['Canvas', '/canvas']] },
-  { h: 'Train', links: [['Datasets', '/datasets'], ['Model shelf', '/models'], ['Teams', '/teams'], ['Projects', '/projects']] },
+  { h: 'Train', links: [['Datasets', '/datasets'], ['Models', '/models'], ['Teams', '/teams'], ['Projects', '/projects']] },
   { h: 'Account', links: [['Funding', '/funding'], ['Keyring', '/keyring'], ['Preferences', '/preferences'], ['Status', '/status']] },
   { h: 'Read', links: [['About', '/about'], ['Ceremony', '/ceremony'], ['Privacy', '/legal/privacy'], ['Terms', '/legal/terms']] },
 ];
