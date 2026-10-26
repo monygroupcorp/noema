@@ -82,12 +82,20 @@ export function Sponsorships() {
         <div className="sectionhead">New pledge</div>
         <div className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s5)', display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
           <input className="inp mono" placeholder="beneficiary account id" value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} disabled={!session} />
+          {/* F-13: no account-identity lookup exists anywhere in this codebase (Teams' "add
+              member by account id" is the same bare-id pattern) — an avatar/display-name card
+              would mean inventing a new backend endpoint. This is the honest substitute: echo
+              the id back so the payer can at least re-read what they typed before committing. */}
+          {beneficiary.trim() && <div className="s mono">→ pledging to {beneficiary.trim()}</div>}
           <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
             <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="1" placeholder="points per cycle" value={grant} onChange={(e) => setGrant(e.target.value)} disabled={!session} />
             <select className="inp mono" style={{ maxWidth: 140 }} value={cadence} onChange={(e) => setCadence(e.target.value as SubsidyCadence)} disabled={!session}>
               {CADENCES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          {/* F-14: Sponsio (src/types/sponsio.ts) carries no reward/tier concept — a pledge is
+              a bare balance top-up, nothing more. Say that plainly rather than imply a perk. */}
+          <div className="s">What this buys: nothing but the top-up itself — each cycle moves the points above from your balance to theirs, no reward tiers or perks attached.</div>
           <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
             <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="balance cap (optional)" value={balanceCap} onChange={(e) => setBalanceCap(e.target.value)} disabled={!session} />
             <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="lifetime cap (optional)" value={capTotal} onChange={(e) => setCapTotal(e.target.value)} disabled={!session} />
