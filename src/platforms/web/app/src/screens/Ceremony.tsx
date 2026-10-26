@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, checkServedKey, contributionsPaused, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
+import { ceremony, checkServedKey, contributionsPaused, heroAction, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import { entryPath } from '../lib/entry';
 import './landing.css';
@@ -279,6 +279,8 @@ export function Ceremony() {
 
   const phase = status?.phase ?? 'announced';
   const chain = status?.chain ?? [];
+  // One filled button on the page (D-42), and it follows the status pill above it.
+  const hero = heroAction(status);
 
   async function onClaim(e: React.FormEvent) {
     e.preventDefault();
@@ -312,9 +314,10 @@ export function Ceremony() {
         </p>
         <div className="cer-status-row"><StatusPill status={status} /></div>
         <div className="cta">
-          <a className="btn lg" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+          <a className="btn lg" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
           <a className="btn-ghost" href="#how">How it works</a>
         </div>
+        {hero.note && <p className="cer-fold-note">{hero.note}</p>}
         <div className="proof">groth16 phase-2 · one honest contributor secures it forever</div>
       </div>
 
@@ -465,7 +468,7 @@ export function Ceremony() {
               </div>
             </div>
 
-            <div className="cer-chain">
+            <div className="cer-chain" id="transcript">
               <div className="cer-chain-h">
                 <span>Transcript</span>
                 <span className="cer-chain-n">{chain.length} contribution{chain.length === 1 ? '' : 's'}</span>
@@ -505,9 +508,9 @@ export function Ceremony() {
 
       <div className="endcta">
         <h2>Make the keys no one can forge — including us.</h2>
-        {/* The hero's "Contribute" is this page's one action; the closing line points back to
-            it as a plain link rather than a second button for the same thing (P-1d). */}
-        <a className="endlink" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+        {/* The hero's button is this page's one action; the closing line points back to the
+            same place as a plain link rather than a second button for the same thing (P-1d). */}
+        <a className="endlink" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
       </div>
 
       <SiteFooter />
