@@ -227,6 +227,40 @@ export function contributionsPaused(status: CeremonyStatus | null): boolean {
   return status?.phase === 'open' && status.acceptingContributions === false;
 }
 
+/** The ceremony page's one filled button, and the line the fold says beside it. */
+export interface HeroAction {
+  label: string;
+  /** In-page anchor: the contribution card, or the transcript. */
+  href: '#contribute' | '#transcript';
+  /** Why a visitor is not being asked to contribute, when they are not. */
+  note: string | null;
+}
+
+/**
+ * What the hero invites follows the status it shows. A filled "Contribute" under a pill
+ * reading "finalized" or "paused" asks for the one thing the page cannot accept; once
+ * contributions are closed, the thing a visitor can still do is read the transcript and
+ * check the published key against it, so that becomes the primary action and the reason
+ * moves up into the fold. Announced and open keep inviting a contribution.
+ */
+export function heroAction(status: CeremonyStatus | null): HeroAction {
+  if (status?.phase === 'finalized') {
+    return {
+      label: 'Verify the published key',
+      href: '#transcript',
+      note: 'Contributions are closed: the ceremony is complete, and the key it produced is published in the transcript below for anyone to check.',
+    };
+  }
+  if (contributionsPaused(status)) {
+    return {
+      label: 'Read the transcript',
+      href: '#transcript',
+      note: 'Contributions are paused: this server does not currently hold the key the next one builds on. Nothing already contributed is lost — check back shortly.',
+    };
+  }
+  return { label: 'Contribute', href: '#contribute', note: null };
+}
+
 export function checkServedKey(
   status: CeremonyStatus | null,
   served: ServedKey | null,

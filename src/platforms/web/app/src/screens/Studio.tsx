@@ -163,8 +163,8 @@ export function Studio() {
                   {arming ? 'leasing…' : 'Lease studio'}
                 </button>
               </div>
-              <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-                the pod boots in the background — this page follows it live. The budget is a hard cap: the studio drains and terminates when it's spent.
+              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-s)' }}>
+                The pod boots in the background — this page follows it live. The budget is a hard cap: the studio drains and terminates when it's spent.
               </div>
             </div>
           </>

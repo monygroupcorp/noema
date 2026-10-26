@@ -1,6 +1,9 @@
 /* ceremony surface — extends landing.css; only the bits the Landing doesn't already have */
 
 .cer-status-row{display:flex;justify-content:center;margin:26px 0 4px}
+/* The one line the fold says when the primary is not "Contribute": why not, and what
+   the button leads to instead. Sits between the buttons and the proof line. */
+.hero .cer-fold-note{margin:18px auto 0;max-width:520px;font-size:var(--fs-s);line-height:1.55;color:var(--muted)}
 .cer-pill{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11.5px;letter-spacing:.03em;
   border:1px solid var(--hair);border-radius:999px;padding:6px 13px;color:var(--muted);background:var(--panel)}
 .cer-pill .cer-dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
