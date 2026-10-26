@@ -42,10 +42,10 @@ export function EditioHub() {
   }
 
   if (fail) {
-    return <AppShell title="Collection"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
+    return <AppShell title="Collections"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   }
   if (!c) {
-    return <AppShell title="Collection"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
+    return <AppShell title="Collections"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
   }
 
   const name = c.nomen || 'Untitled collection';
