@@ -52,6 +52,7 @@ interface Shot { route: string; viewport: string; file: string; bytes: number }
 interface Manifest {
   run: string; capturedAt: string; revision: string; baseUrl: string; authenticated: boolean;
   coverage?: string; routes: number; shots: Shot[]; failed?: { route: string; viewport?: string; error: string }[];
+  webgl?: boolean;
 }
 
 const SCHEMA = {
@@ -155,7 +156,7 @@ function userPrompt(shot: Shot, tiles: { width: number; height: number; tiles: s
       ? `Reference row: ${ref.id} — deliberately unnamed (${ref.purpose}). Cite DESIGN.md rules only; do not cite ${ref.id}.`
       : 'This screen has no row in the reference map. Cite DESIGN.md rules only.';
   return `Screen: ${shot.route}${ref?.screen ? ` (${ref.screen})` : ''}
-Viewport: ${shot.viewport}, ${viewport.width}×${viewport.height}, full-page capture.
+Viewport: ${shot.viewport}, ${viewport.width}×${viewport.height}, full-page capture.${m.webgl === false ? '\nThe capturing browser could draw no WebGL. If this shot shows a "needs WebGL" notice or an empty 3D area, that is the camera, not the screen: do not file it.' : ''}
 ${refLine}
 Capture: ${m.coverage ?? (m.authenticated ? 'signed in' : 'anonymous')}
 Shot id to cite, verbatim: ${shot.file}
