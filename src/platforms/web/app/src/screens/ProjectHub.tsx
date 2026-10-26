@@ -103,6 +103,7 @@ export function ProjectHub() {
             ) : (
               <>
                 <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>Rename ▸</button></h1>
+                <div className="ph-meta mono" style={{ marginTop: 6 }}>{p.shared ? `${p.shared} members · ` : ''}updated {p.updated} · mixed custody (TEE · local · public)</div>
                 <p className="ph-desc">{p.desc || 'No description yet.'}</p>
               </>
             )}
@@ -189,7 +190,6 @@ export function ProjectHub() {
               <div className="ph-about">
                 <div className="ph-l">About this project</div>
                 <p>A project <b>groups</b> your work — it isn’t a wall. Anything here can be referenced from other projects; the only hard boundary is your account.</p>
-                <div className="ph-meta mono">{p.shared ? `${p.shared} members · ` : ''}updated {p.updated} · mixed custody (TEE · local · public)</div>
               </div>
               <div className="ph-activity">
                 <div className="ph-l">Activity</div>
