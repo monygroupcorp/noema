@@ -293,3 +293,23 @@ test('classifyError: a model with no download address is a setup error, not "try
 test('classifyError: the MODEL_NOT_RESOLVED code reads the same way', () => {
   assert.equal(classifyError('CompilerError MODEL_NOT_RESOLVED'), "This workflow isn't set up correctly. Please contact support.")
 })
+
+// ---------------------------------------------------------------------------
+// A model the USER added whose registry record names no file: the Compiler refuses by the
+// model's name (MODEL_UNFETCHABLE), and the sentence hands the user their own way forward
+// rather than sending them to support for a LoRA they typed or pinned.
+// ---------------------------------------------------------------------------
+
+test('classifyError: a model with no downloadable file is named, with the way forward', () => {
+  const result = classifyError(new Error("'Drifella' has no downloadable file yet — leave out its trigger word or unpin it, then run again"))
+  assert.equal(result, "The model 'Drifella' has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.")
+})
+
+test('classifyError: the MODEL_UNFETCHABLE code alone reads the same way, without a name', () => {
+  assert.equal(classifyError('CompilerError MODEL_UNFETCHABLE'), "The model has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.")
+})
+
+test('classifyError: an addressless model is not mistaken for a mis-set-up workflow', () => {
+  const result = classifyError(new Error("'Drifella' has no downloadable file yet — leave out its trigger word or unpin it, then run again"))
+  assert.notEqual(result, "This workflow isn't set up correctly. Please contact support.")
+})
