@@ -14,7 +14,12 @@ regression (future baselines) and an LLM-critique pass (Phase 2); axe findings a
 - `walk.ts` — the walker. Signs in (best-effort, see below), then per route: desktop (1280x800)
   + mobile (390x844) screenshots into `shots/<run>/<route>/`, and an axe WCAG 2.1/2.2 A+AA scan
   written to `report/<run>/axe.json` beside a `manifest.json`. `npm run walk -- --list`
-  enumerates the planned shots without touching a target.
+  enumerates the planned shots without touching a target. The app scrolls inside `.page`, not
+  the document, so a plain full-page capture is one viewport tall; the walker grows the window
+  to the inner scroller's height before each shot and records per shot what it scrolled and how
+  tall the window became (`scrollContainer`, `viewportHeightAtShot`, `grown`, `capped`). A
+  manifest without `fullScreenCapture: true` is from before this and shows app routes at their
+  first fold only.
 - `review.ts` — how a person looks at the result. One run builds a contact sheet of every shot;
   two runs build a diff, every shot compared pixel for pixel and sorted by how much moved.
 - `critique.ts` — Phase 2, the critic. Every shot of a run is critiqued by three independent
