@@ -70,7 +70,7 @@ export function TraitRules() {
   }
 
   const empty = axes.every((a) => a.valores.length === 0);
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>rules</b></span>;
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'Collection'}</Link> <span className="sep">/</span> <b>Rules</b></span>;
 
   return (
     <AppShell title={crumb}>

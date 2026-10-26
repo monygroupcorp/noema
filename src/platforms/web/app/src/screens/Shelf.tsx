@@ -305,8 +305,8 @@ export function Shelf() {
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
           </div>
           <div className="shelf-right">
-            <button className="btn ghost" onClick={() => setShowImport((v) => !v)}><Ic name="download" /> import by URL</button>
-            <Link className="btn" to="/datasets"><Ic name="plus" /> new training</Link>
+            <button className="btn ghost" onClick={() => setShowImport((v) => !v)}><Ic name="download" /> Import by URL</button>
+            <Link className="btn" to="/datasets"><Ic name="plus" /> New training</Link>
           </div>
         </div>
 

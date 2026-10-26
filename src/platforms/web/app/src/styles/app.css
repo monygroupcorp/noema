@@ -1417,7 +1417,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .surface-title{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .posture{flex:0 0 auto; gap:7px}
   .posture .pc-pill.credits, .posture .pc-pill.compute{display:none}
-  .pc-pill.id-chip .nm{max-width:5.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .pc-pill.id-chip .nm{max-width:6.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
   /* bottom-bar rail: show only the global nav; Funding/Settings/account move into the
      account panel (topbar chip), so the foot doesn't crowd or leak into the bar. */

@@ -60,7 +60,7 @@ export function EditioHub() {
     { n: 5, to: `/collections/${c.id}/export`, ico: 'send', t: 'Export & publish', s: 'download · hosting · noesis' },
   ];
 
-  const crumb = <span className="ph-crumb"><Link to="/collections">collections</Link> <span className="sep">/</span> <b>{name}</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections">Collections</Link> <span className="sep">/</span> <b>{name}</b></span>;
 
   return (
     <AppShell title={crumb}>

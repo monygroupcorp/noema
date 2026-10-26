@@ -341,7 +341,7 @@ export function Vault() {
   );
 
   return (
-    <AppShell crumb="vault" context={context}>
+    <AppShell crumb="Vault" context={context}>
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Vault</h1>

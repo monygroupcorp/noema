@@ -17,7 +17,7 @@ import { guardedClick, guardedNavigate } from '../lib/dirtyGuard';
 // compute label from the session execution mode (custody is per-run; this is the standing posture).
 // Every run executes on our shared compute today — there is no other posture to report.
 function computeLabel(_exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: string } {
-  return { glyph: 'lit', text: 'shared' };
+  return { glyph: 'lit', text: 'Shared' };
 }
 
 export function Account() {
@@ -56,10 +56,10 @@ export function Account() {
   const signedIn = !!session;
   const anon = ident.funding === 'bearer';
   // The real fiat session takes precedence over the cosmetic identity skin for the name/reach readout.
-  const name = signedIn ? (session!.username ?? 'your account') : anon ? 'anonymous' : ident.name;
+  const name = signedIn ? (session!.username ?? 'Your account') : anon ? 'Anonymous' : ident.name;
   const credits = liveCredits ?? (ident.bal.match(/(\d[\d,]*)\s*credits?/)?.[1] ?? '—');
   const compute = useMemo(() => computeLabel(execution), [execution]);
-  const reach = signedIn || !anon ? 'signed in · web · Telegram · API' : 'bearer purse';
+  const reach = signedIn || !anon ? 'Signed in · web · Telegram · API' : 'Bearer purse';
 
   function toggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -98,9 +98,9 @@ export function Account() {
       <span className="pc-pill compute" title="active compute"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</span>
       {/* identity chip — opens the account dropdown */}
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
-        <Chip d={ident} /><span className="nm">{anon ? 'anonymous' : 'you'}</span><span className="cv"><Ic name="chevron-down" /></span>
+        <Chip d={ident} /><span className="nm">{anon ? 'Anonymous' : 'You'}</span><span className="cv"><Ic name="chevron-down" /></span>
       </button>
-      <Link to="/chat" className="pc-pill pc-start" onClick={guardedClick}><Ic name="plus" /> start</Link>
+      <Link to="/chat" className="pc-pill pc-start" onClick={guardedClick}><Ic name="plus" /> Start</Link>
 
       {open && (
         <div id="acctpop" className="acctmenu" style={pos}>
@@ -109,8 +109,8 @@ export function Account() {
             <div><div className="nm">{name}</div><div className="reach">{reach}</div></div>
           </div>
           <div className="am-stats">
-            <div className="am-stat"><div className="l">credits</div><div className="v"><span className="gem">◈</span> {credits}</div></div>
-            <div className="am-stat"><div className="l">compute</div><div className="v"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</div></div>
+            <div className="am-stat"><div className="l">Credits</div><div className="v"><span className="gem">◈</span> {credits}</div></div>
+            <div className="am-stat"><div className="l">Compute</div><div className="v"><span className={`hemi2 ${compute.glyph}`} /> {compute.text}</div></div>
           </div>
           {/* The held logins + the anon slot — switch freely (Keyring in miniature). */}
           <div className="am-accounts">
@@ -120,7 +120,7 @@ export function Account() {
               return (
                 <button key={d.id} className={`am-acct${active ? ' on' : ''}`} onClick={() => switchTo(d.id)}>
                   <Chip d={d} />
-                  <span className="nm">{rowAnon ? 'anonymous' : d.name}</span>
+                  <span className="nm">{rowAnon ? 'Anonymous' : d.name}</span>
                   {active && <span className="chk">✓</span>}
                 </button>
               );

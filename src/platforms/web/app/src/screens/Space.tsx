@@ -724,7 +724,7 @@ function CorpusSpace() {
     : activeInfo;
 
   return (
-    <AppShell crumb="space">
+    <AppShell crumb="Space">
       {/* No clear-on-click here: deselection is driven by the pick result inside the
           canvas (see onPick below), which is the only place that knows whether the
           click landed on a point. Clicks still bubble normally, which the panels
@@ -772,7 +772,7 @@ function CorpusSpace() {
                 are deliberately two distinct affordances, not merged into one button. */}
             <div className="orient-cluster" onClick={(e) => e.stopPropagation()}>
               <button onClick={resetView} title="reset view — reframe the camera">
-                <Ic name="rotate-cw" /> reset view
+                <Ic name="rotate-cw" /> Reset view
               </button>
               <Link to="/app" title="back to app home">
                 <Ic name="home" /> home

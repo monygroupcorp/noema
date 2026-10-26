@@ -3543,8 +3543,8 @@ export function filterSessionHistory(rows: readonly SessionRow[], query: string)
 export function sessionSearchEmptyNote(rows: readonly SessionRow[], query: string): string | null {
   if (rows.length > 0) return null;
   return query.trim()
-    ? 'no session matches that — search runs over the fragments each piece was drawn from'
-    : 'no muse sessions off this dataset yet';
+    ? 'No session matches that — search runs over the fragments each piece was drawn from'
+    : 'No muse sessions off this dataset yet';
 }
 
 /** The quiet line the dataset screen carries beside its muse door: how many sessions

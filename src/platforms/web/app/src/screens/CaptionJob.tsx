@@ -191,7 +191,7 @@ export function CaptionJob() {
   const captions = set?.captions ?? {};
   const captioned = d.media.filter((m) => typeof captions[m.id] === 'string' && captions[m.id].trim() !== '').length;
 
-  const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>captions</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>Captions</b></span>;
 
   return (
     <AppShell title={crumb}>

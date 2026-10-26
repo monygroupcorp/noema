@@ -384,7 +384,7 @@ export function Dataset() {
   );
 
   const crumb = (
-    <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
+    <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
   );
 
   return (
@@ -610,7 +610,7 @@ export function Dataset() {
               onClick={() => navigate(d.captionsets.length === 0 ? `/datasets/${d.id}/caption` : `/datasets/${d.id}/derive`)}>
               {d.captionsets.length === 0 ? 'Caption it, then train →' : 'Train a model from this →'}
             </button>
-            <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>muse →</Link>
+            <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>Muse →</Link>
             {/* Beside the door, not behind it: how many sessions this dataset has, and the
                 way to the ones that are not the current work. */}
             {sessionCountLine(museSessions ?? []) && (

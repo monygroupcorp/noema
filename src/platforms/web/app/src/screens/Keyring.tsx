@@ -21,7 +21,7 @@ export function Keyring() {
   const addAccount = () => navigate('/onboard?add=1');
 
   return (
-    <AppShell crumb="keyring">
+    <AppShell crumb="Keyring">
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Keyring</h1>

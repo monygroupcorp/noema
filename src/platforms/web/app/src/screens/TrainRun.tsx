@@ -140,7 +140,7 @@ export function TrainRun() {
   const since = elapsed(run.createdAt, now);
 
   const crumb = (
-    <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> train <span className="sep">/</span> <b>run</b></span>
+    <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> Train <span className="sep">/</span> <b>Run</b></span>
   );
 
   return (
