@@ -11,6 +11,7 @@ import { SECTIONS, SectionPane, resolveSection } from './accountSections';
 
 const appSource = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8');
 const mounted = (path: string) => appSource.includes(`path="${path}"`);
+const accountSource = readFileSync(resolve(__dirname, 'AccountSettings.tsx'), 'utf8');
 
 const PLACEHOLDER = /coming soon|later pass|building this|not wired|placeholder/i;
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -55,6 +56,20 @@ describe('account sections', () => {
     expect(html).toContain('aria-pressed="true"');
     expect(text(html)).toContain('studio one');
     expect(text(html)).toContain('~2m left');
+  });
+
+  // The account home needs the session, the identity store and the shell, which this harness
+  // does not have, so its billing card is read from the source. The card used to carry a
+  // "Plan · card" row reading "coming soon — no subscriptions or card billing yet" after card
+  // packs had been on sale on /funding for some time: a placeholder that had gone from
+  // premature to false. The card must say what is true and send the reader to where credits
+  // are bought.
+  it('describes billing as it is today and points at the funding screen', () => {
+    const card = accountSource.match(/<SectionCard to="\/funding"[\s\S]*?<\/SectionCard>/)?.[0];
+    expect(card, 'the account home has a billing card').toBeTruthy();
+    expect(card).not.toMatch(PLACEHOLDER);
+    expect(card).not.toMatch(/\byet\b/);
+    expect(card).toContain('to="/funding"');
   });
 
   it('sends an unlisted section back to the account home instead of showing another section', () => {

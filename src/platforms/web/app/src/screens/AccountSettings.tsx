@@ -115,7 +115,8 @@ export function AccountSettings() {
           </div></div>
 
           {/* posture instrument — the dashboard device, reused. Status only: the one control that
-              changes identity is the "Go anonymous" button below (P-1d). */}
+              changes identity is the "Go anonymous" button below (P-1d), shown while there is an
+              account to step off — pressed from the anonymous slot it would do nothing. */}
           <div className="noema-frame ac-posture">
             <div className="ac-pcell">
               <div className="ac-l">Identity</div>
@@ -135,7 +136,7 @@ export function AccountSettings() {
               real too, but destructive, so it sits last on the page (REF-34). */}
           <div className="ac-sov">
             <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
-            <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
+            {!anon && <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>}
           </div>
           {exportUrl && (
             <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
@@ -150,12 +151,13 @@ export function AccountSettings() {
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
               live studios, saved logins) show real data. Each card's manage link goes where the
-              section's nav entry goes (accountSections). */}
+              section's nav entry goes (accountSections). There is no plan row: credits are bought
+              as packs and nothing is billed on a schedule, so a row would only read "none" (P-1c);
+              the card's note names both ways to add credits instead. */}
           <div className="ac-cards">
             <SectionCard to="/funding" ico="wallet" name="Billing &amp; credits">
               <Row k="Credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
-              <Row k="Plan · card" v={<span className="muted">coming soon — no subscriptions or card billing yet</span>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> credits fund on-chain today — <Link className="accent" to="/funding">deposit from a wallet ▸</Link></div>
+              <div className="ac-note mono"><span className="hemi2 dashed" /> buy a pack by card or deposit from a wallet — <Link className="accent" to="/funding">add credits ▸</Link></div>
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
               <Row k="Availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
