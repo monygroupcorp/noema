@@ -134,6 +134,20 @@ export function RequestDemo() {
             onSubmit={(e) => { e.preventDefault(); void submit(); }}
             style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3, 12px)', maxWidth: 480 }}
           >
+            {/* Read before the first field, not between the last field and Submit: the advice
+                is to leave and come back, and a decision like that is made before filling the
+                form, not mid-pass (REF-5). One child: .warn is a flex row. */}
+            {!session && (
+              <div className="warn">
+                <span>
+                  <b>Sign in first if you can.</b> A request sent signed in switches your partner
+                  access on by itself when approved; sent anonymously, we'd have to onboard you by
+                  hand. <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring
+                  you back here.
+                </span>
+              </div>
+            )}
+
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span className="sub">Name (optional)</span>
               <input
@@ -191,19 +205,6 @@ export function RequestDemo() {
                 onChange={(e) => setNotes(e.target.value)}
               />
             </label>
-
-            {/* Read before pressing submit, and after the fields rather than before them, so
-                the form itself opens in the first screen (P-2a). One child: .warn is a flex row. */}
-            {!session && (
-              <div className="warn">
-                <span>
-                  <b>Sign in first if you can.</b> A request sent signed in switches your partner
-                  access on by itself when approved; sent anonymously, we'd have to onboard you by
-                  hand. <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring
-                  you back here.
-                </span>
-              </div>
-            )}
 
             {phase === 'error' && <div className="warn">{error}</div>}
 
