@@ -1,6 +1,7 @@
 # Train a model on your own work
 
 **Published:** 2026-09-05
+**Summary:** Turn a folder of your own references into a model you can run, knowing what each step costs.
 
 A walkthrough from a folder of references to a model you can run, and what each step actually costs you.
 

@@ -1,6 +1,7 @@
 # Compose a workflow on the canvas
 
 **Published:** 2026-09-05
+**Summary:** Wire several models into one flow you can run, publish and call over the API like any other.
 
 How to wire several models into one flow you can run, publish, and call like any other.
 

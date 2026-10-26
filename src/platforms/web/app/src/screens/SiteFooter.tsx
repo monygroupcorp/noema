@@ -9,13 +9,13 @@ export function SiteFooter() {
       <div className="inner">
         <div>
           <div className="brand"><span className="dot" />noema</div>
-          {/* The tagline states only what the privacy policy states. We never train on prompts or
-              outputs, and an account needs no email — but run records are RETAINED, and erasure
-              severs them from you rather than deleting them (privacy policy §5, §7, §8; MeEraser
-              pseudonymizes and tombstones, it does not delete). "Kept until you erase your
-              account" read as a deletion promise erasure does not keep, on every page of the
-              site. It sits on every page; it is the widest claim we make. */}
-          <div className="tag">Open-source generative media. An account needs no email, and we never train on your prompts or outputs. Run records are retained; erasing your account severs them from you rather than deleting them.</div>
+          {/* The tagline makes no product claim. The privacy policy owns what is kept, what is
+              never done with it, and what erasure does (it severs, it does not delete — §7, §8),
+              and a claim is stated once, in the place that owns it (DESIGN.md P-1b, D-71). This
+              strip sits on every page: restating the policy here put the widest claim we make
+              under every screen, and it drifted from the policy once already ("kept until you
+              erase your account" read as a deletion promise erasure does not keep). */}
+          <div className="tag">Open-source generative media. <Link to="/legal/privacy">What is kept, and why</Link>.</div>
         </div>
         <div className="col">
           <h3>Product</h3>

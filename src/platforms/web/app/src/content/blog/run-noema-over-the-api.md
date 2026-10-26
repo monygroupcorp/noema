@@ -1,6 +1,7 @@
 # Run noema over the API
 
 **Published:** 2026-09-05
+**Summary:** Call any flow from your own code with one HTTP request, then watch the run until it settles.
 
 Every flow on the platform is one HTTP call away, and they all follow the same three-step shape.
 
