@@ -11,12 +11,16 @@ import './load-failure.css';
 // Three kinds, because they ask for three different things:
 //   • `missing`   — the API said not found. The server answers 404 for a record that is not
 //                   the caller's as well as for one that does not exist (ids stay
-//                   non-enumerable), so the sentence says both. No retry: asking again will
-//                   not change the answer. A visitor with no session is also offered the door,
-//                   since the record may be theirs under an account.
+//                   non-enumerable), so for a signed-in reader the sentence says both. No retry:
+//                   asking again will not change the answer. A visitor with no session is told
+//                   the one thing the app knows for certain — that they are not signed in — and
+//                   offered the door, since the record may be theirs under an account.
 //   • `signin`    — the API refused the caller (401/403). The record is not open to visitors.
 //   • `transient` — anything else: the server fell over, the connection dropped, the read timed
 //                   out. Retry is the action, and the back link is the way out if it keeps failing.
+//
+// One action is the filled button and the rest are plain links (D-42): whichever one resolves
+// the state — retry, the door, or failing both, the way back.
 
 export type LoadFailureKind = 'missing' | 'signin' | 'transient';
 
@@ -29,11 +33,12 @@ export function loadFailureKind(e: unknown): LoadFailureKind {
   return 'transient';
 }
 
-/** The lists that own records, named as the rail names them (D-69) — the way out of a dead end. */
+/** The lists that own records, named as the rail names them (D-69) — the way out of a dead end.
+ *  Labels are lowercase because they land mid-sentence ("Back to collections", D-26). */
 export const BACK = {
-  collections: { to: '/collections', label: 'Collections' },
-  datasets: { to: '/datasets', label: 'Datasets' },
-  home: { to: '/app', label: 'Home' },
+  collections: { to: '/collections', label: 'collections' },
+  datasets: { to: '/datasets', label: 'datasets' },
+  home: { to: '/app', label: 'home' },
 } as const;
 
 export interface LoadFailureProps {
@@ -50,12 +55,13 @@ export interface LoadFailureProps {
 export function loadFailureCopy(noun: string, kind: LoadFailureKind, signedIn: boolean): { what: string; next: string | null } {
   switch (kind) {
     case 'missing':
-      return {
-        what: `This ${noun} doesn't exist, or isn't yours to open.`,
-        next: signedIn ? null : 'If it is yours, sign in to open it.',
-      };
+      return signedIn
+        ? { what: `This ${noun} doesn't exist, or isn't yours to open.`, next: null }
+        : { what: "You're not signed in.", next: `If this ${noun} is yours, sign in to open it.` };
     case 'signin':
-      return { what: `Sign in to open this ${noun}.`, next: 'It is not open to visitors.' };
+      return signedIn
+        ? { what: `This ${noun} isn't yours to open.`, next: 'Sign in to the account that owns it to open it.' }
+        : { what: "You're not signed in.", next: `This ${noun} is not open to visitors. Sign in to open it.` };
     default:
       return {
         what: `This ${noun} couldn't be loaded.`,
@@ -64,22 +70,29 @@ export function loadFailureCopy(noun: string, kind: LoadFailureKind, signedIn: b
   }
 }
 
+/** Whether the card is a failed read (danger frame) or a door (neutral frame), per D-10. */
+export function loadFailureFailed(kind: LoadFailureKind, signedIn: boolean): boolean {
+  return kind === 'transient' || (kind === 'missing' && signedIn);
+}
+
 export function LoadFailure({ noun, kind, back, onRetry }: LoadFailureProps) {
   const location = useLocation();
   const signedIn = getSession() !== null;
   const copy = loadFailureCopy(noun, kind, signedIn);
-  // A refusal is a failure of the read; a door is not — it keeps the neutral frame (D-10).
-  const failed = kind !== 'signin';
+  const failed = loadFailureFailed(kind, signedIn);
+  const offerRetry = kind === 'transient' && onRetry !== undefined;
   const offerDoor = kind === 'signin' || (kind === 'missing' && !signedIn);
+  // The way back is the primary only when nothing else is offered.
+  const backIsPrimary = !offerRetry && !offerDoor;
   return (
     <div className="page"><div className="pw">
       <div className={`load-fail${failed ? ' bad' : ''}`} role="alert">
         <p className="load-fail-what">{copy.what}</p>
         {copy.next && <p className="load-fail-next">{copy.next}</p>}
         <div className="load-fail-actions">
-          {kind === 'transient' && onRetry && <button type="button" className="btn ghost" onClick={onRetry}>Try again</button>}
-          {offerDoor && <Link className="btn ghost" to={doorPath(location.pathname + location.search)}>Sign in</Link>}
-          <Link className="btn ghost" to={back.to}>Back to {back.label}</Link>
+          {offerRetry && <button type="button" className="btn" onClick={onRetry}>Try again</button>}
+          {offerDoor && <Link className="btn" to={doorPath(location.pathname + location.search)}>Sign in</Link>}
+          <Link className={backIsPrimary ? 'btn' : 'load-fail-back'} to={back.to}>Back to {back.label}</Link>
         </div>
       </div>
     </div></div>
