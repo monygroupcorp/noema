@@ -5,6 +5,7 @@
 // `npm run walk -- --list`            → static self-check: enumerates planned shots, no target.
 // `npm run walk`                      → walk against WALK_BASE_URL, into the `latest` run.
 // `npm run walk -- --run baseline`    → walk into a NAMED run.
+// `npm run walk -- --only /a,/b`      → a subset of routes, while tuning the walker itself.
 //
 // Runs are named because the point of capturing every route is comparing two of them. A run
 // writes a manifest recording the commit, the target and every shot's dimensions, so a set of
@@ -87,6 +88,65 @@ async function settle(page: import('playwright').Page): Promise<void> {
   await page.evaluate(SETTLE_JS).catch(() => {});
 }
 
+/** The app does not scroll the document. `.app` is `height:100vh` and `.page` is the scroll area
+ *  (`overflow:auto; min-height:0`), so Playwright's `fullPage` — which grows the viewport until
+ *  the DOCUMENT has no more to show — finds nothing to grow and photographs one viewport-height
+ *  of a screen that may run to five. The first critique run read every app route from its first
+ *  fold and called a screen's lower sections missing; only the marketing and doc pages, which
+ *  scroll the body, came out tall.
+ *
+ *  So before the shot the walk measures the tallest scrolling element and grows the viewport by
+ *  the height it hides. `.app` follows the viewport, `.page` follows `.app`, and the whole screen
+ *  is in the picture. The rail is skipped — it is viewport-bound by design and never the content.
+ *  Capped so an endless feed cannot ask for a window Chromium will not draw; a capped shot says
+ *  so in the manifest. Source, not a closure, for the same reason as SETTLE_JS. */
+const GROW_CAP_PX = 12_000;
+const SCROLLER_JS = `(function () {
+  let best = null;
+  const all = document.querySelectorAll('*');
+  for (const el of all) {
+    if (el.closest('.rail')) continue;
+    const cs = getComputedStyle(el);
+    if (!/(auto|scroll)/.test(cs.overflowY)) continue;
+    const hidden = el.scrollHeight - el.clientHeight;
+    if (hidden <= 1) continue;
+    if (!best || hidden > best.hidden) {
+      best = { hidden: hidden, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
+               selector: el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : '') };
+    }
+  }
+  return best;
+})()`;
+
+type Scroller = { hidden: number; scrollHeight: number; clientHeight: number; selector: string } | null;
+
+/** Grow the viewport until the tallest inner scroller has nothing left to hide, or the cap is
+ *  reached. Growing can reflow and lazy-load more (a feed fills as it gets room), so it measures
+ *  again after each step and stops when a step reveals nothing new — two steps cover every screen
+ *  seen so far; the loop is bounded regardless. Returns what the manifest records. */
+async function growToContent(page: import('playwright').Page, vp: { width: number; height: number }) {
+  let height = vp.height;
+  let scroller: Scroller = null;
+  for (let step = 0; step < 4; step++) {
+    const found = await page.evaluate(SCROLLER_JS).catch(() => null) as Scroller;
+    if (!found) break;
+    scroller = found;
+    const want = Math.min(height + found.hidden, GROW_CAP_PX);
+    if (want <= height) break;
+    height = want;
+    await page.setViewportSize({ width: vp.width, height });
+    await settle(page);
+  }
+  return {
+    // What scrolled, and what the viewport became to show it. `document` means the page scrolled
+    // the body and fullPage alone was enough — the marketing and doc screens.
+    scrollContainer: scroller ? scroller.selector : 'document',
+    viewportHeightAtShot: height,
+    grown: height > vp.height,
+    capped: height >= GROW_CAP_PX,
+  };
+}
+
 function slug(path: string): string {
   return path === '/' ? 'root' : path.replace(/^\//, '').replace(/[/:]/g, '-');
 }
@@ -153,48 +213,65 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
 
   const report: { route: string; viewport: string; violations: unknown[] }[] = [];
   const counts: Record<string, number> = {};
-  const shots: { route: string; viewport: string; file: string; bytes: number }[] = [];
-  const failed: { route: string; error: string }[] = [];
+  const shots: {
+    route: string; viewport: string; file: string; bytes: number;
+    scrollContainer: string; viewportHeightAtShot: number; grown: boolean; capped: boolean;
+  }[] = [];
+  const failed: { route: string; viewport: string; error: string }[] = [];
 
   for (const row of rows) {
-    const ctx = authenticated && existsSync(STATE_FILE)
-      ? await browser.newContext({ storageState: STATE_FILE })
-      : await browser.newContext();
-    const page = await ctx.newPage();
-    try {
-      // `networkidle` never fires on a screen holding a live connection — the heavy lazy routes
-      // (Canvas, Space, Vault) time out waiting for a quiet network that a streaming app does not
-      // have. Wait for the document, then for the page to stop changing.
-      await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForLoadState('load').catch(() => {});
-      await settle(page);
+    // One context per VIEWPORT, not one per route. Sizing a page down after it has rendered wide
+    // captures a resized desktop, not a phone: anything the app decides once at the width it first
+    // saw keeps the wide decision. The concierge dock is the case that proved it — its own
+    // `matchMedia('(max-width:760px)')` guard is read when the panel opens, so a page opened at
+    // 1280 and then narrowed to 390 shows a panel a phone-first visitor never gets, over every
+    // shot. A fresh context also clears the per-path localStorage that suppresses first-visit
+    // behaviour, so each shot is a first visit AT ITS OWN WIDTH — the state to photograph.
+    for (const vp of VIEWPORTS) {
+      const ctx = authenticated && existsSync(STATE_FILE)
+        ? await browser.newContext({ storageState: STATE_FILE, viewport: { width: vp.width, height: vp.height } })
+        : await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+      const page = await ctx.newPage();
+      try {
+        // `networkidle` never fires on a screen holding a live connection — the heavy lazy routes
+        // (Canvas, Space, Vault) time out waiting for a quiet network that a streaming app does not
+        // have. Wait for the document, then for the page to stop changing.
+        await page.goto(`${BASE_URL}${row.resolvedPath}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.waitForLoadState('load').catch(() => {});
+        await settle(page);
 
-      for (const vp of VIEWPORTS) {
-        await page.setViewportSize({ width: vp.width, height: vp.height });
         const dir = resolve(SHOTS_DIR, slug(row.path));
         mkdirSync(dir, { recursive: true });
         const file = resolve(dir, `${vp.name}.png`);
+        // Grow the window to the app's inner scroller (see growToContent), shoot, then put the
+        // window back so axe scans the viewport a visitor actually has.
+        const capture = await growToContent(page, vp);
         await page.screenshot({ path: file, fullPage: true });
+        if (capture.grown) await page.setViewportSize({ width: vp.width, height: vp.height });
         shots.push({
           route: row.path,
           viewport: vp.name,
           file: `${slug(row.path)}/${vp.name}.png`,
           bytes: statSync(file).size,
+          ...capture,
         });
-      }
 
-      const axeResults = await new AxeBuilder({ page })
-        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'])
-        .analyze();
-      report.push({ route: row.path, viewport: 'desktop', violations: axeResults.violations });
-      counts[row.path] = axeResults.violations.length;
-    } catch (err) {
-      console.log(`  ! ${row.path} — ${(err as Error).message}`);
-      counts[row.path] = -1; // -1 = walk failed to reach the route, distinct from 0 violations
-      failed.push({ route: row.path, error: (err as Error).message });
-    } finally {
-      await page.close();
-      await ctx.close();
+        // Scanned at the width that was photographed, and recorded under that width. A contrast or
+        // target-size finding is a statement about a viewport; one filed under the wrong width
+        // sends the next reader to a screenshot that does not show it.
+        const axeResults = await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'])
+          .analyze();
+        report.push({ route: row.path, viewport: vp.name, violations: axeResults.violations });
+        counts[`${row.path} [${vp.name}]`] = axeResults.violations.length;
+      } catch (err) {
+        console.log(`  ! ${row.path} [${vp.name}] — ${(err as Error).message}`);
+        counts[`${row.path} [${vp.name}]`] = -1; // -1 = unreachable, distinct from 0 violations
+        failed.push({ route: row.path, viewport: vp.name, error: (err as Error).message });
+      } finally {
+        await page.close();
+        await ctx.close();
+      }
     }
   }
 
@@ -209,6 +286,21 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         revision: revision(),
         baseUrl: BASE_URL,
         authenticated,
+        // Says in words what `authenticated: false` says in a boolean. A run captured without
+        // credentials covers the logged-out half of the app and nothing else — every auth-gated
+        // screen in it is a sign-in gate or an anonymous render, never the screen a member sees.
+        // A reader who mistakes one for the other reads a whole baseline wrong, so the manifest
+        // states the coverage rather than leaving it to be inferred from a flag.
+        coverage: authenticated
+          ? 'signed in — auth-gated screens show member state'
+          : 'logged-out only — no WALK_EMAIL/WALK_PASSWORD, so the signed-in half of every '
+            + 'auth-gated route is NOT captured; those shots are the anonymous render or the sign-in gate',
+        // Each shot is a first visit at its own width: one browser context per (route, viewport).
+        perViewportContext: true,
+        // A shot of an app route is the whole screen, not its first fold: the viewport is grown to
+        // the inner scroller's height before the shot (each shot says what it scrolled and how
+        // tall the window became). Runs before this flag photographed app routes at one viewport.
+        fullScreenCapture: true,
         viewports: VIEWPORTS,
         routes: rows.length,
         failed,
@@ -230,8 +322,21 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
   // later one-line change, after one triaged run.
 }
 
+/** `--only /catalog,/run` restricts the walk to those census paths (the pattern, not the
+ *  resolved fixture path). A subset run is for checking the walker, not for a baseline: its
+ *  manifest says `routes: <n>` so nobody mistakes it for a full census. */
+function onlyRoutes(rows: RouteRow[]): RouteRow[] {
+  const i = process.argv.indexOf('--only');
+  if (i < 0) return rows;
+  const want = new Set((process.argv[i + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+  const kept = rows.filter((r) => want.has(r.path));
+  const missing = [...want].filter((w) => !rows.some((r) => r.path === w));
+  if (missing.length) throw new Error(`--only names routes not in the census: ${missing.join(', ')}`);
+  return kept;
+}
+
 async function main() {
-  const rows = census();
+  const rows = onlyRoutes(census());
   if (process.argv.includes('--list')) {
     listOnly(rows);
     return;

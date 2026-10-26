@@ -10,7 +10,8 @@
     "test": "vitest run",
     "lint:tokens": "stylelint \"src/**/*.css\" --config .stylelintrc.json",
     "walk": "tsx walk/walk.ts",
-    "walk:review": "tsx walk/review.ts"
+    "walk:review": "tsx walk/review.ts",
+    "walk:critique": "tsx walk/critique.ts"
   },
   "dependencies": {
     "@noble/curves": "^1.9.7",

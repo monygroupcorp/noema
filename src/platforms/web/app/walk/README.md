@@ -14,9 +14,18 @@ regression (future baselines) and an LLM-critique pass (Phase 2); axe findings a
 - `walk.ts` — the walker. Signs in (best-effort, see below), then per route: desktop (1280x800)
   + mobile (390x844) screenshots into `shots/<run>/<route>/`, and an axe WCAG 2.1/2.2 A+AA scan
   written to `report/<run>/axe.json` beside a `manifest.json`. `npm run walk -- --list`
-  enumerates the planned shots without touching a target.
+  enumerates the planned shots without touching a target. The app scrolls inside `.page`, not
+  the document, so a plain full-page capture is one viewport tall; the walker grows the window
+  to the inner scroller's height before each shot and records per shot what it scrolled and how
+  tall the window became (`scrollContainer`, `viewportHeightAtShot`, `grown`, `capped`). A
+  manifest without `fullScreenCapture: true` is from before this and shows app routes at their
+  first fold only.
 - `review.ts` — how a person looks at the result. One run builds a contact sheet of every shot;
   two runs build a diff, every shot compared pixel for pixel and sorted by how much moved.
+- `critique.ts` — Phase 2, the critic. Every shot of a run is critiqued by three independent
+  multimodal passes against `DESIGN.md` and the screen's row in `REFERENCES.md`; a finding that
+  does not cite the shot, a rule that exists, and what the rule says is discarded unread, a
+  finding only one pass saw is dropped, and what remains lands as a crit pack. See below.
 
 ## Runs
 
@@ -61,6 +70,40 @@ renders, which is a real observation, not a failure).
 
 The login session is cached to a gitignored `walk/.storage-state.json` local to the machine
 running the walk; delete it to force a fresh sign-in.
+
+## Critiquing a run
+
+```
+npm run walk:critique -- baseline                      # the run's mobile shots, 3 passes each
+npm run walk:critique -- baseline --viewport desktop   # the other viewport
+npm run walk:critique -- baseline --only /catalog,/run # a subset, while tuning
+npm run walk:critique -- baseline --pack-only          # rebuild the pack from findings-*.json
+```
+
+The critic is the `claude` CLI in print mode: no new vendor, no key in the repo, and each pass
+is its own process with no session, so no pass sees another's answer. `--model` and
+`--passes` override the defaults (`claude-sonnet-5`, 3); `--concurrency` is how many passes run
+at once (4).
+
+Two gates stand between the model and a reader, and both leave a receipt:
+
+- **The citation gate.** A finding carries the shot it was observed in, one rule — a `D-*`/`P-*`
+  from `DESIGN.md` or the screen's own `REF-*` from `REFERENCES.md` — and what that rule says.
+  Missing any of the three, or citing an `EX-*` that `DESIGN.md` §9 has already adjudicated, it is
+  discarded before anyone reads it. A multimodal critic invents issues it never observed; the
+  citation is the only thing that catches it, because a citation can be checked and a vibe cannot.
+- **The majority gate.** A finding kept by fewer than half the passes is noise by definition and
+  is dropped. Agreement is printed beside every finding that survives (`2/3`, `3/3`).
+
+A full-page shot of a long screen reaches a model shrunk to fit, which turns 11px type into a
+smear the critic then reports on; so a shot taller than one image is cut into full-width tiles
+(`report/<run>/crit/tiles/`) and the critic reads every tile, top to bottom, still citing the one
+shot id.
+
+Output under `report/<run>/crit/`: `findings-<viewport>.json` (every raw finding, admitted or
+discarded with its reason), `pack-<viewport>.md` (the house CRIT format — rule inline under each
+`**VERDICT:**`), `pack-<viewport>.html` (each screen's shot beside its findings), and
+`deliver/` (the same pack with the shots embedded, so it reads the same on any machine).
 
 ## Known ceiling
 
