@@ -1,7 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
 import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
 import { activityDoorHref, activityDoorLabel, activityKindLabel, queueLabel } from '../lib/muse';
@@ -29,7 +28,6 @@ export function statCards(me: MeStatus | null, usdPerCredit = IMPETUS_USD): Stat
 }
 
 export function Status() {
-  const { ident } = useIdentity();
   const [me, setMe] = useState<MeStatus | null>(null);
   const [err, setErr] = useState(false);
 
@@ -213,10 +211,6 @@ export function Status() {
             )}
           </>
         )}
-
-        <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-          Live from staging · {ident.funding === 'named' ? 'signed-in account' : 'anonymous session'}.
-        </div>
       </div></div>
     </AppShell>
   );
