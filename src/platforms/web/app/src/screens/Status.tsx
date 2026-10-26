@@ -163,8 +163,10 @@ export function Status() {
           <div className="empty"><div className="t">Loading your activity…</div></div>
         ) : activityRows.length === 0 ? (
           <div className="empty">
-            <div className="ico"><Ic name="sparkles" /></div>
-            <div className="t">Nothing running or finished yet — queued, in-flight and completed runs all land here the moment you fire one, and finished ones stay in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link> after.</div>
+            {/* One line that says what will appear here, and the one action that fills it: the
+                same start path the home's "Create something" takes (DESIGN.md D-60). */}
+            <div className="t">Nothing running or finished yet — every run lands here the moment you start one.</div>
+            <Link className="btn ghost" to="/catalog"><Ic name="sparkles" /> Create something</Link>
           </div>
         ) : (
           <div className="list">
@@ -184,11 +186,11 @@ export function Status() {
           <div className="empty"><div className="t">Loading your spend history…</div></div>
         ) : spend.length === 0 ? (
           <div className="empty">
-            <div className="ico"><Ic name="receipt-text" /></div>
-            <div className="t">
-              No settled runs yet — once a generation finishes, what it cost shows here. Finished work lives in your{' '}
-              <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.
-            </div>
+            {/* The same action fills this card. It is offered here only when the Activity card
+                above is not already offering it, so the screen never shows the control twice
+                (P-1d); with nothing running at all, the one button above is the one to press. */}
+            <div className="t">No settled runs yet — what each run cost shows here once it finishes.</div>
+            {activityRows.length > 0 && <Link className="btn ghost" to="/catalog"><Ic name="sparkles" /> Create something</Link>}
           </div>
         ) : (
           <>
