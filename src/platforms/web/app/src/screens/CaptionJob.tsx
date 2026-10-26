@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure } from '../components/LoadFailure';
 import { api, type Dataset } from '../lib/api';
 import { captionRunRequest } from '../lib/captionsets';
 import { captionRunParam, uncaptionedCount, withCaptionRunParam } from '../lib/muse';
@@ -170,11 +171,7 @@ export function CaptionJob() {
     return <AppShell title="Caption job"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
   }
   if (!dataset) {
-    return (
-      <AppShell title="Caption job">
-        <div className="page"><div className="pw wide"><div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div></div></div>
-      </AppShell>
-    );
+    return <AppShell title="Caption job"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
   }
 
   const d = dataset;

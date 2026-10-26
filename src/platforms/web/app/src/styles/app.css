@@ -12,7 +12,7 @@
   --hair:var(--color-border); --hair-soft:#15181b;
   --text:var(--color-text); --muted:var(--color-text-muted); --faint:var(--color-text-subtle);
   --accent:var(--color-accent); --accent-soft:var(--color-accent-hover); --accent-bg:var(--color-accent-subtle);
-  --good:var(--color-success);
+  --good:var(--color-success); --bad:var(--color-danger);
   /* locality (hemisphere) + economy (credits/royalties) — global so the posture cluster,
      dashboard, and per-surface meters all read the same palette (brand.md: one glyph, one meaning). */
   --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f;

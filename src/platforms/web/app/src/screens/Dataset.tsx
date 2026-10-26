@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure } from '../components/LoadFailure';
 import { custodyGlyph, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
@@ -341,13 +342,7 @@ export function Dataset() {
     return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
   }
   if (!d) {
-    return (
-      <AppShell title="Dataset">
-        <div className="page"><div className="pw wide">
-          <div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div>
-        </div></div>
-      </AppShell>
-    );
+    return <AppShell title="Dataset"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
   }
   const active = activeSet ?? (d.captionsets[0]?.id ?? '');
   const version = d.versions[d.versions.length - 1]?.v ?? '—';

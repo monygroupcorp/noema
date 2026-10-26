@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure } from '../components/LoadFailure';
 import {
   api,
   type Dataset as DatasetT,
@@ -1900,13 +1901,7 @@ export function Muse() {
     return <AppShell title="Muse"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
   }
   if (!d) {
-    return (
-      <AppShell title="Muse">
-        <div className="page"><div className="pw wide">
-          <div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div>
-        </div></div>
-      </AppShell>
-    );
+    return <AppShell title="Muse"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
   }
 
   // ── What an appended image still needs (noema-260) ────────────────────────

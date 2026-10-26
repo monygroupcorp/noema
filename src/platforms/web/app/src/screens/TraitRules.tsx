@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { api, type Collection, type Tractus, type TractusValor } from '../lib/api';
 import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
 import { axisSplice } from '../lib/collections';
@@ -22,6 +23,8 @@ export function TraitRules() {
   const nav = useNavigate();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   const [axes, setAxes] = useState<Tractus[]>([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,11 +36,11 @@ export function TraitRules() {
     if (!id) return;
     let live = true;
     api.getCollection(id).then((r) => { if (live) { setC(r.collection); setAxes(r.collection.tractus ?? []); } })
-      .catch((e) => { if (live) setErr(msg(e)); });
+      .catch((e) => { if (live) setFail(loadFailureKind(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
-  if (err) return <AppShell title="Rules"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load: {err}</div></div></div></AppShell>;
+  if (fail) return <AppShell title="Rules"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   if (!c) return <AppShell title="Rules"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 
   const editable = c.status === 'draft';

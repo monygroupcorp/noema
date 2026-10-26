@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { api, type Collection, type CollectionPiece, type RarityReport } from '../lib/api';
 import { COLL_STATUS_LABEL, collTile, spliceMechanismLine } from '../lib/collections';
 import { mediaFromOutput } from '../lib/media';
@@ -73,6 +74,7 @@ export function CanonicRun() {
   const [rarity, setRarity] = useState<RarityReport | null>(null);
   const [pieces, setPieces] = useState<CollectionPiece[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
   const [reload, setReload] = useState(0);
   const [extendN, setExtendN] = useState(50);
   const [busy, setBusy] = useState(false);
@@ -80,7 +82,7 @@ export function CanonicRun() {
   useEffect(() => {
     // No id in the route is the third door to "Loading… and nothing else": returning early
     // leaves `c` null and `err` null forever. There is no run to read, so say that.
-    if (!id) { setErr('this URL names no run'); return; }
+    if (!id) { setFail('missing'); return; }
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // -1 so the first tick always reads the pieces once, even for a finished run that will
@@ -120,7 +122,7 @@ export function CanonicRun() {
             .catch(() => {});
         }
       } catch (e) {
-        if (live) setErr(e instanceof Error ? e.message : String(e));
+        if (live) setFail(loadFailureKind(e));
       }
     }
     poll();
@@ -134,6 +136,7 @@ export function CanonicRun() {
     finally { setBusy(false); }
   }
 
+  if (fail) return <AppShell title="Canonic run"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setReload((r) => r + 1); }} /></AppShell>;
   if (err) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="warn">{err}</div></div></div></AppShell>;
   if (!c) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 

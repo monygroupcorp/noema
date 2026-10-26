@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { api, type Collection } from '../lib/api';
 import { publishNote, publishOutcome, type Editio, type PublishRequest } from '../lib/editio';
 
@@ -161,7 +162,8 @@ function usePublishPoll(kind: Kind, job: Job, setJobs: React.Dispatch<React.SetS
 export function EditioExport() {
   const { id } = useParams();
   const [c, setC] = useState<Collection | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   const [dest, setDest] = useState<Dest>('you');
   const [consent, setConsent] = useState(false);
   const [jobs, setJobs] = useState<Jobs>(IDLE_JOBS);
@@ -171,7 +173,7 @@ export function EditioExport() {
   useEffect(() => {
     if (!id) return;
     let live = true;
-    api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setErr(msg(e)); });
+    api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setFail(loadFailureKind(e)); });
     // What the server already has on this collection's hosting publication outlives the
     // session that filed it, so recover it on mount. Only ever promotes an idle screen: a
     // publish begun in THIS session owns the job and must not be clobbered by a snapshot
@@ -195,14 +197,14 @@ export function EditioExport() {
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
   // Poll each pending publication until it settles (ZIP built + hosted, or gate-rejected).
   // One per destination, because both can now be in flight at once.
   usePublishPoll('download', jobs.download, setJobs);
   usePublishPoll('hosting', jobs.hosting, setJobs);
 
-  if (err) return <AppShell title="Export & publish"><div className="page"><div className="pw"><div className="warn">Couldn’t load this collection: {err}</div></div></div></AppShell>;
+  if (fail) return <AppShell title="Export & publish"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   if (!c) return <AppShell title="Export & publish"><div className="page"><div className="pw"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 
   const noPieces = c.completed === 0;
