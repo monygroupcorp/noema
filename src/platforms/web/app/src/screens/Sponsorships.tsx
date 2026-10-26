@@ -83,7 +83,7 @@ export function Sponsorships() {
         <div className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s5)', display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
           <input className="inp mono" placeholder="beneficiary account id" value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} disabled={!session} />
           <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
-            <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="1" placeholder="grant (points / cycle)" value={grant} onChange={(e) => setGrant(e.target.value)} disabled={!session} />
+            <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="1" placeholder="points per cycle" value={grant} onChange={(e) => setGrant(e.target.value)} disabled={!session} />
             <select className="inp mono" style={{ maxWidth: 140 }} value={cadence} onChange={(e) => setCadence(e.target.value as SubsidyCadence)} disabled={!session}>
               {CADENCES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
