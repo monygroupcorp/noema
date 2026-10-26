@@ -261,6 +261,25 @@ export function heroAction(status: CeremonyStatus | null): HeroAction {
   return { label: 'Contribute', href: '#contribute', note: null };
 }
 
+/** The closing line's link: the one thing on the page the hero does not already offer. */
+export interface FootAction {
+  label: string;
+  href: HeroAction['href'];
+}
+
+/**
+ * The page ends with a plain link, and the hero is the page's one filled button; when the
+ * two carry the same label to the same anchor they are one control shown twice (P-1d).
+ * The foot offers the other half of the page: while the hero invites a contribution, the
+ * foot leads to the transcript; once the hero leads to the transcript, the foot leads to
+ * the contribution card, where the page explains why contributions are closed or paused.
+ */
+export function footAction(status: CeremonyStatus | null): FootAction {
+  if (status?.phase === 'finalized') return { label: 'Why contributions are closed', href: '#contribute' };
+  if (contributionsPaused(status)) return { label: 'Why contributions are paused', href: '#contribute' };
+  return { label: 'Read the transcript', href: '#transcript' };
+}
+
 export function checkServedKey(
   status: CeremonyStatus | null,
   served: ServedKey | null,

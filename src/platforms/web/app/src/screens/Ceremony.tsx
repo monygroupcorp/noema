@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, checkServedKey, contributionsPaused, heroAction, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
+import { ceremony, checkServedKey, contributionsPaused, footAction, heroAction, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import { entryPath } from '../lib/entry';
 import './landing.css';
@@ -281,6 +281,7 @@ export function Ceremony() {
   const chain = status?.chain ?? [];
   // One filled button on the page (D-42), and it follows the status pill above it.
   const hero = heroAction(status);
+  const foot = footAction(status);
 
   async function onClaim(e: React.FormEvent) {
     e.preventDefault();
@@ -508,9 +509,9 @@ export function Ceremony() {
 
       <div className="endcta">
         <h2>Make the keys no one can forge — including us.</h2>
-        {/* The hero's button is this page's one action; the closing line points back to the
-            same place as a plain link rather than a second button for the same thing (P-1d). */}
-        <a className="endlink" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
+        {/* The hero's button is this page's one action; the closing line is a plain link to
+            the other half of the page, never a second control for the same thing (P-1d). */}
+        <a className="endlink" href={foot.href}>{foot.label} <Ic name="arrow-right" /></a>
       </div>
 
       <SiteFooter />

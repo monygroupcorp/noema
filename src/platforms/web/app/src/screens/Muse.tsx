@@ -3302,7 +3302,7 @@ export function MuseSessions() {
             <h1>Muse sessions</h1>
             <div className="sub">
               Every session broken off this dataset, most recently worked first. Opening one is a read —
-              it does not change which session the muse door comes back to.
+              it does not change which session the muse resumes.
             </div>
           </div>
         </div>
@@ -3345,7 +3345,7 @@ export function MuseSessions() {
                 <span className="muse-hist-line">{row.line}</span>
                 <span className="gt-sub mono">
                   worked {row.mutatum} · started {row.natum}
-                  {i === 0 && query.trim() === '' ? ' · the muse door resumes here' : ''}
+                  {i === 0 && query.trim() === '' ? ' · the muse resumes here' : ''}
                 </span>
               </div>
               {row.lineage.length > 0 && (

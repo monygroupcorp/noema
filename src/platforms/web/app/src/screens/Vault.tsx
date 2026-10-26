@@ -47,6 +47,19 @@ function Secret({ k, value, secret }: { k: string; value: string; secret?: boole
   );
 }
 
+/**
+ * The config-fetch failure as one message (DESIGN.md D-62, D-68): what happened, the server's
+ * detail once (its own trailing period stripped so the two sentences do not meet as ".."), and
+ * what to do once. The API's not-JSON message already ends in "try again in a moment", so the
+ * instruction is only added when the detail does not carry it.
+ */
+export function configErrMessage(detail: string): string {
+  const d = detail.trim().replace(/\.+$/, '');
+  const saysRetry = /try again/i.test(d);
+  return `Couldn’t reach the anonymous-credit service${d ? ` — ${d}` : ''}. `
+    + `The anonymous purse reads as off until it answers${saysRetry ? '.' : '; try again in a moment.'}`;
+}
+
 export function Vault() {
   const { ident } = useIdentity();
   const signedIn = ident.funding === 'named';
@@ -370,9 +383,7 @@ export function Vault() {
             informational notices below wear; it says what happened and what to do (D-62). While
             the config is unknown the purse reads as off (see purseOff above). */}
         {configErr && (
-          <div className="warn bad" role="alert">
-            Couldn’t reach the anonymous-credit service — {configErr}. The anonymous purse reads as off until it answers; try again in a moment.
-          </div>
+          <div className="warn bad" role="alert">{configErrMessage(configErr)}</div>
         )}
 
         {/* ANON_PURSE gate (noema-131): while the anonymous purse is switched off, everything

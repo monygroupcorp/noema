@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { heroAction, type CeremonyStatus } from '../../../src/platforms/web/app/src/lib/ceremony.js'
+import { footAction, heroAction, type CeremonyStatus } from '../../../src/platforms/web/app/src/lib/ceremony.js'
 
 // ---------------------------------------------------------------------------
 // The ceremony page's hero used to show a filled "Contribute" button under a status
@@ -46,4 +46,28 @@ test('paused: the primary is the transcript, and the fold says why a contributio
   assert.equal(a.href, '#transcript')
   assert.doesNotMatch(a.label, /contribute/i)
   assert.match(a.note ?? '', /paused/)
+})
+
+// The page's closing line is a plain link. It used to repeat the hero's label and anchor,
+// which in the finalized state put "Verify the published key" twice on one page, both
+// leading to the transcript (P-1d). `footAction` is the other half of the page.
+test('the foot link never repeats the hero: it offers the anchor the hero does not', () => {
+  for (const st of [
+    null,
+    status({ phase: 'announced' }),
+    status({ acceptingContributions: true }),
+    status({ acceptingContributions: false }),
+    status({ phase: 'finalized', finalHash: 'cd'.repeat(32) }),
+  ]) {
+    const hero = heroAction(st)
+    const foot = footAction(st)
+    assert.notEqual(foot.href, hero.href)
+    assert.notEqual(foot.label, hero.label)
+  }
+})
+
+test('finalized: the foot leads to the card that explains why contributions are closed', () => {
+  const f = footAction(status({ phase: 'finalized', finalHash: 'cd'.repeat(32) }))
+  assert.equal(f.href, '#contribute')
+  assert.match(f.label, /closed/)
 })

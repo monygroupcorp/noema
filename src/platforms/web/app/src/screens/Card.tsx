@@ -495,10 +495,10 @@ export function Card() {
               className={`make-default${makeDefault ? ' on' : ''}`}
               onClick={setAsMakeDefault}
               disabled={bindBusy || makeDefault}
-              title={makeDefault ? 'This is your /make default (web + Telegram)' : 'Set as /make default'}
+              title={makeDefault ? 'This flow is your default, on the web and in Telegram' : 'Use this flow as your default, on the web and in Telegram'}
               aria-pressed={makeDefault}
             >
-              <Ic name="wand-sparkles" /> {makeDefault ? '/make default' : 'set as /make default'}
+              <Ic name="wand-sparkles" /> {makeDefault ? 'My default' : 'Use as my default'}
             </button>
             <button
               className={`pin${pinned ? ' on' : ''}`}
