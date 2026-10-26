@@ -226,7 +226,17 @@ export function Datasets() {
           <>
             {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
             {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
-            {catalog && catalog.length === 0 && <div className="empty"><div className="t">Nothing published yet.</div></div>}
+            {/* An empty catalogue offers the one action that fills it (DESIGN.md D-60). A set is
+                published from its own page, so the action is to make one — or, for a visitor
+                with no account to hold it, the door. */}
+            {catalog && catalog.length === 0 && (
+              <div className="empty">
+                <div className="t">Nothing published yet.</div>
+                {signedIn
+                  ? <button className="btn ghost" onClick={openModal}><Ic name="plus" /> Make a dataset to publish</button>
+                  : <Link className="btn ghost" to={doorPath('/datasets')}>Sign in to make one</Link>}
+              </div>
+            )}
 
             {catalog && catalog.length > 0 && (
               <div className="dsgrid">
