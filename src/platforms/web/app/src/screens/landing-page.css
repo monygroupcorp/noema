@@ -71,9 +71,11 @@
 /* the kicker — the one line under the headline. It carried a class and no rule anywhere, so it
    rendered at body size in near-white with zero margin, sitting on the headline's own baseline:
    not a kicker, a fragment of the headline that had come loose. It takes the hero's own 32px
-   rhythm and the mono register every other small standing label on this page is set in. */
+   rhythm and the mono register every other small standing label on this page is set in. It is a
+   label, not a control, so it sits in the muted tone the page's other labels use: accent marks
+   what the visitor can act on (DESIGN.md D-9), and a line that does nothing must not wear it. */
 .lp-cand-hero .lp-cand-kicker{display:block;margin-top:var(--s7);font-size:var(--fs-xs);
-  letter-spacing:.14em;color:var(--accent-soft)}
+  letter-spacing:.14em;color:var(--muted)}
 .lp-cand-hero p{font-size:clamp(15px,1.5vw,18px);color:var(--muted);line-height:1.55;max-width:520px;margin:0 auto}
 .lp-cand-hero .lp-cand-cta{display:block;margin-top:var(--s7)}
 /* app.css:1184 sets `.btn.lg{flex-direction:column}` — written for a stacked label/sub-label,
@@ -200,7 +202,9 @@
 .lp-how .lp-how-steps{list-style:none;margin:var(--s10) 0 0;padding:0;display:grid;
   grid-template-columns:repeat(4,1fr);gap:var(--s7)}
 .lp-how .lp-how-steps li{border-top:1px solid var(--hair);padding-top:var(--s5)}
-.lp-how .lp-how-steps .mono{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.16em}
+/* the counters order the steps; they are not something to press, so they take the muted tone of
+   the step text beside them rather than the accent (DESIGN.md D-9) */
+.lp-how .lp-how-steps .mono{color:var(--muted);font-size:var(--fs-xs);letter-spacing:.16em}
 .lp-how .lp-how-steps h3{font-size:var(--fs-lg);letter-spacing:-.02em;font-weight:600;margin:var(--s4) 0 var(--s3)}
 .lp-how .lp-how-steps p{color:var(--muted);font-size:var(--fs-base);line-height:1.6;margin:0}
 
