@@ -1,7 +1,7 @@
 <!-- Reference copy of the page published at /legal/privacy. The published page is the source of
      truth: `src/platforms/web/app/src/content/privacy.md`. Keep the two in step. -->
 
-# Privacy Policy
+# Privacy policy
 **Last updated:** 2026-09-05
 **Controller:** MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina.
 

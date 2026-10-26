@@ -1,13 +1,13 @@
 <!-- Reference copy of the page published at /legal/terms. The published page is the source of
      truth: `src/platforms/web/app/src/content/terms.md`. Keep the two in step. -->
 
-# Terms & Conditions
+# Terms & conditions
 
 **Last updated:** 2026-09-08
 
 ---
 
-## 1. The Service
+## 1. The service
 
 MONY GROUP LLC ("we", "us") provides access to rented GPU compute for running AI models
 ("Service"). Two usage modes:

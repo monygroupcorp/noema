@@ -1,7 +1,7 @@
 <!-- Reference copy of the page published at /legal/cookies. The published page is the source of
      truth: `src/platforms/web/app/src/content/cookies.md`. Keep the two in step. -->
 
-# Cookie Policy
+# Cookie policy
 **Last updated:** 2026-09-08
 
 ---

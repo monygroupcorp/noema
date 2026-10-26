@@ -79,9 +79,9 @@ export function Profile() {
 
         <div className="sectionhead" id="profile-assets">Assets</div>
         <div className="sub" style={{ marginBottom: 'var(--s4)' }}>Bring your own — drop an image to upload.</div>
-        <AssetSlot label="Banner — click to upload" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
+        <AssetSlot label="Banner" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
         <div style={{ display: 'flex', gap: 'var(--s4)', marginTop: 'var(--s4)', alignItems: 'flex-end' }}>
-          <AssetSlot className="pfp" label="PFP" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
+          <AssetSlot className="pfp" label="Avatar" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
           <AssetSlot style={{ flex: 1 }} label="Background" url={appr.backgroundUrl} onUploaded={(u) => save({ backgroundUrl: u })} onError={setErr} />
         </div>
 
@@ -476,7 +476,7 @@ function AssetSlot({ label, url, onUploaded, onError, className, style }: {
   const bg = url ? { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
   return (
     <div className={`assetslot${className ? ` ${className}` : ''}`} style={{ ...style, ...bg }} onClick={() => inputRef.current?.click()}>
-      {!url && (busy ? 'Uploading…' : label)}
+      {!url && <><span className="assetslot-l">{label}</span><span className="assetslot-h">{busy ? 'Uploading…' : 'Click to upload'}</span></>}
       <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
     </div>
   );
