@@ -1,7 +1,7 @@
 # NOEMA — the reference-app map
 
-**Status: DRAFT, awaiting rth's ruling.** Every `REF-*` below is a proposal. Until a row is
-ruled, a critique may not cite it. Rows marked **unnamed** are deliberately blank: the screen's
+**Status: ruled by rth, 2026-10-26 — every row as proposed.** A critique may cite any named
+`REF-*` below. A row changes by ruling, not by edit (§4). Rows marked **unnamed** are deliberately blank: the screen's
 job was not clear enough from the source to name a comparison object, and a reference invented
 to fill a cell is worse than an empty one — see §0.4.
 
@@ -199,17 +199,18 @@ It fails when a census route has no row, when a `REF-*` id is duplicated, and wh
 route that does not exist. It prints the split — named, deliberately unnamed, not a screen — so
 the numbers in any critique come from the run rather than from this paragraph.
 
-Clause 1 of `noema/ux-phase-2-critic` asks that **every** screen carry a named reference. Some do
-not, and each of those says why in its own row. Closing them is a matter of someone saying what
-the screen is for — it is not a matter of choosing an app.
+Four rows carry no reference, and each says why in its own row; the 2026-10-26 ruling kept them
+unnamed. Naming one is a matter of someone saying what the screen is for — it is not a matter of
+choosing an app — and when that is settled the row is named by ruling like any other.
 
 ---
 
 ## 3. Deliberate departures
 
 Empty. This section is where a ruled departure from a reference is recorded, so that it stops
-being filed as a finding — the same office DESIGN.md §9 performs for `D-*` rules. Nothing has
-been ruled yet because nothing has been critiqued against this map yet.
+being filed as a finding — the same office DESIGN.md §9 performs for `D-*` rules. Nothing is
+recorded yet: the first critique pack against this map is on the board, and a departure enters
+here when a `REF-*` finding in it is ruled a deliberate choice rather than a defect.
 
 A departure is recorded here only after rth rules on it, and records **what the user loses**, not
 just that noema chose otherwise.
