@@ -459,6 +459,12 @@ already been rejected, and it must be discarded.**
   read as history. It is never cited as a rule, and never seeded into a critique.
 - **EX-10 — `styles/design/**` findings are out of scope for this repo.** Correct upstream and
   re-copy (D-1). A finding whose only fix is editing a vendored file is not actionable here.
+- **EX-19 — The spend meter is absent from the topbar at phone width.** D-50 says the topbar
+  carries the meter; at phone width it does not. The `app.css` rule from 2026-06-30 collapses the
+  phone topbar to crumb, identity and Start, with credits and compute one tap away in the account
+  panel instead. Ruled by rth, 2026-10-26 (deliverable 2026-10-26-mqdz00, picked over
+  `meter-on-phones`): the account panel satisfies "one tap away," and D-50 findings against a
+  phone topbar's missing meter are not admissible.
 
 ### Open debts — real, tracked, not to be re-filed as new
 
@@ -489,7 +495,8 @@ Collected for one pass, in priority order:
 - **R-3** (§6.1) — **resolved, rth 2026-08-26.** Retuned: radius tokens moved to the observed
   ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`).
 - **R-4** (§9) — **resolved, rth 2026-08-26.** Exceptions list confirmed complete, no additions
-  or removals.
+  or removals. Superseded in part 2026-10-26: EX-19 added by a specific ruling (deliverable
+  2026-10-26-mqdz00) on a D-50 finding R-4 did not anticipate.
 
 All four ratification questions are answered. DESIGN.md is fully ratified as of 2026-08-26; the
 Phase-2 critic may cite it.
