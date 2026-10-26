@@ -67,22 +67,32 @@ export function Projects() {
           <span className="pg sm" style={{ background: project.color }}>{project.glyph}</span> {project.name} · workspace
         </div>
 
+        {/* Each holding card is a door to its screen. A holding with nothing in it says what
+            lands there and carries the one action that fills it (DESIGN.md D-60); the head's
+            Open link then stands down, so the card offers one control, not two to the same
+            place (P-1d). */}
         <div className="wsgrid">
           <div className="wscol">
-            <div className="wshead"><Ic name="message-square" /> Chats <Link to="/chat">Open →</Link></div>
-            {project.chats.length === 0 ? <div className="wsempty">No chats yet</div> : project.chats.map((ch) => (
+            <div className="wshead"><Ic name="message-square" /> Chats {project.chats.length > 0 && <Link to="/chat">Open →</Link>}</div>
+            {project.chats.length === 0 ? (
+              <div className="wsempty">No chats yet — <Link to="/chat">start one ▸</Link></div>
+            ) : project.chats.map((ch) => (
               <div className="lrow sm" key={ch.id}><div className="li-main"><div className="t">{ch.title}</div></div><div className="li-right mono">{ch.when}</div></div>
             ))}
           </div>
           <div className="wscol">
-            <div className="wshead"><Ic name="sliders-horizontal" /> Saved cards <Link to="/catalog">Open →</Link></div>
-            {project.cards.length === 0 ? <div className="wsempty">No saved cards</div> : project.cards.map((cd) => (
+            <div className="wshead"><Ic name="sliders-horizontal" /> Saved cards {project.cards.length > 0 && <Link to="/catalog">Open →</Link>}</div>
+            {project.cards.length === 0 ? (
+              <div className="wsempty">No saved cards yet — <Link to="/catalog">save one from the catalogue ▸</Link></div>
+            ) : project.cards.map((cd) => (
               <Link className="lrow sm" key={cd.id} to={`/card?id=${cd.id}`}><div className="li-main"><div className="t">{cd.name}</div></div><div className="li-right"><span className="badge accent">{cd.verb}</span></div></Link>
             ))}
           </div>
           <div className="wscol">
-            <div className="wshead"><Ic name="workflow" /> Canvases <Link to="/canvas">Open →</Link></div>
-            {project.canvases.length === 0 ? <div className="wsempty">No canvases yet</div> : project.canvases.map((cv) => (
+            <div className="wshead"><Ic name="workflow" /> Canvases {project.canvases.length > 0 && <Link to="/canvas">Open →</Link>}</div>
+            {project.canvases.length === 0 ? (
+              <div className="wsempty">No canvases yet — <Link to="/canvas">build one ▸</Link></div>
+            ) : project.canvases.map((cv) => (
               <div className="lrow sm" key={cv.id}><div className="li-main"><div className="t">{cv.name}</div></div><div className="li-right mono">{cv.nodes} nodes</div></div>
             ))}
           </div>

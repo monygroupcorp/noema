@@ -3307,17 +3307,22 @@ export function MuseSessions() {
           </div>
         </div>
 
-        <div className="muse-hist-search">
-          <input
-            className="cer-input"
-            type="search"
-            placeholder="Search the fragments these sessions were drawn from"
-            aria-label="Search muse sessions"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <span className="gt-sub mono">{rows.length === 0 ? '' : `${shown.length} of ${rows.length}`}</span>
-        </div>
+        {/* The search appears once there are sessions to search (DESIGN.md P-1a); a field
+            over nothing — no account, no sessions yet — answers no question. It stays while
+            a query narrows the list to nothing, since then it is what the visitor is using. */}
+        {rows.length > 0 && (
+          <div className="muse-hist-search">
+            <input
+              className="cer-input"
+              type="search"
+              placeholder="Search the fragments these sessions were drawn from"
+              aria-label="Search muse sessions"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <span className="gt-sub mono">{`${shown.length} of ${rows.length}`}</span>
+          </div>
+        )}
 
         {!signedIn && (
           <div className="empty">

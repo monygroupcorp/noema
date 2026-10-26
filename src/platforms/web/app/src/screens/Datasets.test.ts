@@ -31,8 +31,8 @@ describe('the datasets library for a signed-out visitor (REFERENCES.md REF-20)',
     expect(SOURCE).toContain('datasetStatsLine(d, media.length)');
     expect(DETAIL).toContain('datasetStatsLine(d, live.length');
   });
-  it('asks "No set of your own yet?" in sentence case (DESIGN.md D-26)', () => {
-    expect(SOURCE).toContain('>No set of your own yet?<');
-    expect(SOURCE).not.toContain('>no set of your own yet?<');
+  it('introduces the catalogue in one sentence, with no detached question above it (DESIGN.md P-1a)', () => {
+    expect(SOURCE).not.toContain('No set of your own yet?');
+    expect(SOURCE).toContain('>Published sets anyone can muse on — no set of your own needed.<');
   });
 });

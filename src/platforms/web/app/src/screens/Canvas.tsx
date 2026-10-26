@@ -45,12 +45,44 @@ export function buildPalette(flows: FlowDescription[]): PaletteEntry[] {
 }
 
 // The canonical catalog (GET /v1/flows) plus the caller's own (GET /v1/me/flows,
-// the picker's owner-scoped twin) — deduped by id for the palette.
+// the picker's owner-scoped twin) — one palette row per flow.
+//
+// Two rows can be the same flow under different ids: the registry carries an older
+// registration beside the current one (`runmake.flux-schnell` and `flux-schnell`, both
+// "FLUX Schnell — text to image" 1.0.0, same schema, same fundament), an owner's copy of a
+// canonical flow keeps the canonical name, and two versions of one flow share it too. So
+// after the id union, rows are folded by name: the newest version wins, and between equal
+// versions the one that describes itself (`descriptio`), else the first listed.
 export function dedupeFlows(canonical: FlowSummary[], mine: FlowSummary[]): FlowSummary[] {
   const byId = new Map<string, FlowSummary>();
   for (const f of canonical) byId.set(f.id, f);
   for (const f of mine) byId.set(f.id, f);
-  return [...byId.values()];
+  const byName = new Map<string, FlowSummary>();
+  for (const f of byId.values()) {
+    const key = (typeof f.nomen === 'string' && f.nomen.trim()) || f.id;
+    const held = byName.get(key);
+    if (!held || prefersFlow(f, held)) byName.set(key, f);
+  }
+  return [...byName.values()];
+}
+
+// Whether `a` should stand for the flow `b` currently stands for — a newer version, or the
+// same version with a description where `b` has none.
+function prefersFlow(a: FlowSummary, b: FlowSummary): boolean {
+  const byVersion = compareVersio(a.versio, b.versio);
+  if (byVersion !== 0) return byVersion > 0;
+  return !!a.descriptio && !b.descriptio;
+}
+
+// Dotted numeric versions ("1.0.0" < "1.2" < "2.0.0"); a missing version sorts lowest.
+function compareVersio(a?: string, b?: string): number {
+  const parse = (v?: string) => (v ?? '').split('.').map((p) => parseInt(p, 10) || 0);
+  const pa = parse(a), pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }
 
 // A small fixed rotation of node colors, hashed off modusId for stable variety —
@@ -573,7 +605,10 @@ export function Canvas() {
         </div>
         <div className="canvas-bar">
           <span className="hint">
-            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''} · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges
+            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''}
+            {/* Pointer and keyboard hints — hidden on a phone or a touch screen, where none of
+                them applies (DESIGN.md P-1a); the facts before them stay. */}
+            <span className="keys"> · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges</span>
           </span>
           <button className="btn" onClick={publish} disabled={publishing || nodes.length === 0}>
             <Ic name="sparkles" /> {publishing ? 'Publishing…' : 'Publish'}
