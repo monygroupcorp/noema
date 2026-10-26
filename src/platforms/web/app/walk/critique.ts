@@ -253,6 +253,11 @@ async function critique(): Promise<void> {
   const PASSES = Number(arg('--passes', '3'));
   const MODEL = arg('--model', 'claude-sonnet-5');
   const ONLY = arg('--only', '').split(',').map((s) => s.trim()).filter(Boolean);
+  // --resume: keep every screen of the existing findings file whose passes all returned, and run
+  // the critic again only for the rest. A pass that fails to return (the CLI refused, the process
+  // died) leaves a screen judged by fewer voices than the majority gate assumes; this is how such a
+  // run is completed without paying for the screens that were already heard in full.
+  const RESUME = process.argv.includes('--resume');
   const WIDTH = Number(arg('--concurrency', '4'));
   const OUT = resolve(HERE, 'report', RUN, 'crit');
   const FINDINGS = resolve(OUT, `findings-${VIEWPORT}.json`);
@@ -276,8 +281,12 @@ async function critique(): Promise<void> {
     if (!existsSync(FINDINGS)) throw new Error(`--pack-only: no ${FINDINGS} yet`);
     report = JSON.parse(readFileSync(FINDINGS, 'utf8')) as CritiqueReport;
   } else {
-    const shots = manifest.shots.filter((s) => s.viewport === VIEWPORT && (!ONLY.length || ONLY.includes(s.route)));
-    if (!shots.length) throw new Error(`run "${RUN}" has no ${VIEWPORT} shots${ONLY.length ? ` for ${ONLY.join(', ')}` : ''}`);
+    const prior: CritiqueReport | null = RESUME && existsSync(FINDINGS) ? (JSON.parse(readFileSync(FINDINGS, 'utf8')) as CritiqueReport) : null;
+    if (RESUME && !prior) throw new Error(`--resume: no ${FINDINGS} to resume from`);
+    const complete = new Set((prior?.screens ?? []).filter((s) => s.passes.filter((p) => p.returned).length >= PASSES).map((s) => s.route));
+    const shots = manifest.shots.filter((s) => s.viewport === VIEWPORT && (!ONLY.length || ONLY.includes(s.route)) && !complete.has(s.route));
+    if (prior) console.log(`resume · ${complete.size} screens already heard by ${PASSES} passes are kept · ${shots.length} to run again`);
+    if (!shots.length && !prior) throw new Error(`run "${RUN}" has no ${VIEWPORT} shots${ONLY.length ? ` for ${ONLY.join(', ')}` : ''}`);
     const system = systemPrompt(design, referencesPreamble(references));
     console.log(`critique · run ${RUN} · ${shots.length} ${VIEWPORT} shots × ${PASSES} passes · ${MODEL} · ${WIDTH} at a time`);
 
@@ -327,10 +336,14 @@ async function critique(): Promise<void> {
     });
 
     const { shots: _omit, ...rest } = manifest;
+    // on a resume the kept screens come from the prior file, in the manifest's order
+    const allScreens = prior
+      ? manifest.shots.filter((s) => s.viewport === VIEWPORT).map((s) => screens.find((x) => x.route === s.route) ?? prior.screens.find((x) => x.route === s.route)).filter((x): x is ScreenReport => !!x)
+      : screens;
     report = {
       run: RUN, viewport: VIEWPORT, model: MODEL, passes: PASSES, critiquedAt: new Date().toISOString(),
-      manifest: rest, screens,
-      costUsd: results.reduce((n, r) => n + (r.pass.costUsd ?? 0), 0),
+      manifest: rest, screens: allScreens,
+      costUsd: (prior?.costUsd ?? 0) + results.reduce((n, r) => n + (r.pass.costUsd ?? 0), 0),
     };
     writeFileSync(FINDINGS, JSON.stringify(report, null, 2));
   }
