@@ -14,6 +14,16 @@
    one row saying the list exists, and then the prose; the summary row is the touch hit height
    (D-43) and the list items are the same height when open. */
 .doc-sections { margin: 0 0 var(--s6); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+/* On a phone the row stays put under the sticky .topnav (86px tall at that width) while the
+   document scrolls, so the list is reachable from the middle of a 5000px page and not only from
+   its top (REFERENCES.md REF-3). It carries the page background so prose does not show through
+   it, and sits above the prose but under the nav. It stays a <details> in flow: opened, the list
+   pushes the prose down rather than floating over it, and a heading jumped to from the list
+   clears the row as well as the nav. */
+@media (max-width: 640px) {
+  .doc-sections { position: sticky; top: 86px; z-index: 2; background: var(--bg); }
+  .prose h2 { scroll-margin-top: 146px; }
+}
 .doc-sections summary { display: flex; align-items: center; gap: var(--s2); min-height: 44px; padding: 0 var(--s1); cursor: pointer; list-style: none; font-size: var(--fs-s); font-weight: 600; letter-spacing: .02em; color: var(--text); }
 .doc-sections summary::-webkit-details-marker { display: none; }
 .doc-sections summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }

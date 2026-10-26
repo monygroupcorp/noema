@@ -1,5 +1,5 @@
 import {
-  Children, cloneElement, createContext, isValidElement, useContext, useEffect, useMemo,
+  Children, cloneElement, createContext, isValidElement, useContext, useEffect, useMemo, useRef,
   type HTMLAttributes, type ReactElement, type ReactNode,
 } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -107,13 +107,18 @@ const Sections = createContext<Section[]>([]);
 
 function SectionList() {
   const sections = useContext(Sections);
+  const list = useRef<HTMLDetailsElement>(null);
   if (sections.length < MIN_SECTIONS) return null;
+  // Choosing a section folds the list. On a phone the row is stuck under the nav while the page
+  // scrolls (doc.css), so an open list left open would sit over the very heading it just jumped
+  // to; folded, the heading lands under the row's edge and the reader is looking at the section.
+  const choose = () => { if (list.current) list.current.open = false; };
   return (
-    <details className="doc-sections">
+    <details className="doc-sections" ref={list}>
       <summary>On this page</summary>
       <ol>
         {sections.map((s) => (
-          <li key={s.id}><a href={`#${s.id}`}>{s.text}</a></li>
+          <li key={s.id}><a href={`#${s.id}`} onClick={choose}>{s.text}</a></li>
         ))}
       </ol>
     </details>
