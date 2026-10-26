@@ -212,9 +212,10 @@ export function Datasets() {
             onto the fun part, with nothing here that isn't yours to click. */}
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>No set of your own yet?</div>
             <h2>Browse the catalog</h2>
-            <div className="sub">Published boards, ready to Muse on right now.</div>
+            {/* One sentence that says what the catalogue is and why a visitor with no set of
+                their own would open it (DESIGN.md P-1a) — not a question floating above it. */}
+            <div className="sub">Published sets anyone can muse on — no set of your own needed.</div>
           </div>
           <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
             <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}

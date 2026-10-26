@@ -66,13 +66,59 @@ describe('buildPalette — node palette from real flow schemas (no hardcoded dem
   });
 });
 
-describe('dedupeFlows', () => {
+describe('dedupeFlows — one palette row per flow', () => {
   it('unions canonical + owner\'s-own flows by id', () => {
     const out = dedupeFlows(
       [{ id: 'a' }, { id: 'b' }],
       [{ id: 'b' }, { id: 'c' }],
     );
     expect(out.map((f) => f.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  // The case seen on the live registry: an older registration of a flow listed beside the
+  // current one, under another id, with the same name and version. Only the described
+  // (current) one reaches the palette, and the rest of the list is untouched.
+  it('folds two registrations of the same flow under different ids into the described one', () => {
+    const out = dedupeFlows(
+      [
+        { id: 'modus.joycaption', nomen: 'JoyCaption — image captioning', versio: '1.0.0' },
+        { id: 'runmake.flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0' },
+        { id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'Fast 4-step FLUX text-to-image' },
+        { id: 'sd1-5', nomen: 'Stable Diffusion 1.5 — text to image', versio: '1.0.0' },
+      ],
+      [],
+    );
+    expect(out.map((f) => f.id)).toEqual(['modus.joycaption', 'flux-schnell', 'sd1-5']);
+  });
+
+  it('keeps the first listed when neither twin describes itself', () => {
+    const out = dedupeFlows(
+      [{ id: 'runmake.flux-schnell', nomen: 'FLUX Schnell' }, { id: 'flux-schnell', nomen: 'FLUX Schnell' }],
+      [],
+    );
+    expect(out.map((f) => f.id)).toEqual(['runmake.flux-schnell']);
+  });
+
+  it('shows the newest of two versions of one flow, whichever list carries it', () => {
+    const out = dedupeFlows(
+      [{ id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'canonical' }],
+      [{ id: 'flux-schnell-v2', nomen: 'FLUX Schnell — text to image', versio: '1.2.0' }],
+    );
+    expect(out.map((f) => f.id)).toEqual(['flux-schnell-v2']);
+  });
+
+  it('folds an owner\'s copy of a canonical flow into one row', () => {
+    const out = dedupeFlows(
+      [{ id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'canonical' }],
+      [{ id: 'mine.flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0' }],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('flux-schnell');
+  });
+
+  it('keeps flows that only lack a name apart, by id', () => {
+    const out = dedupeFlows([{ id: 'a' }, { id: 'b' }], []);
+    expect(out.map((f) => f.id)).toEqual(['a', 'b']);
   });
 });
 

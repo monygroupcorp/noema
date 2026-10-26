@@ -34,6 +34,9 @@
   display: flex; align-items: center; gap: var(--s4); background: var(--panel); border: 1px solid var(--hair);
   border-radius: var(--r-pill); padding: 8px 8px 8px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
 .canvas-bar .hint { color: var(--faint); font-size: var(--fs-xs); font-family: var(--font-mono); white-space: nowrap; }
+/* The pointer/keyboard hints are for a mouse and a keyboard: on a phone or a touch screen
+   they describe nothing the visitor can do, so only the facts before them remain. */
+@media (max-width:760px),(hover:none) and (pointer:coarse) { .canvas-bar .hint .keys { display: none; } }
 
 /* loading state */
 .canvas-loading { display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-xs); }

@@ -9,9 +9,9 @@ import { activityDoorHref, activityRowLabel, partitionHomeActivity } from '../li
 import { Ic } from '../lib/icons';
 
 // Home / dashboard (dashboard-spec.md, render noema-dashboard.png). Leads with the brand's
-// one question answered — "What NOEMA can see: the meter, nothing more." — then projects, then
-// the AWAITING YOU / RUNNING NOW activity bands. The instrument band is the one framed
-// element (.noema-frame, corner ticks earned).
+// one question answered — "What NOEMA can see: the meter, nothing more." — then the AWAITING
+// YOU / RUNNING NOW activity bands (the return surface, DESIGN.md D-64), then projects. The
+// instrument band is the one framed element (.noema-frame, corner ticks earned).
 //
 // noema-327 (crit V1): the old "recent" band read the client-local chat-title list, which
 // is never real activity. It's replaced here by two bands off the real `GET /v1/me/activity`
@@ -35,6 +35,9 @@ const EARNING_LABEL: Record<EarningKind, string> = {
   'host-bonus': 'host bonus',
   referral: 'referrals',
 };
+
+// An empty activity band is one plain line, not a dashed box (DESIGN.md D-60, D-64).
+const BAND_EMPTY = { color: 'var(--faint)', fontSize: 'var(--fs-s)' } as const;
 
 // The royalties tile's figure. Before the read lands it holds its place with a dash (D-61);
 // once the read has landed, a lifetime of nothing is not printed as a large 0 (DESIGN.md D-58,
@@ -141,35 +144,14 @@ export function Dashboard() {
           <span className="sub" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>Pick a model to run, or just describe what you want.</span>
         </div>
 
-        {/* your projects */}
-        <div className="sectionhead db-head">your projects · {projects.length}<Link className="db-all" to="/projects">all projects ▸</Link></div>
-        <div className="dbprojgrid">
-          {projects.map((p) => (
-            <Link key={p.id} className="dbproj" to={`/projects/${p.id}`}>
-              <div className="dbproj-mosaic"><span style={{ background: p.color }} /><span /><span /><span /></div>
-              <div className="dbproj-body">
-                <b>{p.name}</b>
-                <div className="dbproj-holdings mono">
-                  {holdings(p).length
-                    ? holdings(p).map((h) => <span key={h.ico} className="hc"><Ic name={h.ico} />{h.n}</span>)
-                    : <span className="hc">{EMPTY_HOLDINGS}</span>}
-                </div>
-              </div>
-              <div className="dbproj-foot"><span className="upd mono">{p.updated}</span></div>
-            </Link>
-          ))}
-          <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
-        </div>
-
-        {/* AWAITING YOU — finished work, each row a door to what it produced. Empty, it says
-            what lands here and carries the one action that fills it (DESIGN.md D-60). */}
+        {/* The return surface, first (DESIGN.md D-64): what finished while you were gone,
+            then what is still running, above the fold. A band with nothing in it is one line
+            that says what lands there and carries the action that fills it (D-60) — not a
+            box — so the projects below rise into the fold for a visitor with nothing yet. */}
         <div className="sectionhead">AWAITING YOU</div>
         <div className="dbrecent">
           {awaiting.length === 0 ? (
-            <div className="empty">
-              <div className="t">Nothing finished yet — a completed run lands here.</div>
-              <div className="s"><Link to="/catalog">Start one from the catalogue ▸</Link></div>
-            </div>
+            <div className="sub" style={BAND_EMPTY}>Nothing finished yet — a completed run lands here. <Link to="/catalog">Start one from the catalogue ▸</Link></div>
           ) : awaiting.map((r) => {
             const href = activityDoorHref(r);
             const row = (
@@ -192,7 +174,7 @@ export function Dashboard() {
         <div className="sectionhead">RUNNING NOW</div>
         <div className="dbrecent">
           {running.length === 0 ? (
-            <div className="empty"><div className="t">Nothing running — <Link to="/catalog">start something ▸</Link></div></div>
+            <div className="sub" style={BAND_EMPTY}>Nothing running — <Link to="/catalog">start something ▸</Link></div>
           ) : running.map((r) => (
             <div className="dbrec-row" key={r.actumId}>
               <Ic name={ACTIVITY_ICON[r.kind]} />
@@ -200,6 +182,26 @@ export function Dashboard() {
               <span className="rp mono">running…</span>
             </div>
           ))}
+        </div>
+
+        {/* your projects */}
+        <div className="sectionhead db-head">your projects · {projects.length}<Link className="db-all" to="/projects">all projects ▸</Link></div>
+        <div className="dbprojgrid">
+          {projects.map((p) => (
+            <Link key={p.id} className="dbproj" to={`/projects/${p.id}`}>
+              <div className="dbproj-mosaic"><span style={{ background: p.color }} /><span /><span /><span /></div>
+              <div className="dbproj-body">
+                <b>{p.name}</b>
+                <div className="dbproj-holdings mono">
+                  {holdings(p).length
+                    ? holdings(p).map((h) => <span key={h.ico} className="hc"><Ic name={h.ico} />{h.n}</span>)
+                    : <span className="hc">{EMPTY_HOLDINGS}</span>}
+                </div>
+              </div>
+              <div className="dbproj-foot"><span className="upd mono">{p.updated}</span></div>
+            </Link>
+          ))}
+          <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
         </div>
 
       </div></div>
