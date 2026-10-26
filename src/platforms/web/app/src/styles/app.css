@@ -1123,6 +1123,10 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .sn-item svg.lucide{width:15px;height:15px;color:var(--faint)} .sn-item.on svg.lucide{color:var(--accent-soft)}
 .ac-panel{border:1px solid var(--hair);border-radius:13px;background:var(--panel);padding:18px;margin-top:18px}
 .ac-panel-l{font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted);margin-bottom:14px}
+/* the destructive section sits last on the account home (REF-34); its confirmation is an .ac-panel in the danger colour */
+.ac-danger{margin-top:var(--s6)}
+.ac-danger .ac-sov{margin-top:var(--s3);margin-bottom:0}
+.ac-danger-confirm{border-color:color-mix(in srgb,var(--color-danger) 35%,var(--hair))}
 .avail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 @media(max-width:680px){.avail-grid{grid-template-columns:1fr}}
 .availcard{text-align:left;border:1px solid var(--hair);border-radius:11px;background:var(--bg);padding:14px;cursor:pointer;font:inherit;color:var(--text);transition:.14s var(--ease)}
