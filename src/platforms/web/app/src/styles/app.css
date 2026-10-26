@@ -606,6 +606,9 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    height (D-43), rather than a link wrapping inside the sentence. */
 .warn.gate{flex-direction:column;align-items:flex-start}
 .warn.gate .btn{min-height:44px}
+/* A request that failed is danger tier, not caution (D-10): the same box in the danger hue, so a
+   service that did not answer is told apart from a notice about something the reader may still do. */
+.warn.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,transparent);color:var(--red-500,#e5746a)}
 
 /* connected accounts (BYO gated-origin secrets) */
 .byo-row{border:1px solid var(--hair);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:10px}

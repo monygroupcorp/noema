@@ -366,7 +366,14 @@ export function Vault() {
 
         {err && <div className="warn" role="alert">{err}</div>}
         {notice && <div className="csec" style={{ borderColor: 'var(--accent)' }}>{notice}</div>}
-        {configErr && <div className="warn">Couldn’t reach the anonymous-credit service — {configErr}</div>}
+        {/* A request that failed is danger tier (DESIGN.md D-10), not the caution amber the
+            informational notices below wear; it says what happened and what to do (D-62). While
+            the config is unknown the purse reads as off (see purseOff above). */}
+        {configErr && (
+          <div className="warn bad" role="alert">
+            Couldn’t reach the anonymous-credit service — {configErr}. The anonymous purse reads as off until it answers; try again in a moment.
+          </div>
+        )}
 
         {/* ANON_PURSE gate (noema-131): while the anonymous purse is switched off, everything
             that would mint or hand one over is absent rather than announced — the roadmap is
