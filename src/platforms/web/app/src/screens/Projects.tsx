@@ -24,7 +24,9 @@ export function Projects() {
     <AppShell crumb="Projects">
       <div className="page"><div className="pw wide">
         <div className="pagehead">
-          <div><h1>Projects</h1><div className="sub">A project is a shared workspace — its chats, cards, canvases, and its slice of your space, in one context.</div></div>
+          {/* A list screen states what these are and how many before its contents (DESIGN.md
+              D-55), in the feed's idiom ("— 1 piece"). */}
+          <div><h1>Projects</h1><div className="sub">A project is a shared workspace — its chats, cards, canvases, and its slice of your space, in one context · {projects.length} {projects.length === 1 ? 'project' : 'projects'}.</div></div>
           <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name="plus" /> New project</button></div>
         </div>
 
