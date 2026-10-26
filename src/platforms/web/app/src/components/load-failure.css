@@ -5,4 +5,9 @@
 .load-fail.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,var(--panel))}
 .load-fail-what{margin:0;color:var(--text);font-size:var(--fs-m);line-height:1.5}
 .load-fail-next{margin:var(--s2) 0 0;color:var(--muted);font-size:var(--fs-s);line-height:1.5}
-.load-fail-actions{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s4)}
+.load-fail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s5);margin-top:var(--s4)}
+/* The way back, when it is not the one primary (D-42): a plain link, not a second pill. It keeps
+   the touch hit height (D-43) and the shared focus ring (D-44). */
+.load-fail-back{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);font-size:var(--fs-s);text-decoration:underline;text-underline-offset:3px;border-radius:var(--r)}
+.load-fail-back:hover{color:var(--text)}
+.load-fail-back:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
