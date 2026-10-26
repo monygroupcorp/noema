@@ -213,6 +213,45 @@ async function login(browser: Browser): Promise<boolean> {
   }
 }
 
+/** The controls on the screen whose background is the accent, measured rather than judged. D-42
+ *  (one filled primary per screen) is the rule the critic files most and misreads most: a bold
+ *  dark pill beside a dim primary read as "filled" three passes out of three, against a written
+ *  standard saying what filled means. A model cannot measure a colour; the DOM can. Each visible
+ *  control's background is compared with --accent as it resolves at that element (the anonymous
+ *  posture retunes the accent per subtree), and the matches go in the manifest for the critic to
+ *  be told as fact. Source, not a closure, for the same reason as SETTLE_JS. */
+const FILLED_JS = `(function () {
+  const out = [];
+  const seen = new Set();
+  const nodes = document.querySelectorAll('button, a, [role="button"], input[type="submit"], summary');
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
+    const bg = cs.backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') continue;
+    const probe = document.createElement('i');
+    probe.style.cssText = 'position:absolute;width:0;height:0;background:var(--accent)';
+    (el.parentElement || document.body).appendChild(probe);
+    const accent = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    if (bg !== accent) continue;
+    const text = (el.getAttribute('aria-label') || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40) || '(unlabelled control)';
+    const key = text + '@' + Math.round(r.top + window.scrollY);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ text: text, top: Math.round(r.top + window.scrollY) });
+  }
+  return out;
+})()`;
+
+type FilledControl = { text: string; top: number };
+
+async function filledControls(page: import('playwright').Page): Promise<FilledControl[]> {
+  return await page.evaluate(FILLED_JS).catch(() => []) as FilledControl[];
+}
+
 const BLANK_JS = "(function(){return (document.body && document.body.innerText || '').trim().length === 0})()";
 const BLANK_RETRY_MS = 3_000;
 
@@ -255,6 +294,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
     route: string; viewport: string; file: string; bytes: number;
     scrollContainer: string; viewportHeightAtShot: number; grown: boolean; capped: boolean;
     blank: boolean;
+    filled: FilledControl[];
   }[] = [];
   const failed: { route: string; viewport: string; error: string }[] = [];
 
@@ -291,6 +331,9 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         // Grow the window to the app's inner scroller (see growToContent), shoot, then put the
         // window back so axe scans the viewport a visitor actually has.
         const capture = await growToContent(page, vp);
+        // Measured in the grown window, so a control below the first fold is listed with the
+        // document offset the shot shows it at.
+        const filled = await filledControls(page);
         await page.screenshot({ path: file, fullPage: true });
         if (capture.grown) await page.setViewportSize({ width: vp.width, height: vp.height });
         shots.push({
@@ -300,6 +343,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
           bytes: statSync(file).size,
           ...capture,
           blank,
+          filled,
         });
 
         // Scanned at the width that was photographed, and recorded under that width. A contrast or
