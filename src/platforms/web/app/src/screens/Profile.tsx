@@ -69,7 +69,7 @@ export function Profile() {
             section individually linkable). Mobile-first app, so a compact anchor row stands in
             for a sidebar/table of contents. The links are a tab row, not pills: a pill is a
             filter, tag or status chip (DESIGN.md D-33), and these navigate. */}
-        <nav className="profile-jump" aria-label="Jump to a section">
+        <nav className="section-jump" aria-label="Jump to a section">
           <a href="#profile-assets">Assets</a>
           <a href="#profile-backup">Account backup &amp; recovery</a>
           <a href="#profile-connected">Connected accounts</a>

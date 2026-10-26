@@ -108,11 +108,23 @@ export function Preferences() {
 
         <p className="pref-sub">Your defaults for every generation — they travel with you across <b>web · Telegram · API</b>.</p>
         <div className="pref-honesty mono"><span className="hemi2 dashed" /> custody stays a per-run choice · these are defaults, override inline anytime</div>
+
+        {/* Each card below is its own jump target (REF-34: GitHub's settings pages make every section
+            individually linkable, the dangerous ones last). Same row as the profile's; the restricted
+            section is last in the list because it is last on the page. */}
+        <nav className="section-jump" aria-label="Jump to a section">
+          <a href="#prefs-style">Style &amp; prompt</a>
+          <a href="#prefs-output">Output &amp; delivery</a>
+          <a href="#prefs-private">Private generation</a>
+          <a href="#prefs-memory">What the concierge remembers</a>
+          <a href="#prefs-restricted">Restricted</a>
+        </nav>
+
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
 
         {/* cross-cutting defaults — WIRED to generatio */}
         <div className="pref-grid">
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-style">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Style &amp; prompt</b></div>
             <label className="ac-row"><span className="ac-rk mono">Default style</span>
               <input className="cer-input" placeholder="e.g. cinematic, cold" value={gen.style ?? ''} onChange={(e) => editLocal({ style: e.target.value || undefined })} onBlur={flush} /></label>
@@ -124,7 +136,7 @@ export function Preferences() {
                 {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
               </select></label>
           </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-output">
             <div className="pref-card-h"><Ic name="send" /><b>Output &amp; delivery</b></div>
             <label className="ac-row"><span className="ac-rk mono">Format</span>
               <select className="cer-input" value={gen.outputFormat ?? 'png'} onChange={(e) => commit({ ...gen, outputFormat: e.target.value })}>
@@ -140,7 +152,7 @@ export function Preferences() {
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select></label>
           </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-private">
             <div className="pref-card-h"><Ic name="send" /><b>Private generation</b></div>
             <label className="ac-row ac-check"><span className="ac-rk mono">Private outputs</span>
               <input type="checkbox" checked={gen.privateOutputs ?? false} onChange={(e) => commit({ ...genRef.current, privateOutputs: e.target.checked })} /></label>
@@ -148,7 +160,7 @@ export function Preferences() {
               <span className="hemi2 dashed" /> Outputs of new runs are visible only to you, through expiring links. Publishing or minting one later makes that copy public. Runs you have already made stay as they are.
             </div>
           </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-memory">
             <div className="pref-card-h"><Ic name="sparkles" /><b>What the concierge remembers</b></div>
             {notes.length === 0 && (
               <div className="pref-note mono" style={{ color: 'var(--faint)' }}>Nothing yet. The concierge adds a line here when it learns something durable about how you work.</div>
@@ -185,7 +197,7 @@ export function Preferences() {
 
         {/* the one age-gated, policy-sensitive toggle on this screen — its own section, set apart
             from the routine cosmetic cards above, last on the page (REF-34, mirrors .ac-danger). */}
-        <div className="pref-restricted">
+        <div className="pref-restricted" id="prefs-restricted">
           <div className="pref-restricted-l mono">Restricted</div>
           <div className="pref-card pref-card-restricted">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>

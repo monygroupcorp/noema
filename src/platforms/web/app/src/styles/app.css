@@ -479,14 +479,15 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .fchip{border:1px solid var(--hair);background:var(--panel);color:var(--muted);font:inherit;font-size:12px;padding:7px 12px;border-radius:999px;cursor:pointer;transition:.14s var(--ease)}
 .fchip:hover{color:var(--text)} .fchip.on{background:var(--accent-bg);color:var(--text);border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))}
 
-/* profile: in-page section jump row (REF-34) — each chip is an anchor onto a .sectionhead id,
-   so every section is individually reachable without a desktop sidebar on this mobile-first screen */
-.profile-jump{display:flex;flex-wrap:wrap;gap:0 var(--s4);margin-bottom:28px;border-bottom:1px solid var(--hair)}
+/* settings screens (profile, preferences): in-page section jump row (REF-34) — each link is an
+   anchor onto a section's id, so every section is individually reachable without a desktop
+   sidebar on these mobile-first screens. One rule for every screen that has sections. */
+.section-jump{display:flex;flex-wrap:wrap;gap:0 var(--s4);margin-bottom:28px;border-bottom:1px solid var(--hair)}
 /* Section links in the tab idiom (D-33: a pill is a filter or a chip; these jump): text on a
    hairline, each with the touch hit height (D-43) and the shared focus ring (D-44). */
-.profile-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--muted);font-size:var(--fs-s);text-decoration:none;transition:.14s var(--ease)}
-.profile-jump a:hover{color:var(--text);border-bottom-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
-.profile-jump a:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
+.section-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--muted);font-size:var(--fs-s);text-decoration:none;transition:.14s var(--ease)}
+.section-jump a:hover{color:var(--text);border-bottom-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.section-jump a:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
 
 /* badges / pills */
 .badge{font-family:var(--font-mono);font-size:10.5px;padding:2px 7px;border-radius:5px;border:1px solid var(--hair);color:var(--muted)}
