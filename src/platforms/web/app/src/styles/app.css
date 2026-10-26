@@ -584,7 +584,8 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .swatches{display:flex;gap:9px;flex-wrap:wrap}
 .sw{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.12s var(--ease)}
 .sw:hover{transform:scale(1.08)} .sw.on{border-color:var(--text);box-shadow:0 0 0 2px var(--bg) inset}
-.assetslot{aspect-ratio:16/6;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--faint);font-size:12.5px;cursor:pointer}
+.assetslot{aspect-ratio:16/6;width:100%;margin:0;padding:0;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--faint);font:inherit;font-size:12.5px;text-align:center;cursor:pointer}
+.assetslot:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .assetslot.pfp{aspect-ratio:1;max-width:96px;border-radius:50%}
 .assetslot:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));color:var(--muted)}
 

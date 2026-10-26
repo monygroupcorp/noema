@@ -475,9 +475,16 @@ function AssetSlot({ label, url, onUploaded, onError, className, style }: {
   }
   const bg = url ? { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
   return (
-    <div className={`assetslot${className ? ` ${className}` : ''}`} style={{ ...style, ...bg }} onClick={() => inputRef.current?.click()}>
+    <button
+      type="button"
+      className={`assetslot${className ? ` ${className}` : ''}`}
+      style={{ ...style, ...bg }}
+      aria-label={url ? label : undefined}
+      aria-busy={busy || undefined}
+      onClick={() => inputRef.current?.click()}
+    >
       {!url && (busy ? 'Uploading…' : label)}
       <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
-    </div>
+    </button>
   );
 }
