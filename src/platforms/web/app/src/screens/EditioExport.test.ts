@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { exportJobFor, hostingJobFor, IDLE_JOBS, putJob } from './EditioExport';
 import type { Editio } from '../lib/editio';
@@ -176,5 +178,15 @@ describe('putJob — a destination keeps its own job', () => {
     const before = putJob(IDLE_JOBS, 'hosting', HELD);
     putJob(before, 'hosting', { s: 'idle' });
     expect(before.hosting).toEqual(HELD);
+  });
+});
+
+describe('a collection that cannot be opened offers the way back (D-62)', () => {
+  it('export renders the shared state instead of an empty page, back to Collections', () => {
+    const src = readFileSync(fileURLToPath(new URL('./EditioExport.tsx', import.meta.url)), 'utf8');
+    expect(src).toContain('<LoadFailure ');
+    expect(src).toContain('back={BACK.collections}');
+    expect(src).not.toContain('Couldn’t load');
+    expect(src).not.toMatch(/not found\./);
   });
 });

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { inFlightLine, pendingReviewLine, recentPieces, runLiveness, STALL_MESSAGE } from './CanonicRun';
 
@@ -94,5 +96,15 @@ describe('recentPieces — what the arrivals strip shows (collection-run-shows-n
   it('shows nothing for a non-positive window rather than slicing from the wrong end', () => {
     expect(recentPieces([1, 2, 3], 0)).toEqual([]);
     expect(recentPieces([1, 2, 3], -5)).toEqual([]);
+  });
+});
+
+describe('a run whose collection cannot be read offers the way back (D-62)', () => {
+  it('the run screen renders the shared state, back to Collections', () => {
+    const src = readFileSync(fileURLToPath(new URL('./CanonicRun.tsx', import.meta.url)), 'utf8');
+    expect(src).toContain('<LoadFailure ');
+    expect(src).toContain('back={BACK.collections}');
+    expect(src).not.toContain('Couldn’t load');
+    expect(src).not.toMatch(/not found\./);
   });
 });

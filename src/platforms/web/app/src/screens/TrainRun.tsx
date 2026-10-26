@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import { api, type Run, type RunOrder } from '../lib/api';
 
@@ -71,6 +72,10 @@ export function trainRunNotice(order: RunOrder | undefined, run: Run): TrainRunN
 export function TrainRun() {
   const { id } = useParams();
   const [run, setRun] = useState<Run | null | undefined>(undefined);   // undefined = loading, null = not found
+  // Why the first read failed, so the dead end can say so. The poll keeps going regardless —
+  // a run that is not readable yet may be in a moment — and a later answer clears it.
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [cancelling, setCancelling] = useState(false);
 
@@ -82,19 +87,21 @@ export function TrainRun() {
       api.getRun(id).then(({ run: r }) => {
         if (!live) return;
         setRun(r);
+        setFail(null);
         // A live ORDER keeps this page polling even though this attempt is terminal — the
         // next attempt's outcome is what the user is waiting for.
         const ordered = r.order?.state === 'scheduled' || r.order?.state === 'attempting';
         if (ordered || (r.status !== 'complete' && r.status !== 'failed')) timer = setTimeout(tick, POLL_MS);
-      }).catch(() => {
+      }).catch((e) => {
         if (!live) return;
         setRun((prev) => (prev === undefined ? null : prev));
+        setFail(loadFailureKind(e));
         timer = setTimeout(tick, POLL_MS);
       });
     };
     tick();
     return () => { live = false; clearTimeout(timer); };
-  }, [id]);
+  }, [id, tries]);
 
   // Re-render the elapsed line once a second while the run is live.
   useEffect(() => {
@@ -107,11 +114,7 @@ export function TrainRun() {
     return <AppShell title="Training run"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
   }
   if (!run) {
-    return (
-      <AppShell title="Training run">
-        <div className="page"><div className="pw wide"><div className="sub mono">run not found. <Link to="/datasets">back to datasets</Link></div></div></div>
-      </AppShell>
-    );
+    return <AppShell title="Training run"><LoadFailure noun="run" kind={fail ?? 'missing'} back={BACK.home} onRetry={() => setTries((n) => n + 1)} /></AppShell>;
   }
 
   const order = run.order;

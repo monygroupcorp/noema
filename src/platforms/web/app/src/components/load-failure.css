@@ -1,0 +1,8 @@
+/* A record that could not be read — see LoadFailure.tsx. One frame, one sentence, one way out. */
+.load-fail{border:1px solid var(--hair);border-radius:var(--r);background:var(--panel);padding:var(--s5) var(--s6);max-width:56ch}
+/* The failure hue is the danger token, never the caution one (D-10): a record that cannot be
+   opened is not a warning about something the reader might still do. */
+.load-fail.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,var(--panel))}
+.load-fail-what{margin:0;color:var(--text);font-size:var(--fs-m);line-height:1.5}
+.load-fail-next{margin:var(--s2) 0 0;color:var(--muted);font-size:var(--fs-s);line-height:1.5}
+.load-fail-actions{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s4)}

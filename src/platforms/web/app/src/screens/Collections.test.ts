@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SEED_MODUS_ID, SEED_TRACTUS, buildCreateRequest } from './Collections';
 import type { Tractus } from '../lib/api';
@@ -105,5 +107,15 @@ describe('the seed is a starting point, not a rail', () => {
     expect(secondAxis.valores).toHaveLength(SEED_TRACTUS[0].valores.length);
     expect(secondAxis.valores[0].value).toBe(SEED_TRACTUS[0].valores[0].value);
     expect(second.total).toBe(SEED_TRACTUS[0].valores.length);
+  });
+});
+
+describe('a collection that cannot be opened offers the way back (D-62)', () => {
+  it('the hub a collection card opens into renders the shared state, back to Collections', () => {
+    const src = readFileSync(fileURLToPath(new URL('./EditioHub.tsx', import.meta.url)), 'utf8');
+    expect(src).toContain('<LoadFailure ');
+    expect(src).toContain('back={BACK.collections}');
+    expect(src).not.toContain('Couldn’t load');
+    expect(src).not.toMatch(/not found\./);
   });
 });

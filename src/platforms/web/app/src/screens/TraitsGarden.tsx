@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary, type Tractus, type TractusValor } from '../lib/api';
 import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
@@ -21,6 +22,8 @@ export function TraitsGarden() {
   const nav = useNavigate();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   const [axes, setAxes] = useState<Tractus[]>([]);
   const [active, setActive] = useState(0);
   const [dirty, setDirty] = useState(false);
@@ -42,13 +45,13 @@ export function TraitsGarden() {
       setAxes(r.collection.tractus ?? []);
       setModusId(r.collection.modusId);
       setTotal(r.collection.total);
-    }).catch((e) => { if (live) setErr(msg(e)); });
+    }).catch((e) => { if (live) setFail(loadFailureKind(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
   useEffect(() => { api.listFlows().then((r) => setFlows(r.flows)).catch(() => {}); }, []);
 
-  if (err) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load: {err}</div></div></div></AppShell>;
+  if (fail) return <AppShell title="Traits"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   if (!c) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 
   const editable = c.status === 'draft';
