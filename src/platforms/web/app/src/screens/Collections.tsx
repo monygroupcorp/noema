@@ -165,6 +165,8 @@ export function Collections() {
   // When scoped to a project, show only its filed collections (Provincia.res.collectionIds).
   const shown = scope && items ? items.filter((c) => scope.collectionIds.includes(c.id)) : items;
 
+  const emptyShown = shown !== null && shown.length === 0 && !creating;
+
   return (
     <AppShell title="Collections">
       <div className="page"><div className="pw wide">
@@ -173,7 +175,9 @@ export function Collections() {
             <h1>Collections</h1>
             <div className="sub">Author a collection from your flows — vary an input across a supply, curate, then choose where it goes. Local until you publish.</div>
           </div>
-          <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>
+          {/* The empty state below carries this same action; while it is on screen the header
+              does not repeat it (P-1d). */}
+          {!emptyShown && <div className="right"><button className="btn" onClick={() => setCreating((v) => !v)}><Ic name={creating ? 'x' : 'plus'} /> {creating ? 'Cancel' : 'new collection'}</button></div>}
         </div>
 
         {scope && <ScopeBanner project={scope} noun="collections" />}
@@ -194,7 +198,7 @@ export function Collections() {
           <div className="collgrid">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="collcard skel" />)}</div>
         )}
 
-        {shown !== null && shown.length === 0 && !creating && (
+        {emptyShown && (
           <div className="empty">
             <div className="t">{scope ? `No collections filed into ${scope.name} yet` : 'No collections yet'}</div>
             <div className="s">Name one — it costs nothing. You pick the flow and the traits afterwards.</div>

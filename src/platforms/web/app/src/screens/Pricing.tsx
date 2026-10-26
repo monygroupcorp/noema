@@ -119,7 +119,7 @@ export function Pricing() {
                 <li>Spend across every modality</li>
               </ul>
               <Link
-                className="btn"
+                className={p.bestRate ? 'btn' : 'btn-ghost'}
                 to={`/funding?pack=${encodeURIComponent(p.id)}`}
                 style={{ marginTop: 'auto' }}
               >
