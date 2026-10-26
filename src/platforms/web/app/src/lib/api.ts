@@ -364,13 +364,21 @@ export function setActiveAnimaId(animaId: string | null): SessionStore {
   return next;
 }
 
-// Drop the active account; activate the next remaining (or null → anon). Returns the new store.
-export function dropActiveAccount(): SessionStore {
+// Forget one held account on this browser. When it was the active one, the last remaining
+// account takes over (or null → anon); when it was not, the active pointer is untouched.
+// Returns the new store.
+export function dropAccount(animaId: string | null): SessionStore {
   const s = readStore();
-  const rest = s.accounts.filter((a) => a.animaId !== s.activeAnimaId);
-  const next: SessionStore = { accounts: rest, activeAnimaId: rest[rest.length - 1]?.animaId ?? null };
+  const rest = s.accounts.filter((a) => a.animaId !== animaId);
+  const activeAnimaId = s.activeAnimaId === animaId ? (rest[rest.length - 1]?.animaId ?? null) : s.activeAnimaId;
+  const next: SessionStore = { accounts: rest, activeAnimaId };
   writeStore(next);
   return next;
+}
+
+// Drop the active account; activate the next remaining (or null → anon). Returns the new store.
+export function dropActiveAccount(): SessionStore {
+  return dropAccount(readStore().activeAnimaId);
 }
 
 // Sign out of every account → the anon commitment path.

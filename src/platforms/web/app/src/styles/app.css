@@ -559,6 +559,23 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .lrow .li-ic{width:30px;height:30px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;background:var(--raised);border:1px solid var(--hair);color:var(--muted)}
 .lrow .li-main{flex:1;min-width:0} .lrow .li-main .t{font-size:13.5px;font-weight:500} .lrow .li-main .s{color:var(--faint);font-size:11.5px;margin-top:1px}
 .lrow .li-right{color:var(--muted);font-size:12px;font-family:var(--font-mono);text-align:right}
+/* Keyring rows (REF-33): the row itself is not pressable — its controls are, so there is no
+   nested click and no pointer hand on the row. Actions sit at the right and wrap under the
+   name at phone width; every control is a 44px hit (D-43) and shows the focus ring (D-44). */
+.lrow.kr{cursor:default;flex-wrap:wrap;row-gap:var(--s2)}
+.lrow.kr:hover{background:transparent}
+/* The name column keeps a floor; below it the actions wrap onto their own line rather than
+   squeezing the caption into a column of single words. */
+.lrow.kr .li-main{flex:1 1 200px}
+.kr-acts{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:var(--s2);margin-left:auto}
+.kr-acts .btn{min-height:44px;white-space:nowrap}
+.kr-acts .btn:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* Where a remove control would be on the anonymous slot: why there is none. */
+.kr-note{color:var(--faint);font-size:var(--fs-xs);font-family:var(--font-mono);text-align:right;min-height:44px;display:inline-flex;align-items:center}
+/* The second step of a remove, inline on the row: what is lost, then yes / keep. */
+.kr-confirm{flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);padding:10px 12px;border:1px solid color-mix(in srgb,var(--color-danger) 35%,var(--hair));border-radius:9px;background:color-mix(in srgb,var(--color-danger) 6%,transparent);font-size:var(--fs-sm);line-height:1.45}
+.kr-confirm-text{flex:1 1 260px;min-width:0}
+.kr-confirm .kr-acts{margin-left:auto}
 
 /* table */
 .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
