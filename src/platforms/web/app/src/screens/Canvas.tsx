@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, Handle, Position,
@@ -360,6 +361,79 @@ export function NodeParamPanel({ node, onChange, onClose }: {
   );
 }
 
+// ── The tools sheet (phone) ────────────────────────────────────────────────────
+// At phone width the stage has no room beside the palette: the list stood the full height
+// of the page and the graph, the surface this screen is (REFERENCES.md REF-19), was behind it.
+// There the palette is summoned instead — one button on the stage opens this sheet, which
+// states its shape first (how many tools, a filter to narrow them; D-55) and closes once a
+// tool is picked. The desktop palette is unchanged.
+
+// Narrow the palette by name as the visitor types: case-blind, whitespace-trimmed, every
+// word must appear somewhere in the name so "flux edit" finds "FLUX.1 Kontext — instruction edit".
+export function filterPalette(palette: PaletteEntry[], query: string): PaletteEntry[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return palette;
+  return palette.filter((entry) => {
+    const name = entry.nomen.toLowerCase();
+    return words.every((w) => name.includes(w));
+  });
+}
+
+export function toolsCount(n: number): string {
+  return `${n} ${n === 1 ? 'tool' : 'tools'}`;
+}
+
+// The sheet's own markup, portal-free so it can be rendered statically in the tests; Canvas
+// portals it to <body> so it sits above the shell, not inside the stage's stacking context.
+export function ToolsSheet({ palette, query, onQuery, onPick, onClose }: {
+  palette: PaletteEntry[];
+  query: string;
+  onQuery: (q: string) => void;
+  onPick: (entry: PaletteEntry) => void;
+  onClose: () => void;
+}) {
+  const shown = filterPalette(palette, query);
+  return (
+    <div className="canvas-tools-sheet" onClick={onClose}>
+      <div
+        className="canvas-tools-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="canvas-tools-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="canvas-tools-head">
+          <b id="canvas-tools-title">{toolsCount(palette.length)}</b>
+          <button type="button" className="btn ghost sm canvas-tools-close" onClick={onClose} aria-label="Close">
+            <Ic name="x" />
+          </button>
+        </div>
+        <div className="canvas-tools-filter">
+          <input
+            className="inp"
+            type="search"
+            value={query}
+            placeholder="Filter by name"
+            aria-label="Filter tools by name"
+            onChange={(e) => onQuery(e.target.value)}
+          />
+        </div>
+        <div className="canvas-tools-list">
+          {shown.map((entry) => (
+            <button key={entry.modusId} type="button" className="cp-item" onClick={() => onPick(entry)}>
+              <Ic name="plus" /> {entry.nomen}
+            </button>
+          ))}
+          {palette.length === 0 && <div className="canvas-tools-empty">No flows registered yet.</div>}
+          {palette.length > 0 && shown.length === 0 && (
+            <div className="canvas-tools-empty">No tool is named like "{query.trim()}". Clear the filter to see all {palette.length}.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Canvas() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -384,6 +458,10 @@ export function Canvas() {
   // The node whose parameter panel is open — id only, so it self-heals off `nodes` (a
   // delete/undo cycle, or an autosave-triggered node replacement, never shows stale data).
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // The phone's tools sheet (see ToolsSheet): open or not, and the name filter typed into it.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsQuery, setToolsQuery] = useState('');
+  const summonRef = useRef<HTMLButtonElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextSave = useRef(true);
   const rfInstance = useRef<ReactFlowInstance<Node<FlowData>, Edge> | null>(null);
@@ -465,6 +543,20 @@ export function Canvas() {
     if (error) dismissError();
   }, [setEdges, error, dismissError]);
 
+  const closeTools = useCallback(() => {
+    setToolsOpen(false);
+    setToolsQuery('');
+    summonRef.current?.focus();
+  }, []);
+
+  // Escape dismisses the sheet, as it does every other dialog in the app.
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeTools(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [toolsOpen, closeTools]);
+
   const addNode = useCallback((entry: PaletteEntry) => {
     const id = `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const count = nodes.length;
@@ -476,6 +568,12 @@ export function Canvas() {
     };
     setNodes((ns) => [...ns, node]);
   }, [nodes.length, setNodes]);
+
+  // Picking from the sheet places the node and puts the stage back in front.
+  const pickTool = useCallback((entry: PaletteEntry) => {
+    addNode(entry);
+    closeTools();
+  }, [addNode, closeTools]);
 
   // Delete a placed node: capture it + its connected edges for undo, then let xyflow's
   // own deleteElements drive the cascade (same onNodesChange/onEdgesChange path as any
@@ -595,7 +693,7 @@ export function Canvas() {
           <NodeParamPanel node={selectedNode} onChange={updateNodeAditus} onClose={() => setSelectedNodeId(null)} />
         )}
         <div className="canvas-palette">
-          <div className="cp-title">Tools</div>
+          <div className="cp-title">Tools · {palette.length}</div>
           {palette.map((entry) => (
             <button key={entry.modusId} className="cp-item" onClick={() => addNode(entry)}>
               <Ic name="plus" /> {entry.nomen}
@@ -603,6 +701,21 @@ export function Canvas() {
           ))}
           {palette.length === 0 && <div className="cp-empty">No flows registered yet.</div>}
         </div>
+        {/* Phone only (canvas.css): the palette above is hidden there and this summons it as a sheet. */}
+        <button
+          ref={summonRef}
+          type="button"
+          className="canvas-tools-summon"
+          onClick={() => setToolsOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={toolsOpen}
+        >
+          <Ic name="plus" /> Add a tool
+        </button>
+        {toolsOpen && createPortal(
+          <ToolsSheet palette={palette} query={toolsQuery} onQuery={setToolsQuery} onPick={pickTool} onClose={closeTools} />,
+          document.body,
+        )}
         <div className="canvas-bar">
           <span className="hint">
             {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''}

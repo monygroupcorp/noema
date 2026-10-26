@@ -3,8 +3,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   aditusFor, applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
-  FlowNode, hasEditablePorts, loadCanvas, nodesToTabula, portType, publishErrorState, resolveTabulaForModus, restoreEdges,
-  restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
+  filterPalette, FlowNode, hasEditablePorts, loadCanvas, nodesToTabula, portType, publishErrorState, resolveTabulaForModus,
+  restoreEdges, restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes, ToolsSheet, toolsCount, type PaletteEntry,
 } from './Canvas';
 import { loadFailureKind } from '../components/LoadFailure';
 import { ApiRequestError, type JsonSchema } from '../lib/api';
@@ -388,5 +388,54 @@ describe('loadCanvas — the rejection reaches the screen, with the kind it show
     const { tabula } = await loadCanvas('f1');
     expect(tabula.id).toBe('t9');
     expect(fetchSpy.mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
+  });
+});
+
+// ── The phone's tools sheet ───────────────────────────────────────────────────────
+// At 390px the palette panel stood the full height of the page and the stage was behind it.
+// The sheet replaces it there: the count first, a filter that narrows by name, one row per
+// tool. Rendered statically (no DOM events in this toolchain, see the note at the top).
+const tool = (modusId: string, nomen: string): PaletteEntry =>
+  ({ modusId, nomen, versio: '1.0.0', inputs: [], outputs: [], inputSchema: { type: 'object' } });
+const TOOLS = [tool('a', 'FLUX Schnell — text to image'), tool('b', 'FLUX.1 Kontext — instruction edit'), tool('c', 'Remove background')];
+
+describe('filterPalette — narrows the tools by name as the visitor types', () => {
+  it('an empty or blank query shows every tool', () => {
+    expect(filterPalette(TOOLS, '')).toEqual(TOOLS);
+    expect(filterPalette(TOOLS, '   ')).toEqual(TOOLS);
+  });
+  it('matches case-blind, anywhere in the name', () => {
+    expect(filterPalette(TOOLS, 'flux').map((t) => t.modusId)).toEqual(['a', 'b']);
+    expect(filterPalette(TOOLS, 'BACKGROUND').map((t) => t.modusId)).toEqual(['c']);
+  });
+  it('every word must appear, in any order', () => {
+    expect(filterPalette(TOOLS, 'edit flux').map((t) => t.modusId)).toEqual(['b']);
+    expect(filterPalette(TOOLS, 'flux video')).toEqual([]);
+  });
+});
+
+describe('ToolsSheet — states its shape before its contents (D-55)', () => {
+  const noop = () => {};
+  it('heads with the count, holds the filter, lists one 44px-class row per tool', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: '', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('3 tools');
+    expect(html).toContain('aria-label="Filter tools by name"');
+    expect(html).toContain('aria-label="Close"');
+    expect(html).toContain('role="dialog"');
+    expect(html.match(/class="cp-item"/g)?.length).toBe(3);
+  });
+  it('the count is the whole palette even while the filter narrows the rows', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: 'remove', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('3 tools');
+    expect(html.match(/class="cp-item"/g)?.length).toBe(1);
+  });
+  it('a filter nothing matches says so and how to see all again', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: 'zzz', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('No tool is named like');
+    expect(html).toContain('Clear the filter to see all 3');
+  });
+  it('toolsCount reads in the singular for one', () => {
+    expect(toolsCount(1)).toBe('1 tool');
+    expect(toolsCount(36)).toBe('36 tools');
   });
 });
