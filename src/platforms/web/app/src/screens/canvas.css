@@ -41,21 +41,66 @@
 /* loading state */
 .canvas-loading { display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-xs); }
 
-/* the node palette — real flows, click to place */
+/* the node palette — real flows, click to place. On a desktop it is a panel on the stage;
+   at phone width it is hidden and summoned as the tools sheet below (see the media block). */
 .canvas-palette {
   position: absolute; top: 16px; left: 16px; z-index: 5; width: 176px; max-height: calc(100% - 32px);
   overflow-y: auto; background: var(--panel); border: 1px solid var(--hair); border-radius: var(--r-lg);
   box-shadow: 0 8px 30px rgba(0,0,0,.4); padding: 10px;
 }
 .canvas-palette .cp-title { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--muted); padding: 2px 4px 8px; }
-.canvas-palette .cp-item {
+.cp-item {
   display: flex; align-items: center; gap: var(--s2); width: 100%; text-align: left;
   background: transparent; border: 1px solid transparent; border-radius: var(--radius);
   padding: 7px 8px; font-size: 12.5px; color: var(--text); cursor: pointer;
 }
-.canvas-palette .cp-item:hover { background: var(--raised); border-color: var(--hair-soft); }
-.canvas-palette .cp-item svg { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.cp-item:hover { background: var(--raised); border-color: var(--hair-soft); }
+.cp-item svg { width: 14px; height: 14px; color: var(--muted); flex: none; }
 .canvas-palette .cp-empty { padding: 4px; color: var(--faint); font-size: 12px; }
+
+/* the tools summon — the one control the phone shows in the palette's place (D-43: 44px) */
+.canvas-tools-summon {
+  display: none; position: absolute; top: 16px; left: 16px; z-index: 5;
+  min-height: 44px; align-items: center; gap: var(--s2); padding: 0 var(--s4);
+  background: var(--panel); border: 1px solid var(--hair); border-radius: var(--r-pill);
+  color: var(--text); font: inherit; font-size: var(--fs-s); font-weight: 600; cursor: pointer;
+  box-shadow: 0 8px 30px rgba(0,0,0,.4);
+}
+.canvas-tools-summon svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+
+/* the tools sheet — the palette as a bottom sheet, portaled to <body> (same chrome as
+   .muse-sheet): the head states the count, the filter narrows the list, a row places a node */
+.canvas-tools-sheet {
+  position: fixed; inset: 0; z-index: var(--z-overlay);
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.6);
+}
+.canvas-tools-card {
+  display: flex; flex-direction: column; width: min(640px, 100%); max-height: 82vh;
+  background: var(--panel); border: 1px solid var(--hair);
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
+  box-shadow: 0 -8px 30px rgba(0,0,0,.4);
+}
+.canvas-tools-head {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s2) var(--s2) var(--s4); border-bottom: 1px solid var(--hair-soft);
+}
+.canvas-tools-head b { flex: 1; font-size: var(--fs-md); font-weight: 600; letter-spacing: -.01em; }
+.canvas-tools-close { min-width: 44px; min-height: 44px; justify-content: center; }
+.canvas-tools-filter { padding: var(--s3) var(--s4) var(--s2); }
+.canvas-tools-list {
+  display: flex; flex-direction: column; overflow-y: auto; min-height: 0;
+  padding: var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom, 0px));
+}
+.canvas-tools-list .cp-item { min-height: 44px; padding: var(--s2) var(--s3); font-size: var(--fs-base); }
+.canvas-tools-empty { padding: var(--s3) var(--s3) var(--s5); color: var(--faint); font-size: var(--fs-sm); }
+
+/* Phone: the stage is what the visitor lands on. The palette panel leaves the stage and the
+   summon takes its corner; the sheet is the palette from then on. */
+@media (max-width:760px) {
+  .canvas-palette { display: none; }
+  .canvas-tools-summon { display: inline-flex; }
+}
 
 /* the publish-error banner (AMENDMENT v2 — dismissible, no design flourish beyond this) */
 .canvas-error-banner {
