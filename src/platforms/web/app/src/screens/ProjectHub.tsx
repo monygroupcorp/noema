@@ -150,7 +150,9 @@ export function ProjectHub() {
         {tab === 'Overview' ? (
           <>
             <div className="ph-overview">
-              <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={c.datasets ? `${c.datasets} filed` : 'no datasets yet'} to={`/datasets?project=${p.id}`}>
+              {/* Each empty holding carries one line saying what fills it; the count and the
+                  signal line appear only once there is something to count (DESIGN.md D-58). */}
+              <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={`${c.datasets} filed`} to={`/datasets?project=${p.id}`}>
                 {c.datasets
                   ? p.datasetIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(dsNames, x)}</div>)
                   : <div className="hc-empty">the core asset — start one to train from</div>}
@@ -160,19 +162,25 @@ export function ProjectHub() {
                   ? p.modelIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(modelNames, x)}</div>)
                   : <div className="hc-empty">trained LoRAs land on the shelf</div>}
               </HoldingCard>
-              <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={c.collections ? `${c.collections} filed` : '0 minted · 0 draft'} to={`/collections?project=${p.id}`}>
+              <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={`${c.collections} filed`} to={`/collections?project=${p.id}`}>
                 {c.collections
                   ? p.collectionIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(collNames, x)}</div>)
                   : <div className="hc-empty">publishable drops → noesis</div>}
               </HoldingCard>
               <HoldingCard ico="message-square" name="Chats" n={c.chats} foot={`last ${p.updated}`} onTo={() => setTab('Chats')}>
-                {p.chats.slice(0, 2).map((ch) => <div className="hc-line" key={ch.id}>› {ch.title}</div>)}
+                {c.chats
+                  ? p.chats.slice(0, 2).map((ch) => <div className="hc-line" key={ch.id}>› {ch.title}</div>)
+                  : <div className="hc-empty">chats you start while this project is active land here</div>}
               </HoldingCard>
               <HoldingCard ico="workflow" name="Canvases" n={c.canvases} foot={`last ${p.updated}`} onTo={() => setTab('Canvases')}>
-                {p.canvases.slice(0, 2).map((cv) => <div className="hc-line" key={cv.id}>› {cv.name} · {cv.nodes} nodes</div>)}
+                {c.canvases
+                  ? p.canvases.slice(0, 2).map((cv) => <div className="hc-line" key={cv.id}>› {cv.name} · {cv.nodes} nodes</div>)
+                  : <div className="hc-empty">canvases you build while this project is active land here</div>}
               </HoldingCard>
               <HoldingCard ico="star" name="Favorites" n={c.cards} foot="catalogue picks" onTo={() => setTab('Favorites')}>
-                {p.cards.slice(0, 2).map((cd) => <div className="hc-line" key={cd.id}>› {cd.name} · {cd.verb}</div>)}
+                {c.cards
+                  ? p.cards.slice(0, 2).map((cd) => <div className="hc-line" key={cd.id}>› {cd.name} · {cd.verb}</div>)
+                  : <div className="hc-empty">pin a card from the catalogue to keep it here</div>}
               </HoldingCard>
             </div>
 
@@ -234,15 +242,18 @@ function ScopedList({ rows, empty }: { rows: string[]; empty: string }) {
   );
 }
 
+// A holding with nothing in it prints no count and no signal line (DESIGN.md D-58: empty
+// counters are suppressed); its body carries the one line saying what fills it, and the Open
+// control stays so the card is still a door.
 function HoldingCard({ ico, name, n, foot, onTo, to, children }: {
   ico: string; name: string; n: number; foot: React.ReactNode; onTo?: () => void; to?: string; children: React.ReactNode;
 }) {
   return (
     <div className="holding">
-      <div className="hc-head"><span className="hc-ico"><Ic name={ico} /></span><b>{name}</b><span className="hc-n">{n}</span></div>
+      <div className="hc-head"><span className="hc-ico"><Ic name={ico} /></span><b>{name}</b>{n ? <span className="hc-n">{n}</span> : null}</div>
       <div className="hc-body">{children}</div>
       <div className="hc-foot">
-        <span className="hc-sig">{foot}</span>
+        <span className="hc-sig">{n ? foot : null}</span>
         {to ? <Link className="hc-open" to={to}>Open ▸</Link> : <button className="hc-open" onClick={onTo}>Open ▸</button>}
       </div>
     </div>

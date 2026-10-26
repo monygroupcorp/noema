@@ -53,11 +53,13 @@ export function computeRow(exec: string): { glyph: string; text: string; roadmap
   return { glyph: 'lit', text: 'shared — running on our compute', roadmap: 'hardware-sealed compute (TEE) is on the roadmap.' };
 }
 
-// the full project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
+// the project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
 // Holdings are real now: datasets/models/collections read the project's filed id-reference
 // lengths, not a hardcoded 0. Chats/canvases/favorites stay client-local overlay (no backend
-// store yet).
-function holdings(p: Project) {
+// store yet). Only the non-zero holdings are returned (DESIGN.md D-58: a row of glyphs all
+// reading 0 is noise); a project with nothing in it gets EMPTY_HOLDINGS as its one line.
+export const EMPTY_HOLDINGS = 'nothing in it yet';
+export function holdings(p: Project): { ico: string; n: number }[] {
   const c = counts(p);
   return [
     { ico: 'message-square', n: c.chats },
@@ -66,7 +68,7 @@ function holdings(p: Project) {
     { ico: 'box', n: c.models },
     { ico: 'hexagon', n: c.collections },
     { ico: 'star', n: c.cards },
-  ];
+  ].filter((h) => h.n > 0);
 }
 
 export function Dashboard() {
@@ -139,7 +141,9 @@ export function Dashboard() {
               <div className="dbproj-body">
                 <b>{p.name}</b>
                 <div className="dbproj-holdings mono">
-                  {holdings(p).map((h, i) => <span key={i} className="hc"><Ic name={h.ico} />{h.n}</span>)}
+                  {holdings(p).length
+                    ? holdings(p).map((h) => <span key={h.ico} className="hc"><Ic name={h.ico} />{h.n}</span>)
+                    : <span className="hc">{EMPTY_HOLDINGS}</span>}
                 </div>
               </div>
               <div className="dbproj-foot"><span className="upd mono">{p.updated}</span></div>

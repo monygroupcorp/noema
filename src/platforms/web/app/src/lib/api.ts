@@ -404,6 +404,21 @@ const authHeaders = (): Record<string, string> => {
 const readHeaders = (): Record<string, string> =>
   getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
 
+// A read only a named account can answer. The anonymous commitment path carries no animaId,
+// so the server has nothing to look up and can only refuse: GET /v1/me/partner answers 404
+// (no partner record can exist) and GET /v1/teams answers 403 (teams require an identified
+// account). Asking anyway printed a failed request in the console on every app route, because
+// the shell probes the partner record on mount. The question is settled here instead, with
+// the same typed rejection the server would have sent, and no request is issued. A caller's
+// catch branch therefore sees exactly what it saw before; only the network round-trip is gone.
+export function namedOnly<T>(refusal: { status: number; code: string; message: string }, read: () => Promise<T>): Promise<T> {
+  if (getSession()) return read();
+  return Promise.reject(new ApiRequestError(refusal.code, refusal.message, refusal.status));
+}
+const NO_PARTNER = { status: 404, code: 'not_found.partner', message: 'No partner record found for this account' };
+const NO_PARTNER_REQUEST = { status: 404, code: 'not_found.partner_request', message: 'No partner request found for this account' };
+const NO_TEAMS = { status: 403, code: 'auth.forbidden', message: 'teams require an identified account' };
+
 // ── Deadline for a read a screen is blocked on ─────────────────────────────
 // `fetch` has no timeout of its own. A request the network accepts and then never answers —
 // a socket a proxy holds open, a server that stops mid-response — leaves its promise pending
@@ -639,13 +654,14 @@ export const api = {
   // ordinary account a platform admin has approved (no on-chain agent/treasury). Uses `jApi`
   // (not `j`) so a 404 (no/revoked partner) surfaces as a typed `ApiRequestError` the Partner
   // screen can branch on (`err.code === 'not_found.partner'`) instead of a generic message.
-  mePartner: () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>),
+  // Named-account only (see namedOnly): without a session the rejection is settled client-side.
+  mePartner: () => namedOnly(NO_PARTNER, () => fetch('/v1/me/partner', { headers: readHeaders() }).then(jApi<Partner>)),
   // GET /v1/me/partner-request — the caller's OWN most recent application and its state.
   // The companion to mePartner(): that one reports approval and 404s the same way for someone
   // who never applied, someone under review and someone declined. This one says which.
   // `jApi` again, so the Partner screen can branch on `err.code === 'not_found.partner_request'`
   // (this account has filed nothing) rather than showing an error for a normal state.
-  mePartnerRequest: () => fetch('/v1/me/partner-request', { headers: readHeaders() }).then(jApi<OwnPartnerRequest>),
+  mePartnerRequest: () => namedOnly(NO_PARTNER_REQUEST, () => fetch('/v1/me/partner-request', { headers: readHeaders() }).then(jApi<OwnPartnerRequest>)),
   // POST /v1/me/partner/api-key — self-serve issue-or-rotate, callable ONLY by the partner
   // themselves (never returned from the admin approval route — see adminDecidePartnerRequest's
   // comment below for why). Each call retires any key this same flow issued previously and
@@ -1179,7 +1195,8 @@ export const api = {
 
   // ── Teams (Sodalitas) — a fellowship of Animae that co-owns work ─────────────
   // All member-scoped; identified accounts only. Founder is the first member.
-  listTeams: () => fetch('/v1/teams', { headers: readHeaders() }).then(j<{ teams: Team[] }>),
+  // Named-account only (see namedOnly): without a session the 403 is settled client-side.
+  listTeams: () => namedOnly(NO_TEAMS, () => fetch('/v1/teams', { headers: readHeaders() }).then(j<{ teams: Team[] }>)),
   getTeam: (id: string) => fetch(`/v1/teams/${encodeURIComponent(id)}`, { headers: readHeaders() }).then(j<{ team: Team }>),
   createTeam: (body: { nomen: string; members?: string[] }) =>
     fetch('/v1/teams', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }).then(j<{ team: Team }>),
