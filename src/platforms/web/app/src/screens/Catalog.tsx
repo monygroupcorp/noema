@@ -103,13 +103,13 @@ export function CatalogFilters({ verbs, verb, onVerb, media, onMedia, sort, onSo
         ))}
       </div>
       <div className="cat-controls">
-        <label className="cat-select">
+        <label className="cat-select cat-select-mod">
           <span>modality</span>
           <select value={media} onChange={(e) => onMedia(e.target.value)}>
             {MODALITIES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
           </select>
         </label>
-        <label className="cat-select">
+        <label className="cat-select cat-select-sort">
           <span>sort</span>
           <select value={sort} onChange={(e) => onSort(e.target.value as SortKey)}>
             {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}

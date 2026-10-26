@@ -119,10 +119,10 @@ export function Studio() {
   );
 
   const badge = !loaded ? null
-    : !studio ? <span className="badge">no lease</span>
-    : studio.status === 'provisioning' ? <span className="badge">provisioning</span>
-    : studio.status === 'draining' ? <span className="badge">draining</span>
-    : <span className="badge accent">ready</span>;
+    : !studio ? <span className="badge">No lease</span>
+    : studio.status === 'provisioning' ? <span className="badge">Provisioning</span>
+    : studio.status === 'draining' ? <span className="badge">Draining</span>
+    : <span className="badge accent">Ready</span>;
 
   return (
     <AppShell crumb="Studio" context={context}>
@@ -144,7 +144,7 @@ export function Studio() {
             <div className="sectionhead">Lease a studio</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)', maxWidth: 480 }}>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-                substrate
+                Substrate
                 <select className="mobile-zoom-safe" value={fundamentumId} onChange={(e) => setFundamentumId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
                   {fundamenta.length === 0 && <option value="">loading substrates…</option>}
                   {fundamenta.map((f) => (
@@ -155,7 +155,7 @@ export function Studio() {
                 </select>
               </label>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-                session budget (credits, optional — defaults to your full balance)
+                Session budget (credits, optional — defaults to your full balance)
                 <input className="mobile-zoom-safe" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 5000" inputMode="numeric" style={{ display: 'block', width: '100%', marginTop: 4 }} />
               </label>
               <div>
