@@ -117,7 +117,7 @@ export function AccountSettings() {
       <AppShell title="Settings">
         <div className="page"><div className="pw wide">
           <div className="pagehead"><div>
-            <h1>Account</h1>
+            <h1>Settings</h1>
             <div className="sub">Your account across every interface — web · Telegram · API. Tune what we see; your work stays yours.</div>
           </div></div>
 

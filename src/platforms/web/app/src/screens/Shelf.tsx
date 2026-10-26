@@ -308,7 +308,7 @@ export function Shelf() {
               {shelfKicker(models, count)}
               {catOpen && catalog && <> · public catalog · {catalog.length}</>}
             </div>
-            <h1>Model shelf</h1>
+            <h1>Models</h1>
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
           </div>
           <div className="shelf-right">
