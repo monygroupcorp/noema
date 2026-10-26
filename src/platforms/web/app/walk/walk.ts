@@ -86,6 +86,15 @@ const SETTLE_JS = `new Promise(function (resolve) {
 
 async function settle(page: import('playwright').Page): Promise<void> {
   await page.evaluate(SETTLE_JS).catch(() => {});
+  // A loader is static DOM: "Loading canvas…" sits still for the quiet window while the reads
+  // behind it are in flight, and the walk photographed it on every run and the critic filed the
+  // screen as never loading. A screen that is busy says so with aria-busy; the walk waits for
+  // that to clear, up to the same cap, then lets the DOM it produced settle.
+  const busy = await page.locator('[aria-busy="true"]').count().catch(() => 0);
+  if (busy > 0) {
+    await page.waitForSelector('[aria-busy="true"]', { state: 'detached', timeout: SETTLE_CAP_MS }).catch(() => {});
+    await page.evaluate(SETTLE_JS).catch(() => {});
+  }
 }
 
 /** The app does not scroll the document. `.app` is `height:100vh` and `.page` is the scroll area
