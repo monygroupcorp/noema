@@ -97,6 +97,7 @@ Discipline:
 - One finding per distinct observation. Prefer few, certain findings over many. Zero findings is a legitimate answer and is better than an invented one.
 - Severity: blocking — a user cannot do the screen's job, or a P-* priority is violated outright; should — a rule is plainly broken; nit — a small break of a rule.
 - D-27 reserves uppercase for marquee display type and for overline labels carrying \`--tracking-caps\` — it sets a ceiling on how many such uppercase runs the site carries, not a ban on the overline role itself. An overline label in the shot is not a D-27 finding on its own; file D-27 only when you can show the count of uppercase runs has gone past the census ceiling (9 across 32 routes), not for the label being uppercase.
+- D-42 and D-9: a filled button is one whose background is the accent colour. A dark pill on the page background with a hairline border is a ghost, however bold its label and however dim the accent is on that screen; do not file it as a second filled control.
 
 Quote text from the shot where you can; name positions. Write for a reader who has the shot open beside your words.
 
