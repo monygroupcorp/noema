@@ -180,8 +180,8 @@ export function AccountSettings() {
               <div className="ac-note mono">generation defaults that travel with you — override inline anytime.</div>
             </SectionCard>
             <SectionCard to="/keyring" ico="key-round" name="Keyring">
-              <Row k="active" v={anon ? 'anonymous' : ident.name} />
-              <Row k="saved logins" v={savedLogins ? <>{savedLogins} in this browser</> : <Link className="accent" to="/onboard?add=1">none yet — add one ▸</Link>} />
+              <Row k="Active" v={anon ? 'anonymous' : ident.name} />
+              <Row k="Saved logins" v={savedLogins ? <>{savedLogins} in this browser</> : <Link className="accent" to="/onboard?add=1">none yet — add one ▸</Link>} />
               <div className="ac-note mono">switch between saved logins or add one — each keeps its own projects, history and settings.</div>
             </SectionCard>
           </div>
