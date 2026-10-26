@@ -18,8 +18,9 @@
   --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f;
   --amber:#d8a657; --amber-bg:rgba(216,166,87,.10);
   --egress:#c98f6a; --noesis:#b98fe0;   /* egress disclosure · the NOESIS publishing brand */
-  /* modality swatches — one palette shared by canvas ports, catalogue, datasets */
-  --m-text:#8fb0ff; --m-image:#5b8cff; --m-video:#d66f9a; --m-audio:#5fd0a8; --m-3d:#c79a4e;
+  /* modality swatches — one palette shared by canvas ports, catalogue, datasets (D-11).
+     Each is its own hue: text is lime, not the soft accent, which read as a second image blue. */
+  --m-text:#b4cf5a; --m-image:#5b8cff; --m-video:#d66f9a; --m-audio:#5fd0a8; --m-3d:#c79a4e;
   --radius:10px; --rail:236px; --context:328px;
   /* The docked concierge launcher (P-2c, D-52): the shell reserves the launcher's whole footprint
      at the foot of .main, so the scroll area ends above it at every scroll position. --dock-h is
