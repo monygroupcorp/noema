@@ -7,13 +7,19 @@ import { ReportModal } from './ReportModal';
 // The persistent frame (dashboard-spec.md §A): left rail (global nav) + a top bar carrying
 // the current surface TITLE (left) and the always-on POSTURE CLUSTER (right). Screens compose
 // their main content (+ optional right context). `crumb` is the surface title.
+//
+// `gated` marks a screen whose body is a gate (sign in, not yours, not found) rather than the
+// screen itself. The gate's own control is then the one action on the screen, and the topbar's
+// "Start" stands down: a topbar must not offer what the screen in front of it refuses (P-1a),
+// and a gate card beside a second button reads as two actions (D-42).
 export function AppShell({
-  crumb, title, context, concierge = true, children,
+  crumb, title, context, concierge = true, gated = false, children,
 }: {
   crumb?: ReactNode;
   title?: ReactNode;
   context?: ReactNode;
   concierge?: boolean;
+  gated?: boolean;
   children: ReactNode;
 }) {
   const heading = title ?? crumb;
@@ -23,7 +29,7 @@ export function AppShell({
       <section className="main">
         <div className="topbar">
           {heading && <div className="surface-title">{heading}</div>}
-          <Account />
+          <Account start={!gated} />
         </div>
         {children}
       </section>

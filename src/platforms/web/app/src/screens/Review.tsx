@@ -76,7 +76,7 @@ export function Review() {
   const pending = (items ?? []).filter((e) => e.reviewOutcome === 'pending');
 
   return (
-    <AppShell title={admin ? 'Feed review · moderation' : 'Your publications in review'}>
+    <AppShell title={admin ? 'Feed review · moderation' : 'Your publications in review'} gated={ready && !session}>
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>

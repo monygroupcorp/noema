@@ -90,19 +90,9 @@ export function RequestDemo() {
       <article className="prose">
         <h1>Request a demo / become a partner</h1>
         <p>
-          Tell us a bit about what you want to build. This isn't a support form — for bugs or
-          feedback on an existing account, use the report button inside the app instead.
+          Tell us what you want to build. For bugs or feedback on an existing account, use the
+          report button inside the app instead.
         </p>
-
-        {phase !== 'success' && !session && (
-          <div className="warn" style={{ maxWidth: 480 }}>
-            <b>Sign in first if you can.</b> A request sent while signed in is tied to your
-            account, so approving it switches your partner access on by itself. Sent
-            anonymously, there's nothing for us to switch on — we'd have to onboard you by hand.
-            {' '}
-            <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring you back here.
-          </div>
-        )}
 
         {phase === 'success' ? (
           <div className="byo-row">
@@ -201,6 +191,19 @@ export function RequestDemo() {
                 onChange={(e) => setNotes(e.target.value)}
               />
             </label>
+
+            {/* Read before pressing submit, and after the fields rather than before them, so
+                the form itself opens in the first screen (P-2a). One child: .warn is a flex row. */}
+            {!session && (
+              <div className="warn">
+                <span>
+                  <b>Sign in first if you can.</b> A request sent signed in switches your partner
+                  access on by itself when approved; sent anonymously, we'd have to onboard you by
+                  hand. <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring
+                  you back here.
+                </span>
+              </div>
+            )}
 
             {phase === 'error' && <div className="warn">{error}</div>}
 

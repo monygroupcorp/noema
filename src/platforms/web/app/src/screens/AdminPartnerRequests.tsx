@@ -71,7 +71,7 @@ export function AdminPartnerRequests() {
     setItems((cur) => (cur ?? []).map((r) => (r.id === updated.id ? updated : r)));
 
   return (
-    <AppShell title="Partner requests · admin">
+    <AppShell title="Partner requests · admin" gated={ready && !session}>
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>

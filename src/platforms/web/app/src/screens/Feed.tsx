@@ -140,9 +140,10 @@ export function Feed() {
         <div className="pagehead">
           <div>
             <h1>Feed</h1>
-            <div className="sub">{feedShape(items)} Publish your own from any result.</div>
+            {/* The topbar's "Start" already begins a piece from every screen; a second filled
+                button here would be the same action twice (P-1d), so the way in is a plain link. */}
+            <div className="sub">{feedShape(items)} <Link to="/card">Make something</Link> and publish it from the result.</div>
           </div>
-          <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
         </div>
 
         {pendingErr && <div className="warn">{pendingErr}</div>}
@@ -159,8 +160,7 @@ export function Feed() {
         {items !== null && items.length === 0 && (
           <div className="empty">
             <div className="t">Nothing published yet</div>
-            <div className="s">Be the first — make something and hit “Publish to feed” on the result.</div>
-            <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
+            <div className="s">Be the first — <Link to="/card">make something</Link> and hit “Publish to feed” on the result.</div>
           </div>
         )}
 
