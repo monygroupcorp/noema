@@ -1,6 +1,6 @@
 import type { Db } from 'mongodb'
 import type { FlowContext, Platform } from './types.js'
-import type { FlowContextStore } from './FlowContextStore.js'
+import { FLOW_CONTEXT_TTL_MS, type FlowContextStore, type FlowContextStoreOptions } from './FlowContextStore.js'
 import { makeLogger } from '../lib/logger.js'
 
 const log = makeLogger('flow:context-store')
@@ -9,11 +9,18 @@ export class MongoFlowContextStore implements FlowContextStore {
   private readonly collection
   private readonly primary = new Map<string, FlowContext>()
   private readonly actumIndex = new Map<string, string>()
+  // When each cached context was last written (or, after hydrate, last persisted). The TTL
+  // index below expires the document; this expires the cache, so the two agree on what is live.
+  private readonly touchedAt = new Map<string, number>()
+  private readonly ttlMs: number
+  private readonly now: () => number
 
-  constructor(db: Db, collectionName = 'flowContexts') {
+  constructor(db: Db, collectionName = 'flowContexts', opts: FlowContextStoreOptions = {}) {
     this.collection = (db as unknown as { collection: (name: string) => unknown }).collection
       ? (db as unknown as { collection: (name: string) => unknown }).collection(collectionName)
       : db  // accept a pre-built collection directly (used in tests)
+    this.ttlMs = opts.ttlMs ?? FLOW_CONTEXT_TTL_MS
+    this.now = opts.now ?? Date.now
   }
 
   key(platform: Platform, userId: string, chatId: string): string {
@@ -21,7 +28,7 @@ export class MongoFlowContextStore implements FlowContextStore {
   }
 
   get(platform: Platform, userId: string, chatId: string): FlowContext | undefined {
-    return this.primary.get(this.key(platform, userId, chatId))
+    return this._live(this.key(platform, userId, chatId))
   }
 
   set(platform: Platform, userId: string, chatId: string, ctx: FlowContext): void {
@@ -32,6 +39,7 @@ export class MongoFlowContextStore implements FlowContextStore {
     if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
 
     this.primary.set(k, ctx)
+    this.touchedAt.set(k, this.now())
     if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, k)
 
     // Fire-and-forget Mongo upsert
@@ -40,15 +48,33 @@ export class MongoFlowContextStore implements FlowContextStore {
 
   delete(platform: Platform, userId: string, chatId: string): void {
     const k = this.key(platform, userId, chatId)
-    const existing = this.primary.get(k)
-    if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
-    this.primary.delete(k)
+    this._evict(k)
     this._delete(k).catch((err: unknown) => log.error('delete error', { error: String(err) }))
   }
 
   findByPendingActumId(actumId: string): FlowContext | undefined {
     const k = this.actumIndex.get(actumId)
-    return k ? this.primary.get(k) : undefined
+    return k ? this._live(k) : undefined
+  }
+
+  /** The cached context under `k`, unless it has sat idle past the TTL — then it is dropped
+   *  from the cache (the document expires on its own index) and reads as absent. */
+  private _live(k: string): FlowContext | undefined {
+    const ctx = this.primary.get(k)
+    if (!ctx) return undefined
+    const touched = this.touchedAt.get(k)
+    if (touched !== undefined && this.now() - touched >= this.ttlMs) {
+      this._evict(k)
+      return undefined
+    }
+    return ctx
+  }
+
+  private _evict(k: string): void {
+    const existing = this.primary.get(k)
+    if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
+    this.primary.delete(k)
+    this.touchedAt.delete(k)
   }
 
   async hydrate(): Promise<void> {
@@ -76,8 +102,13 @@ export class MongoFlowContextStore implements FlowContextStore {
     const docs = await col.find({}).toArray()
     for (const doc of docs) {
       const ctx = doc.ctx as FlowContext
-      this.primary.set(doc._id as string, ctx)
-      if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, doc._id as string)
+      const k = doc._id as string
+      this.primary.set(k, ctx)
+      // Carry the persisted write time so a context that was already old at boot does not get
+      // a fresh 24h from the restart. A document with no stamp is treated as written now.
+      const updatedAt = doc.updatedAt instanceof Date ? doc.updatedAt.getTime() : this.now()
+      this.touchedAt.set(k, updatedAt)
+      if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, k)
     }
   }
 

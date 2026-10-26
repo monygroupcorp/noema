@@ -340,9 +340,120 @@ test('CONFIGURE + form, balance insufficient returns Detail step with top-up act
   if (p.kind === 'Detail') {
     assert.ok(p.label.includes('Insufficient') || p.label.includes('balance'), 'label should mention balance')
     const actionIds = p.actions.map(a => a.id)
-    assert.ok(actionIds.includes('connect_wallet'), 'should have connect_wallet action')
-    assert.ok(actionIds.includes('buy_credits'), 'should have buy_credits action')
+    assert.ok(actionIds.includes('run_again'), 'should offer Try again (re-checks the balance)')
     assert.ok(actionIds.includes('cancel'), 'should have cancel action')
+    // No funding link is known here, so no button promises one — and no button is a dead tap.
+    assert.ok(!actionIds.includes('buy_credits'), 'no funding link → no buy button')
+    assert.ok(!actionIds.includes('connect_wallet'), 'the dead connect-wallet tap is gone')
+    assert.match(p.content, /\/recover/, 'the text says how a Telegram user signs in on the web')
+    assert.match(p.content, /Funding/, 'the text names where credits are bought')
+  }
+})
+
+function zeroBalanceSignorum(): ExecuteFlowDeps['signorum'] {
+  return { ...makeDeps().signorum, balance: async () => 0n }
+}
+
+test('insufficient balance: with a funding url the step links the page and every button does something', async () => {
+  const flow = new ExecuteFlow(makeDeps({ signorum: zeroBalanceSignorum(), fundingUrl: 'https://example.test/funding' }))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'a cat' })
+  assertStep(result)
+  const p = result.primitives[0]
+  assert.equal(p.kind, 'Detail')
+  if (p.kind !== 'Detail') return
+  const buy = p.actions.find(a => a.id === 'buy_credits')
+  assert.equal(buy?.url, 'https://example.test/funding', 'Buy credits is a link to the funding page')
+  assert.match(p.content, /https:\/\/example\.test\/funding/)
+  assert.deepEqual(p.actions.map(a => a.id), ['buy_credits', 'run_again', 'cancel'])
+})
+
+test('fast path (/make <prompt>) with an empty balance answers with the top-up step, not an exception', async () => {
+  let initiated = 0
+  const base = makeDeps({ signorum: zeroBalanceSignorum() })
+  const flow = new ExecuteFlow({ ...base, inceptor: { initiate: async () => { initiated++; return makeActum() } } })
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+  const result = await flow.enter(ctx)
+  assert.equal(result.primitives[0].kind, 'Detail')
+  assert.equal((result.primitives[0] as { label: string }).label, 'Insufficient balance')
+  assert.equal(initiated, 0, 'nothing was dispatched')
+})
+
+test('top-up step → Try again once the balance covers it submits the same run', async () => {
+  let balance = 0n
+  const base = makeDeps()
+  const initiated: Array<Record<string, unknown>> = []
+  const flow = new ExecuteFlow({
+    ...base,
+    signorum: { ...base.signorum, balance: async () => balance },
+    inceptor: { initiate: async (inc: { aditus: Record<string, unknown> }) => { initiated.push(inc.aditus); return makeActum() } },
+  })
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+  const first = await flow.enter(ctx)
+  assert.equal(first.primitives[0].kind, 'Detail')
+
+  // Still broke: Try again re-shows the top-up step, dispatches nothing.
+  const again = await flow.handle(ctx, { kind: 'action', actionId: 'run_again' })
+  assertStep(again)
+  assert.equal(again.primitives[0].kind, 'Detail')
+  assert.equal(initiated.length, 0)
+
+  balance = 10_000n
+  const run = await flow.handle(ctx, { kind: 'action', actionId: 'run_again' })
+  assertStep(run)
+  assert.equal(run.primitives[0].kind, 'Result')
+  assert.deepEqual(initiated, [{ prompt: 'a cat' }], 'the same aditus was dispatched')
+})
+
+test('✕ on a card ends the flow and says it was cancelled', async () => {
+  const flow = new ExecuteFlow(makeDeps({ signorum: zeroBalanceSignorum() }))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+  await flow.enter(ctx)
+  const result = await flow.handle(ctx, { kind: 'action', actionId: 'cancel' })
+  assertResolution(result)
+  assert.equal(result.kind, 'complete')
+  assert.deepEqual((result as { output?: unknown }).output, { cancelled: true })
+})
+
+test('a failed run lands on CONFIGURE: Try again re-submits the same aditus, ✕ ends it', async () => {
+  const base = makeDeps()
+  const initiated: Array<Record<string, unknown>> = []
+  const flow = new ExecuteFlow({
+    ...base,
+    inceptor: { initiate: async (inc: { aditus: Record<string, unknown> }) => { initiated.push(inc.aditus); return makeActum() } },
+  })
+  const ctx = makeCtx({
+    state: { step: 'AWAITING_COMPLETION', modusId: 'mod-1', aditus: { prompt: 'a cat' }, actumId: 'actum-1', browsePageIndex: 0 },
+    pendingActumId: 'actum-1',
+  })
+
+  const failed = await flow.handleCompletion(ctx, { kind: 'failed', error: 'GPU OOM' })
+  assertStep(failed)
+  const card = failed.primitives[0]
+  assert.equal(card.kind, 'Detail')
+  if (card.kind === 'Detail') assert.deepEqual(card.actions.map(a => a.id), ['run_again', 'cancel'])
+  assert.equal((ctx.state as { step: string }).step, 'CONFIGURE')
+
+  // Before: this tap answered "Working…" forever. Now it runs again.
+  const retry = await flow.handle(ctx, { kind: 'action', actionId: 'run_again' })
+  assertStep(retry)
+  assert.equal(retry.primitives[0].kind, 'Result')
+  assert.deepEqual(initiated, [{ prompt: 'a cat' }])
+})
+
+test('SELECT_CATEGORY + a stray message re-asks WITH the categories (never an empty keyboard)', async () => {
+  const flow = new ExecuteFlow(makeDeps())
+  const ctx = makeCtx()
+  await flow.enter(ctx)
+  await flow.handle(ctx, { kind: 'select', selectedId: 'effect' })
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'hello?' })
+  assertStep(result)
+  const p = result.primitives[0]
+  assert.equal(p.kind, 'Select')
+  if (p.kind === 'Select') {
+    assert.equal(p.options.length, 4, 'the effect categories are offered again')
+    assert.ok(p.options.some(o => o.id === 'caption'))
   }
 })
 

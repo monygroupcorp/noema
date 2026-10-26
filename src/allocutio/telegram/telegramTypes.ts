@@ -61,7 +61,9 @@ export interface TelegramSender {
   editMessageReplyMarkup?(chatId: number, messageId: number, reply_markup: unknown): Promise<void>
   /** Delete a message — used to re-post the session bulletin at the bottom of the chat. */
   deleteMessage?(chatId: number, messageId: number): Promise<void>
-  answerCallbackQuery(callbackQueryId: string): Promise<void>
+  /** Answer a button tap. `text` shows as a toast on the tapper's screen — the one channel a
+   *  tap on a dead button can be answered through without posting into the chat. */
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>
   sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
   sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
   sendDocument(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>

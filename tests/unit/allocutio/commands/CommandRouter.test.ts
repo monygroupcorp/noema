@@ -6,17 +6,19 @@ function make(extra?: {
   flows?: (userId: string) => Promise<string[]>
   resolveVerb?: (userId: string, verb: string) => Promise<string | undefined>
   bindVerb?: (userId: string, verb: string, modusId: string) => Promise<void>
+  fundingUrl?: string
 }) {
   const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [], bind: [] }
   const router = new CommandRouter({
     enterExecute: async (userId, state) => { calls.enter.push({ userId, state }) },
     cancel: (userId) => { calls.cancel.push(userId) },
-    sendMessage: async (chatId, text) => { calls.msg.push({ chatId, text }) },
+    sendMessage: async (chatId, text, extra) => { calls.msg.push({ chatId, text, extra }) },
     sendStart: async (chatId) => { calls.start.push(chatId) },
     ack: (chatId, messageId) => { calls.ack.push({ chatId, messageId }) },
     setPendingShareToken: (userId, token) => { calls.shareToken.push({ userId, token }) },
     arm: (userId, chatId) => { calls.arm.push({ userId, chatId }) },
     ...(extra?.flows ? { flows: extra.flows } : {}),
+    ...(extra?.fundingUrl ? { fundingUrl: extra.fundingUrl } : {}),
     ...(extra?.resolveVerb ? { resolveVerb: extra.resolveVerb } : {}),
     ...(extra?.bindVerb
       ? { bindVerb: async (userId: string, verb: string, modusId: string) => { calls.bind.push({ userId, verb, modusId }); await extra.bindVerb!(userId, verb, modusId) } }
@@ -225,4 +227,24 @@ test('silentOnUnknown never suppresses a command we do own', async () => {
   const { router, calls } = make()
   await router.dispatch('u1', 456, '/make a red fox', 50, undefined, { silentOnUnknown: true })
   assert.equal(calls.enter.length, 1, 'a bare /make in a group still works')
+})
+
+test('/wallet says the whole top-up route, links the funding page, and acks', async () => {
+  const { router, calls } = make({ fundingUrl: 'https://example.test/funding' })
+  await router.dispatch('u1', 456, '/wallet', 50)
+  const msg = calls.msg[0] as { text: string; extra?: { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string }>> } } }
+  assert.doesNotMatch(msg.text, /coming soon/i)
+  assert.match(msg.text, /\/recover/)
+  assert.match(msg.text, /Recover with Telegram/)
+  assert.match(msg.text, /https:\/\/example\.test\/funding/)
+  assert.deepEqual(msg.extra?.reply_markup?.inline_keyboard.flat().map(b => b.url), ['https://example.test/funding'])
+  assert.deepEqual(calls.ack, [{ chatId: 456, messageId: 50 }])
+})
+
+test('/wallet with no funding url still says the route, with no button', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/wallet')
+  const msg = calls.msg[0] as { text: string; extra?: unknown }
+  assert.match(msg.text, /On the web/)
+  assert.equal(msg.extra, undefined)
 })

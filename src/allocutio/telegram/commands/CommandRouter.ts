@@ -1,4 +1,4 @@
-import { inlineKeyboard, btn } from '../telegramRender.js'
+import { topUpMarkup } from '../telegramRender.js'
 import type { EnvelopeMediaType } from '../envelopeMedia.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
@@ -70,6 +70,8 @@ export interface CommandDeps {
    * it on the web sign-in screen to log back in. Optional — same wiring as linkTelegram.
    */
   issueTelegramRecovery?(userId: string): Promise<string>
+  /** Where credits are bought on the web. Absent → /wallet still says the route, with no link. */
+  fundingUrl?: string
 }
 
 /** Deep-link account-link payload: `/start link_<code>` (code is base64url from makeLinkToken). */
@@ -280,16 +282,16 @@ export class CommandRouter {
           await this.deps.showStatus(userId, chatId)
         } else {
           // Fallback for tests/contexts that don't wire the status aggregator.
-          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, {
-            reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('top up', 'a:topup')]]),
-          })
+          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, topUpMarkup(this.deps.fundingUrl))
         }
         return
 
       case '/wallet':
-        await this.deps.sendMessage(chatId, COPY.command.walletComingSoon, {
-          reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')]]),
-        })
+        // The bot takes no payment. What it can do is say, in full, how this account tops up —
+        // with the link when the deployment knows it. (This used to say "coming soon" above two
+        // buttons that did nothing.)
+        await this.deps.sendMessage(chatId, COPY.command.topUp(this.deps.fundingUrl), topUpMarkup(this.deps.fundingUrl))
+        ack()
         return
 
       case '/recover':

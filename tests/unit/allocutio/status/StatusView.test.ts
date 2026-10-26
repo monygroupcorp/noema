@@ -21,13 +21,13 @@ test('signed-in zero-state: only Balance + footer', () => {
   assert.ok(!text.includes('YOUR GENS'), 'no empty section header')
   assert.ok(!text.includes('YOUR STUDIOS'))
   assert.ok(!text.includes('JOINABLE'))
-  assert.deepEqual(cb(keyboard).sort(), ['stat:history', 'stat:refresh', 'stat:settings'].sort())
+  assert.deepEqual(cb(keyboard), ['stat:refresh'], 'only buttons that do something')
 })
 
 test('not signed in: prompts to connect; only footer affordances', () => {
   const { text, keyboard } = StatusView.render({ ...empty, auctorKey: null })
   assert.match(text, /Not signed in/)
-  assert.deepEqual(cb(keyboard).sort(), ['stat:history', 'stat:refresh', 'stat:settings'].sort())
+  assert.deepEqual(cb(keyboard), ['stat:refresh'])
 })
 
 test('balance: formats with thousands separator + USD', () => {

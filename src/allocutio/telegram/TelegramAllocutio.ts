@@ -49,7 +49,7 @@ import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMen
 import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
-import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { inlineKeyboard, btn, urlBtn, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
@@ -116,10 +116,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
      *  server-side. Absent → a private run's media cannot be delivered on this bot. */
     resolvePrivateMedia?: (marker: string) => Promise<string | undefined>
+    /** Where credits are bought on the web — linked wherever the bot says "not enough credits". */
+    fundingUrl?: string
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
   private readonly chatIds = new Map<string, number>()
+
+  // When each private chat last got the "nothing is running" hint — one per minute, not one
+  // per line of a paste.
+  private readonly idleHintAt = new Map<number, number>()
+  private static readonly IDLE_HINT_EVERY_MS = 60 * 1000
 
   // pending edit: platform:userId → messageId of the message to edit in place
   private readonly pendingEditMessageIds = new Map<string, number>()
@@ -195,6 +202,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     issueTelegramRecovery?: (telegramUserId: string) => Promise<string>
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
+    /** Where credits are bought on the web. Absent → the route is still spelled out, unlinked. */
+    fundingUrl?: string
     /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
      *  server-side (private generation, noema-347). The bytes live in a bucket with no public
      *  binding, so a marker is the only thing a private run hands us; the link is minted for
@@ -314,6 +323,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       // the link-token store. Absent → /recover + link deep links report unavailable.
       ...(deps.linkTelegramAccount ? { linkTelegram: deps.linkTelegramAccount } : {}),
       ...(deps.issueTelegramRecovery ? { issueTelegramRecovery: deps.issueTelegramRecovery } : {}),
+      ...(deps.fundingUrl ? { fundingUrl: deps.fundingUrl } : {}),
     })
 
     // Wire router callbacks
@@ -568,8 +578,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         log.error('TelegramAllocutio error', { error: String(err) })
         if (chatId) {
           if (messageId) void this._react(chatId, messageId, REACTION.error)
+          // An empty balance is the one failure the user can fix themselves — so say how, with
+          // the link, rather than a sentence that sends them to /status to read the same zero.
+          const broke = /insufficient funds/i.test(err instanceof Error ? err.message : String(err))
           await this.sender
-            .sendMessage(chatId, classifyError(err))
+            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl) : classifyError(err), broke ? topUpMarkup(this.deps.fundingUrl) : undefined)
             .catch(() => {})
         }
       }
@@ -661,7 +674,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           if (fileUrl) {
             await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text: fileUrl })
           }
+          return
         }
+        // A photo into an idle private chat fills nothing. Silence here read as a broken bot
+        // to anyone who remembered sending a picture and getting one back; say what would work.
+        if (message.chat.type === 'private') await this._idleHint(chatId, COPY.command.idleMedia)
         return
       }
 
@@ -677,9 +694,21 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       if (text === '') return
       if (this.router.hasContext('telegram', userId, String(chatId))) {
         await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text })
+        return
       }
-      // No active flow → no-op
+      // No active flow. In a private chat (or when addressed in a group) that is a person
+      // typing at a bot that is not listening — say what would start something.
+      await this._idleHint(chatId, COPY.command.idleText)
     }
+  }
+
+  /** The "nothing is running" hint, at most once a minute per chat. */
+  private async _idleHint(chatId: number, text: string): Promise<void> {
+    const now = Date.now()
+    const last = this.idleHintAt.get(chatId)
+    if (last !== undefined && now - last < TelegramAllocutio.IDLE_HINT_EVERY_MS) return
+    this.idleHintAt.set(chatId, now)
+    await this.sender.sendMessage(chatId, text).catch(() => {})
   }
 
   /** Group gate (ruling 2): was this message @-mentioning the bot, or replying to one
@@ -725,28 +754,34 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       this.chatIds.set(`telegram:${userId}`, chatId)
     }
 
-    // Always ack the callback query
-    await this.sender.answerCallbackQuery(query.id)
+    // Every tap is answered exactly once. A tap something below consumes is answered plainly;
+    // a tap nothing consumes — a button on a card whose flow is gone — is answered with a
+    // toast that says so. Telegram shows a spinner on the button until the answer lands, so
+    // the plain answer goes first and the handler runs after it.
+    const ack = (text?: string) => this.sender.answerCallbackQuery(query.id, text)
 
-    if (!query.data) return
+    if (!query.data) { await ack(); return }
 
     // Session bulletin — warm stepper / confirm / refresh / kill / Mod • picker.
     // Slice off the `bul:` prefix rather than split on ':' — picker ids carry their own
     // colon suffix (`mod.pick:3`, `mod.filter:lora`, `mod.page:next`) that a split would drop.
     if (query.data.startsWith('bul:') && chatId) {
+      await ack()
       const action = query.data.slice(4)
       await this.bulletins.handleControl(chatId, String(query.from.id), action)
       return
     }
 
-    // /status HUD — refresh / cancel:<actumId> / bulletin:<studioId> / join:<studioId> / history / settings
+    // /status HUD — refresh / cancel:<actumId> / bulletin:<studioId> / join:<studioId>
     if (query.data.startsWith('stat:') && chatId) {
+      await ack()
       await this._handleStatusCallback(query.data.slice(5), userId, chatId)
       return
     }
 
     // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
+      await ack()
       const [, action, actumId, ratedType] = query.data.split(':')
       // Pass the callback's own chat so the menu can refuse cross-chat actumIds.
       await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id), chatId })
@@ -756,47 +791,63 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Save-as review — prompt-mode toggle / Save (collision check + register) / Cancel.
     // Keyed on the review message the button rode on (the SaveAsMenu owns the draft).
     if (query.data.startsWith('sa:') && chatId && query.message?.message_id !== undefined) {
+      await ack()
       await this.saveAs?.handle(query.message.message_id, query.data.slice(3), chatId, userId)
       return
     }
 
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
+      await ack()
       void this.sender.sendMessage(chatId, COPY.status.podInvite).catch(() => {})
       return
     }
 
     const event = decodeCallbackData(query.data)
-    if (!event) return
+    if (!event) { await ack(); return }
 
     // Flow-card "Save as…" — open the Save-as menu seeded from the active flow's card
     // state (modusId + aditus + pinnedModels). Intercepted here, NOT routed to the flow
     // (the menu is force-reply driven, with no active flow step of its own).
     if (event.kind === 'action' && event.actionId === 'saveas' && chatId) {
+      await ack()
       await this._saveAsFromCard(userId, chatId)
       return
     }
 
-    // Store the message ID for in-place editing on the next step
-    if (query.message?.message_id !== undefined) {
-      this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
-    }
-
-    // Start-screen shortcut buttons — launch flows directly (same path as commands).
-    if (event.kind === 'select') {
-      if (event.selectedId === 'make' || event.selectedId === 'flows') {
-        await this._enterExecute(userId)
-        return
-      }
-      if (event.selectedId === 'chat') {
-        await this._enterExecute(userId, { modusId: CANON_VERBS.chat, aditus: {}, browsePageIndex: 0 })
+    // Start-screen shortcut buttons — each does what its command does. `make` runs the bound
+    // /make flow (it used to open the generic mode picker, which is what `flows` is for) and
+    // `status` is /status. The tapped message becomes the next card (edit in place).
+    if (event.kind === 'select' && chatId) {
+      const shortcut = event.selectedId
+      if (shortcut === 'make' || shortcut === 'flows' || shortcut === 'chat' || shortcut === 'status') {
+        await ack()
+        if (query.message?.message_id !== undefined && shortcut !== 'status') {
+          this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
+        }
+        if (shortcut === 'make') await this.commands.dispatch(userId, chatId, '/make')
+        else if (shortcut === 'flows') await this._enterExecute(userId)
+        else if (shortcut === 'chat') await this._enterExecute(userId, { modusId: CANON_VERBS.chat, aditus: {}, browsePageIndex: 0 })
+        else await this._showStatus(userId, chatId)
         return
       }
     }
 
     if (chatId && this.router.hasContext('telegram', userId, String(chatId))) {
+      await ack()
+      // The tapped message becomes the next step's card (edit in place). Only when the tap is
+      // going to be answered: stamping it for a dead tap made the NEXT /make overwrite that old
+      // message somewhere up the chat instead of posting at the bottom.
+      if (query.message?.message_id !== undefined) {
+        this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
+      }
       await this.router.handle('telegram', userId, String(chatId), event)
+      return
     }
+
+    // Nothing is behind this button any more: the flow it belonged to ended, expired, or was
+    // somebody else's. Say so where the tapper is looking, without posting into the chat.
+    await ack(COPY.command.menuExpired)
   }
 
   // -------------------------------------------------------------------------
@@ -1016,9 +1067,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
 
     if (action.startsWith('bulletin:') || action.startsWith('join:') || action === 'history' || action === 'settings') {
-      // V1 stubs — surface progress on these in later sprints. Acknowledge so
-      // the user sees something happen.
-      await this.sender.sendMessage(chatId, `\`${action}\` — coming soon.`)
+      // Not built. History and Settings no longer render; a tap on an older message, or on a
+      // studio row, gets a fresh /status rather than a promise.
+      await this._showStatus(userId, chatId)
       return
     }
   }
@@ -1032,10 +1083,13 @@ noema
 
 Generate AI art, chat with models, explore creative tools.`
 
+    // Every button here answers: the second row used to be "connect wallet" and "balance",
+    // which no handler ever received.
+    const fundingUrl = this.deps.fundingUrl
     await this.sender.sendMessage(chatId, text, {
       reply_markup: inlineKeyboard([
         [btn('make', 's:make'), btn('chat', 's:chat'), btn('flows', 's:flows')],
-        [btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')],
+        [btn('status', 's:status'), ...(fundingUrl ? [urlBtn('top up', fundingUrl)] : [])],
       ]),
     })
   }
@@ -1135,9 +1189,12 @@ Generate AI art, chat with models, explore creative tools.`
     if (chatId === null) return
 
     switch (resolution.kind) {
-      case 'complete':
-        await this.sender.sendMessage(chatId, COPY.status.done)
+      case 'complete': {
+        // A ✕ on a card completes the flow with `cancelled` set; "Done." would misname it.
+        const cancelled = (resolution.output as { cancelled?: boolean } | undefined)?.cancelled === true
+        await this.sender.sendMessage(chatId, cancelled ? COPY.command.cancelled : COPY.status.done)
         break
+      }
       case 'abandon':
         // Silent — abandon fires on implicit context replacement (e.g. /make while already in a flow).
         // Explicit /cancel sends its own message directly from the command handler.

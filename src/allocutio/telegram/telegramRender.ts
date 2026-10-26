@@ -10,7 +10,8 @@ import { isMediaRef } from '../../crystal/MediaFetcher.js'
 
 // ── inline keyboard helpers ──────────────────────────────────────────────────
 
-export type InlineButton = { text: string; callback_data: string }
+/** A tap the bot answers (`callback_data`), or a link Telegram opens for the user (`url`). */
+export type InlineButton = { text: string; callback_data: string } | { text: string; url: string }
 export type InlineKeyboard = { inline_keyboard: InlineButton[][] }
 
 export function inlineKeyboard(rows: InlineButton[][]): InlineKeyboard {
@@ -19,6 +20,16 @@ export function inlineKeyboard(rows: InlineButton[][]): InlineKeyboard {
 
 export function btn(text: string, data: string): InlineButton {
   return { text, callback_data: data }
+}
+
+export function urlBtn(text: string, url: string): InlineButton {
+  return { text, url }
+}
+
+/** The one button under every "you need credits" message: a link to where they are bought.
+ *  Undefined when the deployment has not said where that is — no button beats a dead one. */
+export function topUpMarkup(fundingUrl?: string): { reply_markup: InlineKeyboard } | undefined {
+  return fundingUrl ? { reply_markup: inlineKeyboard([[urlBtn('Buy credits', fundingUrl)]]) } : undefined
 }
 
 // ── renderPrimitive — Telegram rendering for each primitive kind ─────────────
@@ -133,7 +144,9 @@ export function renderPrimitive(primitive: Primitive): RenderResult {
     }
 
     case 'Detail': {
-      const rows = primitive.actions.map(action => [btn(action.label, `a:${action.id}`)])
+      const rows = primitive.actions.map(action => [
+        action.url ? urlBtn(action.label, action.url) : btn(action.label, `a:${action.id}`),
+      ])
       return {
         text: `${primitive.label}\n\n${primitive.content}`,
         extra: { reply_markup: inlineKeyboard(rows) },
