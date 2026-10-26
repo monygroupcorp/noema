@@ -1,4 +1,4 @@
-# Privacy Policy
+# Privacy policy
 **Last updated:** 2026-09-05
 **Controller:** MONY GROUP LLC, a Tennessee limited liability company, foreign-qualified in North Carolina.
 

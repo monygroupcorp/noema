@@ -584,9 +584,12 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .swatches{display:flex;gap:9px;flex-wrap:wrap}
 .sw{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.12s var(--ease)}
 .sw:hover{transform:scale(1.08)} .sw.on{border-color:var(--text);box-shadow:0 0 0 2px var(--bg) inset}
-.assetslot{aspect-ratio:16/6;width:100%;margin:0;padding:0;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--faint);font:inherit;font-size:12.5px;text-align:center;cursor:pointer}
+.assetslot{aspect-ratio:16/6;width:100%;margin:0;padding:0;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;align-content:center;gap:2px;text-align:center;color:var(--faint);font:inherit;font-size:12.5px;line-height:1.3;cursor:pointer}
 .assetslot:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
-.assetslot.pfp{aspect-ratio:1;max-width:96px;border-radius:50%}
+/* an empty tile names the asset and says what a tap does; the avatar tile keeps a fixed width so the
+   round target does not shrink to the width of its own label */
+.assetslot-l{color:var(--muted)} .assetslot-h{font-size:var(--fs-xs)}
+.assetslot.pfp{aspect-ratio:1;width:96px;flex:none;border-radius:50%;padding:0 var(--s2)}
 .assetslot:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));color:var(--muted)}
 
 /* secret / phrase (vault) */
@@ -1129,6 +1132,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ac-card-h b{font-size:14px;font-weight:600} .ac-manage{margin-left:auto;font-size:12px;color:var(--accent-soft);text-decoration:none}
 .ac-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;font-size:12.5px}
 .ac-rk{color:var(--faint)} .ac-rv{color:var(--text);display:flex;align-items:center;gap:6px} .ac-rv .muted{color:var(--faint)}
+/* a checkbox row: the whole label is the 44px hit target (D-43), the box itself is sized to be seen */
+.ac-row.ac-check{min-height:44px;cursor:pointer}
+.ac-check input[type=checkbox]{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent);cursor:pointer}
 .ac-note{font-size:11px;color:var(--faint);border-top:1px solid var(--hair-soft);margin-top:10px;padding-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ac-prefptr{display:flex;align-items:center;gap:9px;flex-wrap:wrap;border:1px dashed var(--hair);border-radius:11px;padding:13px 16px;font-size:13px;color:var(--muted)}
 .ac-prefptr svg.lucide{width:15px;height:15px;color:var(--accent-soft)} .ac-prefptr a{color:var(--accent-soft);text-decoration:none}

@@ -1,10 +1,10 @@
-# Terms & Conditions
+# Terms & conditions
 
 **Last updated:** 2026-09-08
 
 ---
 
-## 1. The Service
+## 1. The service
 
 MONY GROUP LLC ("we", "us") provides access to rented GPU compute for running AI models
 ("Service"). Two usage modes:
