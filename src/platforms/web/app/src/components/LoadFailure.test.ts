@@ -97,23 +97,23 @@ describe('LoadFailure — says what happened and offers the way out (D-62)', () 
     expect(loadFailureFailed('transient', false)).toBe(true);
   });
 
-  it('one primary action; the way back is a plain link unless it is the only action (D-42)', () => {
+  it('one primary action; the way back is a ghost button unless it is the only action (D-42, D-43)', () => {
     const door = html({ kind: 'missing' });
     expect(primaries(door)).toBe(1);
     expect(door).toContain('class="btn" href="/onboard');
-    expect(door).toContain('class="load-fail-back" href="/collections"');
+    expect(door).toContain('class="btn ghost load-fail-back" href="/collections"');
 
     const retry = html({ kind: 'transient', onRetry: () => {} });
     expect(primaries(retry)).toBe(1);
     expect(retry).toContain('<button type="button" class="btn">Try again</button>');
-    expect(retry).toContain('class="load-fail-back" href="/collections"');
+    expect(retry).toContain('class="btn ghost load-fail-back" href="/collections"');
 
+    // Alone, the way back is the one filled button: no ghost chrome anywhere.
     const alone = html({ kind: 'transient' });
     expect(primaries(alone)).toBe(1);
     expect(alone).toContain('class="btn" href="/collections"');
     expect(alone).not.toContain('load-fail-back');
-
-    for (const out of [door, retry, alone]) expect(out).not.toContain('ghost');
+    expect(alone).not.toContain('ghost');
   });
 
   it('the way back is sentence case: the list name is lowercase mid-label (D-26)', () => {
