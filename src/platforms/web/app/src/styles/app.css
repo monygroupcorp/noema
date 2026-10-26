@@ -148,8 +148,9 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .projcard:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .projcard.on{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .pc-head{display:flex;align-items:center;gap:9px;margin-bottom:8px}
-.pc-head b{font-weight:600} .pc-head .psh{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--faint)} .pc-head .psh svg.lucide{width:12px;height:12px}
-.pc-head .badge{margin-left:auto}
+.pc-head b{font-weight:600}
+/* every card's state, as chips (REF-11): active, and who can see it */
+.pc-head .pc-state{margin-left:auto;display:inline-flex;gap:var(--s1);flex-wrap:wrap;justify-content:flex-end}
 .pc-desc{color:var(--muted);font-size:12.5px;line-height:1.5;margin-bottom:11px;min-height:38px}
 .pc-counts{font-size:10.5px;color:var(--faint)} .pc-counts .upd{margin-left:4px}
 .sectionhead .pg{display:inline-grid;vertical-align:-4px;margin-right:7px}
