@@ -9,6 +9,10 @@
 .topnav .brand .dot .lit{fill:var(--accent)}
 .topnav .brand .dot .ring{stroke:var(--accent)}
 .topnav .right{display:flex;align-items:center;gap:10px}
+/* The body of a marketing page owns its one accent-filled action (D-42), so the nav's "Open app"
+   reads as a ghost beside it, whatever class the screen gave it. */
+.topnav .right .btn{background:var(--raised);border:1px solid var(--hair);color:var(--text);font-weight:500;font-size:var(--fs-sm);padding:8px 13px;border-radius:8px}
+.topnav .right .btn:hover{filter:none;border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 
 .hero{position:relative;max-width:1080px;margin:0 auto;padding:clamp(96px,15vh,180px) var(--px-section) 56px;text-align:center}
 .hero > *{position:relative}
