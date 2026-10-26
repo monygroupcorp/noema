@@ -75,8 +75,14 @@ export function Teams() {
           <div className="sub">A team is a group of accounts that owns work together. Create one, then add members by their account id.</div>
         </div></div>
 
+        {/* The gate's one action is a button on its own row, not a word inside the sentence
+            (DESIGN.md D-43): at phone width the inline link wrapped mid-phrase and was one text
+            line tall. */}
         {!session && ready && (
-          <div className="warn">Teams need an identified account. <Link to={doorPath(here)}>Sign in</Link> to create and manage them.</div>
+          <div className="warn gate">
+            <div>Teams need an identified account. Sign in to create and manage them.</div>
+            <Link className="btn ghost" to={doorPath(here)}>Sign in</Link>
+          </div>
         )}
 
         <div className="sectionhead">New team</div>

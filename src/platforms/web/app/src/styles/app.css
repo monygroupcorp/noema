@@ -477,8 +477,12 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* profile: in-page section jump row (REF-34) — each chip is an anchor onto a .sectionhead id,
    so every section is individually reachable without a desktop sidebar on this mobile-first screen */
-.profile-jump{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:28px}
-.profile-jump a{text-decoration:none}
+.profile-jump{display:flex;flex-wrap:wrap;gap:0 var(--s4);margin-bottom:28px;border-bottom:1px solid var(--hair)}
+/* Section links in the tab idiom (D-33: a pill is a filter or a chip; these jump): text on a
+   hairline, each with the touch hit height (D-43) and the shared focus ring (D-44). */
+.profile-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--muted);font-size:var(--fs-s);text-decoration:none;transition:.14s var(--ease)}
+.profile-jump a:hover{color:var(--text);border-bottom-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.profile-jump a:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
 
 /* badges / pills */
 .badge{font-family:var(--font-mono);font-size:10.5px;padding:2px 7px;border-radius:5px;border:1px solid var(--hair);color:var(--muted)}
@@ -522,6 +526,8 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .cat-select select:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .cat-count{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
 .empty .btn{margin-top:var(--s3)}
+/* The one action that fills an empty state (D-60) is a touch target (D-43). */
+.empty .btn{min-height:44px}
 
 /* the registry table: column-header row + data rows */
 .reg-bar{display:flex;align-items:center;gap:7px;padding:14px 6px 9px;border-bottom:1px solid var(--hair);font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted)}
@@ -600,6 +606,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .phrase span{background:var(--raised);border:1px solid var(--hair);border-radius:7px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--text)}
 .phrase span i{color:var(--faint);font-style:normal;margin-right:7px}
 .warn{display:flex;gap:10px;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
+/* A gate: the sentence, then its one action as a button on its own row with the touch hit
+   height (D-43), rather than a link wrapping inside the sentence. */
+.warn.gate{flex-direction:column;align-items:flex-start}
+.warn.gate .btn{min-height:44px}
+/* A request that failed is danger tier, not caution (D-10): the same box in the danger hue, so a
+   service that did not answer is told apart from a notice about something the reader may still do. */
+.warn.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,transparent);color:var(--red-500,#e5746a)}
 
 /* connected accounts (BYO gated-origin secrets) */
 .byo-row{border:1px solid var(--hair);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:10px}

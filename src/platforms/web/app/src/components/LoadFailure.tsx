@@ -19,8 +19,9 @@ import './load-failure.css';
 //   • `transient` — anything else: the server fell over, the connection dropped, the read timed
 //                   out. Retry is the action, and the back link is the way out if it keeps failing.
 //
-// One action is the filled button and the rest are plain links (D-42): whichever one resolves
-// the state — retry, the door, or failing both, the way back.
+// One action is the filled button and the rest are ghost buttons (D-42): whichever one resolves
+// the state — retry, the door, or failing both, the way back. The way back is a button either
+// way, never a bare underlined word beside a pill (D-43); ghost chrome keeps the primary primary.
 
 export type LoadFailureKind = 'missing' | 'signin' | 'transient';
 
@@ -92,7 +93,7 @@ export function LoadFailure({ noun, kind, back, onRetry }: LoadFailureProps) {
         <div className="load-fail-actions">
           {offerRetry && <button type="button" className="btn" onClick={onRetry}>Try again</button>}
           {offerDoor && <Link className="btn" to={doorPath(location.pathname + location.search)}>Sign in</Link>}
-          <Link className={backIsPrimary ? 'btn' : 'load-fail-back'} to={back.to}>Back to {back.label}</Link>
+          <Link className={backIsPrimary ? 'btn' : 'btn ghost load-fail-back'} to={back.to}>Back to {back.label}</Link>
         </div>
       </div>
     </div></div>

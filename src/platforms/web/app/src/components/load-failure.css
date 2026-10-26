@@ -5,9 +5,12 @@
 .load-fail.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,var(--panel))}
 .load-fail-what{margin:0;color:var(--text);font-size:var(--fs-m);line-height:1.5}
 .load-fail-next{margin:var(--s2) 0 0;color:var(--muted);font-size:var(--fs-s);line-height:1.5}
-.load-fail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s5);margin-top:var(--s4)}
-/* The way back, when it is not the one primary (D-42): a plain link, not a second pill. It keeps
-   the touch hit height (D-43) and the shared focus ring (D-44). */
-.load-fail-back{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);font-size:var(--fs-s);text-decoration:underline;text-underline-offset:3px;border-radius:var(--r)}
-.load-fail-back:hover{color:var(--text)}
+.load-fail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);margin-top:var(--s4)}
+/* Every action is a button with the touch hit height (D-43), so the way back and the primary
+   share one padding box and sit as a row of controls, not a pill beside an underlined word. */
+.load-fail-actions .btn{min-height:44px}
+/* The way back, when it is not the one primary (D-42): ghost chrome at the muted weight, so the
+   one filled button stays the primary. It keeps the shared focus ring (D-44). */
+.btn.ghost.load-fail-back{color:var(--muted);font-weight:500}
+.btn.ghost.load-fail-back:hover{color:var(--text)}
 .load-fail-back:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}

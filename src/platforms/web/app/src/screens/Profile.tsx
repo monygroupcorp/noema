@@ -67,12 +67,13 @@ export function Profile() {
 
         {/* Each section below is its own jump target (REF-34: GitHub's settings pages make every
             section individually linkable). Mobile-first app, so a compact anchor row stands in
-            for a sidebar/table of contents. */}
+            for a sidebar/table of contents. The links are a tab row, not pills: a pill is a
+            filter, tag or status chip (DESIGN.md D-33), and these navigate. */}
         <nav className="profile-jump" aria-label="Jump to a section">
-          <a className="fchip" href="#profile-assets">Assets</a>
-          <a className="fchip" href="#profile-backup">Account backup &amp; recovery</a>
-          <a className="fchip" href="#profile-connected">Connected accounts</a>
-          <a className="fchip" href="#profile-purses">Purses</a>
+          <a href="#profile-assets">Assets</a>
+          <a href="#profile-backup">Account backup &amp; recovery</a>
+          <a href="#profile-connected">Connected accounts</a>
+          <a href="#profile-purses">Purses</a>
         </nav>
 
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
