@@ -114,11 +114,11 @@ export function Preferences() {
         <div className="pref-grid">
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Style &amp; prompt</b></div>
-            <label className="ac-row"><span className="ac-rk mono">default style</span>
+            <label className="ac-row"><span className="ac-rk mono">Default style</span>
               <input className="cer-input" placeholder="e.g. cinematic, cold" value={gen.style ?? ''} onChange={(e) => editLocal({ style: e.target.value || undefined })} onBlur={flush} /></label>
-            <label className="ac-row"><span className="ac-rk mono">negative prompt</span>
+            <label className="ac-row"><span className="ac-rk mono">Negative prompt</span>
               <input className="cer-input" placeholder="blurry, text, watermark" value={gen.negativePrompt ?? ''} onChange={(e) => editLocal({ negativePrompt: e.target.value || undefined })} onBlur={flush} /></label>
-            <label className="ac-row"><span className="ac-rk mono">default /make flow</span>
+            <label className="ac-row"><span className="ac-rk mono">Default /make flow</span>
               <select className="cer-input" value={makeModel} onChange={(e) => rebindMake(e.target.value)}>
                 {!flows.some((f) => f.id === makeModel) && <option value={makeModel}>{makeModel}</option>}
                 {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
@@ -126,15 +126,15 @@ export function Preferences() {
           </div>
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="send" /><b>Output &amp; delivery</b></div>
-            <label className="ac-row"><span className="ac-rk mono">format</span>
+            <label className="ac-row"><span className="ac-rk mono">Format</span>
               <select className="cer-input" value={gen.outputFormat ?? 'png'} onChange={(e) => commit({ ...gen, outputFormat: e.target.value })}>
                 <option value="png">PNG · max quality</option><option value="jpg">JPG</option><option value="webp">WebP</option>
               </select></label>
-            <label className="ac-row"><span className="ac-rk mono">telegram: deliver as</span>
+            <label className="ac-row"><span className="ac-rk mono">Telegram: deliver as</span>
               <select className="cer-input" value={gen.telegramDeliverAs ?? 'album'} onChange={(e) => commit({ ...gen, telegramDeliverAs: e.target.value as Generatio['telegramDeliverAs'] })}>
                 <option value="album">album</option><option value="individual">individual</option>
               </select></label>
-            <label className="ac-row"><span className="ac-rk mono">land in (project)</span>
+            <label className="ac-row"><span className="ac-rk mono">Land in (project)</span>
               <select className="cer-input" value={gen.defaultProjectId ?? ''} onChange={(e) => commit({ ...gen, defaultProjectId: e.target.value || undefined })}>
                 <option value="">— none (unfiled) —</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -142,7 +142,7 @@ export function Preferences() {
           </div>
           <div className="pref-card">
             <div className="pref-card-h"><Ic name="send" /><b>Private generation</b></div>
-            <label className="ac-row"><span className="ac-rk mono">private outputs</span>
+            <label className="ac-row ac-check"><span className="ac-rk mono">Private outputs</span>
               <input type="checkbox" checked={gen.privateOutputs ?? false} onChange={(e) => commit({ ...genRef.current, privateOutputs: e.target.checked })} /></label>
             <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
               <span className="hemi2 dashed" /> Outputs of new runs are visible only to you, through expiring links. Publishing or minting one later makes that copy public. Runs you have already made stay as they are.
@@ -178,8 +178,8 @@ export function Preferences() {
         <div className="pref-grid">
           <div className="pref-card">
             <div className="pref-card-h"><span className="accent mono">/make</span><span className="pref-kind">image</span></div>
-            <div className="pref-preview"><span className="pp-l mono">resolves to</span><span className="pp-v mono">{makeModel}</span></div>
-            <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">the <b>default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
+            <div className="pref-preview"><span className="pp-l mono">Resolves to</span><span className="pp-v mono">{makeModel}</span></div>
+            <div className="pref-preview"><span className="pp-l mono">Rebind</span><span className="pp-v mono">the <b>Default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
           </div>
         </div>
 
@@ -189,7 +189,7 @@ export function Preferences() {
           <div className="pref-restricted-l mono">Restricted</div>
           <div className="pref-card pref-card-restricted">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
-            <label className="ac-row"><span className="ac-rk mono">adult content</span>
+            <label className="ac-row ac-check"><span className="ac-rk mono">Adult content</span>
               <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
             <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
               <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.

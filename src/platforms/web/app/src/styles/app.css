@@ -1128,6 +1128,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ac-card-h b{font-size:14px;font-weight:600} .ac-manage{margin-left:auto;font-size:12px;color:var(--accent-soft);text-decoration:none}
 .ac-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;font-size:12.5px}
 .ac-rk{color:var(--faint)} .ac-rv{color:var(--text);display:flex;align-items:center;gap:6px} .ac-rv .muted{color:var(--faint)}
+/* a checkbox row: the whole label is the 44px hit target (D-43), the box itself is sized to be seen */
+.ac-row.ac-check{min-height:44px;cursor:pointer}
+.ac-check input[type=checkbox]{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent);cursor:pointer}
 .ac-note{font-size:11px;color:var(--faint);border-top:1px solid var(--hair-soft);margin-top:10px;padding-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ac-prefptr{display:flex;align-items:center;gap:9px;flex-wrap:wrap;border:1px dashed var(--hair);border-radius:11px;padding:13px 16px;font-size:13px;color:var(--muted)}
 .ac-prefptr svg.lucide{width:15px;height:15px;color:var(--accent-soft)} .ac-prefptr a{color:var(--accent-soft);text-decoration:none}
