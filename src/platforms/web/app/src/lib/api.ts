@@ -32,13 +32,17 @@ export type CanonVerb =
 // convention of loosening required-on-the-wire fields to optional client-side (see `nomen`/
 // `versio` above) — callers that construct a partial FlowSummary (e.g. Canvas.test.ts's
 // dedupeFlows fixtures) shouldn't have to supply every field just to typecheck.
-export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown; modusGenus?: CanonVerb }
+export interface FlowSummary { id: string; nomen?: string; versio?: string; categoria?: unknown; modusGenus?: CanonVerb; descriptio?: string }
 export interface JsonSchema {
   type: string;
   properties?: Record<string, { type: string; format?: string; default?: unknown; description?: string; title?: string; optiones?: Array<{ value: string; label: string }> }>;
   required?: string[];
 }
-export interface FlowDescription { id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string }
+export interface FlowDescription {
+  id: string; nomen: string; versio: string; input: JsonSchema; output?: JsonSchema; familia?: string;
+  /** The same optional fields the list carries, so a card can describe a flow from either. */
+  descriptio?: string; categoria?: unknown; fundamentumId?: string;
+}
 
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
 
@@ -572,7 +576,9 @@ export interface Tabula {
 
 export const api = {
   listFlows: () => fetch('/v1/flows').then(j<{ flows: FlowSummary[] }>),
-  getFlow: (id: string) => fetch(`/v1/flows/${id}`).then(j<FlowDescription>),
+  // Takes a signal so a screen can put a deadline on the read (withReadTimeout): a card that
+  // waits on this with no bound shows "Loading…" for as long as the tab lives.
+  getFlow: (id: string, signal?: AbortSignal) => fetch(`/v1/flows/${id}`, { signal }).then(j<FlowDescription>),
   quote: (body: Pick<RunRequest, 'modusId' | 'verb' | 'aditus'>) =>
     fetch('/v1/runs/quote', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<{ impetus: string; recipient?: string }>),
