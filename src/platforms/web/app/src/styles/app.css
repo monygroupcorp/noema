@@ -21,6 +21,12 @@
   /* modality swatches — one palette shared by canvas ports, catalogue, datasets */
   --m-text:#8fb0ff; --m-image:#5b8cff; --m-video:#d66f9a; --m-audio:#5fd0a8; --m-3d:#c79a4e;
   --radius:10px; --rail:236px; --context:328px;
+  /* The docked concierge launcher (P-2c, D-52): the shell reserves the launcher's whole footprint
+     at the foot of .main, so the scroll area ends above it at every scroll position. --dock-h is
+     the launcher's box (set on .cbtn, so the reserve and the pill cannot drift apart); --dock-off
+     is its distance from the viewport bottom (the bar height joins it on a phone, below). */
+  --bar-h:58px; --dock-h:52px; --dock-off:var(--s4);
+  --dock-reserve:calc(var(--dock-off) + var(--dock-h) + var(--s2));
   --ease:cubic-bezier(.22,.61,.36,1); --dur-fast:120ms; --dur:160ms; --dur-slow:300ms;
   /* SPACING scale (4px base) — compose from these, never magic numbers */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:48px; --s10:64px;
@@ -106,12 +112,10 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .ttdot{width:5px;height:5px;border-radius:50%; background:var(--accent)}
 
 /* ---------- main + topbar ---------- */
-/* padding-bottom reserves a safe strip for the fixed Concierge bubble — the scroll area (.page)
-   ends above it, so footer CTAs/last rows never render under the bubble at any scroll position. */
-/* padding-bottom reserves a safe strip for the fixed Concierge bubble; .page (below) gets
+/* padding-bottom reserves the concierge launcher's footprint (--dock-reserve); .page (below) gets
    min-height:0 so it actually shrinks to leave it — the scroll area then ENDS above the
-   bubble and no footer/last-row can ever render under it. The systemic overhang fix. */
-.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:72px}
+   launcher and no footer/last-row can ever render under it (P-2c, D-52). */
+.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:var(--dock-reserve)}
 .topbar{display:flex; align-items:center; gap:12px; padding:14px 30px; border-bottom:1px solid var(--hair); min-height:62px}
 /* identity + trust as ONE control (the single trust source) */
 .me{display:flex; align-items:center}
@@ -700,15 +704,20 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .exitus .acts .btn-ghost svg.lucide,.result .acts .btn-ghost svg.lucide{width:14px;height:14px}
 
 /* ---------- concierge bubble (chat collapses into this as you go deeper) ---------- */
-/* This fixed bottom-right bubble no longer overhangs footer CTAs: the scroll area (.page) is
-   bounded ABOVE it via .app grid-template-rows:minmax(0,1fr) + .page min-height:0 + .main
-   padding-bottom (the reserve). Keep those three together if you touch the shell layout. */
-.concierge{position:fixed;right:18px;bottom:16px;z-index:48;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+/* This fixed bottom-right bubble never overhangs content: the scroll area (.page) is bounded
+   ABOVE it via .app grid-template-rows:minmax(0,1fr) + .page min-height:0 + .main
+   padding-bottom:var(--dock-reserve). Keep those three together if you touch the shell layout.
+   The OPEN panel is modal instead of reserved: its height depends on the thread, so .cscrim
+   covers the page beneath it and a tap there dismisses the panel (P-2c's second clause). */
+.concierge{position:fixed;right:18px;bottom:var(--dock-off);z-index:48;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.cscrim{display:none;position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 45%,transparent)}
+.concierge.open .cscrim{display:block}
+.concierge .cpanel,.concierge .cbtn{position:relative;z-index:1}   /* above .cscrim inside the dock's own stacking context */
 /* when the page has a right context sidebar, float left of it (over the middle content) */
 .concierge.has-context{right:calc(var(--context) + 18px)}
 @media (max-width:1080px){ .concierge.has-context{right:18px} }  /* sidebar hidden → back to corner */
 .cpanel{transform-origin:bottom right}
-.cbtn{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:6px 14px 6px 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:.16s var(--ease)}
+.cbtn{display:flex;align-items:center;gap:10px;height:var(--dock-h);background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:6px 14px 6px 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:.16s var(--ease)}
 .cbtn:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .cbtn .orb{width:30px;height:30px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;transition:background .45s var(--ease);flex:0 0 auto;position:relative}
 .cbtn .orb::after{content:"";position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;background:var(--good);border:2px solid var(--panel)}
@@ -759,7 +768,8 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 @media (max-width:760px){
   /* shell → single column; left rail becomes a fixed bottom icon bar */
   .app,.app.two{grid-template-columns:1fr}
-  .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
+  :root{--dock-off:calc(var(--bar-h) + var(--s3))}             /* the launcher sits above the bottom bar; --dock-reserve follows */
+  .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:var(--bar-h);flex-direction:row;align-items:stretch;
         border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:visible;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
   .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
@@ -777,14 +787,12 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .railgroup-backdrop{display:block;position:fixed;inset:0;z-index:var(--z-pop)}
   .railgroup-pop{display:flex;position:fixed;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-pop);flex-direction:column;padding:6px}
   .railgroup-pop .navitem{flex-direction:row;justify-content:flex-start;padding:8px 10px;font-size:var(--fs-sm)}
-  .main{padding-bottom:58px}                                 /* clear the bottom bar */
   .topbar{padding:var(--s3) var(--s4);min-height:54px;gap:var(--s2)}
   .crumb{display:none}                                       /* identity + webring carry it */
   .fonttoggle{display:none}                                  /* dev-only */
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
   .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
-  .concierge{bottom:70px}                                    /* sit above the bottom bar */
   #trustpop{width:calc(100vw - 24px)}
 }
 @media (max-width:680px){
