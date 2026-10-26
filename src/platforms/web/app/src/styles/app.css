@@ -593,12 +593,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    Local palette tokens live here (NOT in noema-theme.css — avoiding a parallel-agent collision). */
 .fund{ --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f; --warn:#d8a657; --warn-bg:rgba(216,166,87,.08); }
 
-.fund-head{margin-bottom:8px}
-.fund-head h1{font-size:28px;font-weight:600;letter-spacing:-.024em;line-height:1.16;margin:12px 0 0}
-.fund-head .sub{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:12px;max-width:62ch}
-.fund-head .sub b{color:var(--text);font-weight:500}
-
-.fund-rows{display:flex;flex-direction:column;margin-top:26px}
+.fund-rows{display:flex;flex-direction:column}
 .fund-row{border-top:1px solid var(--hair);padding:26px 0}
 .fund-row:last-child{border-bottom:1px solid var(--hair)}
 
