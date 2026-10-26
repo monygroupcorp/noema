@@ -144,11 +144,14 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* ── projects workspace screen ──────────────────────────────────────────────── */
 .projgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);transition:.14s var(--ease)}
+.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);text-decoration:none;transition:.14s var(--ease)}
 .projcard:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .projcard.on{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .pc-head{display:flex;align-items:center;gap:9px;margin-bottom:8px}
-.pc-head b{font-weight:600}
+/* The title is the card's name, not its action: it reads in --text, and only the hover
+   carries the accent (DESIGN.md D-9). */
+.pc-head b{font-weight:600;color:var(--text);transition:color .14s var(--ease)}
+.projcard:hover .pc-head b{color:var(--accent-soft)}
 /* every card's state, as chips (REF-11): active, and who can see it */
 .pc-head .pc-state{margin-left:auto;display:inline-flex;gap:var(--s1);flex-wrap:wrap;justify-content:flex-end}
 .pc-desc{color:var(--muted);font-size:12.5px;line-height:1.5;margin-bottom:11px;min-height:38px}
@@ -249,6 +252,9 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .hint .dest{display:flex;align-items:center;gap:6px;color:var(--muted)}
 .hint .dest .ttdot{width:6px;height:6px}
 .hint .keys{margin-left:auto;display:flex;gap:14px}
+/* A phone has no Enter-to-send convention, so the keyboard hints are noise there; the flow
+   name beside them stays (REFERENCES.md REF-14). */
+@media (max-width:760px),(hover:none) and (pointer:coarse){.hint .keys{display:none}}
 .hint .mono{color:var(--faint)}
 .hint .dest b{color:var(--text);font-weight:500}
 
@@ -1472,29 +1478,30 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .mobile-zoom-safe{font-size:16px}
 
   /* catalog toolbars: search/filters/sort wrap onto their own lines instead of
-     squeezing the modality + verb chip rows into whatever space is left. */
+     squeezing the modality + verb chip rows into whatever space is left. The modality
+     facet takes a line of its own so the result count stays beside the sort — in the
+     control row, never a line of its own above the column headers (REFERENCES.md REF-17). */
   .cat-toolbar{flex-wrap:wrap; row-gap:8px}
   .cat-search{flex:1 1 100%; max-width:none; order:1}
   .cat-filters{order:2}
   .cat-sort{margin-left:0; order:3}
   .cat-toolbar.cat-verbs .cat-filters{order:initial}
-  .cat-controls{margin-left:0; order:3; flex:1 1 100%}
+  .cat-controls{margin-left:0; order:3; flex:1 1 100%; column-gap:var(--s2)}
+  .cat-controls .cat-select-mod{flex:1 1 100%}
   .cat-count{margin-left:auto}
 
-  /* registry column header: labels track the stacked 2-line data row below
-     (name+pin on line 1, modality+version as a smaller line 2). */
-  .reg-bar{flex-wrap:wrap; row-gap:2px}
-  .reg-bar .c-name{flex:1 1 100%}
-  .reg-bar .c-mod{width:auto; flex:1; font-size:8.5px}
-  .reg-bar .c-ver{width:auto; flex:1; font-size:8.5px}
-
-  /* registry row: stack into two lines — name/id + pin on line 1, modality +
-     version as a smaller line 2 — instead of crushing everything onto one row. */
-  .reg-row{flex-wrap:wrap; row-gap:4px}
-  .reg-name{flex:1 1 auto; min-width:0}
-  .reg-mod{width:auto; flex:1; order:3; font-size:10px}
-  .reg-ver{width:auto; flex:1; order:4; font-size:10px}
-  .reg-row .pin{order:2; width:44px; height:44px}
+  /* registry on a phone: one grid for the header and every row, so the modality,
+     version and pin sit in the same columns whether the id is "rmbg" or
+     "modus.dataset-decompose" (DESIGN.md D-59). The name stacks over its id in the
+     first column instead of the row wrapping by content length. */
+  .reg-bar,.reg-row{display:grid; grid-template-columns:minmax(0,1fr) 64px 44px 44px; column-gap:8px; align-items:center}
+  .reg-bar .c-mod{width:auto; font-size:8.5px}
+  .reg-bar .c-ver{width:auto; font-size:8.5px}
+  .reg-name{flex-direction:column; align-items:flex-start; gap:2px; min-width:0}
+  .reg-name .nm,.reg-name .id{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .reg-mod{width:auto; font-size:10px; gap:6px}
+  .reg-ver{width:auto; font-size:10px}
+  .reg-row .pin{margin-left:0; width:44px; height:44px}
   .reg-row .pin svg{width:16px; height:16px}
 }
 
