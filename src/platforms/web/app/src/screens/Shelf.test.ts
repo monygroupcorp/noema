@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { heldModelPublishStates, resolveUseInFlowTarget } from './Shelf';
+import { heldModelPublishStates, resolveUseInFlowTarget, shelfKicker } from './Shelf';
 import type { Editio } from '../lib/editio';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
@@ -93,5 +93,21 @@ describe('heldModelPublishStates — a hold survives the reload that used to los
       ed({ id: 'old', reviewOutcome: 'pending', moderationNote: 'an earlier hold' }),
     ]);
     expect(held.m1.note).toBe('the live hold');
+  });
+});
+
+// DESIGN.md P-1c / D-58: a counter reading 0 is suppressed. The empty card under the heading
+// already says "No models yet"; the kicker must not say it again as a number.
+describe('shelfKicker — the count above the heading stays silent at zero', () => {
+  it('prints the count when there is one', () => {
+    expect(shelfKicker([], 3)).toBe('your models · 3');
+  });
+
+  it('suppresses a zero rather than printing "· 0"', () => {
+    expect(shelfKicker([], 0)).toBe('your models');
+  });
+
+  it('says it is loading before the read lands', () => {
+    expect(shelfKicker(null, 0)).toBe('loading…');
   });
 });

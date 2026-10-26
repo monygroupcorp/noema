@@ -129,6 +129,13 @@ const SORT_LABELS: { key: CatalogSort; label: string }[] = [
   { key: 'name', label: 'name' },
 ];
 
+// The kicker above the shelf heading. A zero is silent (DESIGN.md P-1c, D-58): the empty
+// card below already says "No models yet", so "your models · 0" would state it twice.
+export function shelfKicker(models: ModelCard[] | null, count: number): string {
+  if (!models) return 'loading…';
+  return count > 0 ? `your models · ${count}` : 'your models';
+}
+
 export function Shelf() {
   const { project: active, fileAsset } = useProject();
   const [models, setModels] = useState<ModelCard[] | null>(null);
@@ -298,7 +305,7 @@ export function Shelf() {
         <div className="pagehead shelf-head">
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>
-              {models ? `your models · ${count}` : 'loading…'}
+              {shelfKicker(models, count)}
               {catOpen && catalog && <> · public catalog · {catalog.length}</>}
             </div>
             <h1>Model shelf</h1>
