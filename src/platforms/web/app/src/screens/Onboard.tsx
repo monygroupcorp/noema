@@ -16,8 +16,9 @@ import './onboard.css';
 //
 // Door A carries the real fiat session (username/password rail). No email — registering logs
 // you straight in, so the form IS the door: a visitor types a username and a password and is
-// in. Wallet sign-up is live (it mints an account from a signature alone, no username); Passkey
-// is not. Door B (anonymous) is the bearer identity skin — funding-side anonymity, our compute.
+// in. Wallet sign-up is live (it mints an account from a signature alone, no username). Door B
+// (anonymous) is the bearer identity skin — funding-side anonymity, our compute. A way in that
+// is not built is not on the door (DESIGN.md D-63).
 //
 // ADDITIVE MODE (`/onboard?add=1`): reached via "Add account" from the Keyring / account menu.
 // The multi-session store APPENDS a login rather than replacing, so this flag only governs copy
@@ -37,12 +38,29 @@ export function safeNext(next: string | null): string | null {
   return next;
 }
 
+// Where `next` leads, named the way the rail names it, so the door can say where the visitor
+// is going (REFERENCES.md REF-6). A path the rail has no name for gets none, and the line under
+// the subhead says only that the task is waiting.
+const DESTINATIONS: ReadonlyArray<readonly [prefix: string, name: string]> = [
+  ['/app', 'home'], ['/chat', 'chat'], ['/catalog', 'the catalogue'], ['/canvas', 'the canvas'],
+  ['/space', 'your space'], ['/datasets', 'your datasets'], ['/models', 'your models'],
+  ['/collections', 'your collections'], ['/feed', 'the feed'], ['/profile', 'your profile'],
+  ['/keyring', 'your keyring'], ['/funding', 'funding'],
+];
+export function destinationName(next: string | null): string | null {
+  if (!next) return null;
+  const path = next.split(/[?#]/)[0];
+  const hit = DESTINATIONS.find(([p]) => path === p || path.startsWith(`${p}/`));
+  return hit ? hit[1] : null;
+}
+
 export function Onboard() {
   const { setExecution } = useIdentity();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const addMode = params.get('add') === '1';
   const next = safeNext(params.get('next'));
+  const dest = destinationName(next);
 
   // Anon entry (Door B): the anon commitment path is a session with no account, so there's
   // nothing to set beyond the execution mode — funding derives from the (absent) session.
@@ -65,10 +83,10 @@ export function Onboard() {
           <>
             <h1 className="auth-display">Make anything.<br />Anonymously.</h1>
             <p className="auth-sub">Choose how you enter — you decide what we can know.</p>
-            {/* Someone sent here mid-task did not come looking for a front door. Say that the
-                task is still waiting, so the door reads as a step in what they were doing
-                rather than the start of something else. */}
-            {next && <p className="auth-sub">Whichever you choose, we take you straight back to what you were doing.</p>}
+            {/* Someone sent here mid-task did not come looking for a front door. Name where they
+                were going, so the door reads as a step in what they were doing rather than the
+                start of something else. */}
+            {next && <p className="auth-sub">{dest ? `Then back to ${dest}.` : 'Then back to what you were doing.'}</p>}
           </>
         )}
       </header>
@@ -85,7 +103,6 @@ export function Onboard() {
           </div>
           <p className="door-d">No account — browse and make anonymously on our compute. Fund a bearer purse from a shielded wallet to spend without a name attached.</p>
           <button className="door-cta slate" onClick={() => enter('rented')}>Enter anonymously →</button>
-          <button className="door-opt" disabled title="Coming soon"><Ic name="venetian-mask" /> Set up a purse <span className="opt-meta">coming soon</span></button>
           <p className="door-warn">* a purse is anonymous only if funded from a shielded wallet. A doxxed source links you to us at funding time — permanently.</p>
           <div className="door-knows"><span className="hemi dashed sm" aria-hidden="true" /> noema knows: <b>nothing*</b></div>
         </section>
@@ -225,7 +242,6 @@ function IdentityDoor({ addMode, next }: { addMode: boolean; next: string | null
           <PasswordField value={password} onChange={setPassword} placeholder={`Password (min ${MIN_PASSWORD} chars)`} autoComplete="new-password" disabled={busy} />
           <button className="door-cta primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
           <button type="button" className="door-opt" disabled={busy} onClick={onSignUpWallet}><Ic name="wallet" /> {busy ? 'Connecting…' : 'Continue with a wallet'}</button>
-          <button type="button" className="door-opt" disabled title="Coming soon"><Ic name="key-round" /> Passkey <span className="opt-meta">coming soon</span></button>
           <div className="link-row">
             <button type="button" className="linkish" onClick={() => swap('signin')}>I already have an account</button>
           </div>

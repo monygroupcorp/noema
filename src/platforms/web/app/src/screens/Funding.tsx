@@ -24,6 +24,26 @@ import { BuyCreditsModal } from './BuyCreditsModal';
 // only applies once you have a balance, and last the code redemption, which needs a code someone
 // else minted. Each still says plainly what it reveals — the honesty is in the copy, not the order.
 
+// The ways money gets in, in the order the rows take them. The head names them up front and
+// each row carries its own tradeoff where the choice is made (REFERENCES.md REF-32). The purse
+// is a layer over a balance and a code is a hand-off, so neither is a way in.
+export const WAYS_IN = [
+  { id: 'card', title: 'Card' },
+  { id: 'wallet', title: 'On-chain wallet' },
+] as const;
+
+// The screen's name and the one line under it (DESIGN.md D-24). Exported on its own because
+// the whole screen needs the session, the router and the shell to render, and the test
+// harness has none of them.
+export function FundingHead() {
+  return (
+    <div className="pagehead"><div>
+      <h1>Funding</h1>
+      <div className="sub">Two ways in — a card or an on-chain wallet — and what each one reveals.</div>
+    </div></div>
+  );
+}
+
 // The card-rail helpers live in lib/checkout so the buy-credits modal builds the same request.
 // Re-exported here because this module was their original home.
 export { canCheckout, buildCheckoutRequest };
@@ -259,17 +279,7 @@ export function Funding() {
     <AppShell crumb="Funding">
       <div className="page"><div className="pw narrow fund">
 
-        <div className="fund-head">
-          <h1>Every way to pay — and what each one reveals.</h1>
-          <div className="sub">
-            Anonymity is a property of <b>how you fund</b>, not a blanket promise. Two ways
-            in — an on-chain wallet or a card — and we tell you exactly what each one reveals.
-            Want spends nothing can tie back to you? Fund from a fresh or shielded wallet — the
-            strong-anonymity path available today. {purseOff
-              ? <>An unlinkable ZK bearer purse on top is <b>coming soon</b>.</>
-              : <>Then mint a ZK purse from your balance.</>}
-          </div>
-        </div>
+        <FundingHead />
 
         <div className="fund-rows">
 
@@ -280,7 +290,7 @@ export function Funding() {
               <div className="fund-ic gold"><Ic name="credit-card" /></div>
               <div className="fund-rowmain">
                 <div className="fund-titleline">
-                  <h3>Card</h3>
+                  <h3>{WAYS_IN[0].title}</h3>
                 </div>
                 <p className="fund-desc">
                   Pay by card via Stripe. The fastest path — and <b>not anonymous</b>: we see
@@ -386,7 +396,7 @@ export function Funding() {
               <div className="fund-ic accent"><Ic name="wallet" /></div>
               <div className="fund-rowmain">
                 <div className="fund-titleline">
-                  <h3>On-chain wallet</h3>
+                  <h3>{WAYS_IN[1].title}</h3>
                 </div>
                 <p className="fund-desc">
                   Connect a wallet and pay with what it holds. We see an <b>address</b>, not
@@ -478,14 +488,19 @@ export function Funding() {
           {/* Added layer · ZK purse — NOT a peer entry rail. A step you take AFTER you have a
               balance: fund from your balance → mint a bearer purse whose spends are
               cryptographically unlinkable to the note. Fund anonymously (shielded wallet)
-              AND spend unlinkably (purse). */}
+              AND spend unlinkably (purse).
+
+              While the purse switch is off (ANON_PURSE_ENABLED, noema-131) the row is absent:
+              a capability that is not built is not shown, and the roadmap is stated once, on
+              the home screen's compute card (DESIGN.md D-63). */}
+          {!purseOff && (
           <section className="fund-row">
             <div className="fund-rowhead">
               <div className="fund-ic slate"><Ic name="venetian-mask" /></div>
               <div className="fund-rowmain">
                 <div className="fund-titleline">
                   <h3>Spend unlinkably — mint a ZK purse</h3>
-                  <span className="fund-flag">{purseOff ? '◌ coming soon' : '◌ added layer'}</span>
+                  <span className="fund-flag">◌ added layer</span>
                 </div>
                 <p className="fund-desc">
                   Not another way to pay — a step you take <b>after</b> you have a balance. From
@@ -500,16 +515,6 @@ export function Funding() {
             </div>
 
             <div className="fund-guide">
-              {purseOff && (
-                <div className="warn fund-warn" style={{ marginBottom: 'var(--s3)' }}>
-                  <WarnIc />
-                  <span>
-                    The ZK bearer purse is <b>coming soon</b> — it unlocks after the trusted-setup
-                    ceremony. Funding anonymously from a shielded or fresh wallet (above) works today;
-                    only the on-top unlinkable-spend layer is not live yet.
-                  </span>
-                </div>
-              )}
               <div className="fund-guide-h">
                 <Hemisphere sees="nothing" /> how the purse works
               </div>
@@ -537,23 +542,16 @@ export function Funding() {
                   or a doxxable wallet) that step is correlation-resistant, not correlation-proof —
                   the debit and the mint are close in time. Fund from a <b>shielded or fresh
                   wallet</b> and that correlation is between anonymous things: no identity leak.
-                  We're building direct-to-commitment deposits so we won't even see the funding
-                  wallet — that's on the roadmap, not shipped yet.
                 </p>
               </details>
               <div className="fund-actions" style={{ marginTop: 'var(--s3)' }}>
-                {purseOff ? (
-                  <button className="btn-ghost" disabled aria-disabled="true">
-                    <Ic name="venetian-mask" /> Mint a purse — coming soon
-                  </button>
-                ) : (
-                  <Link className="btn-ghost" to="/vault">
-                    <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
-                  </Link>
-                )}
+                <Link className="btn-ghost" to="/vault">
+                  <Ic name="venetian-mask" /> Mint a purse <Ic name="arrow-right" />
+                </Link>
               </div>
             </div>
           </section>
+          )}
 
           {/* Last · Have a code? — someone funded a purse from their balance and sent you the token.
               Redeeming moves its whole remaining balance onto your account, once. Not a rail

@@ -349,7 +349,7 @@ export function Vault() {
           <div className="sub" style={{ marginTop: 'var(--s2)' }}>
             A purse spends unlinkably. Whether the <i>funding</i> stays anonymous depends on how you
             funded: fund from a shielded or fresh wallet and there's no identity to link; fund from a
-            card or a doxxable wallet and the debit is linkable to that funder until we ship direct-to-commitment (blind) issuance.
+            card or a doxxable wallet and the debit is linkable to that funder.
           </div>
         </div></div>
 
@@ -357,17 +357,10 @@ export function Vault() {
         {notice && <div className="csec" style={{ borderColor: 'var(--accent)' }}>{notice}</div>}
         {configErr && <div className="warn">Couldn’t reach the anonymous-credit service — {configErr}</div>}
 
-        {/* ANON_PURSE gate (noema-131): the anonymous purse is off for v1 (ships after the
-            trusted-setup ceremony). Funding, card, wallet, and shielded-wallet anonymity all
-            work now — only the ZK bearer purse waits. Coming-soon takes precedence over the
-            ceremony notice below (same root cause, one clear message). */}
-        {purseOff && (
-          <div className="warn">
-            The anonymous purse is <b>coming soon</b> — it unlocks after the trusted-setup ceremony.
-            Card and on-chain wallet funding work today, and spending from a shielded or fresh wallet
-            is already unlinkable. <Link to="/ceremony">See the ceremony ▸</Link>
-          </div>
-        )}
+        {/* ANON_PURSE gate (noema-131): while the anonymous purse is switched off, everything
+            that would mint or hand one over is absent rather than announced — the roadmap is
+            stated once, on the home screen's compute card (DESIGN.md D-63). The ceremony notice
+            below has the same root cause and is held back for the same reason. */}
 
         {/* Honesty gate: the ceremony must be finalized before any note can be minted. */}
         {config && !config.ready && !purseOff && (
@@ -378,7 +371,8 @@ export function Vault() {
         )}
 
         {/* ── Purses ─────────────────────────────────────────────────────────── */}
-        <div className="sectionhead">Purses</div>
+        {/* With the purse off and none held there is nothing to head, so no heading. */}
+        {!(purseOff && purses.length === 0) && <div className="sectionhead">Purses</div>}
 
         {!purseOff && (
           <div className="csec">

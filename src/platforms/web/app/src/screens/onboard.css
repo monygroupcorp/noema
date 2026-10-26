@@ -25,7 +25,6 @@
 .door-opt:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .door-opt:disabled{opacity:.5;cursor:not-allowed}
 .door-opt svg.lucide{width:15px;height:15px;color:var(--muted)}
-.door-opt .opt-meta{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
 .door-warn{font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--amber,#d9a13a);margin:4px 0 0}
 .door-knows{margin-top:auto;padding-top:8px;display:flex;align-items:center;gap:8px;
   font-family:var(--font-mono);font-size:12px;color:var(--muted)}

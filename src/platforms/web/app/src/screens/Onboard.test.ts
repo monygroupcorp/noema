@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { safeNext } from './Onboard';
+import { destinationName, safeNext } from './Onboard';
 
 // `next` decides where the door sends a visitor once their session is live, and it arrives from
 // the query string — so anything that isn't a same-origin app path is an open redirect off the
@@ -24,5 +24,20 @@ describe('safeNext', () => {
     expect(safeNext(null)).toBeNull();
     expect(safeNext('')).toBeNull();
     expect(safeNext('funding')).toBeNull();
+  });
+});
+
+// The door names where a visitor was going, so the step reads as part of their task. A path the
+// rail has no name for is not guessed at.
+describe('destinationName', () => {
+  it('names a rail destination, ignoring the query it carries', () => {
+    expect(destinationName('/catalog')).toBe('the catalogue');
+    expect(destinationName('/funding?pack=plus_50')).toBe('funding');
+    expect(destinationName('/datasets/abc')).toBe('your datasets');
+  });
+
+  it('has no name for a path the rail does not list, or for no path', () => {
+    expect(destinationName('/nowhere')).toBeNull();
+    expect(destinationName(null)).toBeNull();
   });
 });
