@@ -80,4 +80,8 @@
 
 .endcta{text-align:center;padding:var(--py-section) var(--px-section) calc(var(--py-section) * 0.75)}
 .endcta h2{font-size:clamp(23px,3vw,34px);letter-spacing:-.03em;font-weight:600;margin:0 0 20px}
+/* The closing line's pointer back to the page's one action: a link, not a second button (P-1d). */
+.endcta .endlink{display:inline-flex;align-items:center;gap:var(--s2);color:var(--accent-soft);text-decoration:underline;text-underline-offset:3px}
+.endcta .endlink:hover{color:var(--text)}
+.endcta .endlink svg.lucide{width:15px;height:15px}
 .lfoot{text-align:center;color:var(--faint);font-family:var(--font-mono);font-size:11px;padding:40px 0 30px;margin-top:auto}

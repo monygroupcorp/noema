@@ -20,7 +20,8 @@ function computeLabel(_exec: string): { glyph: 'lit' | 'ring' | 'dashed'; text: 
   return { glyph: 'lit', text: 'Shared' };
 }
 
-export function Account() {
+// `start` is whether the "+ Start" pill is offered. AppShell withholds it on a gated screen.
+export function Account({ start = true }: { start?: boolean } = {}) {
   const { ident, idents, execution, setIdentity } = useIdentity();
   const { session, signOutActive, signOutAll, accounts } = useSession();
   const navigate = useNavigate();
@@ -100,7 +101,7 @@ export function Account() {
       <button className="pc-pill id-chip" ref={btnRef} onClick={toggle}>
         <Chip d={ident} /><span className="nm">{anon ? 'Anonymous' : 'You'}</span><span className="cv"><Ic name="chevron-down" /></span>
       </button>
-      <Link to="/chat" className="pc-pill pc-start" onClick={guardedClick}><Ic name="plus" /> Start</Link>
+      {start && <Link to="/chat" className="pc-pill pc-start" onClick={guardedClick}><Ic name="plus" /> Start</Link>}
 
       {open && (
         <div id="acctpop" className="acctmenu" style={pos}>

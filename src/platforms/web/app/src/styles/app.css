@@ -833,7 +833,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .gold,.gem{color:var(--gold,#d9b25f)}
 
 /* topbar: surface title left, posture cluster right */
-.surface-title{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);margin-right:auto}
+/* The title box is bounded at every width, so a long crumb shrinks (parents first, see
+   .ph-crumb) instead of pushing the posture cluster out of the bar. */
+.surface-title{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* rail foot — funding · settings · account avatar */
 .railfoot{margin-top:auto;border-top:1px solid var(--hair-soft);padding:8px 10px 10px;display:flex;flex-direction:column;gap:2px}
@@ -852,8 +854,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .pc-pill.compute{font-family:var(--font-mono);color:var(--muted)}
 .pc-pill.id-chip{padding-left:6px} .pc-pill.id-chip .chip{width:20px;height:20px;font-size:10px}
 .pc-pill.id-chip .nm{font-weight:500} .pc-pill.id-chip .cv svg.lucide{width:13px;height:13px;color:var(--faint)}
-/* ghost like its sibling pills (D-42): the screen's own action is the one filled button */
-.pc-start{font-weight:600}
+/* Composes with its sibling pills in every respect, weight included (D-42): the screen's own
+   action is the one filled button, and nothing in the topbar outranks it. */
+.pc-start{font-weight:500}
 .pc-start svg.lucide{width:14px;height:14px}
 
 /* account dropdown — restrained, posture-rich (noema-account-dropdown.png) */
@@ -916,11 +919,16 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .dbrec-row .rd{color:var(--text)} .dbrec-row .rp{margin-left:auto;color:var(--muted);font-size:11.5px}
 
 /* ── project hub (project-hub-spec.md) ─────────────────────────────────────── */
-/* The crumb gives up its parent segments before the current screen's name: parents shrink and
-   ellipsize, the current name (<b>) never shrinks (D-50 — the crumb says where you are). */
+/* The crumb gives up its parent segments before the current screen's name (D-50 — the crumb
+   says where you are). Parents carry a shrink factor three orders above the leaf's, so the
+   flex algorithm takes all the shortfall from them first; each stops at the width of one
+   ellipsis, so a collapsed parent still reads as "…" and stays a link. Only once every parent
+   is down to "…" does the leaf shrink, and it ends in an ellipsis of its own rather than a cut
+   word (a `flex:none` leaf overflowed the title box, which clips mid-word with no ellipsis). */
 .ph-crumb{display:inline-flex;align-items:baseline;max-width:100%;min-width:0;white-space:nowrap}
-.ph-crumb a{color:var(--muted);text-decoration:none;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis} .ph-crumb a:hover{color:var(--text)}
-.ph-crumb .sep{color:var(--faint);margin:0 7px;flex:none} .ph-crumb b{color:var(--text);font-weight:600;flex:none}
+.ph-crumb a{color:var(--muted);text-decoration:none;flex:0 1000 auto;min-width:1em;overflow:hidden;text-overflow:ellipsis} .ph-crumb a:hover{color:var(--text)}
+.ph-crumb .sep{color:var(--faint);margin:0 7px;flex:none}
+.ph-crumb b{color:var(--text);font-weight:600;flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis}
 .ph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .ph-kick{display:block;margin-bottom:8px}
 .ph-name{font-size:clamp(24px,3vw,32px);font-weight:600;letter-spacing:-.02em;margin:0}
@@ -1440,7 +1448,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   /* topbar fits the phone: title ellipsizes; posture collapses to chip + start
      (credits/compute live one tap away in the account panel). */
   .topbar{flex-wrap:nowrap; gap:8px}
-  .surface-title{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  /* A phone's title box is too narrow for a parent beside the leaf — the posture cluster takes
+     most of the bar — so the parents are collapsed all the way and the leaf has the box to
+     itself, readable instead of ellipsized to its first syllable. The bottom-bar rail and the
+     browser's back carry the way up, as they do for .crumb above. */
+  .ph-crumb a, .ph-crumb .sep{display:none}
   .posture{flex:0 0 auto; gap:7px}
   .posture .pc-pill.credits, .posture .pc-pill.compute{display:none}
   .pc-pill.id-chip .nm{max-width:6.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}

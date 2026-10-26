@@ -505,7 +505,9 @@ export function Ceremony() {
 
       <div className="endcta">
         <h2>Make the keys no one can forge — including us.</h2>
-        <a className="btn-ghost" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+        {/* The hero's "Contribute" is this page's one action; the closing line points back to
+            it as a plain link rather than a second button for the same thing (P-1d). */}
+        <a className="endlink" href="#contribute">Contribute <Ic name="arrow-right" /></a>
       </div>
 
       <SiteFooter />

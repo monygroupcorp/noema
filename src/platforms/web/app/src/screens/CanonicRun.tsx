@@ -136,7 +136,7 @@ export function CanonicRun() {
     finally { setBusy(false); }
   }
 
-  if (fail) return <AppShell title="Canonic run"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setReload((r) => r + 1); }} /></AppShell>;
+  if (fail) return <AppShell title="Canonic run" gated={fail !== 'transient'}><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setReload((r) => r + 1); }} /></AppShell>;
   if (err) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="warn">{err}</div></div></div></AppShell>;
   if (!c) return <AppShell title="Canonic run"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 

@@ -405,7 +405,9 @@ export function Funding() {
               </div>
               <div className="fund-aside">
                 <Meter sees="pseudonym" label="a pseudonym" />
-                <button className="btn-ghost" onClick={connect}>
+                {/* Ghost: buying is the one filled action of this way in (D-42); connecting is
+                    its first step, and the buy flow prompts for a wallet itself if none is held. */}
+                <button className="btn ghost" onClick={connect}>
                   {wallet ? <>Connected: {shortAddr(wallet)}</> : <>Connect <Ic name="arrow-right" /></>}
                 </button>
                 {walletErr && <div className="warn byo-warn" style={{ marginTop: 'var(--s2)' }}>{walletErr}</div>}
