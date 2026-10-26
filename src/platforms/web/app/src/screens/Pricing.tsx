@@ -23,6 +23,19 @@ import './doc.css';
 // "Private spending" (DESIGN.md D-63, P-1b), never a line that promises it for later.
 const fmt = (n: number) => n.toLocaleString('en-US');
 
+// What a credit buys, in the unit the ledger measures. A display credit is ten impetus, and one
+// impetus is one billed second of pod time at the platform's reference pod rate
+// (src/ledger/rates.ts: IMPETUS_USD_RATE, REFERENCE_COST_PER_HR), so a credit is ten seconds
+// of GPU time. The image count comes from the one text-to-image flow with a cost curve fitted
+// from its own settled runs (src/crystal/seeds/essentiae.ts, the `sd1-5` pretium): at the
+// default 512², 20 steps a run bills about 86 s when the pod has to load the weights first and
+// about 20 s on a pod that already holds them. The cold figure is the one quoted, so the count
+// on a card is a floor a buyer can hold us to, not a best case.
+const GPU_SECONDS_PER_CREDIT = 10;
+const SD15_COLD_CREDITS_PER_IMAGE = 8.6;
+const gpuHours = (credits: number) => Math.round((credits * GPU_SECONDS_PER_CREDIT) / 3600);
+const sd15Images = (credits: number) => Math.floor(credits / SD15_COLD_CREDITS_PER_IMAGE / 10) * 10;
+
 export function Pricing() {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [err, setErr] = useState(false);
@@ -78,6 +91,11 @@ export function Pricing() {
         </p>
 
         <h2>Packs</h2>
+        <p>
+          A credit is ten seconds of GPU time at the reference pod rate, and a run is charged the
+          pod time it actually took. The image counts below are floors: they assume every run
+          loads its weights first, and a pod that is already warm bills a fraction of that.
+        </p>
         {err && (
           <p>Pack pricing is momentarily unavailable — please refresh to load the latest packs.</p>
         )}
@@ -112,6 +130,10 @@ export function Pricing() {
               <div style={{ fontSize: '18px', fontWeight: 600 }}>
                 ${p.usd} — {fmt(p.credits)} credits
               </div>
+              <p style={{ margin: 0, color: 'var(--muted)' }}>
+                About {gpuHours(p.credits)} hours of GPU time: at least {fmt(sd15Images(p.credits))}{' '}
+                Stable Diffusion 1.5 images at the default settings, more on a warm pod.
+              </p>
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 <li>Never expire</li>
                 <li>No subscription, no recurring charge</li>

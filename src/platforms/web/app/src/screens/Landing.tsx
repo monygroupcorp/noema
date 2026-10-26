@@ -126,7 +126,10 @@ export interface LandingProps {
 export function Landing({
   face = 'fraunces',
   theme = 'editorial',
-  cta = 'ink',
+  // The public default is the accent fill: a screen has one primary action and it is the
+  // accent-filled button (DESIGN.md D-42). The ink and outline variants are lab experiments,
+  // and the ink one read as a pale pill that the ghost button beside it matched for weight.
+  cta = 'blue',
   mark = 'serif',
   crop = '1:1',
   stagger = 18,

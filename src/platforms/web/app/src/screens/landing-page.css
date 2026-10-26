@@ -148,7 +148,11 @@
 /* ── accent discipline ──────────────────────────────────────────────────────────────────────
    Blue was doing buttons, rules, bars, chips and the index at once, and an accent that appears
    everywhere is not an accent. Three colours, three jobs: ink is the voice, blue is data and
-   instruments, amber is the economy. The CTA leaves the accent and takes the ink.
+   instruments, amber is the economy. The ink and outline CTAs below were the experiment in
+   taking the button off the accent too. Neither ships: the public page renders `lp-cta-blue`,
+   the plain accent-filled .btn, because one accent-filled primary beside a ghost secondary is
+   how every other screen tells the two apart (DESIGN.md D-42), and an ink pill next to a ghost
+   button read as two equals. The variants stay for the lab (/lab/landing) only.
    ──────────────────────────────────────────────────────────────────────────────────────────── */
 .lp-cta-ink .btn{background:var(--ink,var(--text));color:var(--bg);border:1px solid transparent}
 .lp-cta-ink .btn:hover{filter:none;background:#fff}

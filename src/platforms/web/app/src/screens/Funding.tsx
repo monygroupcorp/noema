@@ -614,10 +614,12 @@ export function Funding() {
 
         </div>
 
-        <div className="warn" style={{ marginTop: 'var(--s7)' }}>
+        {/* Fine print reads as fine print: plain muted text, not a bordered amber box. The box
+            borrowed a caution colour for a sentence that warns of nothing (DESIGN.md D-10). */}
+        <p style={{ margin: 'var(--s7) 0 0', color: 'var(--muted)', fontSize: 'var(--fs-sm)', lineHeight: 1.5 }}>
           Credits are a prepaid balance for compute on noema — not money.
           Non-transferable, non-withdrawable, redeemable only for runs here.
-        </div>
+        </p>
 
       </div></div>
     </AppShell>
