@@ -4,15 +4,15 @@ import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
 import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
-import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivity, queueLabel } from '../lib/muse';
+import { activityDoorHref, activityDoorLabel, activityKindLabel, queueLabel } from '../lib/muse';
 
 const IMPETUS_USD = 0.000337;
 
 // The stat cards under the page head. The balance is drawn whatever it reads: next to "Add
 // credits" a zero balance is the fact the button acts on, the one case P-1c admits. Runs and
-// studios are counts, and a count of nothing is not printed (DESIGN.md D-58) — the Running now
-// and Recently finished bands below already say what fills them. Before the read lands every
-// card holds its place with an ellipsis (D-61).
+// studios are counts, and a count of nothing is not printed (DESIGN.md D-58) — the Activity
+// list below already says what fills them. Before the read lands every card holds its place
+// with an ellipsis (D-61).
 export interface StatCard { l: string; n: string; d: string }
 export function statCards(me: MeStatus | null, usdPerCredit = IMPETUS_USD): StatCard[] {
   if (!me) return [
@@ -78,10 +78,12 @@ export function Status() {
       .finally(() => setSpendLoading(false));
   };
 
-  // Running-now / recently-finished bands (GET /v1/me/activity) — the SAME poll the
-  // rail's badge reads (noema-326), not a second request.
+  // One activity list (GET /v1/me/activity) — the SAME poll the rail's badge reads
+  // (noema-326), not a second request. The read is already newest-first across BOTH
+  // in-flight and settled rows (CrystalApi#listActivity sorts on createdAt before doors
+  // are attached), so rendering it in order is the one list REF-9 asks for — no
+  // re-partition into separate running/finished bands.
   const { rows: activityRows, loaded: activityLoaded } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
-  const { running, finished } = partitionActivity(activityRows);
 
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -121,7 +123,8 @@ export function Status() {
 
   // One row's link: a generation's door is a raw media URL (a plain external anchor,
   // never a router Link), training/caption/decompose door through the source dataset
-  // (a real in-app route), and a door-less row renders without a link at all.
+  // (a real in-app route), and a door-less row renders without a link at all. The
+  // running/finished split that used to be two panels is now this one badge (F-40).
   const activityRow = (row: ActivityRow, right: ReactNode) => {
     const href = activityDoorHref(row);
     const body = (
@@ -130,7 +133,10 @@ export function Status() {
           <div className="t">{row.modusLabel ?? activityKindLabel(row.kind)}</div>
           <div className="s">{activityKindLabel(row.kind)}{href ? ` · ${activityDoorLabel(row.kind)}` : ''}</div>
         </div>
-        <div className="li-right">{right}</div>
+        <div className="li-right" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+          <span className={`badge${row.status === 'running' ? ' accent' : ''}`}>{row.status === 'running' ? 'Running' : 'Done'}</span>
+          {right}
+        </div>
       </>
     );
     if (!href) return <div className="lrow" key={row.actumId}>{body}</div>;
@@ -154,31 +160,17 @@ export function Status() {
           ))}
         </div>
 
-        <div className="sectionhead">Running now</div>
+        <div className="sectionhead">Activity</div>
         {!activityLoaded ? (
-          <div className="empty"><div className="t">Loading what’s running…</div></div>
-        ) : running.length === 0 ? (
+          <div className="empty"><div className="t">Loading your activity…</div></div>
+        ) : activityRows.length === 0 ? (
           <div className="empty">
             <div className="ico"><Ic name="sparkles" /></div>
-            <div className="t">Nothing running right now — queued &amp; in-flight runs show here the moment you fire one.</div>
+            <div className="t">Nothing running or finished yet — queued, in-flight and completed runs all land here the moment you fire one, and finished ones stay in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link> after.</div>
           </div>
         ) : (
           <div className="list">
-            {running.slice(0, 8).map((row) => activityRow(row, runningRight(row)))}
-          </div>
-        )}
-
-        <div className="sectionhead">Recently finished</div>
-        {!activityLoaded ? (
-          <div className="empty"><div className="t">Loading recent activity…</div></div>
-        ) : finished.length === 0 ? (
-          <div className="empty">
-            <div className="ico"><Ic name="footprints" /></div>
-            <div className="t">Nothing finished yet — a completed run lands here, and stays in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link> after.</div>
-          </div>
-        ) : (
-          <div className="list">
-            {finished.slice(0, 8).map((row) => activityRow(row, fmtDate(row.settledAt)))}
+            {activityRows.slice(0, 8).map((row) => activityRow(row, row.status === 'running' ? runningRight(row) : fmtDate(row.settledAt)))}
           </div>
         )}
 
