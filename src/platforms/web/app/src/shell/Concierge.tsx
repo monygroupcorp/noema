@@ -10,6 +10,7 @@ import { WriteProposalCard } from '../components/WriteProposalCard';
 import { commitMemoryDelta } from '../lib/conciergeMemory';
 import { pickConciergeThread } from '../lib/conciergeThread';
 import { ReportModal } from './ReportModal';
+import { ReplyMarkdown } from '../components/ReplyMarkdown';
 
 // NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
 // (starts with "/"); the agent-side allowlist is the real gate.
@@ -283,21 +284,23 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
 
         {target ? (
           <div className="cassist">
-            {target.hint && <div className="chint">{target.hint}</div>}
-            <div className="ex">
-              <div className="extext">{target.example}</div>
-              <div className="exact">
-                <button onClick={() => target.apply(target.example)}>Use this</button>
-                <button className="ghost" onClick={() => copy(target.example)}>{copied ? 'Copied' : 'Copy'}</button>
+            <div className="cbody-scroll">
+              {target.hint && <div className="chint">{target.hint}</div>}
+              <div className="ex">
+                <div className="extext">{target.example}</div>
+                <div className="exact">
+                  <button onClick={() => target.apply(target.example)}>Use this</button>
+                  <button className="ghost" onClick={() => copy(target.example)}>{copied ? 'Copied' : 'Copy'}</button>
+                </div>
               </div>
-            </div>
 
-            {draft && (
-              <div className="ex draft">
-                <div className="extext">{draft}</div>
-                <div className="exact"><button onClick={() => target.apply(draft)}>Insert</button></div>
-              </div>
-            )}
+              {draft && (
+                <div className="ex draft">
+                  <div className="extext">{draft}</div>
+                  <div className="exact"><button onClick={() => target.apply(draft)}>Insert</button></div>
+                </div>
+              )}
+            </div>
 
             <div className="cinput">
               <input
@@ -310,56 +313,58 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
             </div>
           </div>
         ) : (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <div className="cbody" style={{ flex: 1, margin: 0 }}>Tell me what to make or change. I’ll pick the tool and run it.</div>
-              <button
-                style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '5px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                onClick={() => { const next = !histOpen; setHistOpen(next); if (next) void refreshThreads(); }}
-              >
-                {histOpen ? 'Close' : '☰ Recent'}
-              </button>
-            </div>
-
-            {histOpen && (
-              <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--line, #2a2f3a)', borderRadius: '8px', padding: '4px', marginBottom: '8px' }}>
+          <div className="cidle">
+            <div className="cbody-scroll">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="cbody" style={{ flex: 1, margin: 0 }}>Tell me what to make or change. I’ll pick the tool and run it.</div>
                 <button
-                  style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: '12px', padding: '6px 8px', borderRadius: '6px', border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
-                  onClick={startNewDock}
-                >+ New conversation</button>
-                {threads.length === 0 && <div style={{ opacity: 0.6, fontSize: '12px', padding: '6px 8px' }}>No conversations yet.</div>}
-                {groupDockThreads(threads, projectNameOf).map((g) => (
-                  <div key={g.key}>
-                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.55, padding: '6px 8px 2px' }}>{g.name}</div>
-                    {g.threads.map((t) => (
-                      <button
-                        key={t.id}
-                        style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: '12px', padding: '5px 8px', borderRadius: '6px', border: 'none', background: t.id === idleColloquiumId ? 'var(--hover, rgba(255,255,255,0.06))' : 'transparent', color: 'inherit', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        onClick={() => void resumeDock(t.id)}
-                      >{t.titulus || t.preview || 'Untitled'}</button>
-                    ))}
-                  </div>
-                ))}
+                  style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '5px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  onClick={() => { const next = !histOpen; setHistOpen(next); if (next) void refreshThreads(); }}
+                >
+                  {histOpen ? 'Close' : '☰ Recent'}
+                </button>
               </div>
-            )}
 
-            {idleResult && (
-              idleResult.kind === 'proposal'
-                ? <ProposalCard proposal={idleResult} onAdjust={idleAdjust} />
-                : (
-                  <div className="ex">
-                    <div className="extext">{idleResult.text}</div>
-                    {idleResult.destination && (
-                      <DestinationLink destination={idleResult.destination} onGo={navigate} />
-                    )}
-                    {idleResult.write && <WriteProposalCard write={idleResult.write} confirmKey={idleTurnKey} />}
-                  </div>
-                )
-            )}
+              {histOpen && (
+                <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--line, #2a2f3a)', borderRadius: '8px', padding: '4px' }}>
+                  <button
+                    style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: '12px', padding: '6px 8px', borderRadius: '6px', border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+                    onClick={startNewDock}
+                  >+ New conversation</button>
+                  {threads.length === 0 && <div style={{ opacity: 0.6, fontSize: '12px', padding: '6px 8px' }}>No conversations yet.</div>}
+                  {groupDockThreads(threads, projectNameOf).map((g) => (
+                    <div key={g.key}>
+                      <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.55, padding: '6px 8px 2px' }}>{g.name}</div>
+                      {g.threads.map((t) => (
+                        <button
+                          key={t.id}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: '12px', padding: '5px 8px', borderRadius: '6px', border: 'none', background: t.id === idleColloquiumId ? 'var(--hover, rgba(255,255,255,0.06))' : 'transparent', color: 'inherit', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          onClick={() => void resumeDock(t.id)}
+                        >{t.titulus || t.preview || 'Untitled'}</button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {idleSending && (
-              <div className="stage"><span className="dots"><span /><span /><span /></span> thinking…</div>
-            )}
+              {idleResult && (
+                idleResult.kind === 'proposal'
+                  ? <ProposalCard proposal={idleResult} onAdjust={idleAdjust} />
+                  : (
+                    <div className="ex">
+                      <ReplyMarkdown text={idleResult.text} />
+                      {idleResult.destination && (
+                        <DestinationLink destination={idleResult.destination} onGo={navigate} />
+                      )}
+                      {idleResult.write && <WriteProposalCard write={idleResult.write} confirmKey={idleTurnKey} />}
+                    </div>
+                  )
+              )}
+
+              {idleSending && (
+                <div className="stage"><span className="dots"><span /><span /><span /></span> thinking…</div>
+              )}
+            </div>
 
             <div className="cinput">
               <input
@@ -371,7 +376,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
               />
               <button disabled={idleSending} onClick={() => void idleSend()}><Ic name="arrow-up" /></button>
             </div>
-          </>
+          </div>
         )}
       </div>
       <div className="cbtn" onClick={() => { setGreeting(false); setOpen((o) => !o); }}>
