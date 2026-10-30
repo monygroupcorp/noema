@@ -136,14 +136,9 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Primary action — the one obvious way to start making (P0-2). New users land here with
-            no generate CTA otherwise; this routes straight to the Catalogue → Card path. The
-            concierge is reached from the rail or the dock, not a second door here (P-1d). */}
-        <div className="db-start" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center', flexWrap: 'wrap', margin: 'var(--s5) 0 var(--s6)' }}>
-          <Link className="btn" to="/catalog"><Ic name="sparkles" /> Create something</Link>
-          <span className="sub" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>Pick a model to run, or just describe what you want.</span>
-        </div>
-
+        {/* No start button of its own: the topbar's "Start" is the screen's one way to begin
+            (DESIGN.md D-50), and a second button here was the same action twice (P-1d). An empty
+            band below still carries the action that fills it (D-60). */}
         {/* The return surface, first (DESIGN.md D-64): what finished while you were gone,
             then what is still running, above the fold. A band with nothing in it is one line
             that says what lands there and carries the action that fills it (D-60) — not a

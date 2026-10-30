@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { EMPTY_HOLDINGS, computeRow, holdings, royaltyFigure, royaltyFoot } from './Dashboard';
 import type { EarningsView } from '../lib/api';
@@ -107,5 +109,15 @@ describe('holdings — the glyph row under a dashboard project card', () => {
       { ico: 'database', n: 2 },
       { ico: 'star', n: 1 },
     ]);
+  });
+});
+
+// DESIGN.md P-1d / D-50: the topbar's "Start" is the home screen's one way to begin; the body
+// does not offer a second start button beside it.
+describe('the home screen start door', () => {
+  const SOURCE = readFileSync(fileURLToPath(new URL('./Dashboard.tsx', import.meta.url)), 'utf8');
+  it('carries no start button of its own', () => {
+    expect(SOURCE).not.toContain('Create something');
+    expect(SOURCE).not.toMatch(/className="btn"[^>]*to="\/catalog"/);
   });
 });
