@@ -66,8 +66,8 @@
    as a table cut off at the page edge, and the hidden column is the one the reader came for.
    Each body row becomes a stack of label + value lines; Doc.tsx carries the column header onto
    every cell as `data-label`, so nothing the header said is lost. The header row stays in the
-   accessibility tree but leaves the layout. The first cell of a row keeps the text colour,
-   since it is what the row is about. */
+   accessibility tree but leaves the layout. The first cell of a row is what the row is about,
+   so it carries no label (Doc.tsx) and reads as the entry's heading: text colour and weight. */
 @media (max-width: 640px) {
   .prose .table-wrap { overflow: visible; }
   .prose table, .prose tbody, .prose tr, .prose td { display: block; width: 100%; min-width: 0; }
@@ -77,5 +77,5 @@
   .prose tbody tr:first-child { border-top: 0; }
   .prose td { border: 0; padding: var(--s1) var(--s3); overflow-wrap: anywhere; }
   .prose td[data-label]::before { content: attr(data-label); display: block; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; color: var(--text); margin-bottom: 2px; }
-  .prose td:first-child { color: var(--text); }
+  .prose td:first-child { color: var(--text); font-weight: 600; }
 }

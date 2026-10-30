@@ -484,9 +484,11 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    sidebar on these mobile-first screens. One rule for every screen that has sections. */
 .section-jump{display:flex;flex-wrap:wrap;gap:0 var(--s4);margin-bottom:28px;border-bottom:1px solid var(--hair)}
 /* Section links in the tab idiom (D-33: a pill is a filter or a chip; these jump): text on a
-   hairline, each with the touch hit height (D-43) and the shared focus ring (D-44). */
-.section-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--muted);font-size:var(--fs-s);text-decoration:none;transition:.14s var(--ease)}
-.section-jump a:hover{color:var(--text);border-bottom-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+   hairline, each with the touch hit height (D-43) and the shared focus ring (D-44). They are set
+   in the actionable tier (D-7), not muted, so they read as navigation rather than as the static
+   copy around them; hover brightens the link and underlines it on the hairline. */
+.section-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--accent-soft);font-size:var(--fs-s);font-weight:500;text-decoration:none;transition:.14s var(--ease)}
+.section-jump a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 .section-jump a:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
 
 /* badges / pills */

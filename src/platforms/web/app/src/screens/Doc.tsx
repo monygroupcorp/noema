@@ -23,6 +23,12 @@ import './doc.css';
 // hast node, so the table component reads `thead > tr > th` before rendering, and each body
 // row clones its cells with the matching header. Whitespace text nodes sit between the cells
 // react-markdown renders, so cells are counted by element, not by child.
+//
+// The first cell is the exception: it names what the row is about (the cookie, the storage key,
+// the kind of data), so on a phone it is the heading of its stacked entry and carries no label.
+// Labelled like the rest, a fifteen-row table read as fifteen entries all headed "Key", told apart
+// only by stopping to read the value under each; unlabelled, the key itself is the first thing in
+// every entry (REFERENCES.md REF-3). The header text stays in the accessible header row.
 const Headers = createContext<string[]>([]);
 
 type HastNode = { type?: string; tagName?: string; value?: string; children?: HastNode[] };
@@ -43,7 +49,8 @@ function labelled(children: ReactNode, labels: string[]): ReactNode {
   let i = 0;
   return Children.map(children, (child) => {
     if (!isValidElement(child)) return child;
-    const label = labels[i++];
+    const label = i === 0 ? undefined : labels[i];
+    i += 1;
     return label
       ? cloneElement(child as ReactElement<{ 'data-label'?: string }>, { 'data-label': label })
       : child;
