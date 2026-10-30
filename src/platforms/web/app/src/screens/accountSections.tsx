@@ -86,7 +86,7 @@ export function ComputeDetail({ studios, initialAvailability }: { studios: Studi
       <div className="ac-panel">
         <div className="ac-panel-l">active sessions · your studios <Link to="/studio" className="accent" style={{ float: 'right', fontWeight: 400 }}>open studio ▸</Link></div>
         {studios === null ? (
-          <div className="ac-note mono">loading your sessions…</div>
+          <div className="ac-note mono">Loading your sessions…</div>
         ) : studios.length === 0 ? (
           <div className="ac-note mono">no live studios — <Link to="/studio" className="accent">lease one</Link> to warm a GPU.</div>
         ) : (

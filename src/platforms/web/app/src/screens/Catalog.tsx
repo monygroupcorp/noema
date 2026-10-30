@@ -161,14 +161,14 @@ export function Catalog() {
           <div className="corpus">
             <h1 className="corpus-big">
               {flows === null
-                ? <span style={{ color: 'var(--faint)' }}>loading the corpus…</span>
+                ? <span style={{ color: 'var(--faint)' }}>Loading the corpus…</span>
                 : <>
                     <span className="n">{models.toLocaleString()}</span> open models — yours to run.
                   </>}
             </h1>
             <div className="corpus-meta">
               {err
-                ? 'couldn’t reach the live catalog — the staging cluster may be unreachable from here'
+                ? 'couldn’t reach the live catalogue — the staging cluster may be unreachable from here'
                 : 'every weight open-source · run remote or local · nothing proprietary, nothing locked'}
             </div>
           </div>

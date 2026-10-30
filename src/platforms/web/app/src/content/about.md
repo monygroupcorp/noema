@@ -36,7 +36,7 @@ Noema is a boutique generative-AI studio. We provide:
 - **A creative workspace** — a typed, composable canvas for building multi-step AI flows
 - **Billing without an identity** — no email to sign up; zero-knowledge credit proofs once the bearer purse ships
 
-We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own payment rails.
+We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalogue, and operate our own payment rails.
 
 ## The team
 

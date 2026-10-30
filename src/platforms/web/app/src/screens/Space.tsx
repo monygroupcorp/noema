@@ -741,7 +741,7 @@ function CorpusSpace() {
             </div>
           </div>
         ) : !corpus ? (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>loading the {layer} space…</div>
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>Loading the {layer} space…</div>
         ) : (
           <ErrorBoundary fallback={<NoWebGL />}>
             <Canvas dpr={[1, 2]} camera={{ position: cameraFrame.position, fov: cameraFrame.fov }} style={{ position: 'absolute', inset: 0 }}>
@@ -795,7 +795,7 @@ function CorpusSpace() {
               </div>
               <div className="search">
                 <Ic name="search" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'loading prompts…'} disabled={!meta} />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'Loading prompts…'} disabled={!meta} />
               </div>
               <div className="mono" style={{ textAlign: 'center', color: hasReal ? 'var(--accent-soft)' : 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s2)' }}>
                 {hasReal ? 'your space' : 'the public exhibit'} · {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
@@ -924,7 +924,7 @@ function CorpusSpace() {
                       </div>
                     );
                   })}
-                  {!meta && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 12, padding: 12 }}>loading thumbnails…</div>}
+                  {!meta && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 12, padding: 12 }}>Loading thumbnails…</div>}
                   {meta && galLimit < galleryIdx.length && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 11, padding: 8, textAlign: 'center' }}>scroll for more…</div>}
                 </div>
               </div>

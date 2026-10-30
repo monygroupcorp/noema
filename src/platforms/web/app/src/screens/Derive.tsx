@@ -107,7 +107,7 @@ export function Derive() {
   );
 
   if (datasets === null) {
-    return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!d) {
     return <AppShell title="Derive"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;

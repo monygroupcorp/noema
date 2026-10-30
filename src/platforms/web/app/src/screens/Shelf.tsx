@@ -306,7 +306,7 @@ export function Shelf() {
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>
               {shelfKicker(models, count)}
-              {catOpen && catalog && <> · public catalog · {catalog.length}</>}
+              {catOpen && catalog && <> · public catalogue · {catalog.length}</>}
             </div>
             <h1>Models</h1>
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
@@ -426,11 +426,11 @@ export function Shelf() {
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>the whole platform</div>
-            <h2>Browse the catalog</h2>
+            <h2>Browse the catalogue</h2>
             <div className="sub">Every model NOEMA publicly carries — seeded and user-published alike.</div>
           </div>
           <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
-            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'Hide catalogue' : 'Browse catalogue'}
           </button>
         </div>
 
@@ -466,8 +466,8 @@ export function Shelf() {
               </div>
             )}
 
-            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
-            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
+            {catErr && <div className="warn">Couldn’t load the catalogue — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalogue…</div></div>}
             {catalog && catShown.length === 0 && <div className="empty"><div className="t">No models match.</div></div>}
 
             {catShown.length > 0 && (

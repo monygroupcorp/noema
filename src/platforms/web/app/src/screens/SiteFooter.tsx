@@ -21,7 +21,7 @@ export function SiteFooter() {
           <h3>Product</h3>
           <Link to="/features">Features</Link>
           <Link to="/pricing">Pricing</Link>
-          <Link to="/catalog">Catalog</Link>
+          <Link to="/catalog">Catalogue</Link>
           <Link to={entryPath()}>Open app</Link>
         </div>
         <div className="col">

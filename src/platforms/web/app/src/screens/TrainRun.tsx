@@ -111,7 +111,7 @@ export function TrainRun() {
   }, [run]);
 
   if (run === undefined) {
-    return <AppShell title="Training run"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Training run"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!run) {
     return <AppShell title="Training run"><LoadFailure noun="run" kind={fail ?? 'missing'} back={BACK.home} onRetry={() => setTries((n) => n + 1)} /></AppShell>;

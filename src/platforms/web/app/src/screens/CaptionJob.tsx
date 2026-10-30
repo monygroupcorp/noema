@@ -168,7 +168,7 @@ export function CaptionJob() {
   };
 
   if (dataset === undefined) {
-    return <AppShell title="Caption job"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Caption job"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!dataset) {
     return <AppShell title="Caption job" gated><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
