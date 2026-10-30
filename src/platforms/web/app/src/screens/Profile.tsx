@@ -106,9 +106,6 @@ export function Profile() {
 // leftover credits back to your balance; revoke drains + retires the token. Identified
 // accounts only — the backend refuses anonymous/purse callers, so we gate on a real session.
 function Purses({ signedIn }: { signedIn: boolean }) {
-  // Where the door hands this visitor back once their session is live.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [purses, setPurses] = useState<Purse[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [credits, setCredits] = useState('');
@@ -157,9 +154,11 @@ function Purses({ signedIn }: { signedIn: boolean }) {
     return (
       <>
         <div className="sectionhead" id="profile-purses">Purses</div>
+        {/* The backup section above carries this screen's one sign-in link (DESIGN.md P-1d);
+            this one says what signing in unlocks and points back to it in prose. */}
         <div className="sub">
-          <Link to={doorPath(here)}>Sign in</Link> to a named account to mint shareable purses — a bearer
-          token others can spend on your credits. Anonymous sessions can’t own purses.
+          A named account mints shareable purses — a bearer token others can spend on your
+          credits. Anonymous sessions can’t own purses; sign in above to make one.
         </div>
       </>
     );

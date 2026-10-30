@@ -163,14 +163,14 @@ export function Catalog() {
               {flows === null
                 ? <span style={{ color: 'var(--faint)' }}>Loading the corpus…</span>
                 : <>
-                    <span className="n">{models.toLocaleString()}</span> open models — yours to run.
+                    {models.toLocaleString()} open models — yours to run.
                   </>}
             </h1>
-            <div className="corpus-meta">
-              {err
-                ? 'couldn’t reach the live catalogue — the staging cluster may be unreachable from here'
-                : 'every weight open-source · run remote or local · nothing proprietary, nothing locked'}
-            </div>
+            {/* The count is plain text: accent marks what can be pressed (DESIGN.md D-9). Under
+                it, only a failed read earns a line; search follows the heading directly (P-1a). */}
+            {err && (
+              <div className="corpus-meta">couldn’t reach the live catalogue — the staging cluster may be unreachable from here</div>
+            )}
           </div>
 
           <div className="cat-toolbar">
