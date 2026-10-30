@@ -785,9 +785,17 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cbtn .orb::after{content:"";position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;background:var(--good);border:2px solid var(--panel)}
 .cbtn .lab{font-size:12.5px;color:var(--text);font-weight:500}
 .cbtn .lab small{display:block;color:var(--faint);font-weight:400;font-size:10.5px}
-.cpanel{width:312px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;transform-origin:bottom left;animation:cpop .18s var(--ease)}
-.concierge.open .cpanel{display:block}
+/* Sized like an actual chat window, not a tooltip — the surface the agent's replies and the
+   idle-branch's dock history need to read as more than a corner widget. */
+.cpanel{width:min(440px,calc(100vw - 36px));height:min(70vh,640px);background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;flex-direction:column;transform-origin:bottom left;animation:cpop .18s var(--ease)}
+.concierge.open .cpanel{display:flex}
 .concierge.open .cbtn{display:none}   /* one affordance at a time (D-53): the open panel replaces its launcher */
+.cpanel .chead{flex:0 0 auto}
+/* The scrollable middle, between the fixed head and the fixed input bar — the "whole chat"
+   surface. Both branches (assist / idle) wrap their body content in this; the input stays
+   docked at the foot exactly as it did in the smaller panel. */
+.cpanel .cbody-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.cpanel .cinput{flex:0 0 auto}
 @keyframes cpop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 .cpanel .chead{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hair-soft)}
 .cpanel .chead .orb{width:22px;height:22px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);flex:0 0 auto}
@@ -800,15 +808,31 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cpanel .cinput input:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .cpanel .cinput button{border:0;border-radius:8px;background:var(--accent);color:#0a0a14;width:32px;cursor:pointer;font-size:14px}
 
+/* A concierge/chat reply's markdown (ReplyMarkdown.tsx): the agent fences anything copyable
+   (D-16: data is mono), and this is what makes a fence an actual block with its own copy
+   control instead of literal backtick characters. */
+.reply-md{font-size:inherit;line-height:inherit}
+.reply-md .reply-p{margin:0 0 8px}
+.reply-md .reply-p:last-child{margin-bottom:0}
+.reply-md code{font-family:var(--font-mono);font-size:.92em;background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1px 5px;color:var(--text)}
+.reply-code-block{position:relative;display:block;margin:0 0 8px}
+.reply-code-block pre{background:var(--panel);border:1px solid var(--hair);border-radius:9px;padding:10px 12px;padding-top:30px;overflow:auto;margin:0}
+.reply-code-block pre code{background:none;border:0;padding:0;font-size:.88em;white-space:pre}
+.reply-code-copy{position:absolute;top:6px;right:6px;font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--hair);background:var(--raised);color:var(--muted);cursor:pointer}
+.reply-code-copy:hover{color:var(--text)}
+
 /* ---------- concierge prompt augmentation (focused-field assist) ---------- */
 .chead .ctxtag{margin-left:8px;font-size:10.5px;font-family:var(--font-mono);color:var(--accent-soft);background:var(--accent-bg);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--hair));padding:2px 7px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
 .chead .ctxtag + .x{margin-left:6px}
-.cassist{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+/* .cidle is the idle (non-assist) branch's equivalent of .cassist: the same flex-column slot
+   filling the panel below .chead, so its result card and the input bar share the assist
+   branch's sizing and the .ex/.extext card styling below. */
+.cassist,.cidle{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
 .cassist .chint{font-size:11.5px;line-height:1.45;color:var(--muted);padding:0 1px}
-.cassist .extext{white-space:pre-wrap}
-.cassist .ex{background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px}
+.cassist .extext,.cidle .extext{white-space:pre-wrap}
+.cassist .ex,.cidle .ex{background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px}
 .cassist .ex.draft{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));background:var(--accent-bg)}
-.cassist .extext{font-size:12.5px;line-height:1.5;color:var(--text)}
+.cassist .extext,.cidle .extext{font-size:12.5px;line-height:1.5;color:var(--text)}
 .cassist .exact{display:flex;gap:7px;margin-top:9px}
 .cassist .exact button{border:0;border-radius:7px;background:var(--accent);color:#0a0a14;font:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;cursor:pointer;transition:.14s var(--ease)}
 .cassist .exact button.ghost{background:transparent;color:var(--muted);border:1px solid var(--hair)}

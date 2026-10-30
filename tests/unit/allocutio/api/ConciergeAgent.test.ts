@@ -889,6 +889,16 @@ test('system prompt instructs replying in the language the user writes in', () =
 })
 
 // ---------------------------------------------------------------------------
+// (f5b) the system prompt tells the model to fence anything copyable so the
+// client can render it as an actual code block with a copy control. Prompt
+// text only, same reasoning as (f5).
+// ---------------------------------------------------------------------------
+test('system prompt instructs fencing copyable text in backticks', () => {
+  const prompt = buildSystemPrompt(baseCtx())
+  assert.match(prompt, /backtick code fences/)
+})
+
+// ---------------------------------------------------------------------------
 // (f6) noema-363: the system prompt discourages re-searching the catalog, which
 // is what spent the tool budget before a proposal could be made.
 // ---------------------------------------------------------------------------
