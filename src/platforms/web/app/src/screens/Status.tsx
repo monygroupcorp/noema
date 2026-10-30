@@ -164,7 +164,7 @@ export function Status() {
         ) : activityRows.length === 0 ? (
           <div className="empty">
             {/* One line that says what will appear here, and the one action that fills it: the
-                same start path the home's "Create something" takes (DESIGN.md D-60). */}
+                same start path the home's empty bands take, to the catalogue (DESIGN.md D-60). */}
             <div className="t">Nothing running or finished yet — every run lands here the moment you start one.</div>
             <Link className="btn ghost" to="/catalog"><Ic name="sparkles" /> Create something</Link>
           </div>

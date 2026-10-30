@@ -140,9 +140,9 @@ export function Feed() {
         <div className="pagehead">
           <div>
             <h1>Feed</h1>
-            {/* The topbar's "Start" already begins a piece from every screen; a second filled
-                button here would be the same action twice (P-1d), so the way in is a plain link. */}
-            <div className="sub">{feedShape(items)} <Link to="/card">Make something</Link> and publish it from the result.</div>
+            {/* The topbar's "Start" already begins a piece from every screen; a link here would
+                be the same action twice (P-1d), so the heading only says how a piece gets here. */}
+            <div className="sub">{feedShape(items)} A piece lands here when its maker publishes it from the result.</div>
           </div>
         </div>
 
