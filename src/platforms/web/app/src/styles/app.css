@@ -505,7 +505,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    sovereignty claim in one line; N/M counts are the single accent flourish. */
 .registry .corpus{margin-bottom:30px}
 .corpus-big{font-size:30px;font-weight:600;letter-spacing:-.022em;line-height:1.1;margin:0;color:var(--text)}
-.corpus-big .n{color:var(--accent-soft)}
 .corpus-meta{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);margin-top:11px;letter-spacing:.01em}
 
 /* toolbar: search pill + modality chips + sort (catalogue-scoped) */

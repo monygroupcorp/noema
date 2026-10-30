@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -91,5 +93,19 @@ describe('CatalogFilters — one control row', () => {
 
   it('keeps the result count visible (REFERENCES.md REF-17)', () => {
     expect(html).toContain('3 of 4 models');
+  });
+});
+
+// P-1a / D-9: the heading states the shape of the list and search follows it; the count is
+// not accent-coloured, since it is not a control.
+describe('the catalogue heading', () => {
+  const SOURCE = readFileSync(fileURLToPath(new URL('./Catalog.tsx', import.meta.url)), 'utf8');
+  const CSS = readFileSync(fileURLToPath(new URL('../styles/app.css', import.meta.url)), 'utf8');
+  it('carries no tagline between the heading and search', () => {
+    expect(SOURCE).not.toContain('nothing proprietary, nothing locked');
+  });
+  it('does not paint the model count in the accent', () => {
+    expect(CSS).not.toMatch(/\.corpus-big \.n\{[^}]*accent/);
+    expect(SOURCE).not.toContain('<span className="n">{models');
   });
 });
