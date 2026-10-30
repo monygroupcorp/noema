@@ -12,3 +12,12 @@ describe('the project hub section labels', () => {
     expect(labels).toEqual(['About this project', 'Activity']);
   });
 });
+
+// DESIGN.md P-1d: the tab row already opens each holding, so the Overview cards summarise
+// what is in it and do not carry a second "Open" to the same place.
+describe('the project hub overview cards', () => {
+  it('are summaries, not a second set of doors beside the tabs', () => {
+    expect(SOURCE).not.toContain('Open ▸');
+    expect(SOURCE).not.toMatch(/<HoldingCard[^>]*\b(to|onTo)=/);
+  });
+});
