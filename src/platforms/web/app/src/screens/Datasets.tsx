@@ -170,7 +170,7 @@ export function Datasets() {
               <div className="t">Your datasets live under an account</div>
               <div className="s">
                 <Link to={doorPath('/datasets')}>Sign in</Link> to see the sets you have built. The
-                published catalog below is open to anyone.
+                published catalogue below is open to anyone.
               </div>
             </div>
           )}
@@ -212,28 +212,30 @@ export function Datasets() {
             onto the fun part, with nothing here that isn't yours to click. */}
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
-            <h2>Browse the catalog</h2>
+            <h2>Browse the catalogue</h2>
             {/* One sentence that says what the catalogue is and why a visitor with no set of
                 their own would open it (DESIGN.md P-1a) — not a question floating above it. */}
             <div className="sub">Published sets anyone can muse on — no set of your own needed.</div>
           </div>
           <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
-            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'Hide catalogue' : 'Browse catalogue'}
           </button>
         </div>
 
         {catOpen && (
           <>
-            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
-            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
+            {catErr && <div className="warn">Couldn’t load the catalogue — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalogue…</div></div>}
             {/* An empty catalogue offers the one action that fills it (DESIGN.md D-60). A set is
                 published from its own page, so the action is to make one. A visitor with no
                 account to hold it already has the one sign-in door on this screen, the account
                 box above (P-1d); here the empty state only says what will appear. */}
             {catalog && catalog.length === 0 && (
               <div className="empty">
-                <div className="t">Nothing published yet.</div>
-                {signedIn && <button className="btn ghost" onClick={openModal}><Ic name="plus" /> Make a dataset to publish</button>}
+                <div className="t">Nothing published yet</div>
+                {signedIn
+                  ? <button className="btn ghost" onClick={openModal}><Ic name="plus" /> Make a dataset to publish</button>
+                  : <div className="s">Sets members publish from their own page appear here.</div>}
               </div>
             )}
 
@@ -305,7 +307,7 @@ export function Datasets() {
               ) : (
                 <div>
                   {vestigia === null ? (
-                    <div className="sub mono">loading your generations…</div>
+                    <div className="sub mono">Loading your generations…</div>
                   ) : eligibleActa.length === 0 ? (
                     <div className="sub mono">no completed {modality} generations to seed from yet.</div>
                   ) : (

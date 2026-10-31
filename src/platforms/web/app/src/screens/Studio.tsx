@@ -146,7 +146,7 @@ export function Studio() {
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
                 Substrate
                 <select className="mobile-zoom-safe" value={fundamentumId} onChange={(e) => setFundamentumId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
-                  {fundamenta.length === 0 && <option value="">loading substrates…</option>}
+                  {fundamenta.length === 0 && <option value="">Loading substrates…</option>}
                   {fundamenta.map((f) => (
                     <option key={f.id} value={f.id}>
                       {(f.nomen ?? f.id) + (f.vramGb ? ` · ${f.vramGb}GB` : '')}

@@ -2646,7 +2646,7 @@ export function loraCatalogReason(
   offered: number,
 ): string | null {
   if (!modusId) return 'choose a workflow first — a model is scoped to the workflow it runs on';
-  if (!familia) return "this workflow doesn't name a base model, so there is no scoped catalog to offer";
+  if (!familia) return "this workflow doesn't name a base model, so there is no scoped catalogue to offer";
   if (offered <= 0) return `no LoRA with a trigger word is available for ${familia}`;
   return null;
 }

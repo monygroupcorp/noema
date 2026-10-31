@@ -339,7 +339,7 @@ export function Dataset() {
   }
 
   if (datasets === null) {
-    return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!d) {
     return <AppShell title="Dataset"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
@@ -399,7 +399,7 @@ export function Dataset() {
                 One press, reversible, no confirm — unlike archive this destroys nothing. */}
             <button className="btn ghost sm" type="button" disabled={pubBusy}
               onClick={() => void togglePublish(d)}>
-              {pubBusy ? 'working…' : d.access?.kind === 'public' ? 'published — unpublish' : 'publish to the catalog'}
+              {pubBusy ? 'working…' : d.access?.kind === 'public' ? 'published — unpublish' : 'publish to the catalogue'}
             </button>
             {archivedSet ? (
               <button className="btn ghost sm" type="button" disabled={archiving}
@@ -418,7 +418,7 @@ export function Dataset() {
               </>
             )}
             <div className="sub ds-archive-note">{ARCHIVE_MEANING}</div>
-            {d.access?.kind === 'public' && <div className="sub mono">published — anyone can find this set in the catalog and Muse on it.</div>}
+            {d.access?.kind === 'public' && <div className="sub mono">published — anyone can find this set in the catalogue and Muse on it.</div>}
             {pubErr && <div className="sub mono">that did not go through: {pubErr}</div>}
             {archivedSet && <div className="sub mono">this set is archived — it is out of your datasets until you take it back.</div>}
             {archiveErr && <div className="sub mono">that did not go through: {archiveErr}</div>}

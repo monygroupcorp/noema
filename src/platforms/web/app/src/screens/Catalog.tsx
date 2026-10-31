@@ -161,7 +161,7 @@ export function Catalog() {
           <div className="corpus">
             <h1 className="corpus-big">
               {flows === null
-                ? <span style={{ color: 'var(--faint)' }}>loading the corpus…</span>
+                ? <span style={{ color: 'var(--faint)' }}>Loading the corpus…</span>
                 : <>
                     {models.toLocaleString()} open models — yours to run.
                   </>}
@@ -169,7 +169,7 @@ export function Catalog() {
             {/* The count is plain text: accent marks what can be pressed (DESIGN.md D-9). Under
                 it, only a failed read earns a line; search follows the heading directly (P-1a). */}
             {err && (
-              <div className="corpus-meta">couldn’t reach the live catalog — the staging cluster may be unreachable from here</div>
+              <div className="corpus-meta">couldn’t reach the live catalogue — the staging cluster may be unreachable from here</div>
             )}
           </div>
 

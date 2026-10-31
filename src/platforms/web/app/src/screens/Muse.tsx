@@ -1371,7 +1371,7 @@ export function Muse() {
       })
       .catch((e) => {
         if (!live) return;
-        setCatalogError(`couldn't read the model catalog: ${errText(e)}`);
+        setCatalogError(`couldn't read the model catalogue: ${errText(e)}`);
         // No catalog read means nothing can be resolved against it. The stored entries
         // are named rather than silently stacked on trust.
         restoreNozzle([], familia);
@@ -1825,7 +1825,7 @@ export function Muse() {
         </ul>
       )}
 
-      {catalogLoading && <div className="gt-sub mono">reading the catalog…</div>}
+      {catalogLoading && <div className="gt-sub mono">Reading the catalogue…</div>}
       {catalogError && <div className="gt-sub mono">{catalogError}</div>}
 
       {/* THE STACK, in the order it fires, and each entry with its OWN weight field: a
@@ -1898,7 +1898,7 @@ export function Muse() {
   );
 
   if (datasets === null) {
-    return <AppShell title="Muse"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Muse"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!d) {
     return <AppShell title="Muse"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;

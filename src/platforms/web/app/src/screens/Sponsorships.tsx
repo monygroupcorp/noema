@@ -76,7 +76,7 @@ export function Sponsorships() {
         </div></div>
 
         {!session && ready && (
-          <div className="warn">Sponsorships need an identified account with a fundable pool. <Link to={doorPath(here)}>Sign in</Link> to pledge.</div>
+          <div className="warn">Sponsorships need an identified account with a fundable pool.</div>
         )}
 
         <div className="sectionhead">New pledge</div>
@@ -100,10 +100,16 @@ export function Sponsorships() {
             <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="balance cap (optional)" value={balanceCap} onChange={(e) => setBalanceCap(e.target.value)} disabled={!session} />
             <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="lifetime cap (optional)" value={capTotal} onChange={(e) => setCapTotal(e.target.value)} disabled={!session} />
           </div>
+          {/* A signed-out visitor gets the control that fixes what is missing, not a dimmed
+              button they cannot press (DESIGN.md D-46). It is the one sign-in door here. */}
           <div>
-            <button className="btn accent" onClick={create} disabled={creating || !session || !beneficiary.trim() || !grant.trim()}>
-              <Ic name="hand-coins" /> {creating ? 'Creating…' : 'Create pledge'}
-            </button>
+            {session ? (
+              <button className="btn accent" onClick={create} disabled={creating || !beneficiary.trim() || !grant.trim()}>
+                <Ic name="hand-coins" /> {creating ? 'Creating…' : 'Create pledge'}
+              </button>
+            ) : ready && (
+              <Link className="btn accent" to={doorPath(here)}><Ic name="hand-coins" /> Sign in to pledge</Link>
+            )}
           </div>
         </div>
 
