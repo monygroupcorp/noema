@@ -252,6 +252,35 @@ async function filledControls(page: import('playwright').Page): Promise<FilledCo
   return await page.evaluate(FILLED_JS).catch(() => []) as FilledControl[];
 }
 
+/** The elements that stay on screen while the page scrolls, measured rather than inferred. A
+ *  full-page capture grows the window to the whole document, so a sticky element is photographed
+ *  once, at the place it starts, and a fixed one at the bottom or top of a window as tall as the
+ *  page. The critic read the privacy page's sticky "On this page" as appearing once and gone for
+ *  the rest of the document, two passes of three, when it follows the reader the whole way down.
+ *  Only the outermost pinned element is listed; its text is clipped like a filled control's. */
+const PINNED_JS = `(function () {
+  const out = [];
+  const pinned = [];
+  for (const el of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'sticky' && cs.position !== 'fixed') continue;
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) continue;
+    if (pinned.some(function (p) { return p.contains(el); })) continue;
+    pinned.push(el);
+    const text = (el.getAttribute('aria-label') || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40) || '(' + el.tagName.toLowerCase() + ')';
+    out.push({ text: text, position: cs.position, top: Math.round(r.top + window.scrollY) });
+  }
+  return out;
+})()`;
+
+type PinnedElement = { text: string; position: 'sticky' | 'fixed'; top: number };
+
+async function pinnedElements(page: import('playwright').Page): Promise<PinnedElement[]> {
+  return await page.evaluate(PINNED_JS).catch(() => []) as PinnedElement[];
+}
+
 const BLANK_JS = "(function(){return (document.body && document.body.innerText || '').trim().length === 0})()";
 const BLANK_RETRY_MS = 3_000;
 
@@ -295,6 +324,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
     scrollContainer: string; viewportHeightAtShot: number; grown: boolean; capped: boolean;
     blank: boolean;
     filled: FilledControl[];
+    pinned: PinnedElement[];
   }[] = [];
   const failed: { route: string; viewport: string; error: string }[] = [];
 
@@ -334,6 +364,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         // Measured in the grown window, so a control below the first fold is listed with the
         // document offset the shot shows it at.
         const filled = await filledControls(page);
+        const pinned = await pinnedElements(page);
         await page.screenshot({ path: file, fullPage: true });
         if (capture.grown) await page.setViewportSize({ width: vp.width, height: vp.height });
         shots.push({
@@ -344,6 +375,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
           ...capture,
           blank,
           filled,
+          pinned,
         });
 
         // Scanned at the width that was photographed, and recorded under that width. A contrast or
