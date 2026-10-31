@@ -1,5 +1,20 @@
 # Changelog
 
+## [5.32.0](https://github.com/monygroupcorp/noema/compare/v5.31.0...v5.32.0) (2026-10-31)
+
+
+### Features
+
+* **web:** the concierge dock opens full-size and fences anything copyable ([#668](https://github.com/monygroupcorp/noema/issues/668)) ([a230c67](https://github.com/monygroupcorp/noema/commit/a230c67a7cae01d24ce17d7080f87da8d87be6b9))
+
+
+### Bug Fixes
+
+* **web:** consistent catalogue copy, sentence-case loading and clearer empty states ([#673](https://github.com/monygroupcorp/noema/issues/673)) ([e97e9d2](https://github.com/monygroupcorp/noema/commit/e97e9d2ccfc4994856019617b799c9a6920186a3))
+* **web:** doc tables head each phone entry by its subject, and /about splits its privacy paragraph ([#671](https://github.com/monygroupcorp/noema/issues/671)) ([a7aba98](https://github.com/monygroupcorp/noema/commit/a7aba98d0471fb73af3cf4c43cc0013d5fa4f9b4))
+* **web:** one door per screen on home, feed, profile, project and catalogue ([#672](https://github.com/monygroupcorp/noema/issues/672)) ([7f84308](https://github.com/monygroupcorp/noema/commit/7f84308ae9154d9658c22bb0b8eb7b76daedad13))
+* **web:** settings section links read as navigation, not muted copy ([#670](https://github.com/monygroupcorp/noema/issues/670)) ([59f1583](https://github.com/monygroupcorp/noema/commit/59f158318c60daf8105fbe4f986005cd087140af))
+
 ## [5.31.0](https://github.com/monygroupcorp/noema/compare/v5.30.0...v5.31.0) (2026-10-26)
 
 
