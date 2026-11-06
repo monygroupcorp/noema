@@ -1,0 +1,11 @@
+# Installed on the production droplet at /etc/systemd/system/.
+[Unit]
+Description=Daily backup of arcanum ceremony artifacts to R2
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

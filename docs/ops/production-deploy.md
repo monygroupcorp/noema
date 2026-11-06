@@ -194,6 +194,60 @@ service, error tracking, dashboards, or any automated wiring of the above snippe
 `deploy.sh` or a droplet-side scheduler. This item documents the pattern; it does not
 stand it up.
 
+## Backups
+
+**Audited 2026-11-06:** the droplet runs no app- or database-specific cron or systemd
+timer. `crontab -l` for root is empty, `/etc/cron.d` holds only Ubuntu's own
+`e2scrub_all` placeholder, and `systemctl list-timers --all` shows only stock Ubuntu
+timers (`dpkg-db-backup`, `logrotate`, `man-db`, `fstrim`, ...). No `mongod` runs on the
+host — the database is **MongoDB Atlas**, off-box, and its own backup/PITR policy is
+**not verified from this repo or this droplet**: there is no Atlas API key anywhere in
+this codebase or in `/opt/noema/.env`, so confirming the cluster's backup tier
+(dedicated M10+ clusters default Cloud Backup to *off* until explicitly toggled on; the
+old free/shared tiers had none or a reduced version with no PITR) requires logging into
+the Atlas project itself. **Operator: confirm Cloud Backup is toggled on for the
+production cluster and that its snapshot/PITR window meets your RPO/RTO bar** — this is
+one setting in the Atlas UI, not a code change.
+
+Everything else the app depends on is already off-box (Atlas for data, R2 for
+generations/exports/models) **except two directories that exist only on this droplet**:
+
+- `/opt/noema/arcanum-artifacts` — the compiled circuit (`arcanum.r1cs`) and the
+  ceremony's Phase-2-init key (`arcanum_0000.zkey`).
+- `/opt/noema/arcanum-ceremony` — contributors' `.zkey` files, named by their own
+  sha256 (4 files, ~21MB, as of this writing — the ceremony's contribution window
+  already happened, Aug 2026). These are **not reproducible**: nobody can re-derive a
+  contributor's `.zkey`, and losing it before the ceremony finalizes permanently
+  truncates the chain of contributions (see `deploy.sh`'s `CEREMONY_DIR` comment). The
+  ceremony's transcript lives in Mongo; the keys the transcript names do not.
+
+  (`arcanum-ceremony`'s 777 permissions are a separate, already-filed finding — this
+  item is about durability of what's in it, not who can write to it.)
+
+`scripts/backup-arcanum-artifacts.sh` tars both directories and pushes a timestamped
+copy to the existing `R2_PRIVATE_OUTPUTS_BUCKET` under `backups/arcanum/`, reusing the
+app's own R2 credentials from `.env` (no new cloud resource, no new secret). It needs
+`rclone` (`apt install rclone`) — the droplet has neither `rclone` nor `aws` cli by
+default. `ops/systemd/noema-backup-arcanum.{service,timer}` run it daily:
+
+```bash
+ssh noema
+apt-get install -y rclone
+cp /opt/noema/ops/systemd/noema-backup-arcanum.service /opt/noema/ops/systemd/noema-backup-arcanum.timer /etc/systemd/system/
+chmod +x /opt/noema/scripts/backup-arcanum-artifacts.sh
+systemctl daemon-reload
+systemctl enable --now noema-backup-arcanum.timer
+systemctl start noema-backup-arcanum.service   # first run, don't wait for 04:17
+journalctl -u noema-backup-arcanum.service --no-pager | tail -20
+```
+
+Nothing else on this droplet is stateful and off the backup list: the signer keystore
+(`/etc/account/STATIONTHIS`) and the RunPod secret (`/opt/noema/secrets/runpod/runpod`)
+are also local-only, but copying key material off-box is a custody decision, not a
+backup-automation one — left to the operator (see the 2026-11-02 ruling on staying in
+the approval loop for custody items). Caddy's `caddy_data`/`caddy_config` volumes hold
+only reissuable TLS certs.
+
 ## Launch checklist
 
 Only items backed by facts established above:
