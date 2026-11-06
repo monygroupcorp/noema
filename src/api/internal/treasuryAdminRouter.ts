@@ -20,6 +20,7 @@
 // Gated by `x-internal-secret` (same discipline as the other /internal routers).
 
 import express, { type Router, type Request, type Response } from 'express'
+import { internalSecretMatches } from '../../lib/internalSecret.js'
 import type { Signorum } from '../../types/significandi.js'
 import type { LegatusStore } from '../../types/legatus.js'
 import type { AnimaStore } from '../../types/anima.js'
@@ -52,8 +53,7 @@ export function createTreasuryAdminRouter(deps: TreasuryAdminDeps): Router {
   // The gate is unconditional: an unconfigured secret refuses every request rather than
   // admitting it. Configuration is asserted at boot (see `src/index.ts`).
   router.use((req: Request, res: Response, next): void => {
-    const provided = req.headers['x-internal-secret'] ?? req.query.token
-    if (!deps.secret || provided !== deps.secret) {
+    if (!internalSecretMatches(deps.secret, req.headers['x-internal-secret'])) {
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid internal secret' } })
       return
     }

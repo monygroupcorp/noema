@@ -22,6 +22,7 @@
 // its own deliberate ruling on how a human reaches it, not a fast unblock bundled into this.
 
 import express, { type Router, type Request, type Response } from 'express'
+import { internalSecretMatches } from '../../lib/internalSecret.js'
 import type { Intellarum } from '../../types/intelligendi.js'
 import { classifyModelLicense, type CommercialVerdict } from '../../crystal/modelLicense.js'
 
@@ -39,8 +40,7 @@ export function createModelAdminRouter(deps: ModelAdminDeps): Router {
   // The gate is unconditional: an unconfigured secret refuses every request rather than
   // admitting it. Configuration is asserted at boot (see `src/index.ts`).
   router.use((req: Request, res: Response, next): void => {
-    const provided = req.headers['x-internal-secret'] ?? req.query.token
-    if (!deps.secret || provided !== deps.secret) {
+    if (!internalSecretMatches(deps.secret, req.headers['x-internal-secret'])) {
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid internal secret' } })
       return
     }
