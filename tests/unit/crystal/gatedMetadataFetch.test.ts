@@ -21,6 +21,20 @@ test('importSecretProviderForUrl maps host → provider', () => {
   assert.equal(importSecretProviderForUrl('https://example.com/x.safetensors'), null)
 })
 
+test('importSecretProviderForUrl rejects an attacker host carrying the provider name as a substring', () => {
+  // Pre-fix this matched via .includes() — a real hostname check must reject all of these.
+  assert.equal(importSecretProviderForUrl('https://attacker.example/?x=civitai.com'), null)
+  assert.equal(importSecretProviderForUrl('https://civitai.com.attacker.example/path'), null)
+  assert.equal(importSecretProviderForUrl('https://attacker.example/huggingface.co'), null)
+  assert.equal(importSecretProviderForUrl('not a url'), null)
+})
+
+test('importSecretProviderForUrl accepts a real subdomain of the provider', () => {
+  assert.equal(importSecretProviderForUrl('https://civitai.com.not-really/'), null)
+  assert.equal(importSecretProviderForUrl('https://cdn.civitai.com/foo'), 'civitai')
+  assert.equal(importSecretProviderForUrl('https://huggingface.co/foo'), 'huggingface')
+})
+
 test('attaches Authorization: Bearer for a gated Civitai request when a token exists', async () => {
   const base = spyFetcher()
   const fetcher = secretJsonFetcher(base, async (p) => (p === 'civitai' ? 'civ-secret' : null))

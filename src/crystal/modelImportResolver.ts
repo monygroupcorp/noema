@@ -66,10 +66,24 @@ export const httpJsonFetcher: JsonFetcher = {
 /** The BYO-secret providers whose metadata origins can be gated. */
 export type ImportSecretProvider = 'civitai' | 'huggingface'
 
-/** Which gated provider (if any) owns a metadata URL's host — drives BYO-token attachment. */
+/** True when `hostname` IS `domain` or a subdomain of it — never a substring match. */
+function isHostOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`)
+}
+
+/** Which gated provider (if any) owns a metadata URL's host — drives BYO-token attachment.
+ *  Checks the actual parsed hostname (exact or subdomain), NOT a substring of the whole URL —
+ *  a substring match is satisfied by e.g. `https://attacker.example/?x=civitai.com`, which would
+ *  leak the owner's BYO Civitai token to an attacker-chosen host. */
 export function importSecretProviderForUrl(url: string): ImportSecretProvider | null {
-  if (url.includes('civitai.com')) return 'civitai'
-  if (url.includes('huggingface.co')) return 'huggingface'
+  let hostname: string
+  try {
+    hostname = new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+  if (isHostOrSubdomain(hostname, 'civitai.com')) return 'civitai'
+  if (isHostOrSubdomain(hostname, 'huggingface.co')) return 'huggingface'
   return null
 }
 
