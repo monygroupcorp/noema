@@ -152,7 +152,9 @@ export interface Gradus {
   modusId: string
   /**
    * "condicio" = condition — an optional expression string that must evaluate
-   * to true for this step to run. Uses the expression system (expr-eval).
+   * to true for this step to run. Not yet implemented; CompositusCursor rejects
+   * any step that sets it (see ADR-0008). A future expression engine must be a
+   * vetted, sandboxed evaluator — not expr-eval, removed for GHSA-q9v2-7m5w-4693.
    * Example: "input.width > 512"
    */
   condicio?: string
