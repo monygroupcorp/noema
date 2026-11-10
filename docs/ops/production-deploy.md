@@ -46,8 +46,7 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
    ./deploy.sh <VERSION>     # e.g. ./deploy.sh 4.1.0, or ./deploy.sh for :latest
    ```
    `deploy.sh` is a blue-green swap: it pulls the image, enables a maintenance flag,
-   loads the Ethereum signer key interactively (`keystore/loadKeystore.js`, requires a
-   TTY), starts a new container (`hyperbotcontained-new`) alongside the old one, health
+   starts a new container (`hyperbotcontained-new`) alongside the old one, health
    -checks it against `http://hyperbot-new:4000/api/health` (80 retries × 5s by default),
    and only on success swaps the network alias from the old container to the new one,
    stops/removes the old container, and tags the deployed image `:previous` for rollback.
