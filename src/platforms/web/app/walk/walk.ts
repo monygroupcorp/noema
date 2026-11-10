@@ -170,10 +170,34 @@ function listOnly(rows: RouteRow[]): void {
   }
 }
 
+/** `noema-sessions` holding at least one account means the door minted a session. Checked by
+ *  evaluation, never assumed: `storageState` writes a file whether or not a session was minted,
+ *  and a stale file from a previous run would make an anonymous walk claim to be authenticated —
+ *  which is the one thing a manifest must never do. */
+async function hasSession(page: import('playwright').Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    try {
+      const raw = localStorage.getItem('noema-sessions');
+      if (!raw) return false;
+      const store = JSON.parse(raw) as { accounts?: Record<string, unknown> };
+      return Object.keys(store.accounts ?? {}).length > 0;
+    } catch { return false; }
+  });
+}
+
 // Best-effort sign-in via Door A (the username/password rail — see src/screens/Onboard.tsx).
 // Skips gracefully with no credentials: the walk still runs, just as an anonymous session, which
 // is a legitimate state to capture (many screens work anon; auth-gated ones will show whatever
 // the anon/redirect state renders — a real observation, not a failure).
+//
+// The door is one form that opens as CREATE for a visitor with no accounts on this browser, or
+// SIGN IN for one who has some — never a separate "continue with a username" gate. A fresh
+// Playwright context always has none, so it opens on CREATE; reaching SIGN IN for a
+// WALK_EMAIL/WALK_PASSWORD account that already exists on the target takes one extra click to
+// the "I already have an account" link. Tried first because the credentials are meant to name a
+// standing walk account that persists across runs (so a round sees the previous round's state,
+// not a fresh blank one each time); registering is the fallback for the first run ever, or a
+// target that was reset.
 async function login(browser: Browser): Promise<boolean> {
   if (!EMAIL || !PASSWORD) {
     console.log('WALK_EMAIL/WALK_PASSWORD not set — walking without a session (anonymous).');
@@ -183,24 +207,25 @@ async function login(browser: Browser): Promise<boolean> {
   const page = await context.newPage();
   try {
     await page.goto(`${BASE_URL}/onboard`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Continue with a username' }).click();
+    const toSignIn = page.getByRole('button', { name: 'I already have an account' });
+    if (await toSignIn.count() > 0) await toSignIn.click();
     await page.getByLabel('username').fill(EMAIL);
-    await page.getByLabel('password').fill(PASSWORD);
+    await page.getByLabel('password', { exact: true }).fill(PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.waitForURL(/\/app/, { timeout: 15_000 }).catch(() => {
-      console.log('Sign-in did not reach /app within 15s — continuing with whatever session resulted.');
-    });
-    // Verify rather than assume. `storageState` writes a file whether or not a session was
-    // minted, and a stale file from a previous run would make an anonymous walk claim to be
-    // authenticated — which is the one thing a manifest must never do.
-    const signedIn = await page.evaluate(() => {
-      try {
-        const raw = localStorage.getItem('noema-sessions');
-        if (!raw) return false;
-        const store = JSON.parse(raw) as { accounts?: Record<string, unknown> };
-        return Object.keys(store.accounts ?? {}).length > 0;
-      } catch { return false; }
-    });
+    await page.waitForURL(/\/app/, { timeout: 15_000 }).catch(() => {});
+    let signedIn = await hasSession(page);
+    if (!signedIn) {
+      // No such account yet (or the password was wrong) — register it instead, fresh.
+      const toRegister = page.getByRole('button', { name: 'Create an account' });
+      if (await toRegister.count() > 0) await toRegister.click();
+      await page.getByLabel('username').fill(EMAIL);
+      await page.getByLabel('password', { exact: true }).fill(PASSWORD);
+      await page.getByRole('button', { name: 'Create account' }).click();
+      await page.waitForURL(/\/app/, { timeout: 15_000 }).catch(() => {
+        console.log('Sign-in/registration did not reach /app within 15s — continuing with whatever session resulted.');
+      });
+      signedIn = await hasSession(page);
+    }
     if (signedIn) await context.storageState({ path: STATE_FILE });
     console.log(signedIn ? 'signed in — walking with a session.' : 'sign-in produced no session — walking anonymously.');
     return signedIn;
