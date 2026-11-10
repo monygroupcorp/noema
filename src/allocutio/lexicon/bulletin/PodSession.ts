@@ -11,6 +11,19 @@ import {
 export type Phase = 'hunting' | 'prep' | 'ready' | 'idle'
 
 /**
+ * Lifecycle — whether this session is still live or has reached its terminal state, and (only
+ * meaningful once terminal) whether it closed via an /arm cancel or a real pod shut-down. This
+ * replaces two independently-mutated booleans (`ended`/`cancelled`) where `cancelled: true` with
+ * `ended: false` was a representable but meaningless state nothing enforced against. Also the one
+ * choke point that forces `starting` off on termination — every current reader of `starting`
+ * already gates on `!ended` first, but that was a convention each new reader had to remember, not
+ * a structural guarantee.
+ */
+type Lifecycle =
+  | { kind: 'live' }
+  | { kind: 'ended'; cancelled: boolean }
+
+/**
  * PodSession — one pod's whole life as pure state: a structured journal, a Ledger,
  * the current live phase, the warm window, and the host/guests. It maps stage
  * events to journal/live transitions; it owns NO timers and does NO I/O (the
@@ -28,8 +41,7 @@ export class PodSession {
   private pod: { gpu?: string; rate?: number; podId?: string } = {}
   private _warmTtlMs = WARM_DEFAULT_MS
   private _confirmed = false
-  private _ended = false
-  private _cancelled = false   // ended via /arm cancel (never provisioned) — distinct from a pod shut-down
+  private _lifecycle: Lifecycle = { kind: 'live' }
   private _activeSubmenu: ActiveSubmenu = null
   private _loadout?: Loadout
   private _pendingModels: PendingModel[] = []
@@ -48,7 +60,7 @@ export class PodSession {
   get podId(): string | undefined { return this.pod.podId }
   get warmTtlMs(): number { return this._warmTtlMs }
   get confirmed(): boolean { return this._confirmed }
-  get ended(): boolean { return this._ended }
+  get ended(): boolean { return this._lifecycle.kind === 'ended' }
   get activeSubmenu(): ActiveSubmenu { return this._activeSubmenu }
   get pendingModels(): readonly PendingModel[] { return this._pendingModels }
   get picker(): PickerState | null { return this._picker }
@@ -147,7 +159,7 @@ export class PodSession {
 
   /** Manager calls this when the hunt drags past the threshold. */
   markHuntSlow(): void {
-    if (this._phase === 'hunting' && !this._ended) this.live = { kind: 'hunting-slow' }
+    if (this._phase === 'hunting' && this._lifecycle.kind !== 'ended') this.live = { kind: 'hunting-slow' }
   }
 
   /** Record a completed gen and return to the resting (stat-line) state. */
@@ -173,7 +185,19 @@ export class PodSession {
   beginStarting(): void { this._starting = true }
   endStarting(): void { this._starting = false }
   get starting(): boolean { return this._starting }
-  end(): void { this._ended = true; this.live = null; this._activeSubmenu = null; this._picker = null; this._arm = null; this._armBase = undefined; this._armAccepts = undefined }
+  /** Shared terminal transition for `end()`/`cancel()` — one choke point so nothing can reach
+   *  `ended` while still reporting `starting` (see `Lifecycle`). */
+  private _doEnd(cancelled: boolean): void {
+    this._lifecycle = { kind: 'ended', cancelled }
+    this._starting = false
+    this.live = null
+    this._activeSubmenu = null
+    this._picker = null
+    this._arm = null
+    this._armBase = undefined
+    this._armAccepts = undefined
+  }
+  end(): void { this._doEnd(false) }
   clearLive(): void { this.live = null }
 
   /** Open a submenu (Mod / Share / Destroy) or close one (null). The Add picker only
@@ -213,7 +237,7 @@ export class PodSession {
   /** A warm studio is up and resting (pod bound, no gen in flight) — a model added now installs
    *  LIVE onto the pod rather than queuing for the next gen. */
   get isWarmIdle(): boolean {
-    return !!this.pod.podId && this._confirmed && !this.live && !this._ended
+    return !!this.pod.podId && this._confirmed && !this.live && this._lifecycle.kind !== 'ended'
   }
   /** Mark a model as installing live (shown as an "Installing…" tail until it lands). */
   beginInstalling(m: PendingModel): void {
@@ -310,7 +334,7 @@ export class PodSession {
   /** An /arm-originated studio that's been armed but not yet provisioned (no pod). Gates the
    *  `[▸ Start]` affordance and makes the flow chooser the parent of the Mod • menu on Back. */
   get isArmedIdle(): boolean {
-    return this._armed && this._confirmed && !this._ended && !this.pod.podId && !this._starting
+    return this._armed && this._confirmed && this._lifecycle.kind !== 'ended' && !this.pod.podId && !this._starting
   }
   /** Step back: config → image (or straight to preset when a flow already fixed the image, so the
    *  skipped image step isn't surfaced on the way back); image/flowdetail → preset; preset →
@@ -326,7 +350,7 @@ export class PodSession {
   }
   /** Cancel an un-provisioned /arm session from its first layer — a clean dismiss, not a pod
    *  shut-down (there was never a pod). The body reads "cancelled" rather than "Pod shut down". */
-  cancel(): void { this._cancelled = true; this.end() }
+  cancel(): void { this._doEnd(true) }
 
   /** Open the picker at the category (mount-location) stage. */
   openPicker(): void {
@@ -393,11 +417,11 @@ export class PodSession {
       warmTtlMs: this._warmTtlMs,
       confirmed: this._confirmed,
       rateUsdPerHr: this.pod.rate,
-      ended: this._ended,
+      ended: this._lifecycle.kind === 'ended',
       // Distinguishes "Pod shut down" (a real pod existed) from "Setup cancelled" (an armed
       // studio dismissed before it ever provisioned).
       everHadPod: !!this.pod.podId,
-      cancelled: this._cancelled,
+      cancelled: this._lifecycle.kind === 'ended' && this._lifecycle.cancelled,
       audience: this.audience,
       activeSubmenu: this._activeSubmenu,
       // A confirmed, pod-less session is an armed studio that hasn't been Started yet — the

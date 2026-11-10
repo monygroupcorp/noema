@@ -320,6 +320,10 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Which session-mutating call (if any) is in flight on this screen right now — see the
+ *  `pendingAction` state below for why these five share one flag. */
+type PendingAction = 'keep' | 'promote' | 'steer' | 'apply' | 'add';
+
 export function Muse() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -352,7 +356,17 @@ export function Muse() {
   // Kept rolls live on the SESSION (noema-329), not here. Keeping is an explicit act and
   // is written server-side; the panel below renders `keptRollsOf(session)`. What is held
   // here is only which keep is mid-write, so the control can refuse a double-send.
-  const [keeping, setKeeping] = useState(false);
+  //
+  // `pendingAction` is the one flag for every call below that reads-then-writes `session`
+  // (keep / promote / steer / confirm-sheet / manual add): each used to guard only its OWN
+  // double-send with its own boolean, which stops a user re-firing the SAME action but not
+  // firing a DIFFERENT one while the first is still in flight — two such calls both start
+  // from the same `session` snapshot, and whichever `setSession` resolves last silently wins,
+  // dropping the other's write from the screen. One shared state makes "a session write is
+  // already in flight" the thing every one of these checks, instead of five separate flags
+  // that each only knew about themselves.
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const keeping = pendingAction === 'keep';
 
   // ── The mining loop (Muse P5, noema-231) ──────────────────────────────────
   // Locks and the vary tree are this sitting's own working state: they steer the
@@ -550,7 +564,7 @@ export function Muse() {
   const [saving, setSaving] = useState<string | null>(null);
   // Promotion (noema-307): in flight, and what to say if it did not land. It writes
   // nothing to the session, so a failure leaves the sitting exactly as it was.
-  const [promoting, setPromoting] = useState(false);
+  const promoting = pendingAction === 'promote';
   const [promoteError, setPromoteError] = useState<string | null>(null);
 
   // ── The execution gate (rth's ruling, 2026-09-02) ──────────────────────────
@@ -609,12 +623,12 @@ export function Muse() {
   const [steerText, setSteerText] = useState('');
   const [steerQuote, setSteerQuote] = useState<string | null>(null);
   const [steerQuoteError, setSteerQuoteError] = useState<string | null>(null);
-  const [steering, setSteering] = useState(false);
+  const steering = pendingAction === 'steer';
   const [steerError, setSteerError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<
     { proposal: MuseSteerProposal; vetoed: Set<string>; phase: SheetPhase; outcome: string | null } | null
   >(null);
-  const [applying, setApplying] = useState(false);
+  const applying = pendingAction === 'apply';
   // Dismissals since the floor last moved (S12). The offer is derived from this and from
   // nothing else, and every floor write below resets it.
   const [dismissals, setDismissals] = useState<DismissalState>(NO_DISMISSALS);
@@ -708,8 +722,8 @@ export function Muse() {
   // the stream keeps running, the floor is untouched, and a session can be promoted more
   // than once. `setSession` is deliberately not called — there is no new session state.
   async function promote() {
-    if (!session || promoting) return;
-    setPromoting(true);
+    if (!session || pendingAction) return;
+    setPendingAction('promote');
     setPromoteError(null);
     try {
       const { collection } = await api.promoteMuseSession(session.id);
@@ -717,7 +731,7 @@ export function Muse() {
     } catch (e) {
       setPromoteError(`that didn't become a collection: ${errText(e)}`);
     } finally {
-      setPromoting(false);
+      setPendingAction(null);
     }
   }
 
@@ -739,10 +753,10 @@ export function Muse() {
   // Manual add — the free widening. One call, and the sheet re-renders from the session
   // it returns like every other floor write. Returns whether the fragment landed, so the
   // form knows whether to clear itself.
-  const [adding, setAdding] = useState(false);
+  const adding = pendingAction === 'add';
   async function addToFloor(category: FragmentCategory, text: string): Promise<boolean> {
-    if (!session || adding) return false;
-    setAdding(true);
+    if (!session || pendingAction) return false;
+    setPendingAction('add');
     try {
       setSession((await api.addMuseFragment(session.id, manualAddRequest(category, text))).session);
       setDismissals(recordFloorChange);
@@ -751,7 +765,7 @@ export function Muse() {
       setSessionError(`that fragment didn't land: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     } finally {
-      setAdding(false);
+      setPendingAction(null);
     }
   }
 
@@ -759,14 +773,14 @@ export function Muse() {
   // re-renders from the session it returns, like every other session write. Nothing is
   // fired and nothing is spent: the prompt is kept, not launched.
   async function keep(prompt: string, paid: boolean) {
-    if (!session || keeping || keepBlocked(session, prompt)) return;
-    setKeeping(true);
+    if (!session || pendingAction || keepBlocked(session, prompt)) return;
+    setPendingAction('keep');
     try {
       setSession((await api.keepMuseRoll(session.id, keptRollRequest(prompt, paid))).session);
     } catch (e) {
       setSessionError(`that roll wasn't kept: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setKeeping(false);
+      setPendingAction(null);
     }
   }
 
@@ -805,8 +819,8 @@ export function Muse() {
   // pieces already in flight are paid for, the loop re-reads the floor before every draw,
   // and the confirm is the cut line.
   async function doSteer() {
-    if (!session || steerBlock) return;
-    setSteering(true);
+    if (!session || pendingAction || steerBlock) return;
+    setPendingAction('steer');
     setSteerError(null);
     try {
       const { proposal } = await api.steerMuseSession(session.id, steerText.trim());
@@ -814,7 +828,7 @@ export function Muse() {
     } catch (e) {
       setSteerError(`that steer didn't run: ${errText(e)}`);
     } finally {
-      setSteering(false);
+      setPendingAction(null);
     }
   }
 
@@ -834,10 +848,10 @@ export function Muse() {
   // the previous call returned, exactly as the reaction writes do. A call that fails does
   // not take the rest with it: what landed stays landed and the sheet names what did not.
   async function confirmSheet() {
-    if (!session || !sheet || applying) return;
+    if (!session || !sheet || pendingAction) return;
     const writes = writesForConfirm(sheet.proposal, sheet.vetoed, 'confirmed');
     if (writes.length === 0) { setSheet(null); return; }
-    setApplying(true);
+    setPendingAction('apply');
     let next = session;
     let landed = 0;
     const failed: string[] = [];
@@ -856,7 +870,7 @@ export function Muse() {
     // have prompted it starts again from zero.
     if (landed > 0) setDismissals(recordFloorChange);
     setSheet((cur) => (cur ? { ...cur, phase: 'confirmed', outcome: confirmOutcomeNote(landed, failed) } : cur));
-    setApplying(false);
+    setPendingAction(null);
     if (failed.length === 0) setSteerText('');
   }
 
@@ -1252,7 +1266,7 @@ export function Muse() {
         <div className="muse-roll-foot">
           <button
             className="btn ghost sm"
-            disabled={keeping || keepBlocked(session, prompt)}
+            disabled={!!pendingAction || keepBlocked(session, prompt)}
             onClick={() => keep(prompt, node.paid)}
           >
             {keeping ? 'keeping…' : 'Keep'}
@@ -2266,7 +2280,7 @@ export function Muse() {
             <button
               type="button"
               className="btn ghost sm"
-              disabled={!!promoteBlockReason(session) || promoting}
+              disabled={!!promoteBlockReason(session) || !!pendingAction}
               title={promoteBlockReason(session) ?? 'the floor becomes a collection’s traits — nothing is spent, and this session is unchanged'}
               onClick={() => void promote()}
             >
@@ -2480,7 +2494,7 @@ export function Muse() {
                     <div className="muse-roll-foot">
                       <button
                         className="btn ghost sm"
-                        disabled={keeping || keepBlocked(session, promptOf(r.index, r.prompt))}
+                        disabled={!!pendingAction || keepBlocked(session, promptOf(r.index, r.prompt))}
                         onClick={() => keep(promptOf(r.index, r.prompt), r.paid)}
                       >
                         {keeping ? 'keeping…' : 'Keep'}
@@ -2663,7 +2677,7 @@ export function Muse() {
             />
             {/* Send is the ONLY thing that fires a steer: not blur, not a stray enter in
                 the scroll, not the offer above. */}
-            <button type="submit" className="btn accent sm muse-steer-send" disabled={!!steerBlock}>
+            <button type="submit" className="btn accent sm muse-steer-send" disabled={!!steerBlock || !!pendingAction}>
               {steering ? 'reading…' : (steerQuote ? `Steer → ~${steerQuote}` : 'Steer →')}
             </button>
           </form>
