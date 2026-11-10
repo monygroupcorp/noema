@@ -482,8 +482,12 @@ export function Ceremony() {
               )}
               {chain.length === 0 ? (
                 <div className="cer-empty">
-                  No contributions yet. The chain starts the moment the ceremony opens —
-                  this transcript will fill in, hash by hash, for anyone to verify.
+                  {phase === 'finalized'
+                    // A finalized ceremony produced a key, so an empty chain here is the
+                    // transcript not having loaded — never "hasn't started yet" (P-1a, P-1c):
+                    // that reads as contradicting the "finalized" status right above it.
+                    ? "The ceremony is finalized, but this transcript hasn't loaded. Reload to see the chain that produced the key."
+                    : 'No contributions yet. The chain starts the moment the ceremony opens — this transcript will fill in, hash by hash, for anyone to verify.'}
                 </div>
               ) : (
                 chain.map((c) => (
