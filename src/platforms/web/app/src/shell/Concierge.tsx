@@ -83,6 +83,19 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   // the page it just announced itself on (D-52).
   const [greeting, setGreeting] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // The open panel's footprint is reserved by narrowing `.main` (D-52, P-2c) — a class on
+  // `<body>` because the panel and `.main` are siblings under `.app`, not ancestor/descendant,
+  // so there is no CSS selector from one to the other. The arrival greeting carries no scrim
+  // (below) and was found still sitting over live form fields and buttons on desktop — a
+  // click-to-dismiss satisfies P-2c's second clause but not its first, and a screen a visitor
+  // cannot read the moment it loads is occluded regardless of how soon they can clear it. The
+  // reserve is gated to the same breakpoint the open decisions above already use: a phone never
+  // auto-opens the panel, and reserving its width there would leave negative content width.
+  useEffect(() => {
+    document.body.classList.toggle('concierge-open', open);
+    return () => document.body.classList.remove('concierge-open');
+  }, [open]);
   const [brief, setBrief] = useState('');
   const [draft, setDraft] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);

@@ -28,6 +28,7 @@
      is its distance from the viewport bottom (the bar height joins it on a phone, below). */
   --bar-h:58px; --dock-h:52px; --dock-off:var(--s4);
   --dock-reserve:calc(var(--dock-off) + var(--dock-h) + var(--s2));
+  --concierge-w:440px;  /* .cpanel's cap — shared so the open-state reserve below cannot drift from it */
   --ease:cubic-bezier(.22,.61,.36,1); --dur-fast:120ms; --dur:160ms; --dur-slow:300ms;
   /* SPACING scale (4px base) — compose from these, never magic numbers */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:48px; --s10:64px;
@@ -116,7 +117,15 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* padding-bottom reserves the concierge launcher's footprint (--dock-reserve); .page (below) gets
    min-height:0 so it actually shrinks to leave it — the scroll area then ENDS above the
    launcher and no footer/last-row can ever render under it (P-2c, D-52). */
-.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:var(--dock-reserve)}
+.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:var(--dock-reserve); transition:padding-right var(--dur) var(--ease)}
+/* The open concierge panel reserves its own footprint too (D-52, P-2c), the same office
+   padding-bottom performs for the collapsed launcher above. `.concierge` is a sibling of `.main`
+   under `.app`, not a descendant, so the hook is a class Concierge.tsx sets on <body> while open
+   rather than a nested selector. Matches the panel's own open-breakpoint guard (Concierge.tsx
+   NARROW_VIEWPORT): a phone never auto-opens the panel and must never reserve for it. */
+@media (min-width:761px){
+  body.concierge-open .main{padding-right:calc(var(--concierge-w) + var(--s7))}
+}
 .topbar{display:flex; align-items:center; gap:12px; padding:14px 30px; border-bottom:1px solid var(--hair); min-height:62px}
 /* identity + trust as ONE control (the single trust source) */
 .me{display:flex; align-items:center}
@@ -367,7 +376,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .seg-hemi{width:13px;height:13px;flex:none}
 
 /* run row */
-.run-row{display:flex;align-items:center;gap:14px}
+.run-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px}
 .quote{display:flex;flex-direction:column;gap:2px}
 .quote .q{font-family:var(--font-mono);font-size:16px;color:var(--text);font-weight:500}
 .quote .qh{font-size:11px;color:var(--faint);font-family:var(--font-mono);letter-spacing:.02em}
@@ -788,7 +797,7 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cbtn .lab small{display:block;color:var(--faint);font-weight:400;font-size:10.5px}
 /* Sized like an actual chat window, not a tooltip — the surface the agent's replies and the
    idle-branch's dock history need to read as more than a corner widget. */
-.cpanel{width:min(440px,calc(100vw - 36px));height:min(70vh,640px);background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;flex-direction:column;transform-origin:bottom left;animation:cpop .18s var(--ease)}
+.cpanel{width:min(var(--concierge-w),calc(100vw - 36px));height:min(70vh,640px);background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;flex-direction:column;transform-origin:bottom left;animation:cpop .18s var(--ease)}
 .concierge.open .cpanel{display:flex}
 .concierge.open .cbtn{display:none}   /* one affordance at a time (D-53): the open panel replaces its launcher */
 .cpanel .chead{flex:0 0 auto}
