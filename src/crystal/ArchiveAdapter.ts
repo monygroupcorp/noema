@@ -24,7 +24,7 @@
 //   metadata.json            — flat array of every item's metadata
 // =============================================================================
 
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import { PassThrough } from 'node:stream'
 import { v4 as uuidv4 } from 'uuid'
 import type { PublicationAdapter, PublishArtifact, PublishPolicy } from './PublicationAdapter.js'
@@ -83,14 +83,14 @@ export class ArchiveAdapter implements PublicationAdapter {
     const key = `${this.prefix}/${id}.zip`
     const width = String(manifest.pieces.length).padStart(4, '0').length
 
-    const archive = archiver('zip', { zlib: { level: 9 } })
+    const archive = new ZipArchive({ zlib: { level: 9 } })
     const pass = new PassThrough()
     archive.pipe(pass)
     // Forward a fatal archiver error onto the piped stream so the upload REJECTS
     // (→ the settle's catch marks the Editio failed) instead of throwing uncaught
     // on an unhandled 'error' event and crashing the worker.
-    archive.on('error', (err) => pass.destroy(err))
-    archive.on('warning', (err) => log.warn('archiver warning', { error: String(err) }))
+    archive.on('error', (err: Error) => pass.destroy(err))
+    archive.on('warning', (err: Error) => log.warn('archiver warning', { error: String(err) }))
 
     // Start the multipart upload FIRST — it consumes `pass` as we append, so the
     // zip is never buffered whole. `putStream` resolves with the hosted URL.
