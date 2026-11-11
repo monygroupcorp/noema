@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.32.0](https://github.com/monygroupcorp/noema/compare/v5.31.0...v5.32.0) (2026-11-11)
+
+
+### Features
+
+* **arcanum:** let a finalized ceremony start a real second round ([#684](https://github.com/monygroupcorp/noema/issues/684)) ([96e62ba](https://github.com/monygroupcorp/noema/commit/96e62ba318a59e3d65a9e745ec971eb2bca266a0))
+* **walk:** measure which elements stay pinned while scrolling, and tell the critic as fact ([#674](https://github.com/monygroupcorp/noema/issues/674)) ([5342239](https://github.com/monygroupcorp/noema/commit/534223949830777e50d29031de8ab66cba8e9ad8))
+* **web:** the concierge dock opens full-size and fences anything copyable ([#668](https://github.com/monygroupcorp/noema/issues/668)) ([a230c67](https://github.com/monygroupcorp/noema/commit/a230c67a7cae01d24ce17d7080f87da8d87be6b9))
+
+
+### Bug Fixes
+
+* **crystal:** match import-secret provider hosts exactly, not by substring ([#681](https://github.com/monygroupcorp/noema/issues/681)) ([eb95308](https://github.com/monygroupcorp/noema/commit/eb9530859f5b46a37c82dc570381913af7a5fd3f))
+* **deploy:** drop the plaintext Ethereum signer key from the prod container ([#682](https://github.com/monygroupcorp/noema/issues/682)) ([63c4174](https://github.com/monygroupcorp/noema/commit/63c41744a0572d054bd0c7bd9402a42ffebd8e4e))
+* **deps:** drop unused aws-sdk/csurf/[@solana](https://github.com/solana) deps, bump jimp and archiver ([#678](https://github.com/monygroupcorp/noema/issues/678)) ([0e9e05a](https://github.com/monygroupcorp/noema/commit/0e9e05a13d3ebd71a6348a6b7e03f7a0c9bd2702))
+* **deps:** pin proxy-addr to 2.0.8, patching the critical IP-spoof advisory ([#677](https://github.com/monygroupcorp/noema/issues/677)) ([04babdc](https://github.com/monygroupcorp/noema/commit/04babdc964795cb636e725b06aec56e7f903fff5))
+* make two implicit session state machines explicit ([#679](https://github.com/monygroupcorp/noema/issues/679)) ([23e1b2d](https://github.com/monygroupcorp/noema/commit/23e1b2d890e3d19b1e809dd028a21ef8279dbf96))
+* **ops:** back up the arcanum ceremony's local-only zkey state to R2 ([#675](https://github.com/monygroupcorp/noema/issues/675)) ([785a6c9](https://github.com/monygroupcorp/noema/commit/785a6c983d3f2a3d86d9391c706544f988034b0e))
+* remove expr-eval, a critical-RCE dependency with no fix and no live use ([#676](https://github.com/monygroupcorp/noema/issues/676)) ([188cfdd](https://github.com/monygroupcorp/noema/commit/188cfdda79f29497f53fea4d9139af34c65e5636))
+* **telegram:** reply in the forum topic a command was asked from ([#683](https://github.com/monygroupcorp/noema/issues/683)) ([3001e8f](https://github.com/monygroupcorp/noema/commit/3001e8f5f77946b84ccd2451e980d7b0699b85cd))
+* **web:** consistent catalogue copy, sentence-case loading and clearer empty states ([#673](https://github.com/monygroupcorp/noema/issues/673)) ([e97e9d2](https://github.com/monygroupcorp/noema/commit/e97e9d2ccfc4994856019617b799c9a6920186a3))
+* **web:** doc tables head each phone entry by its subject, and /about splits its privacy paragraph ([#671](https://github.com/monygroupcorp/noema/issues/671)) ([a7aba98](https://github.com/monygroupcorp/noema/commit/a7aba98d0471fb73af3cf4c43cc0013d5fa4f9b4))
+* **web:** one door per screen on home, feed, profile, project and catalogue ([#672](https://github.com/monygroupcorp/noema/issues/672)) ([7f84308](https://github.com/monygroupcorp/noema/commit/7f84308ae9154d9658c22bb0b8eb7b76daedad13))
+* **web:** settings section links read as navigation, not muted copy ([#670](https://github.com/monygroupcorp/noema/issues/670)) ([59f1583](https://github.com/monygroupcorp/noema/commit/59f158318c60daf8105fbe4f986005cd087140af))
+
 ## [5.31.0](https://github.com/monygroupcorp/noema/compare/v5.30.0...v5.31.0) (2026-10-26)
 
 
