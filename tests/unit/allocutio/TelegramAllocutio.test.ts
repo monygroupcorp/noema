@@ -191,13 +191,13 @@ function msgUpdate(userId: number, chatId: number, text: string, messageId = 1):
   }
 }
 
-function cbUpdate(userId: number, chatId: number, callbackData: string, cbId = 'cb-1'): TelegramUpdate {
+function cbUpdate(userId: number, chatId: number, callbackData: string, cbId = 'cb-1', threadId?: number): TelegramUpdate {
   return {
     update_id: 2,
     callback_query: {
       id: cbId,
       from: { id: userId, username: 'tester' },
-      message: { message_id: 99, chat: { id: chatId } },
+      message: { message_id: 99, chat: { id: chatId }, ...(threadId !== undefined ? { message_thread_id: threadId } : {}) },
       data: callbackData,
     },
   }
@@ -228,7 +228,7 @@ function groupMsgUpdate(
   userId: number,
   chatId: number,
   text: string,
-  opts: { messageId?: number; replyToBot?: boolean; botUsername?: string } = {}
+  opts: { messageId?: number; replyToBot?: boolean; botUsername?: string; threadId?: number } = {}
 ): TelegramUpdate {
   return {
     update_id: 5,
@@ -238,6 +238,7 @@ function groupMsgUpdate(
       chat: { id: chatId, type: 'supergroup' },
       text,
       date: Math.floor(Date.now() / 1000),
+      ...(opts.threadId !== undefined ? { message_thread_id: opts.threadId } : {}),
       ...(opts.replyToBot
         ? { reply_to_message: { message_id: 900, from: { id: 1, username: opts.botUsername ?? 'stationbot' } } }
         : {}),
@@ -1906,6 +1907,58 @@ test('render target follows the flow\'s own chat, even after the user types else
 
   assert.equal(sender.photos.length, 1)
   assert.equal(sender.photos[0].chatId, 111, 'renders into the chat the flow was opened in, not chat B')
+})
+
+// =============================================================================
+// Forum-topic routing: a reply lands in the same topic the command was asked from
+// =============================================================================
+
+test('a command asked inside a forum topic gets its reply tagged with that topic', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 42 }))
+
+  const reply = sender.sent.at(-1)!
+  assert.equal((reply.extra as { message_thread_id?: number }).message_thread_id, 42)
+})
+
+test('a command asked in General (no topic) gets a reply with no thread id', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start'))
+
+  const reply = sender.sent.at(-1)!
+  assert.equal((reply.extra as { message_thread_id?: number }).message_thread_id, undefined)
+})
+
+test('replies follow the asking topic even as the same chat sees traffic in other topics', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 1 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 1)
+
+  // A different topic in the SAME chat, between the two commands.
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 2 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 2)
+
+  // Back in the first topic — still 1, not stuck on whichever topic was last seen.
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 1 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 1)
+})
+
+test('a session bulletin posted once a gen starts still lands in the topic the /make came from', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+
+  await allocutio.receive(groupMsgUpdate(123, 456, '/make', { threadId: 9 }))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a9', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+
+  // The bulletin is platform-agnostic and posts through the wrapped sender — the thread
+  // tag comes from the adapter (keyed by chatId), not from the bulletin's own call.
+  const posted = sender.sent.find(m => m.chatId === 456)
+  assert.ok(posted, 'bulletin control should have posted into the chat')
+  assert.equal((posted!.extra as { message_thread_id?: number } | undefined)?.message_thread_id, 9)
 })
 
 // =============================================================================

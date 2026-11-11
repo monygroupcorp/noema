@@ -37,6 +37,9 @@ export interface TelegramUpdate {
     /** A command can ride attached media's caption — a different field from `text`. */
     caption?: string
     date: number
+    /** Set when this message lives inside a forum topic other than General — the reply
+     *  must carry it back so it lands in the topic the command was asked from. */
+    message_thread_id?: number
     reply_to_message?: TelegramMedia & {
       message_id: number
       /** Who sent the message being replied to — used to detect a reply to the bot itself. */
@@ -46,14 +49,14 @@ export interface TelegramUpdate {
   callback_query?: {
     id: string
     from: { id: number; username?: string; first_name?: string }
-    message?: { message_id: number; chat: { id: number } }
+    message?: { message_id: number; chat: { id: number }; message_thread_id?: number }
     data?: string
   }
 }
 
 /** TelegramSender — the outbound surface, injected so tests can mock it. */
 export interface TelegramSender {
-  sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string }): Promise<{ message_id: number }>
+  sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string; message_thread_id?: number }): Promise<{ message_id: number }>
   editMessageText(chatId: number, messageId: number, text: string, extra?: { reply_markup?: unknown }): Promise<void>
   /** Edit a media message's caption (text-message edit won't work on photos). */
   editMessageCaption?(chatId: number, messageId: number, caption: string, extra?: { reply_markup?: unknown }): Promise<void>
@@ -64,10 +67,10 @@ export interface TelegramSender {
   /** Answer a button tap. `text` shows as a toast on the tapper's screen — the one channel a
    *  tap on a dead button can be answered through without posting into the chat. */
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>
-  sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendDocument(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendMediaGroup(chatId: number, media: unknown[]): Promise<void>
+  sendPhoto(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendVideo(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendDocument(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendMediaGroup(chatId: number, media: unknown[], extra?: { message_thread_id?: number }): Promise<void>
   setMessageReaction?(chatId: number, messageId: number, reaction: unknown[]): Promise<void>
   getFileLink(fileId: string): Promise<string>
   /**
