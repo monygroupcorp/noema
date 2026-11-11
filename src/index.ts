@@ -1016,9 +1016,12 @@ async function main(): Promise<void> {
   // Crystal Agent API (/v1) — ApiAllocutio.
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   // Reviewer-confirmed-CSAM NCMEC report seam (human-review path, spec §4). From the
-  // private module; absent (public build) → the confirm action rejects but logs that no
-  // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
-  const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+  // private module; absent (public build), or present but built before this seam existed
+  // → the confirm action rejects but logs that no report was filed. Assembles + preserves;
+  // live NCMEC submission needs the ESP account.
+  const csamReviewReporter = typeof compliance?.configureCsamReviewReporter === 'function'
+    ? compliance.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+    : undefined
 
   // Wide-event store (per-job telemetry incl. costUsd) — constructed here (ahead of its other
   // consumers below) so the admin COGS report can read off the SAME instance analyticsListener
