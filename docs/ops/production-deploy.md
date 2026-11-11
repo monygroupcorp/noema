@@ -46,8 +46,7 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
    ./deploy.sh <VERSION>     # e.g. ./deploy.sh 4.1.0, or ./deploy.sh for :latest
    ```
    `deploy.sh` is a blue-green swap: it pulls the image, enables a maintenance flag,
-   loads the Ethereum signer key interactively (`keystore/loadKeystore.js`, requires a
-   TTY), starts a new container (`hyperbotcontained-new`) alongside the old one, health
+   starts a new container (`hyperbotcontained-new`) alongside the old one, health
    -checks it against `http://hyperbot-new:4000/api/health` (80 retries × 5s by default),
    and only on success swaps the network alias from the old container to the new one,
    stops/removes the old container, and tags the deployed image `:previous` for rollback.
@@ -56,6 +55,12 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
 4. **Rollback:** `./deploy.sh <previous-version>` (or `./deploy.sh previous` if the
    `:previous` tag was set by the last deploy) re-runs the same blue-green flow against
    the prior image.
+
+   **No signer key is provisioned here.** This step used to decrypt an Ethereum signer key
+   interactively and hand it to the container as a plain env var; nothing in this codebase
+   consumes that key today (`docs/spec/publishing.md` §10 — the real on-chain minter,
+   build-order #6, is unbuilt). When that minter ships, see that doc's "Signer custody for
+   build-order #6" note before reintroducing the key.
 
 ## OFAC deposit screening (compliance)
 

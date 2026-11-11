@@ -69,10 +69,6 @@ COMPLIANCE_DIR="${COMPLIANCE_DIR:-/opt/noema/private/compliance}"
 CEREMONY_DIR="${CEREMONY_DIR:-/opt/noema/ceremony}"
 CEREMONY_DIR_IN_CONTAINER="/var/lib/noema/ceremony"
 
-# Keystore
-KEYSTORE_SCRIPT="${DEPLOY_ROOT}/keystore/loadKeystore.js"
-KEYSTORE_PATH="/etc/account/STATIONTHIS"
-
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-80}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-5}"
@@ -273,25 +269,16 @@ docker pull "${IMAGE}" 2>&1 | tee -a "${LOG_FILE}"
 # 3. Enable maintenance mode
 enable_maintenance
 
-# 4. Load Ethereum signer private key (interactive — requires TTY)
-log "Loading Ethereum signer private key..."
-PRIVATE_KEY=$(node "${KEYSTORE_SCRIPT}" --path "${KEYSTORE_PATH}" < /dev/tty)
-if [[ -z "${PRIVATE_KEY}" ]]; then
-  log "Failed to load private key; aborting."
-  exit 1
-fi
-
-# 5. Ensure infrastructure
+# 4. Ensure infrastructure
 ensure_network
 start_caddy
 
-# 6. Blue-green: start new container alongside old
+# 5. Blue-green: start new container alongside old
 NEW_CONTAINER="${APP_CONTAINER}-new"
 NEW_ALIAS="${CONTAINER_ALIAS}-new"
 stop_container_if_exists "${NEW_CONTAINER}"
 
 run_logged "Starting new container (${IMAGE})..." docker run -d \
-  --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
   --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
   --env-file "${ENV_FILE}" \
@@ -308,18 +295,17 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --security-opt no-new-privileges \
   "${IMAGE}"
 
-# 7. Health check new container — old keeps serving traffic
+# 6. Health check new container — old keeps serving traffic
 if ! health_check_app "${NEW_CONTAINER}" "${NEW_ALIAS}"; then
   log "Health check failed on new container; old container still serving."
   docker logs "${NEW_CONTAINER}" 2>&1 | tail -n 200 >> "${LOG_FILE}" || true
   stop_container_if_exists "${NEW_CONTAINER}"
-  unset PRIVATE_KEY
   disable_maintenance
   log "Deploy ABORTED. No downtime occurred."
   exit 1
 fi
 
-# 8. Swap: disconnect old, reconnect new with production alias
+# 7. Swap: disconnect old, reconnect new with production alias
 log "Swapping traffic to new container..."
 if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   docker network disconnect "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
@@ -343,14 +329,13 @@ if ! assert_alias_serving; then
   else
     log "CRITICAL: neither container holds ${CONTAINER_ALIAS}. Manual recovery required (see deploy.sh header)."
   fi
-  unset PRIVATE_KEY
   disable_maintenance
   log "Deploy ABORTED at the swap. Old container was NOT destroyed."
   exit 1
 fi
 log "Traffic swapped to new container."
 
-# 9. Stop old container (capturing shutdown logs), then rename new
+# 8. Stop old container (capturing shutdown logs), then rename new
 if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   log "Stopping ${APP_CONTAINER} (${STOP_TIMEOUT}s graceful)..."
   docker stop --time "${STOP_TIMEOUT}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
@@ -364,7 +349,7 @@ fi
 docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Container renamed to ${APP_CONTAINER}."
 
-# 9b. Report the compliance mount. An empty mount is indistinguishable from a correct one from
+# 8b. Report the compliance mount. An empty mount is indistinguishable from a correct one from
 # outside the container, so say which case happened rather than making the next reader exec in.
 if [ -n "$(ls -A "${COMPLIANCE_DIR}" 2>/dev/null || true)" ]; then
   log "Compliance mount POPULATED (${COMPLIANCE_DIR} -> read-only). Real OFAC/CSAM module available to the runtime."
@@ -377,16 +362,13 @@ else
   log "  To install it, follow the operator provisioning notes for the compliance module."
 fi
 
-# 10. Clear private key from memory
-unset PRIVATE_KEY
-
-# 11. Disable maintenance
+# 9. Disable maintenance
 disable_maintenance
 
-# 12. Tag current image as 'previous' for future rollbacks
+# 10. Tag current image as 'previous' for future rollbacks
 docker tag "${IMAGE}" "${REGISTRY}:previous" >> "${LOG_FILE}" 2>&1 || true
 
-# 13. Cleanup unused images (belt-and-suspenders after pre-pull prune)
+# 11. Cleanup unused images (belt-and-suspenders after pre-pull prune)
 docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
 
 log "Deployment complete. Recent app logs:"

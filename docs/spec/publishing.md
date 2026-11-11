@@ -354,5 +354,13 @@ Inert stand-ins shipped to stand up the spine. Each is wired and exercised by th
 | `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
 | `MintAdapter` / `MarketplaceAdapter` (`src/crystal/MintAdapter.ts`) | **Freeze is real**: content-addresses `provenanceHash + owners[] + size` into a deterministic `mint:<chain>:<sha256>` / marketplace listing handle (the immutable drop identifier). But it submits **no on-chain transaction** (no Catena/CreditVault mint, no contract, no chain-issued tokenId, no per-token `tokenURI`) and makes **no real marketplace API call** — the returned handle is a projection, not an on-chain/venue artifact. | A real on-chain minter (Catena/CreditVault rails: deploy/mint, capture the tx + tokenId; assemble `tokenURI`s — the mutable hosted layer is the living-NFT work #6) and a real marketplace client (list/delist via the venue API). | Before minting/listing is offered to users (the handle is a deterministic-but-off-chain reference until then). |
 
+**Signer custody for build-order #6:** the real on-chain minter is expected to act as NOEMA's
+registered delegated agent on the noesis (ms2fun) launchpad (its `MasterRegistryV1.isAgent` /
+per-instance `agentDelegationEnabled` mechanism) — not a one-off NOEMA-owned contract. That agent
+EOA's key must never again reach an app container as a raw env var (the threat model that cost
+`audit-high-eth-signer-key-plaintext-env` its finding): design #6's signing path — a local signer
+process reached over a unix socket, or a KMS-backed signer — before wiring the first real call, and
+provision the key through that boundary from the start.
+
 **Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when
 adding or removing one.

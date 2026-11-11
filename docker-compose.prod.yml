@@ -4,7 +4,7 @@
 # lifecycle (pull, keystore decrypt, health check, rollback).
 #
 # Usage from deploy.sh:
-#   ETHEREUM_SIGNER_PRIVATE_KEY="..." docker compose -f docker-compose.prod.yml up -d bot
+#   docker compose -f docker-compose.prod.yml up -d bot
 #   docker compose -f docker-compose.prod.yml up -d staging
 #   docker compose -f docker-compose.prod.yml up -d caddy
 
@@ -45,7 +45,6 @@ services:
       clip:
         condition: service_healthy
     environment:
-      - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
       - CEREMONY_ZKEY_DIR=/var/lib/noema/ceremony
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
