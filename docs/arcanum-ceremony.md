@@ -374,6 +374,28 @@ recognises that and serves it out of the image.
 Both variables are one-time: once the bytes are in custody, and custody is the mount, they
 stay there and the variable can come back out of the environment.
 
+## Running a second round
+
+`finalize()` is one-way and `CEREMONY_OPEN` only ever fires once, from `announced` — by
+design, so a stray redeploy can never reopen a live or finished ceremony by accident. That
+is right for the ceremony that already ran; it leaves nowhere for a real contributor to
+land once the round that proved the flow works is finalized.
+
+`CEREMONY_REOPEN=1` is that second, deliberate door. Set at boot while the ceremony is
+`finalized`, it archives the finished round (its root, chain and final hash — read back
+with `CeremoniaStore.history()`, never exposed on `/v1/ceremony`) and reopens on
+`arcanum_0000.zkey` with an empty chain, same as the first round's `CEREMONY_OPEN` did.
+It is its own variable rather than something `CEREMONY_OPEN` implies, precisely so that it
+never fires by accident: starting a second round is a one-time coordinator act, done once,
+on purpose, per round, the same way `CEREMONY_OPEN` and `CEREMONY_FINALIZE` are.
+
+Round two starting from the same `arcanum_0000.zkey` is correct, not a shortcut: the root
+carries no toxic waste of its own (that only enters with each contributor's own
+randomness), so a second independent chain of real contributions from it is exactly as
+sound as the first — it just does not have to trust anyone who contributed to the first.
+A contributor who already landed one in the round that just closed can land another in the
+new round; that is the point of a new round, not a gap in the one that already enforced it.
+
 ## After the ceremony: wiring the verifier
 
 Once `verification_key.json` is in `src/arcanum/circuit/artifacts/`, load it in

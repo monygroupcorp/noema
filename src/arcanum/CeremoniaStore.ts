@@ -31,6 +31,14 @@ export interface CaeremoniaStatus {
   openSlots: number | null
 }
 
+/** A finished round, archived by `reopen()` on its way out. Same three fields a status
+ * carries while it is live — just no longer the one the sequencer is advancing. */
+export interface CaeremoniaRound {
+  rootHash: string | null
+  chain: Contributio[]
+  finalHash: string | null
+}
+
 // The honest pre-coordinator state: announced, nothing collected yet.
 const ANNOUNCED: CaeremoniaStatus = {
   phase: 'announced', rootHash: null, chain: [], finalHash: null, openSlots: null,
@@ -69,6 +77,27 @@ export interface CeremoniaStore {
   hasContributed(identityKey: string): Promise<boolean>
   /** Coordinator: seal the ceremony with the beacon'd final proving-key hash. */
   finalize(finalHash: string): Promise<void>
+  /**
+   * Coordinator: start a new round on top of a finalized one. Archives the finished
+   * round (its root, chain and finalHash — see `history()`) and resets phase to 'open'
+   * on the new `rootHash`, with an empty chain and no contributors marked as having
+   * landed a contribution yet: round two is a fresh chain, not a continuation of round
+   * one's, even when it happens to start from the same circuit root.
+   *
+   * Refuses (returns false, changes nothing) unless the current phase is 'finalized' —
+   * an announced or open ceremony has no finished round to archive and should go
+   * through `open()` instead, and refusing a second reopen before anyone has read the
+   * first round's key back out of `history()` is what keeps a double-call from losing
+   * it.
+   */
+  reopen(rootHash: string, openSlots?: number | null): Promise<boolean>
+  /**
+   * Every round this ceremony has archived via `reopen()`, oldest first. Deliberately
+   * not part of `CaeremoniaStatus` / the public GET response — a finished round is the
+   * audit trail a coordinator reads before starting the next one, not something
+   * `/v1/ceremony` needs to grow a field for.
+   */
+  history(): Promise<CaeremoniaRound[]>
 }
 
 const DOC_ID = 'caeremonia'
@@ -87,6 +116,10 @@ interface StatusDoc {
    * the public GET response (it would otherwise leak anon session identity keys).
    */
   contributedKeys?: string[]
+  /** Rounds `reopen()` has archived, oldest first. Absent on a ceremony that has never
+   * been reopened — same reasoning as `contributedKeys`, this is bookkeeping, not the
+   * public shape. */
+  history?: CaeremoniaRound[]
 }
 
 export class MongoCeremoniaStore implements CeremoniaStore {
@@ -171,6 +204,32 @@ export class MongoCeremoniaStore implements CeremoniaStore {
       { $set: { phase: 'finalized', finalHash, openSlots: null } },
     )
   }
+
+  async reopen(rootHash: string, openSlots: number | null = null): Promise<boolean> {
+    // Matched on phase: 'finalized' so a concurrent double-call only ever archives the
+    // round once — the loser's filter no longer matches after the winner's update lands.
+    const res = await this.statusCol.updateOne(
+      { _id: DOC_ID, phase: 'finalized' },
+      [{
+        $set: {
+          history: { $concatArrays: [{ $ifNull: ['$history', []] }, [{
+            rootHash: '$rootHash', chain: '$chain', finalHash: '$finalHash',
+          }]] },
+          phase: 'open',
+          rootHash,
+          openSlots,
+          chain: [],
+          contributedKeys: [],
+        },
+      }],
+    )
+    return res.modifiedCount === 1
+  }
+
+  async history(): Promise<CaeremoniaRound[]> {
+    const doc = await this.statusCol.findOne({ _id: DOC_ID })
+    return doc?.history ?? []
+  }
 }
 
 /** In-memory store for tests and pre-DB dev. */
@@ -207,6 +266,17 @@ export class MemoryCeremoniaStore implements CeremoniaStore {
   async finalize(finalHash: string): Promise<void> {
     this.state.phase = 'finalized'; this.state.finalHash = finalHash; this.state.openSlots = null
   }
+  private rounds: CaeremoniaRound[] = []
+  async reopen(rootHash: string, openSlots: number | null = null): Promise<boolean> {
+    if (this.state.phase !== 'finalized') return false
+    this.rounds.push({
+      rootHash: this.state.rootHash, chain: this.state.chain, finalHash: this.state.finalHash,
+    })
+    this.state = { phase: 'open', rootHash, chain: [], finalHash: null, openSlots }
+    this.contributedKeys = new Set()
+    return true
+  }
+  async history(): Promise<CaeremoniaRound[]> { return [...this.rounds] }
   /** Test helper: how many distinct contacts have requested a slot. */
   slotCount(): number { return this.slots.size }
 }
