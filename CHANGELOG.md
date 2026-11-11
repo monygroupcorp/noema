@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.32.2](https://github.com/monygroupcorp/noema/compare/v5.32.1...v5.32.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **arcanum:** mount arcanum_0000.zkey so CEREMONY_REOPEN can actually read it ([#687](https://github.com/monygroupcorp/noema/issues/687)) ([00cfcda](https://github.com/monygroupcorp/noema/commit/00cfcdaffeb17dadd091323bab706808e5572d1e))
+
 ## [5.32.1](https://github.com/monygroupcorp/noema/compare/v5.32.0...v5.32.1) (2026-11-11)
 
 
