@@ -56,6 +56,12 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
    `:previous` tag was set by the last deploy) re-runs the same blue-green flow against
    the prior image.
 
+   **No signer key is provisioned here.** This step used to decrypt an Ethereum signer key
+   interactively and hand it to the container as a plain env var; nothing in this codebase
+   consumes that key today (`docs/spec/publishing.md` §10 — the real on-chain minter,
+   build-order #6, is unbuilt). When that minter ships, see that doc's "Signer custody for
+   build-order #6" note before reintroducing the key.
+
 ## OFAC deposit screening (compliance)
 
 Deposit screening is live only when **both** of these hold. Either one alone is a NO-OP
