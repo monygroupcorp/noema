@@ -33,7 +33,10 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
 
   // Per-studio Bulletin link (jump-to-bulletin for the studio). Only owners see
   // this row — the scope is enforced at the callback dispatcher, not here.
+  // Terminated studios have no bulletin to jump to, and a long-running host can
+  // accumulate dozens of them — skip those rows along with their text-report lines.
   for (const st of s.studios) {
+    if (st.status === 'terminated') continue
     rows.push([
       { id: `bulletin:${st.studioId}`, label: `→ ${st.label}`, kind: 'action', scope: 'host' },
     ])

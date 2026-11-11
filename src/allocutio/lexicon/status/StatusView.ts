@@ -31,11 +31,16 @@ export const StatusView = {
       for (const g of s.gens) lines.push(`  • ${genLine(g)}`)
     }
 
-    // 3. YOUR STUDIOS — section omitted if empty.
-    if (s.studios.length > 0) {
+    // 3. YOUR STUDIOS — live studios only; a terminated one is history, not state,
+    // and a long-running host can accumulate dozens of them. One terse count line
+    // in their place instead of a bullet per dead pod.
+    const liveStudios = s.studios.filter(st => st.status !== 'terminated')
+    const terminatedCount = s.studios.length - liveStudios.length
+    if (liveStudios.length > 0 || terminatedCount > 0) {
       lines.push('')
-      lines.push(`YOUR STUDIOS (${s.studios.length})`)
-      for (const st of s.studios) lines.push(`  • ${studioLine(st)}`)
+      lines.push(`YOUR STUDIOS (${liveStudios.length})`)
+      for (const st of liveStudios) lines.push(`  • ${studioLine(st)}`)
+      if (terminatedCount > 0) lines.push(`  (+${terminatedCount} terminated)`)
     }
 
     // 4. JOINABLE — section omitted if empty (v1 always empty pending admission spec).
