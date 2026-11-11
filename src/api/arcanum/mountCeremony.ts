@@ -66,6 +66,12 @@ async function publishKey(
  * needs a redeploy):
  *
  *   CEREMONY_OPEN=1            — seed the chain root from arcanum_0000.zkey and open it.
+ *   CEREMONY_REOPEN=1          — start a new round over a FINALIZED ceremony: archives the
+ *                                finished round (CeremoniaStore.history) and reopens on
+ *                                arcanum_0000.zkey with an empty chain. Its own variable,
+ *                                never implied by CEREMONY_OPEN — CEREMONY_OPEN is a no-op
+ *                                past 'announced' on purpose, so a stray redeploy can never
+ *                                reopen a live or finished ceremony by accident.
  *   CEREMONY_HEAD_ZKEY=<path>  — put the chain head back in custody on a box that does not
  *                                have it, so an open ceremony can accept contributions again.
  *   CEREMONY_FINAL_ZKEY=<path> — publish a final proving key the image does NOT carry into
@@ -103,6 +109,32 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
       }
     } catch (err) {
       log.error('ceremony open failed', { error: String(err) })
+    }
+  }
+
+  // ── one-time: reopen for a new round ───────────────────────────────────────────────
+  // Starting a second round over a finalized ceremony discards nothing (the finished
+  // round is archived, read it back with CeremoniaStore.history before trusting this
+  // ran), but it does mean every contributor who already landed one, in the round just
+  // closed, can land another — that is the point of a new round, not a bug in this one.
+  if (process.env.CEREMONY_REOPEN === '1') {
+    try {
+      const status = await store.status()
+      if (status.phase !== 'finalized') {
+        log.info('CEREMONY_REOPEN set but the ceremony is not finalized — no-op', { phase: status.phase })
+      } else if (!existsSync(ROOT_ZKEY)) {
+        log.error('CEREMONY_REOPEN set but arcanum_0000.zkey absent — run arcanum-trusted-setup.sh --init')
+      } else {
+        const bytes = readFileSync(ROOT_ZKEY)
+        const root = sha256Hex(bytes)
+        await custody.put(root, bytes)
+        const slots = process.env.CEREMONY_SLOTS ? Number(process.env.CEREMONY_SLOTS) : null
+        const did = await store.reopen(root, Number.isFinite(slots as number) ? slots : null)
+        log.info(did ? 'ceremony REOPENED for a new round' : 'CEREMONY_REOPEN raced another boot — no-op',
+          { rootHash: root })
+      }
+    } catch (err) {
+      log.error('ceremony reopen failed', { error: String(err) })
     }
   }
 
