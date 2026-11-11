@@ -1,0 +1,12 @@
+# Installed on the production droplet at /etc/systemd/system/.
+# Runs scripts/backup-arcanum-artifacts.sh against the deploy checkout at
+# /opt/noema. See docs/ops/production-deploy.md "Backups" section.
+[Unit]
+Description=Back up arcanum ceremony artifacts to R2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/noema
+ExecStart=/opt/noema/scripts/backup-arcanum-artifacts.sh
