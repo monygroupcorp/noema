@@ -123,6 +123,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
   private readonly chatIds = new Map<string, number>()
 
+  // Forum-topic routing: chatId → the message_thread_id the chat's traffic is currently
+  // in. A group with topics enabled puts every message and command inside some topic;
+  // a reply that omits message_thread_id lands in General regardless of where the
+  // triggering message was asked, which is the "wrong channel" bug this map fixes.
+  // Absent (DMs, and groups with topics off) → no entry, so sends carry no thread id.
+  private readonly chatThreadIds = new Map<number, number | undefined>()
+
   // When each private chat last got the "nothing is running" hint — one per minute, not one
   // per line of a paste.
   private readonly idleHintAt = new Map<number, number>()
@@ -214,7 +221,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   }) {
     this.deps = deps
     this.router = deps.router
-    this.sender = deps.sender
+    // Every outbound send goes through this wrapper, so a forum topic's reply lands back
+    // in that topic no matter which subsystem (bulletin, delivery, status, flow render) sent it.
+    this.sender = this._withTopicRouting(deps.sender)
     this.identity = deps.identity
 
     // Mod • → Add catalog/search backend (own module — keeps this adapter lean).
@@ -344,6 +353,28 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   /** Map a neutral UI keyboard to Telegram's inline-keyboard shape. */
   private _toInline(kb: UiKeyboard): InlineKeyboard {
     return inlineKeyboard(kb.map(row => row.map(b => btn(b.label, b.data))))
+  }
+
+  /** Wrap a raw TelegramSender so every message it *sends* (not edits — those are already
+   *  pinned to a messageId) carries the chat's current forum topic. Every subsystem in this
+   *  adapter (bulletins, delivery, status, flow renders) writes through `this.sender`, so
+   *  wrapping it once here is what makes all of them topic-correct, without teaching any of
+   *  them — most of which are deliberately platform-agnostic — what a Telegram topic is. */
+  private _withTopicRouting(sender: TelegramSender): TelegramSender {
+    const thread = (chatId: number) => this.chatThreadIds.get(chatId)
+    return {
+      ...sender,
+      sendMessage: (chatId, text, extra) =>
+        sender.sendMessage(chatId, text, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendPhoto: (chatId, url, extra) =>
+        sender.sendPhoto(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendVideo: (chatId, url, extra) =>
+        sender.sendVideo(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendDocument: (chatId, url, extra) =>
+        sender.sendDocument(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendMediaGroup: (chatId, media, extra) =>
+        sender.sendMediaGroup(chatId, media, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+    }
   }
 
   /** How the bulletin manager puts messages on Telegram (BulletinSink). */
@@ -615,6 +646,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // and force-reply reply paths). Render target no longer reads from this map; it
     // resolves from the chat-scoped FlowContext (ruling 3).
     this.chatIds.set(`telegram:${userId}`, chatId)
+    // Track which forum topic this chat's traffic is in right now, so every reply the
+    // various subsystems send back lands in the same topic, not General. Absent on a
+    // non-topic message (DM, or General itself) → clear, so sends there carry no thread id.
+    if (message.message_thread_id !== undefined) this.chatThreadIds.set(chatId, message.message_thread_id)
+    else this.chatThreadIds.delete(chatId)
 
     // Mod • → Add: a reply to a force-reply prompt carries either a search term or trigger word(s).
     const repliedTo = message.reply_to_message?.message_id
@@ -752,6 +788,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (chatId) {
       this.chatIds.set(`telegram:${userId}`, chatId)
+      const threadId = query.message?.message_thread_id
+      if (threadId !== undefined) this.chatThreadIds.set(chatId, threadId)
+      else this.chatThreadIds.delete(chatId)
     }
 
     // Every tap is answered exactly once. A tap something below consumes is answered plainly;
