@@ -13,7 +13,10 @@ declare const __dirname: string
 
 const ARTIFACTS = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const R1CS_PATH = path.join(ARTIFACTS, 'arcanum.r1cs')
-const ROOT_ZKEY = path.join(ARTIFACTS, 'arcanum_0000.zkey')
+// arcanum_0000.zkey is gitignored (too large to commit, per docs/arcanum-ceremony.md) and so is
+// never in the image. ARCANUM_ROOT_ZKEY_PATH mirrors ARCANUM_PTAU_PATH below: a mounted host
+// path for the one deploy that sets CEREMONY_OPEN or CEREMONY_REOPEN, read once at boot.
+const ROOT_ZKEY = process.env.ARCANUM_ROOT_ZKEY_PATH ?? path.join(ARTIFACTS, 'arcanum_0000.zkey')
 const REPO_ZKEY = path.join(ARTIFACTS, 'arcanum_final.zkey')
 
 /**
@@ -82,6 +85,9 @@ async function publishKey(
  *                                (run scripts/arcanum-trusted-setup.sh --finalize first).
  *   CEREMONY_ZKEY_DIR          — custody dir for the zkey chain (default: <artifacts>/ceremony,
  *                                which on a container does not survive a deploy — mount one).
+ *   ARCANUM_ROOT_ZKEY_PATH     — arcanum_0000.zkey, for CEREMONY_OPEN/CEREMONY_REOPEN to read
+ *                                at boot. Not in the image (too large to commit); mount it for
+ *                                the one deploy that sets either variable.
  *   ARCANUM_PTAU_PATH          — pot20_final.ptau for deep per-contribution verification.
  */
 export async function mountCeremony(app: Express, store: CeremoniaStore): Promise<void> {

@@ -47,6 +47,7 @@ services:
     environment:
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
       - CEREMONY_ZKEY_DIR=/var/lib/noema/ceremony
+      - ARCANUM_ROOT_ZKEY_PATH=/var/lib/noema/arcanum-artifacts/arcanum_0000.zkey
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
     volumes:
       - /var/run/hyperbot:/var/run/hyperbot
@@ -64,6 +65,11 @@ services:
       # sets the same CEREMONY_ZKEY_DIR; the two must stay in step. Empty is correct until a
       # ceremony opens.
       - ${CEREMONY_DIR:-/opt/noema/ceremony}:/var/lib/noema/ceremony
+      # arcanum_0000.zkey + arcanum.r1cs — too large to commit (gitignored), so CEREMONY_OPEN
+      # and CEREMONY_REOPEN read the root zkey from here at boot instead of the image. deploy.sh
+      # mounts the same path and sets the same ARCANUM_ROOT_ZKEY_PATH; the two must stay in
+      # step. Read-only: nothing here is ever written by the app.
+      - ${ARCANUM_ARTIFACTS_DIR:-/opt/noema/arcanum-artifacts}:/var/lib/noema/arcanum-artifacts:ro
     mem_limit: 900m
     networks:
       hyperbot:

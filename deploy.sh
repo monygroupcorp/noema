@@ -69,6 +69,14 @@ COMPLIANCE_DIR="${COMPLIANCE_DIR:-/opt/noema/private/compliance}"
 CEREMONY_DIR="${CEREMONY_DIR:-/opt/noema/ceremony}"
 CEREMONY_DIR_IN_CONTAINER="/var/lib/noema/ceremony"
 
+# Arcanum circuit setup artifacts (host state, NOT in the image: arcanum_0000.zkey and
+# arcanum.r1cs are gitignored — too large to commit, per docs/arcanum-ceremony.md). Read-only;
+# the app only reads arcanum_0000.zkey from here, and only at boot, and only on the one deploy
+# that sets CEREMONY_OPEN or CEREMONY_REOPEN — the running ceremony's own chain lives in
+# CEREMONY_DIR above, not here.
+ARCANUM_ARTIFACTS_DIR="${ARCANUM_ARTIFACTS_DIR:-/opt/noema/arcanum-artifacts}"
+ARCANUM_ARTIFACTS_DIR_IN_CONTAINER="/var/lib/noema/arcanum-artifacts"
+
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-80}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-5}"
@@ -281,6 +289,7 @@ stop_container_if_exists "${NEW_CONTAINER}"
 run_logged "Starting new container (${IMAGE})..." docker run -d \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
   --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
+  --env ARCANUM_ROOT_ZKEY_PATH="${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}/arcanum_0000.zkey" \
   --env-file "${ENV_FILE}" \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
@@ -290,6 +299,7 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
   -v "${COMPLIANCE_DIR}:/usr/src/app/dist/private/compliance:ro" \
   -v "${CEREMONY_DIR}:${CEREMONY_DIR_IN_CONTAINER}" \
+  -v "${ARCANUM_ARTIFACTS_DIR}:${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}:ro" \
   --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
