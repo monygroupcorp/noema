@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.32.1](https://github.com/monygroupcorp/noema/compare/v5.32.0...v5.32.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **compliance:** tolerate a private compliance module built before the CSAM reviewer-report seam ([#685](https://github.com/monygroupcorp/noema/issues/685)) ([1e7033e](https://github.com/monygroupcorp/noema/commit/1e7033e24c8d51d7268699350aa17e2a02526a69))
+
 ## [5.32.0](https://github.com/monygroupcorp/noema/compare/v5.31.0...v5.32.0) (2026-11-11)
 
 
