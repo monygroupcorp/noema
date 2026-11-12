@@ -1,6 +1,8 @@
-// Auth contract of the treasury admin router: the `x-internal-secret` / `?token=` gate is
+// Auth contract of the treasury admin router: the `x-internal-secret` header gate is
 // unconditional, so an unconfigured secret refuses every request instead of admitting it.
-// The gate runs before any ledger write — an unauthorized call must not reach `issue`.
+// Header-only — `?token=` is deliberately not accepted (it lands in access logs, browser
+// history and the Referer header). The gate runs before any ledger write — an unauthorized
+// call must not reach `issue`.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
@@ -58,10 +60,10 @@ test('configured secret + correct header → request is admitted', async () => {
   assert.ok(calls.includes('issue'))
 })
 
-test('configured secret + correct ?token= → request is admitted', async () => {
+test('configured secret + correct ?token= → 401 (header only, no query fallback)', async () => {
   const { server } = harness(SECRET)
   const res = await request(server).post(fund).query({ token: SECRET }).send({ points: 5 })
-  assert.equal(res.status, 200)
+  assert.equal(res.status, 401)
 })
 
 test('configured secret + wrong credential → 401 and no ledger write', async () => {

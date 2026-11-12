@@ -1,6 +1,6 @@
 // Auth contract + reclassify/clearance behaviour of the model admin router. Mirrors
-// treasuryAdminRouter.test.ts's structure: the x-internal-secret gate is unconditional,
-// so a refused request must never reach `setLicense`.
+// treasuryAdminRouter.test.ts's structure: the x-internal-secret header gate is unconditional
+// and header-only (no `?token=` fallback), so a refused request must never reach `setLicense`.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
@@ -64,6 +64,13 @@ test('wrong credential → 401 and no store write', async () => {
 test('no credential → 401 and no store write', async () => {
   const { server, calls } = harness(SECRET)
   const res = await request(server).post(licenseRoute(KLEIN_4B.id)).send({ reclassify: true })
+  assert.equal(res.status, 401)
+  assert.deepEqual(calls, [])
+})
+
+test('correct ?token= → 401 (header only, no query fallback) and no store write', async () => {
+  const { server, calls } = harness(SECRET)
+  const res = await request(server).post(licenseRoute(KLEIN_4B.id)).query({ token: SECRET }).send({ reclassify: true })
   assert.equal(res.status, 401)
   assert.deepEqual(calls, [])
 })
