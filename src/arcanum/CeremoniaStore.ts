@@ -219,6 +219,7 @@ export class MongoCeremoniaStore implements CeremoniaStore {
           rootHash,
           openSlots,
           chain: [],
+          finalHash: null,
           contributedKeys: [],
         },
       }],
