@@ -121,6 +121,21 @@ tell me the exact name/title to use (or tell me to just go ahead with what's alr
 the realm) and I'll either fill and submit it myself or hand you the filled form to submit,
 whichever you'd rather.
 
+**Done (2026-11-13), per your ruling "fill out the form as far as you can and I'll finish it and
+submit for us":** opened platform.minimax.io/h3-license in your Chrome and filled in everything
+that isn't a guess about you personally — Country: United States, Company Name: Mony Group LLC,
+Business Email: mony.group.corporation@gmail.com, the $20M revenue question: No, and checked the
+Agree License Terms / Safeguards Commitment / Flow-down Confirmation / Confidentiality
+Confirmation boxes (all four match what we already committed to above). **Left for you, in the
+open tab:**
+- **Full Name** — blank, needs your real legal name.
+- **Job Title** — defaulted to "Founder / Co-Founder" by an accidental click while I was reading
+  the form; change it if that's not the title you want on file.
+- **Indemnity Confirmation** — left unchecked on purpose. It's "we indemnify and hold MiniMax
+  harmless against any and all losses/liabilities/claims/costs from any breach by us" — a real
+  liability commitment, not a procedural box, and yours to decide rather than mine to tick.
+- The **Submit** button itself — I did not click it.
+
 ### Still open regardless of who files
 
 - The flow-down T&C language (item 5 above) isn't written yet — worth drafting in parallel so it's
