@@ -42,6 +42,8 @@ One container, one process.
    `/api/health`, and prints logs (look for `[web] serving React app from …`).
 4. **Verify:** `curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept: text/html' https://staging.noema.art/`
    should be `200`; `…/v1/flows` should be `200`.
+5. **Logs** survive the recreate: `journalctl -t noema-staging` (see "Logs" in
+   `production-deploy.md`).
 
 ## The web app
 

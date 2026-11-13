@@ -895,6 +895,10 @@ async function main(): Promise<void> {
     const traceCtx = makeTraceContext({ platform: 'telegram' })
     withTrace(traceCtx, () => allocutio.receive(ctx.update))
   })
+  tgBot.on('my_chat_member', ctx => {
+    const traceCtx = makeTraceContext({ platform: 'telegram' })
+    withTrace(traceCtx, () => allocutio.receive(ctx.update))
+  })
 
   // 8. Express + webhook router
   const app = express()

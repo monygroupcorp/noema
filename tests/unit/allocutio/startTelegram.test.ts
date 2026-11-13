@@ -278,3 +278,23 @@ test('the signal handlers are registered ahead of the Telegram start in the boot
   assert.ok(sigint < start, 'SIGINT handler must be registered before Telegram is started')
   assert.ok(listen < sigterm, 'signal handlers should be registered once the server is listening')
 })
+
+test('polling and webhook both subscribe to bot membership changes', async () => {
+  const launched: unknown[] = []
+  const hooked: unknown[] = []
+  const { bot } = makeBot()
+  bot.launch = (config?: unknown) => { launched.push(config); return never<void>() }
+  bot.telegram.setWebhook = (_url: string, extra?: unknown) => { hooked.push(extra); return Promise.resolve(true) }
+
+  await startTelegram({ bot, commands: COMMANDS, log: makeLog().log, pollingProbeMs: 5 })
+  await startTelegram({ bot, commands: COMMANDS, log: makeLog().log, webhookUrl: 'https://x.test', app: { use: () => {} } })
+
+  for (const updates of [
+    (launched[0] as { allowedUpdates: string[] }).allowedUpdates,
+    (hooked[0] as { allowed_updates: readonly string[] }).allowed_updates,
+  ]) {
+    assert.ok(updates.includes('message'))
+    assert.ok(updates.includes('callback_query'))
+    assert.ok(updates.includes('my_chat_member'))
+  }
+})

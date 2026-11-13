@@ -34,6 +34,10 @@ export interface TelegramUpdate {
     from?: { id: number; username?: string; first_name?: string }
     chat: { id: number; type: string }
     text?: string
+    /** Service message: this group was upgraded to a supergroup with a new id (old chat side). */
+    migrate_to_chat_id?: number
+    /** Service message: this supergroup was upgraded from a group with the given id (new chat side). */
+    migrate_from_chat_id?: number
     /** A command can ride attached media's caption — a different field from `text`. */
     caption?: string
     date: number
@@ -49,9 +53,11 @@ export interface TelegramUpdate {
   callback_query?: {
     id: string
     from: { id: number; username?: string; first_name?: string }
-    message?: { message_id: number; chat: { id: number }; message_thread_id?: number }
+    message?: { message_id: number; chat: { id: number; type?: string }; message_thread_id?: number }
     data?: string
   }
+  /** The bot's own membership of a chat changed. Logged, never dispatched. */
+  my_chat_member?: import('./updateLog.js').ChatMemberUpdated
 }
 
 /** TelegramSender — the outbound surface, injected so tests can mock it. */
