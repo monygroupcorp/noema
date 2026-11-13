@@ -112,6 +112,8 @@ if [[ ! -f "${RUNPOD_SSH_KEY_SRC}" ]]; then
   log "WARNING: RunPod SSH key not found at ${RUNPOD_SSH_KEY_SRC} — SECURE pod runs will fail until it's mounted."
 fi
 
+# Logs go to the host journal so they outlive this container, which every deploy removes:
+# `journalctl -t noema-staging`. See docs/ops/staging-deploy.md.
 log "Starting staging container..."
 docker run -d \
   --env-file "${ENV_FILE}" \
@@ -120,6 +122,8 @@ docker run -d \
   --network-alias "${CONTAINER_ALIAS}" \
   --name "${STAGING_CONTAINER}" \
   --restart unless-stopped \
+  --log-driver journald \
+  --log-opt tag=noema-staging \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   "${IMAGE}" >> "${LOG_FILE}" 2>&1
