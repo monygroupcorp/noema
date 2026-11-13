@@ -166,6 +166,32 @@ commercial license.
 > `src/crystal/seeds/intellae.ts`. The public-catalog gate (`isCatalogEligible`) refuses `no`/`unknown`
 > promotions fail-closed — see `docs/spec/model-import.md` §Licensing.
 
+### MiniMax H3 — what the licence actually covers
+
+The 2026-09-01 operating licence lifts the Community License's US exclusion for self-hosting the
+canonical `fl2va` / `ref2va` / `t2v` weights (territory only). On top of that, the Community
+License itself — not a separate royalty deal — sets what we may do with the model:
+
+- **Selling access — covered.** Running H3 as a paid flow is "permit[ting] the generation of
+  Outputs," which the licence allows as long as we keep "reasonable and proportionate technical
+  and organizational safeguards" and display "MiniMax H3" on the product UI. No ongoing royalty is
+  owed to MiniMax; the one figure that matters is a **$20M/yr revenue trigger** — cross it and we
+  owe MiniMax a separate written authorization request (`api@minimax.io`), not a running cut.
+- **Training — covered only for derivatives of H3 itself.** A LoRA or fine-tune built on these
+  weights is a "Model Derivative" under the licence and inherits it, so that is covered. The
+  licence separately bars using H3's weights or Outputs "to improve any other artificial
+  intelligence model (other than MiniMax H3 or its Model Derivatives)" — on a plain reading, that
+  also rules out treating H3-generated video as training data for an unrelated model. Training a
+  *different, newer model* off of H3 — rather than fine-tuning H3 itself — is **not** covered by
+  the existing grant and would need a separate agreement with MiniMax.
+- **NFT collections — covered.** "MiniMax claims no rights over the Outputs you generate. You and
+  your users are entirely responsible for the Outputs," so minting/selling generated video as NFTs
+  is ordinary commercial use of our own output, subject only to the same UI-attribution requirement
+  and the licence's blanket bans (no military use, no unlicensed professional activity).
+
+This is a plain reading of the MiniMax H3 Community License, cross-checked against the operating
+licence already on file — not legal advice (see disclaimer at top).
+
 ---
 
 ## Distilled: the legitimate structure
