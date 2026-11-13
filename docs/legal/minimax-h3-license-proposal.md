@@ -136,6 +136,16 @@ open tab:**
   liability commitment, not a procedural box, and yours to decide rather than mine to tick.
 - The **Submit** button itself — I did not click it.
 
+**Submitted (2026-11-13), by rth.** Confirmation screen: "Request Submitted — Thanks for your
+application. We have submitted John Kelly's request and will email
+mony.group.corporation@gmail.com shortly." So: filed as John Kelly / Founder / Co-Founder of
+Mony Group LLC, under the no-indemnity-checked terms above. **We do not hold the licence yet** —
+this is a submitted request, and MiniMax's own page says a confirmation email follows; nothing
+here confirms the grant itself. Per MiniMax DevRel's public statements the form is expected to be
+self-serve/auto-granted, but that's not yet verified for this request. Next step: watch
+mony.group.corporation@gmail.com for MiniMax's reply and treat *that* — not this submission — as
+what actually retires this goal.
+
 ### Still open regardless of who files
 
 - The flow-down T&C language (item 5 above) isn't written yet — worth drafting in parallel so it's
