@@ -442,8 +442,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
                       {txHash ? 'deposit — confirming onchain' : 'deposit — SIGN IN WALLET'}
                     </div>
                     <div className="bcm-disclosure">
-                      this purchase reveals an address, an amount, a timestamp — never a name,
-                      never what you make.
+                      this purchase reveals an address, an amount, a timestamp — never a name.
                     </div>
                     <div className="bcm-closesafety">
                       You can close this window — the deposit settles onchain either way and
@@ -517,9 +516,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
 
             <p>
               Connect a wallet to pay with what it already holds. We see an address, not a
-              person — an amount and a timestamp, never a name, never what you make. How
-              private that address is depends on the wallet: a fresh or shielded one has no
-              identity behind it; a normal one can be traced on-chain.
+              person — an amount and a timestamp, never a name. How private that address is
+              depends on the wallet: a fresh or shielded one has no identity behind it; a
+              normal one can be traced on-chain.
             </p>
             <button className="btn" onClick={doConnect}>Connect wallet</button>
             {connectErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{connectErr}</div>}
