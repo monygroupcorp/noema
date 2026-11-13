@@ -43,6 +43,22 @@ export function walletGateState(hasSession: boolean, address: string, linkedWall
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
+/** Plain English for a deposit's on-chain status — never the raw Latin status token.
+ * The settle line used to interpolate `depositStatus` straight into the polling copy, so a
+ * confirmed-but-uncredited deposit read "still not credited — confirmatum · stopped watching":
+ * the backend's own enum word, not a sentence. `confirmatum` means the deposit is confirmed
+ * onchain but the credit hasn't landed — the funds are real, just HELD pending the webhook. */
+export function depositStatusLabel(status: MyDeposit['status'] | null): string {
+  switch (status) {
+    case 'confirmatum': return 'held — confirmed onchain, awaiting credit';
+    case 'processatum': return 'credited';
+    case 'fractum': return 'failed';
+    case 'praesolutum': return 'settled on the prior ledger';
+    case 'detectum':
+    default: return 'seen, not yet confirmed';
+  }
+}
+
 /** Format a token amount (in whole units) the way the legacy quick-target anchors did —
  * price anchors, not exact totals, so precision scales down as the number gets small. */
 function fmtEthAnchor(amount: number): string {
@@ -474,8 +490,8 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
                 ? `confirmed · ${settledAt ?? ''}`
                 : phase === 'settle'
                 ? settleStalled
-                  ? `still not credited — ${depositStatus ?? 'detectum'} · stopped watching`
-                  : `waiting for the credit to land — ${depositStatus ?? 'detectum'} · polling every 15s`
+                  ? `still not credited — ${depositStatusLabel(depositStatus)} · stopped watching`
+                  : `waiting for the credit to land — ${depositStatusLabel(depositStatus)} · polling every 15s`
                 : 'credits land automatically'}
             </span>
             {phase === 'settled' && <span className="bcm-tick success">—✓</span>}
