@@ -93,13 +93,37 @@ look/fix pass on `src/crystal/seeds/intellae.ts` + `modelLicense.ts` to flip tho
 gated off the paid catalog despite the flag. I've escalated this separately rather than touching
 `main`-branch code from this goal's branch.
 
-## My lean
+## Ruling (2026-11-13, rth): Path A. Not B (too expensive), not C.
 
-1. File Path A now (free, fast, self-serve) — once rth or whoever is authorized signs off on the
-   actual filer/representation.
-2. In parallel, decide whether Path C (API passthrough) is worth standing up as a stopgap for
-   selling access while A is pending.
-3. Treat "train a genuinely new model off H3" as its own, separate, uncertain ask to MiniMax —
-   don't bundle it into "get the license," since no license tier here grants it.
-4. Get the live-catalog flag (`seeds/intellae.ts`) checked/fixed as its own fast-follow, given the
-   possible live exposure.
+Pursuing the free MiniMax self-serve territorial exception only. The API-passthrough stopgap and
+the paid Comfy reseller license are both off the table.
+
+### What filing Path A actually takes
+
+The form at **platform.minimax.io/h3-license** asks for:
+1. The applicant's **full legal name** and **job title** — the real person representing Mony
+   Group LLC to MiniMax.
+2. **Country.**
+3. Agreement to the MiniMax H3 license terms.
+4. A **confidentiality confirmation** on the request's contents.
+5. A commitment that, before we give anyone access to a product built on H3, we'll **bind them to
+   terms at least as protective as MiniMax's own restrictions** (the flow-down obligation) —
+   meaning our own T&C needs language covering this before (or as) we launch, and we need the
+   anti-abuse reporting/suspension capability described above.
+
+I don't have (1) or (2) to fill in, and submitting a representation to a third party under
+Mony Group LLC's name isn't something I'll do without you naming who signs it — not because the
+form is risky to click, but because "full legal name, job title" is a real representation about a
+real person and I'm not going to guess it.
+
+**My lean:** file it as you, rth, under whatever title you use for Mony Group LLC externally —
+tell me the exact name/title to use (or tell me to just go ahead with what's already on file for
+the realm) and I'll either fill and submit it myself or hand you the filled form to submit,
+whichever you'd rather.
+
+### Still open regardless of who files
+
+- The flow-down T&C language (item 5 above) isn't written yet — worth drafting in parallel so it's
+  ready the moment the exception is granted, not after.
+- The live-catalog-flag exposure (`seeds/intellae.ts`/`modelLicense.ts` on `main`) is tracked
+  separately (gripe g-2b547e39) and still needs its own look/fix pass regardless of this path.
