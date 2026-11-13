@@ -75,3 +75,16 @@ test('an unhedged absolute is reported with its file and line', () => {
   assert.equal(code, 1)
   assert.match(out, /claims-guard-fixture\.txt:3: we never see/i, out)
 })
+
+// BuyCreditsModal said this about a deposit's on-chain footprint, but it read as a blanket
+// promise and the privacy policy disclaims it: run inputs and outputs ARE retained as your
+// own history, and the policy says "we can technically read" them.
+test('the purchase-modal retention claim is caught', () => {
+  for (const phrase of [
+    'an amount and a timestamp, never a name, never what you make.',
+    'this purchase reveals an address — never what you generate.',
+  ]) {
+    const { code, out } = guardOn(phrase)
+    assert.equal(code, 1, `should have been caught: ${phrase}\n${out}`)
+  }
+})

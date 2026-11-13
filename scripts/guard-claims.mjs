@@ -43,6 +43,10 @@ const DENY = [
   /nobody can see/i,
   /no one can see/i,
   /military[-\s]?grade/i,
+  // The purchase modal's own disclosure claimed this about what a deposit reveals on-chain,
+  // but it reads as a blanket promise and the privacy policy disclaims it: run inputs and
+  // outputs ARE retained as your own history, and "we can technically read" them (Section 2c).
+  /never (what|see what) you (make|generate|create)/i,
   // "zero-knowledge" is only a problem as a DIRECT MODIFIER of compute/inference/session
   // — that is a confidential-compute claim. The ZK *billing* claim (zero-knowledge proofs
   // for credit spends) is true and must not be caught, and it legitimately shares a line

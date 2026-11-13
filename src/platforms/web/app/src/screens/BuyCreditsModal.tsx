@@ -43,6 +43,22 @@ export function walletGateState(hasSession: boolean, address: string, linkedWall
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
+/** Plain English for a deposit's on-chain status — never the raw Latin status token.
+ * The settle line used to interpolate `depositStatus` straight into the polling copy, so a
+ * confirmed-but-uncredited deposit read "still not credited — confirmatum · stopped watching":
+ * the backend's own enum word, not a sentence. `confirmatum` means the deposit is confirmed
+ * onchain but the credit hasn't landed — the funds are real, just HELD pending the webhook. */
+export function depositStatusLabel(status: MyDeposit['status'] | null): string {
+  switch (status) {
+    case 'confirmatum': return 'held — confirmed onchain, awaiting credit';
+    case 'processatum': return 'credited';
+    case 'fractum': return 'failed';
+    case 'praesolutum': return 'settled on the prior ledger';
+    case 'detectum':
+    default: return 'seen, not yet confirmed';
+  }
+}
+
 /** Format a token amount (in whole units) the way the legacy quick-target anchors did —
  * price anchors, not exact totals, so precision scales down as the number gets small. */
 function fmtEthAnchor(amount: number): string {
@@ -442,8 +458,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
                       {txHash ? 'deposit — confirming onchain' : 'deposit — SIGN IN WALLET'}
                     </div>
                     <div className="bcm-disclosure">
-                      this purchase reveals an address, an amount, a timestamp — never a name,
-                      never what you make.
+                      this purchase reveals an address, an amount, a timestamp — never a name.
                     </div>
                     <div className="bcm-closesafety">
                       You can close this window — the deposit settles onchain either way and
@@ -475,8 +490,8 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
                 ? `confirmed · ${settledAt ?? ''}`
                 : phase === 'settle'
                 ? settleStalled
-                  ? `still not credited — ${depositStatus ?? 'detectum'} · stopped watching`
-                  : `waiting for the credit to land — ${depositStatus ?? 'detectum'} · polling every 15s`
+                  ? `still not credited — ${depositStatusLabel(depositStatus)} · stopped watching`
+                  : `waiting for the credit to land — ${depositStatusLabel(depositStatus)} · polling every 15s`
                 : 'credits land automatically'}
             </span>
             {phase === 'settled' && <span className="bcm-tick success">—✓</span>}
@@ -517,9 +532,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
 
             <p>
               Connect a wallet to pay with what it already holds. We see an address, not a
-              person — an amount and a timestamp, never a name, never what you make. How
-              private that address is depends on the wallet: a fresh or shielded one has no
-              identity behind it; a normal one can be traced on-chain.
+              person — an amount and a timestamp, never a name. How private that address is
+              depends on the wallet: a fresh or shielded one has no identity behind it; a
+              normal one can be traced on-chain.
             </p>
             <button className="btn" onClick={doConnect}>Connect wallet</button>
             {connectErr && <div className="warn" style={{ marginTop: 'var(--s3)' }}>{connectErr}</div>}
