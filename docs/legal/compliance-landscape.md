@@ -153,7 +153,9 @@ commercial license.
 | Krea | 2 | Krea 2 Community | ⚠️ conditional | Commercial only under <$1M-revenue threshold |
 | Pony Diffusion | (SDXL) | Fair AI Public License 1.0-SD | ✅ | Flow-down restrictions |
 | Llama | 3.x | Meta Community License | ✅ (with conditions) | 700M MAU cap, attribution/naming, flow-down AUP |
-| Qwen | 3 / 3-VL / Image | Apache 2.0 | ✅ | Verify per checkpoint; Qwen3 generation is Apache |
+| Qwen | 3 / 3-VL | Apache 2.0 | ✅ | Text/VL encoders used as support components (FLUX.2, Krea 2, Z-Image TEs) |
+| Qwen-Image | 1.0 / 2512 | Apache 2.0 | ✅ | Fully clear — pre-2.1 checkpoints only |
+| Qwen-Image | 2.1 | Qwen Research License Agreement | ❌ unless licensed | **Alibaba dropped Apache for this checkpoint (2026-09-20).** Non-commercial only ("research or evaluation"); any commercial use — including training/selling LoRAs on it, or offering it in the catalog — needs a separate commercial licence bought from Alibaba. Request at **model-business@notice.qwencloud.com**. Flow-down attribution if licensed: must display "Built with Qwen" or "Improved using Qwen"; may not use "Qwen" as the primary name of a derivative product. `qwen-image-2.1-research-nc` stays `no` in `modelLicense.ts` so imports/promotions fail closed until a licence is held. |
 | MiniMax | H3 (fl2va / ref2va) | MiniMax H3 | ✅ licence held | Restrictive in the US; Mony Group LLC requested and received a US operating licence (2026-09-01). Third-party H3 derivatives are NOT covered — `minimax-h3` stays `no` in `modelLicense.ts` so imports fail closed. The 4-step turbo LoRAs ship in the same `Comfy-Org/MiniMax-H3` repo and carry the same licence. |
 
 > Action: extend this table for **every** model in the catalog before it can be billed.
