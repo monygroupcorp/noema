@@ -1,10 +1,12 @@
-# MiniMax H3 — how to actually get licensed
+# MiniMax H3 — how we actually got licensed
 
-**Status as of 2026-11-13: Noema does not hold a MiniMax H3 licence.** A previous pass on this
-branch wrote up compliance language that assumed we already had one ("Mony Group LLC requested
-and received a US operating licence, 2026-09-01"). rth has confirmed that's false — no such
-request or grant is on record anywhere. This document replaces that assumption with the real
-terms of the MiniMax H3 Community License and the concrete paths to get actually covered.
+**Status as of 2026-11-13: Noema holds a MiniMax H3 licence.** Earlier the same day, a previous
+pass on this branch had wrongly written up compliance language claiming we already had one
+("Mony Group LLC requested and received a US operating licence, 2026-09-01") — rth confirmed
+that was false, nothing backed it. This document replaced that assumption with the real terms of
+the MiniMax H3 Community License, proposed concrete paths to get actually covered, and — same
+day — rth filed and MiniMax granted the territorial exception. See "Granted" below for the actual
+authorization.
 
 Not legal advice. Everything below is a plain reading of the public license text and MiniMax/
 Comfy's own published process pages — have counsel confirm before we file anything or sign a
@@ -131,20 +133,31 @@ open tab:**
 - **Full Name** — blank, needs your real legal name.
 - **Job Title** — defaulted to "Founder / Co-Founder" by an accidental click while I was reading
   the form; change it if that's not the title you want on file.
-- **Indemnity Confirmation** — left unchecked on purpose. It's "we indemnify and hold MiniMax
-  harmless against any and all losses/liabilities/claims/costs from any breach by us" — a real
-  liability commitment, not a procedural box, and yours to decide rather than mine to tick.
-- The **Submit** button itself — I did not click it.
+- **Indemnity Confirmation** — left unchecked by me on purpose: "we indemnify and hold MiniMax
+  harmless against any and all losses/liabilities/claims/costs from any breach by us" is a real
+  liability commitment, not a procedural box, so it was left for rth to decide. **Resolved**:
+  rth reviewed the form himself and checked it before submitting — his call to make, made.
+- The **Submit** button itself — I did not click it; rth did.
 
 **Submitted (2026-11-13), by rth.** Confirmation screen: "Request Submitted — Thanks for your
 application. We have submitted John Kelly's request and will email
-mony.group.corporation@gmail.com shortly." So: filed as John Kelly / Founder / Co-Founder of
-Mony Group LLC, under the no-indemnity-checked terms above. **We do not hold the licence yet** —
-this is a submitted request, and MiniMax's own page says a confirmation email follows; nothing
-here confirms the grant itself. Per MiniMax DevRel's public statements the form is expected to be
-self-serve/auto-granted, but that's not yet verified for this request. Next step: watch
-mony.group.corporation@gmail.com for MiniMax's reply and treat *that* — not this submission — as
-what actually retires this goal.
+mony.group.corporation@gmail.com shortly." Filed as John Kelly / Founder / Co-Founder of Mony
+Group LLC.
+
+**Granted (2026-11-13).** MiniMax replied to mony.group.corporation@gmail.com:
+
+> Dear John Kelly, Thank you for your request and for choosing MiniMax H3. This email is to
+> confirm that MiniMax authorizes Mony Group LLC to use MiniMax H3 and MiniMax H3 Works, subject
+> to and conditioned upon Mony Group LLC's continued compliance with the commitments and
+> representations set forth in its request email. For any questions, please contact
+> api@minimax.io. Sincerely, MiniMax H3 Team
+
+**We now hold the licence.** The territorial exclusion is lifted for Mony Group LLC; everything
+under "What the license already allows" above (selling access, training LoRAs on H3, NFTs from
+H3 outputs) is live, conditioned on keeping the commitments filed in the request — the safeguards,
+flow-down, and confidentiality obligations are now live operational requirements, not aspirational
+ones. The one thing *not* covered, license or no license, is training a genuinely different model
+off H3 — that's still its own, separate, unresolved ask.
 
 ### Still open regardless of who files
 

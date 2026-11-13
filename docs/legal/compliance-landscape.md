@@ -154,7 +154,7 @@ commercial license.
 | Pony Diffusion | (SDXL) | Fair AI Public License 1.0-SD | ✅ | Flow-down restrictions |
 | Llama | 3.x | Meta Community License | ✅ (with conditions) | 700M MAU cap, attribution/naming, flow-down AUP |
 | Qwen | 3 / 3-VL / Image | Apache 2.0 | ✅ | Verify per checkpoint; Qwen3 generation is Apache |
-| MiniMax | H3 (fl2va / ref2va) | MiniMax H3 Community License | ❌ not licensed | **Corrected 2026-11-13 (rth): no such licence is on file.** Self-hosting H3 is excluded from the Community License in the US (and EU/UK/South Korea) by the license's own territory clause; nothing shows Mony Group LLC ever filed the request that lifts that exclusion. `minimax-h3` correctly stays `no` here for third-party imports, but the **canonical H3 seeds in `seeds/intellae.ts` carry an explicit `commercialUse:'yes'` override** citing a licence that does not exist — that override is wrong and needs its own fix (tracked separately; out of scope for this doc, see `docs/legal/minimax-h3-license-proposal.md`). The 4-step turbo LoRAs ship in the same `Comfy-Org/MiniMax-H3` repo and are bound by the same licence. |
+| MiniMax | H3 (fl2va / ref2va) | MiniMax H3 Community License | ✅ licence held | **Corrected, then actually obtained, 2026-11-13.** Earlier the same day this row wrongly claimed a pre-existing "2026-09-01" licence that rth confirmed was never real. Mony Group LLC then filed MiniMax's own territorial-exception request (`platform.minimax.io/h3-license`) and MiniMax granted it the same day by email to `mony.group.corporation@gmail.com`, authorizing Mony Group LLC to use MiniMax H3/H3 Works conditioned on keeping the commitments filed in that request (safeguards, flow-down, confidentiality — see `docs/legal/minimax-h3-license-proposal.md` for the full text and terms). `minimax-h3` correctly stays `no` in `modelLicense.ts` for third-party imports — that entry governs imports our grant doesn't cover, not canonical H3 itself. The canonical H3 seeds in `seeds/intellae.ts` carry an explicit `commercialUse:'yes'` override; it still cites the old unverified "2026-09-01" date and should be updated to point at this grant instead (tracked separately, gripe g-2b547e39). The 4-step turbo LoRAs ship in the same `Comfy-Org/MiniMax-H3` repo and are bound by the same licence. |
 
 > Action: extend this table for **every** model in the catalog before it can be billed.
 > Tie it to the `Fundamentum` / `Essentia` registry so license metadata is single-sourced
@@ -166,38 +166,39 @@ commercial license.
 > `src/crystal/seeds/intellae.ts`. The public-catalog gate (`isCatalogEligible`) refuses `no`/`unknown`
 > promotions fail-closed — see `docs/spec/model-import.md` §Licensing.
 
-### MiniMax H3 — what the licence actually covers, and what we don't have yet
+### MiniMax H3 — what the licence actually covers
 
-We do **not** hold a MiniMax H3 licence of any kind today. What follows is a plain reading of the
-public MiniMax H3 Community License (confirmed against its text, 2026-11-13) — not legal advice
-(see disclaimer at top) — so we know exactly what obtaining one would and wouldn't unlock. The
-proposal for how to actually get there is `docs/legal/minimax-h3-license-proposal.md`.
+We hold a MiniMax H3 licence as of 2026-11-13: MiniMax granted Mony Group LLC's territorial-
+exception request the same day it was filed (full text and the grant email in
+`docs/legal/minimax-h3-license-proposal.md`). What follows is a plain reading of the public
+MiniMax H3 Community License, cross-checked against that grant — not legal advice (see disclaimer
+at top).
 
-- **Selling access — would be covered**, once licensed. Running H3 as a paid flow is "permit[ting]
-  the generation of Outputs," which the licence allows as long as we keep "reasonable and
-  proportionate technical and organizational safeguards" and display "MiniMax H3" on the product
-  UI. No ongoing royalty is owed to MiniMax; the one figure that matters is a **$20M/yr revenue
-  trigger** — cross it and we'd owe MiniMax a separate written authorization request
-  (`api@minimax.io`), not a running cut. We are nowhere near that figure.
-- **Training — would be covered only for derivatives of H3 itself.** A LoRA or fine-tune built on
-  these weights is a "Model Derivative" under the licence and inherits it, so that would be
-  covered. The licence separately bars using H3's weights or Outputs "to improve any other
-  artificial intelligence model (other than MiniMax H3 or its Model Derivatives)" — on a plain
-  reading, that also rules out treating H3-generated video as training data for an unrelated
-  model. Training a *different, newer model* off of H3 — rather than fine-tuning H3 itself — is
-  **not** coverable by any licence tier below and would need a separate, bespoke agreement with
-  MiniMax that nothing here guarantees.
-- **NFT collections — would be covered.** "MiniMax claims no rights over the Outputs you generate.
-  You and your users are entirely responsible for the Outputs," so minting/selling generated video
-  as NFTs would be ordinary commercial use of our own output, subject only to the same
-  UI-attribution requirement and the licence's blanket bans (no military use, no unlicensed
-  professional activity).
-- **The actual blocker today: US territory.** The Community License excludes the US (plus EU, UK,
-  South Korea) from self-hosting H3 at all, commercial or not. Nothing in this repo, the register,
-  or decisions.log shows that exclusion was ever lifted for Mony Group LLC — the 2026-09-01 date
-  stamped through `seeds/intellae.ts`/`modelLicense.ts` traces to an unverified note, not a filed
-  request or a licence on file. The seeds' `commercialUse:'yes'` override for canonical H3 should
-  be treated as **unsupported** until that's fixed.
+- **Selling access — covered.** Running H3 as a paid flow is "permit[ting] the generation of
+  Outputs," which the licence allows as long as we keep "reasonable and proportionate technical
+  and organizational safeguards" and display "MiniMax H3" on the product UI — both of which we
+  committed to in the grant request and now have to actually run, not just promise. No ongoing
+  royalty is owed to MiniMax; the one figure that matters is a **$20M/yr revenue trigger** — cross
+  it and we'd owe MiniMax a separate written authorization request (`api@minimax.io`), not a
+  running cut. We are nowhere near that figure.
+- **Training — covered only for derivatives of H3 itself.** A LoRA or fine-tune built on these
+  weights is a "Model Derivative" under the licence and inherits it, so that is covered. The
+  licence separately bars using H3's weights or Outputs "to improve any other artificial
+  intelligence model (other than MiniMax H3 or its Model Derivatives)" — on a plain reading, that
+  also rules out treating H3-generated video as training data for an unrelated model. Training a
+  *different, newer model* off of H3 — rather than fine-tuning H3 itself — is **not** covered by
+  this grant and would need a separate, bespoke agreement with MiniMax.
+- **NFT collections — covered.** "MiniMax claims no rights over the Outputs you generate. You and
+  your users are entirely responsible for the Outputs," so minting/selling generated video as NFTs
+  is ordinary commercial use of our own output, subject only to the same UI-attribution requirement
+  and the licence's blanket bans (no military use, no unlicensed professional activity).
+- **What changed today:** the Community License excludes the US (plus EU, UK, South Korea) from
+  self-hosting H3 at all, commercial or not — that was the actual blocker, not revenue or the
+  training/NFT clauses. A prior note in this doc claimed that exclusion was already lifted
+  ("2026-09-01"); rth confirmed that was never real. It's real now: the filed request plus
+  MiniMax's grant email are the actual basis for the register's "✅ licence held" above. The seeds'
+  `commercialUse:'yes'` override for canonical H3 in `seeds/intellae.ts` is now factually correct
+  but still cites the old fictitious date — update its citation to this grant (gripe g-2b547e39).
 
 ---
 
