@@ -106,6 +106,26 @@ test('classifyModelLicense: an empty baseModel string is skipped, not treated as
   assert.deepEqual(classifyModelLicense(m), { license: 'flux-1-dev-nc', commercialUse: 'no' })
 })
 
+// ── Qwen-Image — the license hinges on the VERSION (docs/legal/compliance-landscape.md) ────────
+// Alibaba dropped Apache 2.0 starting with 2.1 (2026-09-20, Qwen Research License, non-commercial);
+// 1.0 and 2512 stay Apache. Mirrors the FLUX.1 schnell/dev version split above.
+
+test('classifyModelLicense: Qwen-Image 2.1 fails closed (Qwen Research License, non-commercial)', () => {
+  const m = { baseModel: 'Qwen/Qwen-Image-2.1', familia: 'qwen-image' }
+  assert.deepEqual(classifyModelLicense(m), { license: 'qwen-image-2.1-research-nc', commercialUse: 'no' })
+})
+
+test('classifyModelLicense: pre-2.1 Qwen-Image checkpoints stay Apache 2.0', () => {
+  assert.deepEqual(
+    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image', familia: 'qwen-image' }),
+    { license: 'apache-2.0', commercialUse: 'yes' },
+  )
+  assert.deepEqual(
+    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image-2512', familia: 'qwen-image' }),
+    { license: 'apache-2.0', commercialUse: 'yes' },
+  )
+})
+
 test('classifyModelLicense: the brutalite shape (familia only, no baseModel/provenance) still fails closed to unknown', () => {
   // Reproduces the exact pre-fix record shape (docs/spec/model-base-provenance.md, trigger):
   // familia:'flux2', no provenance, nomen = the trigger word (matches nothing in BASE_TABLE), and

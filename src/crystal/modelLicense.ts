@@ -48,6 +48,12 @@ const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
                                   // (rth 2026-09-01), so the CANONICAL H3 seeds carry an
                                   // explicit commercialUse:'yes'. This entry governs THIRD-PARTY
                                   // imports, which our grant does not cover — keep it 'no'.
+  'qwen-image-2.1-research-nc': 'no',  // Qwen-Image-2.1 — Alibaba dropped Apache for this checkpoint
+                                  // (2026-09-20): Qwen Research License Agreement, non-commercial
+                                  // only. ❌ unless Noema holds a separate commercial licence from
+                                  // Alibaba (request: model-business@notice.qwencloud.com). Pre-2.1
+                                  // checkpoints (1.0 / 2512) stay Apache 2.0 — see the 'apache-2.0'
+                                  // row BASE_TABLE resolves them to.
   'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
   'krea-community': 'conditional',       // Krea 2 Community — commercial only for entities <$1M revenue
   'unknown': 'unknown',
@@ -194,6 +200,11 @@ const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; 
   { test: (t) => t.includes('chroma'), familia: 'chroma', license: 'apache-2.0' },
   { test: (t) => t.includes('krea'), familia: 'krea2', license: 'krea-community' },
   { test: (t) => t.includes('z-image') || t.includes('zimage') || t.includes('z image'), familia: 'zimage', license: 'apache-2.0' },
+  // Qwen-Image — the license hinges on the VERSION. Alibaba dropped Apache 2.0 starting with 2.1
+  // (2026-09-20, Qwen Research License Agreement, non-commercial); 1.0 and 2512 stay Apache. The
+  // version check must precede the bare check (most-specific-first, same pattern as FLUX variants).
+  { test: (t) => isQwenImage(t) && isQwenImage21(t), familia: 'qwen-image', license: 'qwen-image-2.1-research-nc' },
+  { test: (t) => isQwenImage(t), familia: 'qwen-image', license: 'apache-2.0' },
   // SD 2.x / SD 3.x — real models, but NO base flow yet → not importable (familia null).
   { test: (t) => t.includes('sd3') || t.includes('sd 3') || t.includes('sd2') || t.includes('sd 2'), familia: null, license: 'stability-community' },
 ]
@@ -349,3 +360,5 @@ function is4b(t: string): boolean { return t.includes('4b') || t.includes('4-b')
 function isSchnell(t: string): boolean { return t.includes('schnell') || /\bflux\.?1?\s*\[?s(chnell)?\]?\b/.test(t) || t.includes('.1 s') || t.includes('.1s') }
 function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 d') || t.includes('.1d') || t.includes('[d]') }
 function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }
+function isQwenImage(t: string): boolean { return t.includes('qwen-image') || t.includes('qwen image') || t.includes('qwenimage') }
+function isQwenImage21(t: string): boolean { return t.includes('2.1') || t.includes('2-1') || t.includes('v2.1') }
