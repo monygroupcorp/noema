@@ -2177,3 +2177,68 @@ test('a flow completed by ✕ says Cancelled, not Done', async () => {
   await new Promise(r => setImmediate(r))
   assert.equal(sender.sent[0]?.text, 'Cancelled.')
 })
+
+// -----------------------------------------------------------------------------
+// Activity log: every received update leaves an info line keyed by chat.
+// -----------------------------------------------------------------------------
+
+async function captureTelegramLog(fn: () => Promise<void>): Promise<import('../../../src/lib/logger.js').LogEntry[]> {
+  const entries: import('../../../src/lib/logger.js').LogEntry[] = []
+  const collect = (e: import('../../../src/lib/logger.js').LogEntry) => { if (e.component === 'telegram:allocutio') entries.push(e) }
+  bus.on('log', collect)
+  try { await fn() } finally { bus.off('log', collect) }
+  return entries
+}
+
+test('a received message is logged at info with its chat id and chat type', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(msgUpdate(123, 456, 'just chatting')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.ok(line, 'an info line for the update')
+  assert.equal(line!.level, 'info')
+  assert.equal(line!.chatId, 456)
+  assert.equal(line!.chatType, 'private')
+  assert.equal(line!.kind, 'message')
+})
+
+test('a received callback is logged at info with its chat id', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(cbUpdate(123, -789, 'noop')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.chatId, -789)
+  assert.equal(line?.kind, 'callback_query')
+})
+
+test('the bot being removed from a group is logged with the chat and timestamp, and nothing is dispatched', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 5,
+    my_chat_member: {
+      chat: { id: -1002, type: 'supergroup', title: 'Night Shift' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'administrator', user: { id: 7 } },
+      new_chat_member: { status: 'kicked', user: { id: 7 } },
+    },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat membership')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.event, 'removed')
+  assert.equal(line?.chatId, -1002)
+  assert.equal(line?.at, '2023-11-14T22:13:20.000Z')
+  assert.equal(router.calls.length, 0)
+  assert.equal(sender.sent.length, 0)
+})
+
+test('a group migrating to a supergroup is logged with both chat ids', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 6,
+    message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: -55, type: 'group' }, migrate_to_chat_id: -100155 },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat migration')
+  assert.equal(line?.event, 'migrated_to')
+  assert.equal(line?.chatId, -55)
+  assert.equal(line?.toChatId, -100155)
+})

@@ -10,6 +10,7 @@ import type { Primitive, Step, Resolution, FlowContext, AuctorKey } from '../../
 import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
+import { describeUpdate, describeMyChatMember, describeChatMigration } from './updateLog.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
 import type { Progressus } from '../../types/progressus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
@@ -582,6 +583,18 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // -------------------------------------------------------------------------
 
   async receive(update: TelegramUpdate): Promise<void> {
+    log.info('telegram update', describeUpdate(update))
+
+    // The bot's own membership of a chat changed (added, removed, promoted, demoted). Nothing to
+    // dispatch — the record is the point, so a report about a group can be traced to the moment
+    // the bot lost its seat or its rights there.
+    if (update.my_chat_member) {
+      log.info('telegram chat membership', describeMyChatMember(update.my_chat_member))
+      return
+    }
+    const migration = update.message && describeChatMigration(update.message)
+    if (migration) log.info('telegram chat migration', migration)
+
     const chatId =
       update.message?.chat.id ??
       update.callback_query?.message?.chat.id
