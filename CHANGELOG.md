@@ -1,5 +1,20 @@
 # Changelog
 
+## [5.34.0](https://github.com/monygroupcorp/noema/compare/v5.33.0...v5.34.0) (2026-11-14)
+
+
+### Features
+
+* bind MiniMax H3 users to its use restrictions before they run it ([7594f8b](https://github.com/monygroupcorp/noema/commit/7594f8bd08b8d663677e886cfb9b3247d75e6f8c))
+
+
+### Bug Fixes
+
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([5f32beb](https://github.com/monygroupcorp/noema/commit/5f32bebb052475f0f9a7c2078d6d6414affdea05))
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([e638c04](https://github.com/monygroupcorp/noema/commit/e638c040ee1d0b558ccf29918744c361135a7510))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([e5297e5](https://github.com/monygroupcorp/noema/commit/e5297e5cf0d6d955f239a5f78f1c07193a9cd53c))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([23458e3](https://github.com/monygroupcorp/noema/commit/23458e30f44eb19552686cef64a2a5def911b83c))
+
 ## [5.33.0](https://github.com/monygroupcorp/noema/compare/v5.32.2...v5.33.0) (2026-11-14)
 
 
