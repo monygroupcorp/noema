@@ -22,6 +22,8 @@ import type { Editio } from '../types/editio.js'
 import type { IntellaSource } from '../types/intelligendi.js'
 import type { MediaFetcher } from './MediaFetcher.js'
 import type { ObjectStore } from './R2Uploader.js'
+import { civitaiAwareFetcher } from './civitaiAuth.js'
+import { isValidSafetensorsHeader } from './loraSourceBackfill.js'
 
 /** Output keys that may carry a single media URL, in priority order. */
 const SINGLE_MEDIA_KEYS = ['image', 'video', 'audio', 'url', 'file']
@@ -98,7 +100,17 @@ export class BucketAdapter implements PublicationAdapter {
   private readonly prefix: string
   private readonly modelPrefix: string
 
-  constructor(private readonly deps: { fetcher: MediaFetcher; store: ObjectStore; prefix?: string; modelPrefix?: string }) {
+  constructor(private readonly deps: {
+    fetcher: MediaFetcher
+    store: ObjectStore
+    prefix?: string
+    modelPrefix?: string
+    /** CIVITAI_API_TOKEN — civitai now gates its download endpoint even for public LoRAs
+     *  (2026-11-13); present → a civitai-origin weight download carries our Bearer token.
+     *  Absent → a civitai source 401s with a clear `CivitaiDownloadError` instead of a
+     *  bare HTTP status. Never used for a non-civitai origin. */
+    civitaiToken?: string
+  }) {
     this.prefix = deps.prefix ?? 'editiones'
     this.modelPrefix = deps.modelPrefix ?? 'models'
   }
@@ -122,9 +134,19 @@ export class BucketAdapter implements PublicationAdapter {
    *  our-custody download URL (the `miladystation` mirror the resolver prefers).
    *  This is real byte movement — the our-custody half of model publishing.
    *
+   *  A civitai-origin source carries our `CIVITAI_API_TOKEN` as a Bearer header — civitai's
+   *  download endpoint now gates even ordinary public LoRAs; a missing/rejected token throws
+   *  the typed `CivitaiDownloadError` rather than an opaque HTTP status. Every other origin
+   *  (HuggingFace, our own mirror) is fetched exactly as before.
+   *
    *  STREAMS the weights when the fetcher + store both support it (model weights are
-   *  large — a multi-GB checkpoint must never be buffered whole in memory); falls
-   *  back to the buffered path otherwise (fine for LoRA-sized files + test fakes). */
+   *  large — a multi-GB checkpoint must never be buffered whole in memory); falls back to
+   *  the buffered path otherwise (fine for LoRA-sized files + test fakes). The buffered path
+   *  additionally proves the bytes are a real safetensors file before they are uploaded — a
+   *  200 that served an HTML error page (or a truncated download) must never land in our
+   *  bucket under a model's name. The streaming path skips this check: a multi-GB checkpoint
+   *  cannot be peeked without buffering it, so a corrupt stream is instead caught on the pod
+   *  that later tries to load it. */
   private async _hostModel(artifact: PublishArtifact, _policy: PublishPolicy): Promise<{ externalRef: string }> {
     const sources = (artifact.output?.sources as IntellaSource[] | undefined) ?? []
     const primary = sources.find((s) => typeof s?.uri === 'string' && s.uri.length > 0)
@@ -134,7 +156,8 @@ export class BucketAdapter implements PublicationAdapter {
     const id = artifact.editioId ?? uuidv4()
     // Keyed under a per-publication folder so `retract` can recompute + delete it.
     const key = `${this.modelPrefix}/${id}/${filename}`
-    const { fetcher, store } = this.deps
+    const fetcher = civitaiAwareFetcher(this.deps.fetcher, this.deps.civitaiToken)
+    const { store } = this.deps
 
     if (fetcher.fetchStream && store.putStream) {
       const { body, contentLength } = await fetcher.fetchStream(primary.uri)
@@ -142,6 +165,9 @@ export class BucketAdapter implements PublicationAdapter {
       return { externalRef: hosted }
     }
     const bytes = await fetcher.fetch(primary.uri)
+    if (/\.safetensors$/i.test(filename) && !isValidSafetensorsHeader(bytes)) {
+      throw new Error(`bucket-adapter: downloaded bytes for '${filename}' are not a valid safetensors file (origin: ${primary.provenance})`)
+    }
     const hosted = await store.put(key, bytes, 'application/octet-stream')
     return { externalRef: hosted }
   }

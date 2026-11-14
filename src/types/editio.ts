@@ -95,6 +95,25 @@ export interface EditioModeration {
 }
 
 /**
+ * EditioFailure — why the adapter THREW on a publish attempt (`status:'failed'`), recorded on
+ * the Editio itself so a failure is never silent (docs/handoff civitai-import-with-key). Mirrors
+ * `EditioModeration`'s split: `reason` is the raw error text — admin-only, may name a host or a
+ * filename, never a secret — and `category` is the closed, author-safe taxonomy
+ * `Edition.failureNote` (runProjection `publisherFailureNote`) turns into a sentence. Absent on
+ * the normal path (never attempted, or attempted and published).
+ */
+export interface EditioFailure {
+  /** 'origin_auth' — the origin (civitai/…) refused the download, missing or rejected
+   *  credential; 'adapter' — anything else the adapter threw (network, malformed source, …). */
+  category: 'origin_auth' | 'adapter'
+  /** The thrown error's message, verbatim. Never the token — `civitaiAwareFetcher` never puts
+   *  it in a message. */
+  reason: string
+  /** When the adapter threw, ISO-8601. */
+  failedAt: string
+}
+
+/**
  * Editio — one publication of one artifact to one destination under one policy.
  */
 export interface Editio {
@@ -137,6 +156,9 @@ export interface Editio {
   /** The moderation gate's verdict when it HELD or REJECTED this publication. Absent
    *  on the normal (approved/never-gated) path. */
   moderation?: EditioModeration
+  /** Why the adapter threw on the attempt that set `status:'failed'`. Absent when never
+   *  attempted, or when the most recent attempt published. */
+  failure?: EditioFailure
   /**
    * This publication's own PUBLIC copy of an artifact output that was private
    * (`noema-private://` markers - private generation, noema-347).
@@ -198,7 +220,7 @@ export interface Editionum {
    */
   listHeld(by?: Editio['by']): Promise<Editiones>
   create(input: Omit<Editio, 'id' | 'natum' | 'mutatum' | 'status'>): Promise<Editio>
-  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation' | 'hostedOutput'>>): Promise<Editio>
+  update(id: string, patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation' | 'hostedOutput' | 'failure'>>): Promise<Editio>
   /**
    * Atomically claim one settle-able publication for a worker: the oldest `pending`
    * Editio with no live lease AND not awaiting review (`reviewOutcome !== 'pending'`),
