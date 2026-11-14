@@ -37,7 +37,7 @@ export interface UseTerms {
 export const USE_TERMS: Record<string, UseTerms> = {
   'minimax-h3': {
     id: 'minimax-h3',
-    versio: '2026-11-13',
+    versio: '2026-11-14',
     nomen: 'MiniMax H3 use restrictions',
     href: '/legal/terms#11-minimax-h3-additional-terms',
     licenseHref: '/legal/minimax-h3-license',
@@ -67,16 +67,23 @@ export function isAccepted(id: string, accepted: Record<string, TermsAcceptance>
   return accepted?.[id]?.versio === terms.versio
 }
 
-/** How deep a composite is followed when collecting terms. Composites nest rarely; a cycle in a
- *  stored definition must not hang the run entry point. */
-const MAX_DEPTH = 4
+/** How many linked flows (steps and saved-from parents) are read when collecting terms. Real
+ *  lineages are a handful of links; the bound only keeps a pathological stored definition from
+ *  hanging the run entry point. */
+const MAX_LINKS = 64
+
+/** Stands in for terms that could not be collected because the lineage ran past `MAX_LINKS`. It
+ *  names no published terms, so a flow carrying it is refused (`unknown`) — the walk fails
+ *  CLOSED: a chain too long to read is never taken to carry no terms. */
+export const UNRESOLVED_LINEAGE = 'unresolved-lineage'
 
 /**
  * Every terms id a modus carries: its own declaration, its steps' for a composite, and its
- * parent's for a saved flow (`fonte`). A composite whose step runs MiniMax H3 binds its caller
- * exactly as running H3 directly does, and the steps dispatch internally, below the run entry
- * point, so they are collected here. A flow a user saved from H3 runs H3's weights; following
- * `fonte` holds it to H3's terms even when it was saved before the parent declared them.
+ * parent's for a saved flow (`fonte`), followed all the way up. A composite whose step runs
+ * MiniMax H3 binds its caller exactly as running H3 directly does, and the steps dispatch
+ * internally, below the run entry point, so they are collected here. A flow a user saved from H3
+ * runs H3's weights; following `fonte` holds it — and anything saved from it in turn — to H3's
+ * terms even when it was saved before the parent declared them.
  */
 export async function requiredUseTerms(
   modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined,
@@ -84,17 +91,18 @@ export async function requiredUseTerms(
 ): Promise<string[]> {
   const out = new Set<string>()
   const seen = new Set<string>()
-  async function walk(m: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined, depth: number): Promise<void> {
-    if (!m) return
+  const queue: Array<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined> = [modus]
+  while (queue.length > 0) {
+    const m = queue.shift()
+    if (!m) continue
     for (const id of m.useTerms ?? []) out.add(id)
-    if (depth >= MAX_DEPTH) return
     for (const next of [...(m.fonte ? [m.fonte] : []), ...(m.gradus ?? []).map(g => g.modusId)]) {
       if (seen.has(next)) continue
+      if (seen.size >= MAX_LINKS) { out.add(UNRESOLVED_LINEAGE); return [...out] }
       seen.add(next)
-      await walk(await find(next), depth + 1)
+      queue.push(await find(next))
     }
   }
-  await walk(modus, 0)
   return [...out]
 }
 

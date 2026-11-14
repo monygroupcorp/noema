@@ -924,9 +924,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum, terminusOf)
   // Every collection piece is a paid run under the funder, dispatched below the run entry point,
   // so each one is held to its flow's licence terms (MiniMax H3) here as well: a funder suspended
-  // mid-collection gets no further pieces, and a collection fired before the terms existed gets
-  // none until its funder accepts them. A refused piece throws before it is initiated, so it is
-  // booked as a failed piece and charged nothing.
+  // mid-collection gets no further pieces, and a collection fired before the terms existed
+  // dispatches none for a funder who has not accepted them. A refused piece throws before it is
+  // initiated, so it is booked as a failed piece (not held for later) and charged nothing.
   const collectioDispatch = gateDispatch(sharedDispatch, {
     find: (id) => modorum.find(id),
     accepted: async (by) => (await config.consuetudinum?.resolveGeneratio(by as AuctorKey))?.termsAccepted,

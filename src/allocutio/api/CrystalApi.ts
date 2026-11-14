@@ -238,7 +238,7 @@ import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 import type { Tabula, Tabulae, Tabularum } from '../../types/tabula.js'
 import { compileTabula, TabulaCompileError } from '../../crystal/compileTabula.js'
 import { hashModus } from '../../crystal/hashModus.js'
-import { useTermsVerdict, lookupUseTerms } from '../../crystal/useTerms.js'
+import { useTermsVerdict, lookupUseTerms, requiredUseTerms } from '../../crystal/useTerms.js'
 import type { QuerelaStore } from '../../types/Querela.js'
 import type { Depositorum, DepositumStatus } from '../../types/catena.js'
 import type { PersonaStore } from '../../types/persona.js'
@@ -700,7 +700,7 @@ export class CrystalApi {
 
   /** Refuse a run of a flow whose licence terms the caller has not accepted, or is suspended
    *  under. See the call site in `invokeFlow`; `fireCollection` asks the same of its flow. */
-  private async _assertUseTerms(auctor: AuctorKey, modus: Pick<Modus, 'useTerms' | 'gradus'> | null): Promise<void> {
+  private async _assertUseTerms(auctor: AuctorKey, modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null): Promise<void> {
     const verdict = await useTermsVerdict({
       modus,
       find: (id) => this.deps.modorum.find(id),
@@ -5064,6 +5064,10 @@ export class CrystalApi {
       ...(opts.affix?.suffix ? { promptSuffixum: opts.affix.suffix } : {}),
       ...(pinned ? { pinned } : {}),
     })
+    // Stamp the licence terms the base carries through its whole lineage onto the saved flow, so
+    // a save of a save never depends on walking back to a parent that declared them.
+    const terms = await requiredUseTerms(base, (id) => this.deps.modorum.find(id))
+    if (terms.length > 0) derived.useTerms = terms
     await this.deps.modorum.register(derived)
     return { id: derived.id }
   }

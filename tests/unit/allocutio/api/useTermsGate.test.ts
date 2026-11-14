@@ -20,7 +20,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/C
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { CANONICAL_ESSENTIAE } from '../../../../src/crystal/seeds/essentiae.js'
 import { MemoryConsuetudinum } from '../../../../src/crystal/MemoryConsuetudinum.js'
-import { USE_TERMS, useTermsVerdict, requiredUseTerms, gateDispatch } from '../../../../src/crystal/useTerms.js'
+import { USE_TERMS, UNRESOLVED_LINEAGE, useTermsVerdict, requiredUseTerms, gateDispatch } from '../../../../src/crystal/useTerms.js'
 import { ownerKeyOf } from '../../../../src/crystal/ownerKey.js'
 import { useTermsCopy } from '../../../../src/flow/flows/ExecuteFlow.js'
 import type { Gradus, Modus } from '../../../../src/types/modus.js'
@@ -266,4 +266,39 @@ test('a collection piece dispatched by the cursor is held to the funder\'s terms
   // a flow with no terms is not touched
   assert.equal(await gated({ modusId: 'plain-flow', by: { arcanumProof: {} } }), 'ran')
   assert.deepEqual(dispatched, ['minimax-h3-t2v', 'plain-flow'])
+})
+
+test('a re-save chain of any length still carries the H3 terms', async () => {
+  // S1 saved from H3 before H3 declared terms; S2..S10 each saved from the one before.
+  const chain = new Map<string, Modus>()
+  chain.set('minimax-h3-t2v', essentia('minimax-h3-t2v'))
+  let parent = 'minimax-h3-t2v'
+  for (let i = 1; i <= 10; i++) {
+    chain.set(`s${i}`, { ...PLAIN, id: `s${i}`, canonica: false, fonte: parent, useTerms: undefined })
+    parent = `s${i}`
+  }
+  assert.deepEqual(await requiredUseTerms(chain.get('s10'), async (id) => chain.get(id) ?? null), ['minimax-h3'])
+})
+
+test('a lineage too long to read is refused, never taken to carry no terms', async () => {
+  // An unbounded chain that never reaches a declaration.
+  const find = async (id: string) => ({ ...PLAIN, id, useTerms: undefined, fonte: `${id}x` })
+  const ids = await requiredUseTerms({ ...PLAIN, useTerms: undefined, fonte: 'x' }, find)
+  assert.ok(ids.includes(UNRESOLVED_LINEAGE))
+  const verdict = await useTermsVerdict({ modus: { ...PLAIN, useTerms: undefined, fonte: 'x' }, find, accepted: async () => undefined })
+  assert.equal(verdict.ok, false)
+})
+
+test('saving a flow stamps the terms its base carries through its lineage', async () => {
+  const registered: Modus[] = []
+  const legacy: Modus = { ...essentia('minimax-h3-t2v'), id: 'old-save', canonica: false, fonte: 'minimax-h3-t2v', useTerms: undefined }
+  const modi = [essentia('minimax-h3-t2v'), legacy]
+  const api = new CrystalApi({
+    modorum: {
+      async find(id: string) { return [...modi, ...registered].find(m => m.id === id) ?? null },
+      async register(m: Modus) { registered.push(m) },
+    },
+  } as unknown as CrystalApiDeps)
+  await api.saveFlow(CALLER, { modusId: 'old-save', name: 'resave one' })
+  assert.deepEqual(registered[0].useTerms, ['minimax-h3'])
 })
