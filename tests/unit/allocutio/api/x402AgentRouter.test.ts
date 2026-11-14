@@ -29,7 +29,7 @@ async function harness(opts: {
   runSpell?: X402AgentDeps['runSpell']
   enabled?: boolean
   withSpell?: boolean
-  modi?: Array<{ id: string; nomen: string; auctor?: { animaId: string } }>
+  modi?: Array<{ id: string; nomen: string; auctor?: { animaId: string }; useTerms?: string[] }>
   hub?: X402AgentDeps['hub']
   getRun?: X402AgentDeps['getRun']
   rateLimiters?: X402AgentDeps['rateLimiters']
@@ -37,7 +37,7 @@ async function harness(opts: {
   const legati = new MemoryLegatus()
   const modorum = new MemoryModorum()
   await modorum.register({ ...CAMEL_TEMPLATE_MODUS, id: 'agent-ws-camel42' })
-  for (const m of opts.modi ?? []) await modorum.register({ ...CAMEL_TEMPLATE_MODUS, id: m.id, nomen: m.nomen, ...(m.auctor ? { auctor: m.auctor } : {}) })
+  for (const m of opts.modi ?? []) await modorum.register({ ...CAMEL_TEMPLATE_MODUS, id: m.id, nomen: m.nomen, ...(m.auctor ? { auctor: m.auctor } : {}), ...(m.useTerms ? { useTerms: m.useTerms } : {}) })
   await legati.create({
     agentId: 'camel42', ownerAddress: OWNER, animaId: 'anima-agent', treasuryId: 'camelcabal-1',
     issuerId: 'https://camelcabal.fun', scope: ['generate'], revokeToken: 'rvk',
@@ -294,4 +294,22 @@ test('rate limiter dep: mounted for GET discover, NOT for POST run', async () =>
   await request(server).post('/api/v1/x402/agents/camel42/spell/memeify').send({ inputs: {} })
   assert.equal(getHits, 1, 'the injected limiter ran for the GET discover route')
   assert.equal(postHits, 0, 'the injected limiter is never mounted on the POST run route')
+})
+
+test('a spell under licence terms (MiniMax H3) is refused before any quote or payment', async () => {
+  let verified = false
+  let ran = false
+  const { server } = await harness({
+    modi: [{ id: 'h3-spell', nomen: 'H3 spell', auctor: { animaId: 'anima-agent' }, useTerms: ['minimax-h3'] }],
+    facilitator: okFacilitator({ async verify() { verified = true; return { valid: true, payer: OWNER, amount: '404400', signatureHash: 'sig-h3' } } }),
+    runSpell: async () => { ran = true; throw new Error('must not run') },
+  })
+  const quote = await request(server).get('/api/v1/x402/agents/camel42/spell/h3?modusId=h3-spell')
+  assert.equal(quote.status, 403)
+  assert.equal(quote.body.error.code, 'TERMS_REQUIRED')
+  const run = await request(server).post('/api/v1/x402/agents/camel42/spell/h3').set('x-payment', 'x').send({ modusId: 'h3-spell', inputs: {} })
+  assert.equal(run.status, 403)
+  assert.equal(run.body.error.code, 'TERMS_REQUIRED')
+  assert.equal(verified, false, 'the payment was never verified')
+  assert.equal(ran, false, 'nothing ran, so nothing was minted')
 })
