@@ -9,6 +9,7 @@ import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { isMediaRef } from '../../crystal/MediaFetcher.js'
+import { useTermsVerdict, type TermsAcceptance } from '../../crystal/useTerms.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -91,6 +92,19 @@ export interface ExecuteFlowDeps {
    */
   ownedResources?: OwnedResourceStores
   /**
+   * Licence-terms state for the caster (`Modus.useTerms`): what they have accepted, and their
+   * confirmed violations under a terms id. A chat surface cannot show the terms or take the
+   * acceptance, so a caster who has not accepted is sent to the web to do it. Absent → nothing
+   * is on file, so a terms-bearing flow is refused, the same fail-closed rule the REST run
+   * route follows.
+   */
+  useTerms?: {
+    accepted(identity: FlowContext['identity']): Promise<Record<string, TermsAcceptance> | undefined>
+    strikes(identity: FlowContext['identity'], termsId: string): Promise<number>
+  }
+  /** The public site origin the terms are published on, for the link in that refusal. */
+  siteUrl?: string
+  /**
    * Where credits are bought — the web funding page. Absent → the insufficient-balance step
    * still says how to top up, it just has no link to tap.
    */
@@ -121,6 +135,19 @@ const EFFECT_CATEGORIES = [
  * The insufficient-balance step's text. Credits are bought on the web, signed in as the
  * same account this chat resolves to — `/recover` is how a Telegram identity gets there.
  */
+/** What the chat says when a flow's licence terms stop a run. Exported for the test. */
+export function useTermsCopy(
+  verdict: Exclude<Awaited<ReturnType<typeof useTermsVerdict>>, { ok: true }>,
+  siteUrl?: string,
+): string {
+  if (verdict.reason === 'unknown') return 'This flow cannot run here right now.'
+  const where = siteUrl ? `${siteUrl}${verdict.terms.href}` : 'on the web, under Terms'
+  if (verdict.reason === 'suspended') {
+    return `Your access to flows under the ${verdict.terms.nomen} is suspended after repeated violations of them.`
+  }
+  return `This flow runs under the ${verdict.terms.nomen}. Read and accept them at ${where}, then run it again.`
+}
+
 export function topUpCopy(required: bigint, balance: bigint, fundingUrl?: string): string {
   const where = fundingUrl ? `at ${fundingUrl}` : 'on the web'
   return [
@@ -533,6 +560,23 @@ export class ExecuteFlow implements Flow {
       casting,
       state.aditus,
     )
+    const terms = await useTermsVerdict({
+      modus: casting,
+      find: (id) => this.deps.modorum.find(id),
+      accepted: async () => this.deps.useTerms?.accepted(ctx.identity),
+      ...(this.deps.useTerms ? { strikes: (id: string) => this.deps.useTerms!.strikes(ctx.identity, id) } : {}),
+    })
+    if (!terms.ok) {
+      return {
+        primitives: [{
+          kind: 'Detail',
+          label: terms.reason === 'suspended' ? 'Access suspended' : 'Terms to accept first',
+          content: useTermsCopy(terms, this.deps.siteUrl),
+          actions: [{ id: 'cancel', label: '✕' }],
+        }],
+      }
+    }
+
     if (!verdict.ok) {
       // Names the port, never the value and never whether a record exists behind it — the same
       // non-enumerability the REST refusal preserves.

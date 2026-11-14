@@ -118,6 +118,31 @@ export const Errors = {
   licenseRestricted: (message: string) => new ApiError('license.restricted', message, 403),
   /** A prompt was refused by the input CSAM guard. 403 — a policy refusal, not a malformed request. */
   contentRefused: (message: string) => new ApiError('content.refused', message, 403),
+  /**
+   * The flow carries upstream licence terms (`Modus.useTerms`) the caller has not accepted at
+   * the current version. 403 with everything a client needs to show the terms and record the
+   * acceptance in place: the terms id, the version, and where the published text is. NOT
+   * retryable as-is — the same request succeeds once the caller accepts.
+   */
+  termsRequired: (terms: { id: string; versio: string; nomen: string; href: string; licenseHref: string }) =>
+    new ApiError(
+      'terms.required',
+      `This flow runs under the ${terms.nomen}. Read and accept them at ${terms.href} before running it.`,
+      403,
+      { retryable: false, details: { terms: terms.id, versio: terms.versio, nomen: terms.nomen, href: terms.href, licenseHref: terms.licenseHref } },
+    ),
+  /** The flow declares licence terms this deployment publishes no text for — nothing the caller
+   *  could accept, so nothing that can run. A server-side configuration fault, named as such. */
+  termsUnknown: (id: string) =>
+    new ApiError('terms.unknown', `This flow names terms '${id}' that are not published here, so it cannot run.`, 503, { retryable: false, details: { terms: id } }),
+  /** The caller is suspended under a flow's licence terms after repeated confirmed violations. */
+  termsSuspended: (terms: { id: string; nomen: string }) =>
+    new ApiError(
+      'terms.suspended',
+      `Your access to flows under the ${terms.nomen} is suspended after repeated violations of them.`,
+      403,
+      { retryable: false, details: { terms: terms.id } },
+    ),
   /** A gated model import needs a connected BYO secret for `provider` (Civitai/HF). 422 — the request
    *  is well-formed but a precondition (a connected token) is unmet. `details.provider` drives the
    *  frontend deep-link to Profile → Connected accounts (BYO-secrets F2). */

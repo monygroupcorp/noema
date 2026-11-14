@@ -3,11 +3,12 @@
 // until each is wired. Dev server proxies /v1 + /api to the backend.
 
 import type { ArtifactRef, Editio, EditionModerationDetail, EditionPreview, FeedFilter, FeedItem, PublishRequest } from './editio';
+import { askTerms, termsRequestOf } from './termsGate';
 
 // Querela — an in-app report (bug/feature/feedback), noema-100's backend contract
 // (src/types/Querela.ts). Mirrored here (not imported) — the web app doesn't import
 // backend source (same convention as `CanonVerb` below).
-export type QuerelaKind = 'bug' | 'feature' | 'feedback';
+export type QuerelaKind = 'bug' | 'feature' | 'feedback' | 'abuse';
 // Auto-captured client state at submit time — the user never types this. `runId`/`actumId`
 // are populated only when the current route carries one (e.g. /train/run/:id); omitted
 // otherwise. See ReportModal.tsx.
@@ -613,12 +614,27 @@ export const api = {
   // would let logs/proxies correlate an anonymous spend back to a session or pseudonym.
   // No active purse → the normal identity/anon-commitment path (authHeaders), untouched;
   // every other route keeps authHeaders() regardless.
-  createRun: (body: RunRequest) => {
+  //
+  // A flow under upstream licence terms (MiniMax H3) is refused with `terms.required` until the
+  // caller accepts them. That refusal is answered HERE rather than on each of the screens that
+  // start runs: the mounted terms dialog (lib/termsGate) shows the terms, an acceptance is
+  // recorded under the same identity the run is sent with, and the run is sent once more.
+  // Declining, or no dialog mounted, lets the refusal through unchanged.
+  createRun: async (body: RunRequest): Promise<{ run: Run }> => {
     const purse = getActivePurse();
     const headers = purse
       ? { 'content-type': 'application/json', 'x-bursa-token': purse }
       : authHeaders();
-    return fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
+    const send = () => fetch('/v1/runs', { method: 'POST', headers, body: JSON.stringify(body) }).then(j<{ run: Run }>);
+    try {
+      return await send();
+    } catch (err) {
+      const req = err instanceof ApiRequestError && err.code === 'terms.required' ? termsRequestOf(err.details) : null;
+      if (!req || !(await askTerms(req))) throw err;
+      await fetch(`/v1/me/terms/${encodeURIComponent(req.terms)}`, { method: 'POST', headers })
+        .then(j<{ acceptance: { terms: string; versio: string; acceptedAt: number } }>);
+      return send();
+    }
   },
   getRun: (id: string) => fetch(`/v1/runs/${id}`, { headers: readHeaders() }).then(j<{ run: Run }>),
   // POST /v1/runs/:id/cancel — give up a run the caller owns. The reservation is released
@@ -1511,6 +1527,8 @@ export interface Generatio {
   // One-time self-declared 18+ attestation (a click-through fact, NOT KYC). Required on file before
   // spicyMode may be enabled. Recorded via POST /v1/me/attestation.
   ageAttestation?: { attestedAt: number };
+  /** Licence terms accepted, by terms id — written by the server only (POST /v1/me/terms/:id). */
+  termsAccepted?: Record<string, { versio: string; acceptedAt: number }>;
   // Private generation (noema-347). When ON, the outputs of NEW runs are visible only to you, via
   // expiring links; default-absent = OFF. Forward-only — it never moves what already exists.
   privateOutputs?: boolean;

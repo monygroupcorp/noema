@@ -3,7 +3,7 @@
 
 # Terms & conditions
 
-**Last updated:** 2026-09-08
+**Last updated:** 2026-11-13
 
 ---
 
@@ -56,6 +56,8 @@ beyond what these controls require.
   restrictions** (e.g., OpenRAIL-M, Meta Llama Community License); by using them you agree to
   comply with those upstream restrictions, which **flow down** to you as a condition of use.
   The applicable restrictions are those of the upstream model's own licence, which travels with the weights; we do not publish a consolidated list of them today.
+  The exception is **MiniMax H3**, whose restrictions are set out in full in Section 11 and must
+  be accepted before your first MiniMax H3 run.
 - **BYO mode:** you represent and warrant that you hold all rights necessary to use the
   weights you supply, and you indemnify us against any claim arising from your model. We do
   not review or license your supplied weights.
@@ -105,4 +107,82 @@ matches, or legal requirement. Prohibited-content violations are reported as req
 ## 10. Governing law & changes
 
 Governed by the laws of the State of Tennessee. We may update these terms; continued use constitutes
-acceptance. Material changes will be notified by in-app notice.
+acceptance, except that Section 11 is accepted explicitly, as it says. Material changes will be
+notified by in-app notice.
+
+## 11. MiniMax H3 — additional terms
+
+The video flows marked **MiniMax H3** run the MiniMax H3 model, which MiniMax licenses to us under
+the [MiniMax H3 Community License Agreement](/legal/minimax-h3-license). That agreement requires us
+to bind everyone who uses MiniMax H3 through the Service to its use restrictions, and these terms
+do so. **You must accept this section before your first MiniMax H3 run**, and again whenever it
+changes materially. Until you do, a MiniMax H3 run is refused before anything is charged. These
+terms are in addition to the rest of these terms, and where the two differ the stricter one applies.
+
+**11.1 Where you may use it.** MiniMax's licence does not extend to the European Union, the United
+Kingdom or the Republic of Korea. You will not run MiniMax H3, or use, reproduce, distribute or
+display its outputs, from or into any of them. (We hold a separate licence from MiniMax for the
+United States.)
+
+**11.2 What you may not do with it.** You will not use MiniMax H3, any model derived from it, or
+any of its outputs:
+
+1. outside the territories in 11.1;
+2. in any manner that violates any applicable national, federal, state, local or international
+   law, regulation or other legal requirement, or that infringes, misappropriates or otherwise
+   violates anyone's intellectual-property or other proprietary rights, including through
+   unauthorized reproduction, distribution, public display, public performance or creation of
+   derivative works;
+3. in any manner that may harm yourself or others;
+4. to repurpose or distribute its outputs in order to harm yourself or others;
+5. to circumvent or bypass any safety guardrail or safeguard, ours or MiniMax's;
+6. in any manner that exploits or harms, or intends to exploit or harm, minors;
+7. to generate or disseminate verifiably false information or content for the purpose of harming
+   others or influencing elections;
+8. to manufacture or facilitate false online engagement, including fake reviews;
+9. to intentionally defame, disparage or otherwise harass others;
+10. to generate or disseminate malware (including ransomware) or any other content intended to
+    damage electronic systems;
+11. to generate or disseminate personally identifiable information for the purpose of harming
+    others;
+12. to generate or disseminate information or content (including images, video, code, posts or
+    articles) in or to any public environment, including by bot posts or similar means, without
+    clearly and prominently disclosing that it is machine-generated;
+13. to impersonate another person without that person's consent, authorization or lawful right;
+14. to make high-risk automated decisions in critical domains that affect individual safety, rights
+    or well-being, such as law enforcement, immigration, healthcare or medical services,
+    critical-infrastructure management, product-safety components, essential services, credit,
+    employment, housing, education, social scoring or insurance;
+15. in any manner that violates or disregards the social, ethical or moral standards of other
+    countries or regions;
+16. to carry out, assist, threaten, incite, plan, advocate for or encourage violent extremism or
+    terrorism;
+17. for any purpose intended to discriminate against or harm individuals or groups based on
+    protected characteristics or categories, online or offline social behavior, or known or
+    predicted personality traits;
+18. to intentionally exploit the vulnerabilities of specific populations based on age, social,
+    physical or psychological characteristics, so as to materially distort the behavior of a member
+    of that group in a manner that causes, or is likely to cause, physical or psychological harm to
+    that person or to others;
+19. for military purposes;
+20. to engage in any unauthorized or unlicensed professional activity, including financial, legal,
+    medical or healthcare, or other professional practice.
+
+**11.3 No training other models.** You will not use MiniMax H3 or any of its outputs or results to
+improve any other artificial-intelligence model, including by distillation or by training on its
+outputs.
+
+**11.4 Updates from MiniMax.** MiniMax may revise its acceptable-use policy. A revision that is
+stricter than 11.2 binds you from the time we publish it here, and we will ask you to accept the
+revised section before your next MiniMax H3 run.
+
+**11.5 Reporting and suspension.** Anyone can report a MiniMax H3 output they believe breaks this
+section: use **Report this output** on the run, or write to
+mony.group.corporation+abuse@gmail.com with a link to it. We investigate every good-faith report.
+Where we confirm a violation we may remove or disable access to the content, and the confirmed
+violation is recorded against the account that ran it. **An account with two confirmed violations
+is suspended from MiniMax H3 flows.** This is in addition to suspension or termination under
+Section 9, which a single serious violation can warrant on its own.
+
+**11.6 Responsibility.** You are responsible for your MiniMax H3 outputs and any use of them.
+MiniMax claims no rights in them, and provides MiniMax H3 "as is", without warranty.

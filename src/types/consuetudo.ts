@@ -88,6 +88,12 @@ export interface Generatio {
    *  anon-capable AuctorKey that owns `spicyMode`, so it works for anon (Bursa/commitment) and named
    *  (Anima) callers alike. */
   ageAttestation?: { attestedAt: number }
+  /** Upstream licence terms the caller has accepted, by terms id (`crystal/useTerms.ts`), each
+   *  with the version accepted. A flow declaring `useTerms` runs only for a caller whose entry
+   *  matches the current version. Written ONLY by `CrystalApi.acceptUseTerms`: a Preferences
+   *  replace can neither set nor clear it, so acceptance is always a deliberate act on the
+   *  terms themselves. Anon-capable, keyed like `ageAttestation`. */
+  termsAccepted?: Record<string, { versio: string; acceptedAt: number }>
   /** Private generation (noema-347). When ON, the outputs of NEW runs are written to a dedicated
    *  bucket with no public binding; the run record stores an opaque marker instead of a URL, and
    *  the owner reads them through short-lived presigned links. Default-absent reads as OFF

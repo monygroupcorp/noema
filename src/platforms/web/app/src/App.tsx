@@ -62,9 +62,17 @@ import featuresMd from './content/features.md?raw';
 import privacyMd from './content/privacy.md?raw';
 import cookiesMd from './content/cookies.md?raw';
 import termsMd from './content/terms.md?raw';
+// MiniMax's licence for MiniMax H3, verbatim from MiniMaxAI/MiniMax-H3 on Hugging Face (licence
+// date 2026-08-02). Section III.1 of it requires a copy to reach every user. Replace the whole
+// file when MiniMax publishes a new version; do not edit the text.
+import minimaxH3LicenseMd from './content/minimax-h3-license.md?raw';
+import { TermsGate } from './shell/TermsGate';
 
 export function App() {
   return (
+    <>
+    {/* One dialog for every screen that starts a run: a run under licence terms waits on it. */}
+    <TermsGate />
     <Routes>
       {/* Marketing Landing owns the root; the app shell's Home/dashboard is /app. */}
       <Route path="/" element={<Landing />} />
@@ -139,7 +147,9 @@ export function App() {
       <Route path="/legal/privacy" element={<Doc md={privacyMd} />} />
       <Route path="/legal/cookies" element={<Doc md={cookiesMd} />} />
       <Route path="/legal/terms" element={<Doc md={termsMd} />} />
+      <Route path="/legal/minimax-h3-license" element={<Doc md={minimaxH3LicenseMd} />} />
       <Route path="*" element={<Stub crumb="404" title="Not found" />} />
     </Routes>
+    </>
   );
 }

@@ -8669,6 +8669,27 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
           },
           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
+        "termsAccepted": {
+          "type": "object",
+          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "versio": {
+                "type": "string",
+                "description": "The terms version accepted."
+              },
+              "acceptedAt": {
+                "type": "number",
+                "description": "Epoch-ms timestamp of the acceptance."
+              }
+            },
+            "required": [
+              "versio",
+              "acceptedAt"
+            ]
+          }
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8928,6 +8949,27 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
       },
       "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
     },
+    "termsAccepted": {
+      "type": "object",
+      "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "versio": {
+            "type": "string",
+            "description": "The terms version accepted."
+          },
+          "acceptedAt": {
+            "type": "number",
+            "description": "Epoch-ms timestamp of the acceptance."
+          }
+        },
+        "required": [
+          "versio",
+          "acceptedAt"
+        ]
+      }
+    },
     "privateOutputs": {
       "type": "boolean",
       "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -9001,6 +9043,27 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
           },
           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
+        "termsAccepted": {
+          "type": "object",
+          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "versio": {
+                "type": "string",
+                "description": "The terms version accepted."
+              },
+              "acceptedAt": {
+                "type": "number",
+                "description": "Epoch-ms timestamp of the acceptance."
+              }
+            },
+            "required": [
+              "versio",
+              "acceptedAt"
+            ]
+          }
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -9042,6 +9105,48 @@ Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC
   },
   "required": [
     "attestation"
+  ]
+}
+```
+
+### POST /v1/me/terms/:id
+
+Accept the current version of a flow's upstream licence terms (e.g. 'minimax-h3', MiniMax H3's use restrictions, published at /legal/terms#minimax-h3). A flow that carries terms refuses to run with terms.required until this is on file, and with terms.suspended once the caller is suspended under them after repeated confirmed violations. Anon-capable (keyed by AuctorKey). An unknown terms id is not_found.terms.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's recorded acceptance of a flow's upstream licence terms.",
+  "properties": {
+    "acceptance": {
+      "type": "object",
+      "properties": {
+        "terms": {
+          "type": "string",
+          "description": "The terms id (e.g. 'minimax-h3')."
+        },
+        "versio": {
+          "type": "string",
+          "description": "The terms version accepted — the current one."
+        },
+        "acceptedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the acceptance."
+        }
+      },
+      "required": [
+        "terms",
+        "versio",
+        "acceptedAt"
+      ]
+    }
+  },
+  "required": [
+    "acceptance"
   ]
 }
 ```
@@ -14915,6 +15020,10 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.already_decided` | 409 | no |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
+| `terms.required` | 403 | no |
+| `terms.suspended` | 403 | no |
+| `terms.unknown` | 503 | no |
+| `not_found.terms` | 404 | no |
 | `secret.required` | 422 | no |
 | `deposit.price_unavailable` | 422 | no |
 | `feature.not_implemented` | 501 | no |

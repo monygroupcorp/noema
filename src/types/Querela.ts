@@ -7,7 +7,11 @@
 // feature, or just have something to say. Kind-discriminated: `bug` reports
 // carry rich captured state (route, run/actum id, device, client error);
 // `feature` reports carry the requested feature/route; `feedback` reports
-// carry a free-text message. All three share one store, keyed on the opaque
+// carry a free-text message; `abuse` reports name a run whose output the
+// reporter believes breaks the terms, and carry who OWNS that run, resolved by
+// the server — never taken from the reporter. An admin's `verdict` on an abuse
+// report is what counts toward suspending a repeat violator (see
+// `crystal/useTerms.ts`). All three share one store, keyed on the opaque
 // `ownerKey` (see `src/crystal/ownerKey.ts`) so anon reporters (a commitment
 // or a bursaToken purse) can file reports too, not just identified animae.
 //
@@ -35,7 +39,7 @@ export interface Querela {
   /** Opaque owner id (`ownerKeyOf(AuctorKey)`) — the reporter. Anon-capable. */
   ownerKey: string
   /** What kind of report this is — shape flexes by kind (see field docs below). */
-  kind: 'bug' | 'feature' | 'feedback'
+  kind: 'bug' | 'feature' | 'feedback' | 'abuse'
   /** "new" = unreviewed; mirrors colloquium's status-field shape (a closed string union
    *  tracked via `update()` + `mutatum`). "closed" = reviewed/resolved/dismissed. */
   status: 'new' | 'closed'
@@ -51,6 +55,15 @@ export interface Querela {
   /** Reporting device, e.g. `navigator.userAgent`. Captured for `bug`, useful generally. */
   device?: string | null
   userAgent?: string | null
+  /** `abuse` only: the owner key of the run reported, resolved server-side from the run id. The
+   *  party a confirmed violation counts against. */
+  subjectOwnerKey?: string | null
+  /** `abuse` only: the terms ids the reported run's flow carries (`Modus.useTerms`), stamped at
+   *  report time so a strike counts under the terms that governed the run. */
+  useTerms?: string[] | null
+  /** `abuse` only: the admin's finding. `violation` counts as a strike against the subject;
+   *  `dismissed` does not. Absent until reviewed. */
+  verdict?: 'violation' | 'dismissed' | null
   /** Hash of `ownerKey + kind + description + (feature ?? route)` — dedup key so N
    *  identical reports from the same owner are not persisted as separate records. */
   contentHash: string
@@ -73,11 +86,15 @@ export interface QuerelaStore {
   find(id: string): Promise<Querela | null>
   /** Return all reports owned by the given owner key. Optionally filter by status. */
   findByOwner(ownerKey: string, status?: 'new' | 'closed'): Promise<Querela[]>
-  update(id: string, patch: Partial<Pick<Querela, 'status'>>): Promise<Querela>
+  update(id: string, patch: Partial<Pick<Querela, 'status' | 'verdict'>>): Promise<Querela>
   /** Dedup lookup — an identical (ownerKey, contentHash) pair means "already reported". */
   findByOwnerAndHash(ownerKey: string, contentHash: string): Promise<Querela | null>
   /** ADMIN: every report across ALL owners, optionally narrowed by kind and/or status.
    *  Newest first. The read half of the admin triage surface — `findByOwner` stays
    *  scoped to one owner and does not serve this. */
   list(filter?: { kind?: Querela['kind']; status?: Querela['status'] }): Promise<Querela[]>
+  /** Confirmed violations (`kind:'abuse'`, `verdict:'violation'`) against one subject under one
+   *  terms id, counted by DISTINCT RUN — the strike count suspension is measured by. Several
+   *  confirmed reports of the same output are one violation. */
+  countViolations(subjectOwnerKey: string, useTerms: string): Promise<number>
 }
