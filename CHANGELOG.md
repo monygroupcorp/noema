@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.33.0](https://github.com/monygroupcorp/noema/compare/v5.32.2...v5.33.0) (2026-11-14)
+
+
+### Features
+
+* **telegram:** log chat activity and membership changes durably ([#692](https://github.com/monygroupcorp/noema/issues/692)) ([7fceed3](https://github.com/monygroupcorp/noema/commit/7fceed393af0f2ad44ac4e275cdc7268c94e1221))
+
+
+### Bug Fixes
+
+* **arcanum:** clear finalHash when a ceremony reopens ([#689](https://github.com/monygroupcorp/noema/issues/689)) ([e3ae2c9](https://github.com/monygroupcorp/noema/commit/e3ae2c9c43920babb8fec74846ae684ce47dc660))
+* **crystal:** authenticate civitai weight downloads, never fail silently ([#697](https://github.com/monygroupcorp/noema/issues/697)) ([65972fb](https://github.com/monygroupcorp/noema/commit/65972fb5a609d34381f028e1be5d219451c1edea))
+* **crystal:** guard and backfill download sources for public LoRAs ([#693](https://github.com/monygroupcorp/noema/issues/693)) ([8dec0b1](https://github.com/monygroupcorp/noema/commit/8dec0b168fc31ade3bb584f531e9651d8fa69e0b))
+* **legal:** correct MiniMax H3 licence status, propose how to obtain one ([048bc53](https://github.com/monygroupcorp/noema/commit/048bc534523cd200068f8efb4aa7777b6c6827db))
+* **legal:** record the granted MiniMax H3 licence ([dafb598](https://github.com/monygroupcorp/noema/commit/dafb5987f5d58075796abeccad0407e5b76b88fb))
+* **web:** stop the funding path from misleading on privacy and deposit status ([#691](https://github.com/monygroupcorp/noema/issues/691)) ([6265ad5](https://github.com/monygroupcorp/noema/commit/6265ad53bd51dcd1735ce7ea2e93dd2e72597223))
+
 ## [5.32.2](https://github.com/monygroupcorp/noema/compare/v5.32.1...v5.32.2) (2026-11-11)
 
 
