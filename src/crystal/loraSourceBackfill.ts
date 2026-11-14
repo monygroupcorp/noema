@@ -194,6 +194,25 @@ export function safetensorsHeaderLength(first8: Uint8Array): number | null {
   return n >= 2 && n < 16_000_000 ? n : null
 }
 
+/**
+ * True when `bytes` opens with a well-formed safetensors header: a sane length prefix
+ * (`safetensorsHeaderLength`) followed by a JSON object naming at least one tensor. Takes the
+ * WHOLE downloaded buffer (not just the first 8 bytes) — unlike the migration's Range-probe,
+ * which never has more than it asked for, a caller holding the full file in memory can validate
+ * the real header, not just its length prefix. Used before anything is committed to our bucket
+ * so a 200 that served an HTML error page (or a truncated download) is never mistaken for weights.
+ */
+export function isValidSafetensorsHeader(bytes: Uint8Array): boolean {
+  const n = safetensorsHeaderLength(bytes.subarray(0, 8))
+  if (n === null || bytes.length < 8 + n) return false
+  try {
+    const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + n))) as Record<string, { dtype?: string }>
+    return Object.entries(header).some(([k, v]) => k !== '__metadata__' && typeof v?.dtype === 'string')
+  } catch {
+    return false
+  }
+}
+
 function dedupe(versions: CivitaiVersion[]): CivitaiVersion[] {
   const seen = new Set<number>()
   return versions.filter(v => (seen.has(v.versionId) ? false : (seen.add(v.versionId), true)))

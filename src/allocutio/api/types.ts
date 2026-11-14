@@ -432,6 +432,11 @@ export interface Edition {
    *  A platform admin sees the raw reason via `GET /v1/editiones/:id/moderation` instead.
    *  Absent when never flagged. */
   moderationNote?: string
+  /** Present when the adapter THREW on the attempt that set `status:'failed'` — an
+   *  author-safe sentence derived from the failure's category (`publisherFailureNote`,
+   *  runProjection), never the raw error text (which may name a host or a filename).
+   *  Absent when never attempted, or when the most recent attempt published. */
+  failureNote?: string
   /** The destination's handle — feed post id / HF repo / token id / R2 url. */
   externalRef?: string
   /** Rights split snapshot (animaId → weight), when team-owned. */

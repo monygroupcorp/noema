@@ -624,6 +624,7 @@ async function main(): Promise<void> {
       ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
     },
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
+    ...(process.env.CIVITAI_API_TOKEN ? { civitaiApiToken: process.env.CIVITAI_API_TOKEN } : {}),
     ...(process.env.ARWEAVE_PRIVATE_KEY ? { arweavePrivateKey: process.env.ARWEAVE_PRIVATE_KEY } : {}),
     ...(apiProviders.length ? { apiProviders } : {}),
     ...(embed ? { embed } : {}),

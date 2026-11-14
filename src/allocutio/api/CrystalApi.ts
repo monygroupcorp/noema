@@ -203,7 +203,7 @@ import {
   type SweepOwner,
 } from '../../crystal/EmbedSweepCursor.js'
 import type { Vestigiorum } from '../../types/vestigium.js'
-import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter } from '../../types/editio.js'
+import type { Editio, Editionum, ArtifactRef, ArtifactKind, EditioVisibility, EditioCustody, FeedFilter, EditioFailure } from '../../types/editio.js'
 import type { Sodalitas, Sodalitatum } from '../../types/sodalitas.js'
 import type { Provincia, ProvinciaResKind, Provinciarum } from '../../types/provincia.js'
 import type { AnimaStore, PublishingPrefs } from '../../types/anima.js'
@@ -215,6 +215,7 @@ import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../crystal/Ve
 import type { ScanFeeCharger } from '../../crystal/ScanFeeCharger.js'
 import type { CsamReviewReporter } from '../../crystal/CsamReviewReporter.js'
 import { allMediaUrls, mediaTypeFor } from '../../crystal/BucketAdapter.js'
+import { CivitaiDownloadError } from '../../crystal/civitaiAuth.js'
 import { isPodLockedReport } from '../../crystal/expiryReaper.js'
 import { makeLogger } from '../../lib/logger.js'
 import type { PromptGuard, PromptVerdict } from '../../crystal/PromptGuard.js'
@@ -2547,8 +2548,18 @@ export class CrystalApi {
       })
       const published = await editiones.update(editioId, { status: 'published', externalRef })
       await this._reconcile(published)
-    } catch {
-      await editiones.update(editioId, { status: 'failed' })
+    } catch (err) {
+      // Never silent (civitai-import-with-key): an adapter throw used to vanish into a bare
+      // `status:'failed'` with no trace anywhere — not in a log, not on the record. Logged for
+      // an operator, and the reason is recorded on the Editio itself (admin-only `failure.reason`;
+      // the author sees only `Edition.failureNote`'s closed, generic form — `toEdition`).
+      const reason = err instanceof Error ? err.message : String(err)
+      log.error('publish: adapter threw — publication failed', { editioId, destination: e.destination, error: reason })
+      const category: EditioFailure['category'] = err instanceof CivitaiDownloadError ? 'origin_auth' : 'adapter'
+      await editiones.update(editioId, {
+        status: 'failed',
+        failure: { category, reason, failedAt: new Date().toISOString() },
+      })
     }
   }
 
@@ -4821,11 +4832,14 @@ export class CrystalApi {
    * Import a model/LoRA by URL (Civitai page/`?modelVersionId`, HuggingFace repo, or a
    * direct `.safetensors`/`.ckpt` link) as a PRIVATE, owner-scoped Intella — usable in
    * the importer's flows at once (`docs/spec/model-import.md` Tier 1). The importer scrapes the
-   * origin metadata, CSAM-scans any preview media (fail-closed), mirrors the weights into
-   * OUR R2 bucket (auth-free `sources[0]`), and registers `access:'private'`,
+   * origin metadata, CSAM-scans any preview media (non-fatal — a non-pass leaves previews
+   * origin-referenced instead of refusing the import, noema-192), and registers the Intella
+   * ORIGIN-ONLY for its weights (`sources[0]` points at Civitai/HF/direct, never a copy in our
+   * R2 — CUSTODY DECISION 2026-07-02, `ModelImporter.ts`) with `access:'private'`,
    * `canonica:false`, `ownerAnimaId` — so `buildAccessOrClauses` resolves it ONLY for the
    * owner and it never appears on the public catalogue. Appearing publicly is a separate,
-   * user-invoked `publish` (an `intella`-kind Editio through `ModerationGate`).
+   * user-invoked `publish` (an `intella`-kind Editio through `ModerationGate`), which is also
+   * where a civitai-origin weight actually gets mirrored into our R2 (`BucketAdapter`).
    *
    * Identified callers only — a private model needs a durable owner (`animaId`).
    */

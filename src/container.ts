@@ -373,6 +373,12 @@ export interface ContainerConfig {
   huggingFaceOrg?: string
   /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
   huggingFaceToken?: string
+  /** CIVITAI_API_TOKEN — civitai gates its download endpoint even for public LoRAs
+   *  (2026-11-13); present → the `BucketAdapter` model-hosting path (public promotion)
+   *  attaches it as a Bearer header on a civitai-origin weight download. Absent → a
+   *  civitai-sourced promotion fails with a clear `CivitaiDownloadError` instead of
+   *  silently 401ing. Never sent to any other host (see `civitaiAwareFetcher`). */
+  civitaiApiToken?: string
   /** ARWEAVE_PRIVATE_KEY — funding wallet for the Irys bundler. Present → the `arweave`
    *  graduation destination is registered (LIVE-UNVERIFIED); absent → not offered. */
   arweavePrivateKey?: string
@@ -759,8 +765,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       uploader,
       ...(privateOutputsStore ? { privateUploader: privateOutputsStore } : {}),
     }))
-    // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
-    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+    // Bucket custody (publishing #2): re-hosts an artifact's media to R2. `civitaiToken`
+    // only affects a model (intella) publish whose weight source is civitai-origin.
+    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader, ...(config.civitaiApiToken ? { civitaiToken: config.civitaiApiToken } : {}) }))
     // Archive (editio-export): bundle a collection's approved pieces into a ZIP in
     // OUR bucket — the sovereign-download destination. Private/custody-ours, so it
     // never touches the moderation gate.
