@@ -14,6 +14,13 @@
 // existing `QuerelaStore.update()`. No threading, no reply-to-submitter, no
 // notifications — those stay out of scope for this item.
 //
+// An `abuse` report also takes a `verdict`. `violation` is a confirmed breach of
+// the terms the reported run's flow carries, and counts as a strike against the
+// run's owner; at the terms' strike limit (`crystal/useTerms.ts`) that owner is
+// suspended from those flows by the run entry point. A verdict closes the report.
+// The response carries the subject's strike count and whether they are now
+// suspended, so the admin sees what the verdict did.
+//
 // Gate: PLATFORM-ADMIN ONLY, the exact predicate `CrystalApi._assertPlatformAdmin`
 // enforces (`auctor.animaId === PLATFORM_ANIMA_ID` — a single hardcoded admin
 // identity, not a role system). That method is private to `CrystalApi` and this
@@ -39,6 +46,7 @@ import type { Credentials } from '../../allocutio/api/IdentityResolver.js'
 import { credentialsFromHeaders } from '../../allocutio/api/IdentityResolver.js'
 import { ApiError, Errors } from '../../allocutio/api/errors.js'
 import { makeLogger } from '../../lib/logger.js'
+import { lookupUseTerms } from '../../crystal/useTerms.js'
 
 const log = makeLogger('querela:admin-router')
 
@@ -47,10 +55,12 @@ export interface QuerelaAdminRouterDeps {
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
 }
 
-const KINDS = ['bug', 'feature', 'feedback'] as const
+const KINDS = ['bug', 'feature', 'feedback', 'abuse'] as const
 type Kind = typeof KINDS[number]
 const STATUSES = ['new', 'closed'] as const
 type Status = typeof STATUSES[number]
+const VERDICTS = ['violation', 'dismissed'] as const
+type Verdict = typeof VERDICTS[number]
 
 // Reproduces CrystalApi.ts's `_assertPlatformAdmin` verbatim (same env var, same
 // fallback, same predicate, same message) — see file header for why this is a
@@ -114,21 +124,46 @@ export function createQuerelaAdminRouter(deps: QuerelaAdminRouterDeps): Router {
     res.status(200).json({ reports })
   }))
 
-  // PATCH /reports/:id — triage: set status. Mounted at `/v1/admin/reports/:id`.
-  // Uses the existing `QuerelaStore.update()` — no new mutation logic.
+  // PATCH /reports/:id — triage: set status, and on an abuse report a verdict.
+  // Mounted at `/v1/admin/reports/:id`.
   router.patch('/:id', wrap(async (req, res) => {
     await resolveAdmin(req)
 
-    const status = req.body?.status
-    if (typeof status !== 'string' || !STATUSES.includes(status as Status)) {
+    const statusRaw = req.body?.status
+    const verdictRaw = req.body?.verdict
+    if (statusRaw !== undefined && (typeof statusRaw !== 'string' || !STATUSES.includes(statusRaw as Status))) {
+      throw Errors.inputMalformed(`status must be one of ${STATUSES.join(', ')}`)
+    }
+    if (verdictRaw !== undefined && (typeof verdictRaw !== 'string' || !VERDICTS.includes(verdictRaw as Verdict))) {
+      throw Errors.inputMalformed(`verdict must be one of ${VERDICTS.join(', ')}`)
+    }
+    if (statusRaw === undefined && verdictRaw === undefined) {
       throw Errors.inputMalformed(`status must be one of ${STATUSES.join(', ')}`)
     }
 
     const id = String(req.params.id)
     const existing = await querelae.find(id)
     if (!existing) throw Errors.notFoundQuerela(id)
+    if (verdictRaw !== undefined && existing.kind !== 'abuse') {
+      throw Errors.inputMalformed('only an abuse report takes a verdict')
+    }
 
-    const updated: Querela = await querelae.update(id, { status: status as Status })
+    // A verdict is a finding, so it closes the report unless the admin says otherwise.
+    const patch: { status?: Status; verdict?: Verdict } = {}
+    if (verdictRaw !== undefined) patch.verdict = verdictRaw as Verdict
+    const status = (statusRaw as Status | undefined) ?? (verdictRaw !== undefined ? 'closed' : undefined)
+    if (status !== undefined) patch.status = status
+    const updated: Querela = await querelae.update(id, patch)
+
+    if (updated.kind === 'abuse' && updated.subjectOwnerKey) {
+      const standing = await Promise.all((updated.useTerms ?? []).map(async (termsId) => {
+        const strikes = await querelae.countViolations(updated.subjectOwnerKey!, termsId)
+        const limit = lookupUseTerms(termsId)?.strikeLimit
+        return { terms: termsId, strikes, suspended: limit !== undefined && strikes >= limit }
+      }))
+      res.status(200).json({ report: updated, subject: standing })
+      return
+    }
     res.status(200).json({ report: updated })
   }))
 

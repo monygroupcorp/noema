@@ -23,6 +23,7 @@ import type { Run } from './types.js'
 import type { RunEvent } from './runEvents.js'
 import { aditusToJsonSchema } from './aditusToJsonSchema.js'
 import { buildQuote, buildPaymentRequirements, acceptFor, type X402Config } from '../../crystal/x402Pricing.js'
+import { requiredUseTerms } from '../../crystal/useTerms.js'
 
 // Runtime validation for the untyped request inputs (§hardening). Narrow/additive: `modusId`
 // just needs to be a non-empty string when present; `inputs` just needs to be a plain object
@@ -96,6 +97,15 @@ export function createX402AgentRouter(deps: X402AgentDeps): Router {
     const ownsIt = requested === legatus.workspaceModusId
       || (modus.auctor !== undefined && 'animaId' in modus.auctor && modus.auctor.animaId === legatus.animaId)
     if (!ownsIt) { fail(res, 403, 'NOT_AGENT_MODUS', 'That modus does not belong to this agent'); return null }
+    // A spell under upstream licence terms (MiniMax H3) binds whoever runs it to accept them
+    // first, and an x402 payer is a wallet with no account to accept them on. Refused here, at
+    // discovery and before payment is verified, so nothing is quoted, taken or minted for a run
+    // that would only be refused.
+    const terms = await requiredUseTerms(modus, (id) => deps.modorum.find(id))
+    if (terms.length > 0) {
+      fail(res, 403, 'TERMS_REQUIRED', 'This spell runs under licence terms that must be accepted on a Noema account; it is not offered pay-per-call')
+      return null
+    }
     // The agent's cut lands at their declared payout target, else the on-chain owner (§4c).
     const payoutAddress = legatus.payoutPolicy?.withdrawAddress ?? legatus.ownerAddress
     return { agentId, animaId: legatus.animaId, ownerAddress: legatus.ownerAddress, payoutAddress, modus }

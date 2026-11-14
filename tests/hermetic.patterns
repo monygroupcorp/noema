@@ -65,6 +65,7 @@ tests/unit/crystal/VestigiaProjection.test.ts
 tests/unit/api/vestigiaRouter.test.ts
 tests/unit/api/querelaRouter.test.ts
 tests/unit/api/querelaAdminRouter.test.ts
+tests/unit/api/querelaAbuse.test.ts
 tests/unit/api/partnerRequestRouter.test.ts
 tests/unit/api/partnerAdminRouter.test.ts
 tests/unit/api/treasuryPersonaIntake.test.ts

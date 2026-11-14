@@ -716,8 +716,38 @@ const GeneratioSchema: JsonSchema = {
       required: ['attestedAt'],
     },
     memoryNotes: { type: 'array', items: { type: 'string' }, description: "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account." },
+    termsAccepted: {
+      type: 'object',
+      description: "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          versio: { type: 'string', description: 'The terms version accepted.' },
+          acceptedAt: { type: 'number', description: 'Epoch-ms timestamp of the acceptance.' },
+        },
+        required: ['versio', 'acceptedAt'],
+      },
+    },
     privateOutputs: { type: 'boolean', description: 'Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise.' },
   },
+}
+
+/** The `{ acceptance }` response for `POST /v1/me/terms/:id` — the recorded terms acceptance. */
+const TermsAcceptanceResponseSchema: JsonSchema = {
+  type: 'object',
+  description: "The caller's recorded acceptance of a flow's upstream licence terms.",
+  properties: {
+    acceptance: {
+      type: 'object',
+      properties: {
+        terms: { type: 'string', description: "The terms id (e.g. 'minimax-h3')." },
+        versio: { type: 'string', description: 'The terms version accepted — the current one.' },
+        acceptedAt: { type: 'number', description: 'Epoch-ms timestamp of the acceptance.' },
+      },
+      required: ['terms', 'versio', 'acceptedAt'],
+    },
+  },
+  required: ['acceptance'],
 }
 
 /** The `{ attestation }` response for `POST /v1/me/attestation` — the recorded 18+ self-attestation. */
@@ -2675,6 +2705,13 @@ export const API_CONTRACT: ApiContract = {
       response: AttestationResponseSchema,
     },
     {
+      method: 'POST',
+      path: '/me/terms/:id',
+      summary: "Accept the current version of a flow's upstream licence terms (e.g. 'minimax-h3', MiniMax H3's use restrictions, published at /legal/terms#minimax-h3). A flow that carries terms refuses to run with terms.required until this is on file, and with terms.suspended once the caller is suspended under them after repeated confirmed violations. Anon-capable (keyed by AuctorKey). An unknown terms id is not_found.terms.",
+      auth: true,
+      response: TermsAcceptanceResponseSchema,
+    },
+    {
       method: 'PUT',
       path: '/me/secrets/:provider',
       summary: 'Connect a BYO gated-origin credential (civitai|huggingface) so gated model imports can download their weights. The token is sealed at rest at once and never echoed back. Anon-capable (a Bursa purse is a valid owner); anonymous callers receive a deanonymization warning.',
@@ -3135,6 +3172,14 @@ export const API_CONTRACT: ApiContract = {
     { code: 'conflict.already_decided', httpStatus: 409, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
+    // The flow carries licence terms the caller has not accepted at their current version. NOT
+    // retryable as-is: details name the terms and where to read them; accept, then run again.
+    { code: 'terms.required', httpStatus: 403, retryable: false },
+    // The caller is suspended under the flow's licence terms after repeated confirmed violations.
+    { code: 'terms.suspended', httpStatus: 403, retryable: false },
+    // The flow names terms this deployment publishes no text for — a configuration fault.
+    { code: 'terms.unknown', httpStatus: 503, retryable: false },
+    { code: 'not_found.terms', httpStatus: 404 },
     { code: 'secret.required', httpStatus: 422 },
     { code: 'deposit.price_unavailable', httpStatus: 422 },
     { code: 'feature.not_implemented', httpStatus: 501 },

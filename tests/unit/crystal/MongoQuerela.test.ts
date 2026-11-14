@@ -116,3 +116,32 @@ test('findByOwnerAndHash returns null when no match', async () => {
   const owner = ownerKeyOf({ animaId: 'anima-abc' })
   assert.equal(await store.findByOwnerAndHash(owner, 'no-such-hash'), null)
 })
+
+test('countViolations counts confirmed abuse by distinct run, per subject and terms', async () => {
+  const offender = ownerKeyOf({ animaId: 'offender' })
+  const abuse = (runId: string, reporter: string, verdict: Querela['verdict'], useTerms = ['minimax-h3']) =>
+    store.create(makeInput({
+      kind: 'abuse', ownerKey: reporter, contentHash: `${reporter}-${runId}`, capturedState: { runId },
+      subjectOwnerKey: offender, useTerms, verdict,
+    }))
+  // Two confirmed reports of run-a are one violation; run-b is dismissed; run-c is unreviewed.
+  await abuse('run-a', 'anima:r1', 'violation')
+  await abuse('run-a', 'anima:r2', 'violation')
+  await abuse('run-b', 'anima:r1', 'dismissed')
+  await abuse('run-c', 'anima:r1', null)
+  assert.equal(await store.countViolations(offender, 'minimax-h3'), 1)
+
+  await abuse('run-d', 'anima:r1', 'violation')
+  assert.equal(await store.countViolations(offender, 'minimax-h3'), 2)
+  // Other terms, and other subjects, are counted apart.
+  await abuse('run-e', 'anima:r1', 'violation', [])
+  assert.equal(await store.countViolations(offender, 'minimax-h3'), 2)
+  assert.equal(await store.countViolations(ownerKeyOf({ animaId: 'bystander' }), 'minimax-h3'), 0)
+})
+
+test('update records a verdict', async () => {
+  const q = await store.create(makeInput({ kind: 'abuse', capturedState: { runId: 'run-1' }, verdict: null }))
+  const updated = await store.update(q.id, { verdict: 'violation', status: 'closed' })
+  assert.equal(updated.verdict, 'violation')
+  assert.equal(updated.status, 'closed')
+})

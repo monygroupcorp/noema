@@ -239,6 +239,8 @@ import { rarityReport, type RarityReport } from '../../crystal/rarityReport.js'
 import type { Tabula, Tabulae, Tabularum } from '../../types/tabula.js'
 import { compileTabula, TabulaCompileError } from '../../crystal/compileTabula.js'
 import { hashModus } from '../../crystal/hashModus.js'
+import { useTermsVerdict, lookupUseTerms, requiredUseTerms } from '../../crystal/useTerms.js'
+import type { QuerelaStore } from '../../types/Querela.js'
 import type { Depositorum, DepositumStatus } from '../../types/catena.js'
 import type { PersonaStore } from '../../types/persona.js'
 import { normalizeAddress } from '../../crystal/walletAuth.js'
@@ -292,6 +294,10 @@ export interface CrystalApiDeps {
   mandata?: Mandatorum
   /** Optional per-AuctorKey aggregation index (passed through to dispatchInceptio). */
   actumIndex?: ActumIndexStore
+  /** Report store — read here only for the strike count behind a licence-terms suspension
+   *  (`Modus.useTerms`). Absent → no caller is treated as suspended, and the acceptance check
+   *  still runs. */
+  querelae?: Pick<QuerelaStore, 'countViolations'>
   /** Session store — keys studios by their bound Modo id (the canonical studio handle)
    *  in `status`, so `/v1/me/status` and `/v1/studios` agree on `studioId` (ADR-0006). */
   modos?: ModoStore
@@ -693,6 +699,25 @@ export class CrystalApi {
     }
   }
 
+  /** Refuse a run of a flow whose licence terms the caller has not accepted, or is suspended
+   *  under. See the call site in `invokeFlow`; `fireCollection` asks the same of its flow. */
+  private async _assertUseTerms(auctor: AuctorKey, modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null): Promise<void> {
+    const verdict = await useTermsVerdict({
+      modus,
+      find: (id) => this.deps.modorum.find(id),
+      accepted: async () => (await this.deps.consuetudinum?.resolveGeneratio(auctor))?.termsAccepted,
+      ...(this.deps.querelae
+        ? { strikes: (id: string) => this.deps.querelae!.countViolations(ownerKeyOf(auctor), id) }
+        : {}),
+    })
+    if (verdict.ok) return
+    if (verdict.reason === 'required') throw Errors.termsRequired(verdict.terms)
+    if (verdict.reason === 'suspended') throw Errors.termsSuspended(verdict.terms)
+    // A declaration this deployment has no published text for cannot be accepted, so the flow
+    // cannot run.
+    throw Errors.termsUnknown(verdict.termsId)
+  }
+
   /**
    * GDPR Art. 17 right-to-erasure (noema-025) — pseudonymize-and-tombstone the CALLER'S OWN
    * account. Self-only by construction: erases exactly the authenticated `auctor`'s animaId, so a
@@ -773,6 +798,14 @@ export class CrystalApi {
     // Read the definition once: the account-defaults pass needs its ports, and so does the
     // owned-resource check below (which needs to know which of them name a stored record).
     const resolvedModus = await modorum.find(modusId)
+
+    // Upstream licence terms (`Modus.useTerms`). MiniMax H3's licence requires every user to be
+    // bound to its use restrictions before access, and repeat violators to be suspended, so a
+    // flow that declares terms runs only for a caller who has accepted their current version
+    // and is not suspended under them. Refused HERE, before any input handling and above the
+    // `Inceptio` literal, so a refusal reserves no signa and provisions no pod. FAIL-CLOSED: with
+    // no settings store there is no acceptance on file, so the flow does not run.
+    await this._assertUseTerms(auctor, resolvedModus)
 
     // Undeclared inputs are refused AT THIS BOUNDARY (noema-314). A submitted aditus key the
     // resolved modus does not declare is not carried into the run: the port never reaches a
@@ -1547,6 +1580,9 @@ export class CrystalApi {
       // and those dispatches carry the collection's funder, not the caller who wrote this base.
       // Checked once, at the write, rather than on every dispatch tick.
       await this._assertOwnedAditus(auctor, modus, aditusBase)
+      // A collection created live dispatches at once, so its flow's licence terms bind the
+      // creator here; a draft is held to them when it is fired.
+      if (!isDraft) await this._assertUseTerms(auctor, modus)
       // Pin the provenance hash to the resolved flow version.
       provenance = provenanceHash({ modusId, modusVersio: modus.versio, tractus, aditusBase })
     }
@@ -1600,6 +1636,9 @@ export class CrystalApi {
 
     // Re-pin provenance to the flow version at fire time (the config that actually runs).
     const modus = await this.deps.modorum.find(c.modusId)
+    // Every piece dispatches under the funder, below the run entry point, so the flow's licence
+    // terms bind the funder here, before the first piece is reserved.
+    await this._assertUseTerms(auctor, modus)
     const provenance = provenanceHash({
       modusId: c.modusId,
       modusVersio: modus?.versio,
@@ -1672,6 +1711,9 @@ export class CrystalApi {
     // ports, so a value that named nothing under the old flow can become a reference under the
     // new one. Re-checked against the caller making the change, for that reason.
     if (patch.modusId !== undefined) await this._assertOwnedAditus(auctor, modus, c.aditusBase ?? {})
+    // A fired collection's new flow starts dispatching on the next tick, so its terms bind the
+    // funder making the change (the branch above has already required the funder).
+    if (patch.modusId !== undefined && c.status !== 'draft') await this._assertUseTerms(auctor, modus)
     const provenance = modusId
       ? provenanceHash({ modusId, modusVersio: modus?.versio, tractus, aditusBase: c.aditusBase })
       : ''
@@ -1841,6 +1883,8 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
     }
+    // The new pieces are paid runs of the collection's flow, so its licence terms bind the funder.
+    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     // Checked after the gates, so a malformed count never tells a stranger whether the
     // collection exists. An extend raises the dispatch budget, so the SUM has to stay exact
     // too — a valid `addCount` on an already-large collection is still refused if it would
@@ -1892,6 +1936,9 @@ export class CrystalApi {
     // resolves the operator lifts the flag first, then resume works.
     await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
+    // Resuming dispatches paid pieces under the collection's funder, so the flow's licence terms
+    // bind the funder — the identity the pieces are charged to, whoever presses resume.
+    await this._assertUseTerms(c.by, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     await this.deps.collectioCursor?.resume(id)
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
@@ -1966,6 +2013,8 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can reject a piece (a rejection rerolls it at the funder’s expense)')
     }
+    // The reroll is a new paid run of the collection's flow, held to its licence terms.
+    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
   }
 
@@ -5029,6 +5078,10 @@ export class CrystalApi {
       ...(opts.affix?.suffix ? { promptSuffixum: opts.affix.suffix } : {}),
       ...(pinned ? { pinned } : {}),
     })
+    // Stamp the licence terms the base carries through its whole lineage onto the saved flow, so
+    // a save of a save never depends on walking back to a parent that declared them.
+    const terms = await requiredUseTerms(base, (id) => this.deps.modorum.find(id))
+    if (terms.length > 0) derived.useTerms = terms
     await this.deps.modorum.register(derived)
     return { id: derived.id }
   }
@@ -5176,6 +5229,11 @@ export class CrystalApi {
     if (merged.ageAttestation === undefined && existing?.ageAttestation) {
       merged.ageAttestation = existing.ageAttestation
     }
+    // Licence-terms acceptance is written only by `acceptUseTerms`. Whatever this replace carries
+    // is discarded and the stored record kept, so a Preferences save can neither forge an
+    // acceptance nor erase one.
+    delete merged.termsAccepted
+    if (existing?.termsAccepted) merged.termsAccepted = existing.termsAccepted
     // No attestation on file ⇒ spicyMode cannot be enabled (for anon or named callers alike).
     if (merged.spicyMode === true && !merged.ageAttestation) {
       throw Errors.authForbidden('Enabling spicy mode requires a recorded 18+ age attestation.')
@@ -5219,6 +5277,24 @@ export class CrystalApi {
     const ageAttestation = { attestedAt: Date.now() }
     await this.deps.consuetudinum.setGeneratio(auctor, { ...existing, ageAttestation })
     return ageAttestation
+  }
+
+  /** Record that the caller accepts the CURRENT version of licence terms `termsId`
+   *  (`crystal/useTerms.ts`) — the click-through a flow declaring those terms requires before it
+   *  runs. Keyed like the 18+ attestation (anon-capable), preserving every other Generatio
+   *  field. Accepting again refreshes the timestamp; accepting a newer version replaces the old.
+   *  An unknown terms id is refused: there is no published text it could stand for. */
+  async acceptUseTerms(auctor: AuctorKey, termsId: string): Promise<{ terms: string; versio: string; acceptedAt: number }> {
+    if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
+    const terms = lookupUseTerms(termsId)
+    if (!terms) throw new ApiError('not_found.terms', `No terms '${termsId}'`, 404)
+    const existing = (await this.deps.consuetudinum.resolveGeneratio(auctor)) ?? {}
+    const entry = { versio: terms.versio, acceptedAt: Date.now() }
+    await this.deps.consuetudinum.setGeneratio(auctor, {
+      ...existing,
+      termsAccepted: { ...(existing.termsAccepted ?? {}), [terms.id]: entry },
+    })
+    return { terms: terms.id, ...entry }
   }
 
   /** The caller's per-modus input defaults (affines) for one flow. */

@@ -100,7 +100,7 @@ are permanent: never reused, never renumbered, so a citation in a past critique 
 |---|---|---|---|---|
 | REF-1 | `/`, `/landing` | Landing | Krea's landing page | A generation product's front door: the artifact carries the page, and the first action is *make something*, not *read about it*. |
 | REF-2 | `/pricing` | Pricing | Replicate's pricing page | Credits that buy variable-cost runs — the hard part is making "what will this cost me" answerable before purchase. |
-| REF-3 | `/about`, `/features`, `/legal/privacy`, `/legal/cookies`, `/legal/terms` | Doc | Stripe's documentation pages | Long prose a person actually finishes: measure, headings that survive scanning, and no marketing in the middle of a legal sentence. |
+| REF-3 | `/about`, `/features`, `/legal/privacy`, `/legal/cookies`, `/legal/terms`, `/legal/minimax-h3-license` | Doc | Stripe's documentation pages | Long prose a person actually finishes: measure, headings that survive scanning, and no marketing in the middle of a legal sentence. |
 | REF-4 | `/blog`, `/blog/:slug` | Blog, BlogPost | Replicate's docs guides index | A guide index where each entry states what you will be able to do after reading it. |
 | REF-5 | `/partners` | RequestDemo | Stripe's contact-sales form | A qualification form that asks the fewest questions that route the request. |
 | REF-6 | `/onboard` | Onboard | Google's account chooser | Adding and switching between identities without losing where you were going. |

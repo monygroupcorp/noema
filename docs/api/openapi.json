@@ -10596,6 +10596,27 @@
                           },
                           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
                         },
+                        "termsAccepted": {
+                          "type": "object",
+                          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "versio": {
+                                "type": "string",
+                                "description": "The terms version accepted."
+                              },
+                              "acceptedAt": {
+                                "type": "number",
+                                "description": "Epoch-ms timestamp of the acceptance."
+                              }
+                            },
+                            "required": [
+                              "versio",
+                              "acceptedAt"
+                            ]
+                          }
+                        },
                         "privateOutputs": {
                           "type": "boolean",
                           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -10941,6 +10962,27 @@
                           },
                           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
                         },
+                        "termsAccepted": {
+                          "type": "object",
+                          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "versio": {
+                                "type": "string",
+                                "description": "The terms version accepted."
+                              },
+                              "acceptedAt": {
+                                "type": "number",
+                                "description": "Epoch-ms timestamp of the acceptance."
+                              }
+                            },
+                            "required": [
+                              "versio",
+                              "acceptedAt"
+                            ]
+                          }
+                        },
                         "privateOutputs": {
                           "type": "boolean",
                           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -11029,6 +11071,27 @@
                     },
                     "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
                   },
+                  "termsAccepted": {
+                    "type": "object",
+                    "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "versio": {
+                          "type": "string",
+                          "description": "The terms version accepted."
+                        },
+                        "acceptedAt": {
+                          "type": "number",
+                          "description": "Epoch-ms timestamp of the acceptance."
+                        }
+                      },
+                      "required": [
+                        "versio",
+                        "acceptedAt"
+                      ]
+                    }
+                  },
                   "privateOutputs": {
                     "type": "boolean",
                     "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -11097,6 +11160,85 @@
             }
           }
         }
+      }
+    },
+    "/me/terms/{id}": {
+      "post": {
+        "summary": "Accept the current version of a flow's upstream licence terms (e.g. 'minimax-h3', MiniMax H3's use restrictions, published at /legal/terms#minimax-h3). A flow that carries terms refuses to run with terms.required until this is on file, and with terms.suspended once the caller is suspended under them after repeated confirmed violations. Anon-capable (keyed by AuctorKey). An unknown terms id is not_found.terms.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's recorded acceptance of a flow's upstream licence terms.",
+                  "properties": {
+                    "acceptance": {
+                      "type": "object",
+                      "properties": {
+                        "terms": {
+                          "type": "string",
+                          "description": "The terms id (e.g. 'minimax-h3')."
+                        },
+                        "versio": {
+                          "type": "string",
+                          "description": "The terms version accepted — the current one."
+                        },
+                        "acceptedAt": {
+                          "type": "number",
+                          "description": "Epoch-ms timestamp of the acceptance."
+                        }
+                      },
+                      "required": [
+                        "terms",
+                        "versio",
+                        "acceptedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "acceptance"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/me/secrets/{provider}": {
@@ -19036,6 +19178,25 @@
     {
       "code": "content.refused",
       "httpStatus": 403
+    },
+    {
+      "code": "terms.required",
+      "httpStatus": 403,
+      "retryable": false
+    },
+    {
+      "code": "terms.suspended",
+      "httpStatus": 403,
+      "retryable": false
+    },
+    {
+      "code": "terms.unknown",
+      "httpStatus": 503,
+      "retryable": false
+    },
+    {
+      "code": "not_found.terms",
+      "httpStatus": 404
     },
     {
       "code": "secret.required",

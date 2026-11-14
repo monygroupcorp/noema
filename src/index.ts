@@ -22,6 +22,8 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { ownerKeyOf } from './crystal/ownerKey.js'
+import { requiredUseTerms } from './crystal/useTerms.js'
 import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
@@ -784,6 +786,13 @@ async function main(): Promise<void> {
       inline: raw => parseManifest(raw) !== null,
     },
     fundingUrl: FUNDING_URL,
+    // A flow under licence terms (MiniMax H3) runs only for a caster who accepted them on the
+    // web and is not suspended; the same records the REST run route reads.
+    useTerms: {
+      accepted: async (identity) => (await consuetudinum.resolveGeneratio(identity))?.termsAccepted,
+      strikes: (identity, termsId) => ring.querelae.countViolations(ownerKeyOf(identity), termsId),
+    },
+    siteUrl: PUBLIC_BASE,
   })
   router.register(executeFlow)
 
@@ -1082,6 +1091,8 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     modos: ring.modos,
     consuetudinum,
+    // The strike count behind a licence-terms suspension (MiniMax H3).
+    querelae: ring.querelae,
     // Private generation (noema-347): presence gates the preference (a toggle the deployment
     // cannot honour is refused, not silently downgraded) and presigns markers on an owner-scoped
     // run read.
@@ -1187,7 +1198,25 @@ async function main(): Promise<void> {
   // Querela reports (bug/feature/feedback) — anon-capable (animaId,
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
-  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+  app.use('/v1/reports', express.json(), createQuerelaRouter({
+    querelae: ring.querelae,
+    identity: apiResolver,
+    // An abuse report names a run; its owner and its flow's licence terms are read from the run.
+    // The owner comes from the actum index (identified and commitment runs) or, for a run paid by
+    // an anonymous purse, from the purse token the actum carries.
+    resolveRun: async (runId) => {
+      const actum = await ring.actorum.findById(runId)
+      if (!actum) return null
+      const entry = await ring.actumIndex?.findByActumId?.(runId)
+      const owner = entry?.animaId ? { animaId: entry.animaId }
+        : entry?.commitment ? { commitment: entry.commitment }
+        : actum.bursaToken ? { bursaToken: actum.bursaToken }
+        : null
+      if (!owner) return null
+      const useTerms = await requiredUseTerms(await ring.modorum.find(actum.modusId), (id) => ring.modorum.find(id))
+      return { ownerKey: ownerKeyOf(owner), useTerms }
+    },
+  }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
   // than shared via the CrystalApi facade.
