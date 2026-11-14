@@ -226,7 +226,7 @@ import { ModelImportError, SecretRequiredError } from '../../crystal/modelImport
 import type { SecretWriter, SecretPresence, SecretProvider } from '../../types/secretum.js'
 import { isSecretProvider, SECRET_PROVIDERS, DEFAULT_SECRET_IDLE_DAYS } from '../../types/secretum.js'
 import { ownerKeyOf } from '../../crystal/ownerKey.js'
-import { isCatalogEligible, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { isCatalogEligible, grantConditionsLive, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
@@ -614,7 +614,10 @@ export function normalizeCatalogSort(sort: string | undefined): CatalogSort {
  * registry never has to grow a method to keep working.
  */
 async function readPublicCatalog(registry: Intellarum): Promise<Intella[]> {
-  return registry.publicCatalog ? await registry.publicCatalog() : await registry.canonical()
+  const pool = registry.publicCatalog ? await registry.publicCatalog() : await registry.canonical()
+  // A model under a licence we hold by conditional grant (MiniMax H3) leaves the public catalog
+  // while the grant's conditions are not live: the grant does not cover us then.
+  return pool.filter((i) => grantConditionsLive(i.license))
 }
 
 /** Order a catalog page. Applied BEFORE any `limit` slice, so paging returns the intended page.
@@ -2084,7 +2087,7 @@ export class CrystalApi {
     // conditional caps); 'no'/'unknown' are refused pending an ADMIN license clearance (setModelLicense
     // backfill). A model with NO recorded verdict (undefined) is not gated here (legacy). Private/
     // personal use is never blocked — this is listing, not use (`docs/spec/model-import.md`).
-    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse)) {
+    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse, owned.intella.license)) {
       throw Errors.licenseRestricted(
         `this model cannot be promoted to the public catalog under its license (${owned.intella.license ?? 'unknown'}, commercial use: ${owned.intella.commercialUse}). It remains usable privately; an admin can clear it after license review.`,
       )

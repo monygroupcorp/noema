@@ -19,6 +19,8 @@
 // refused (fail-closed) pending a held license / manual clearance.
 // =============================================================================
 
+import { lookupUseTerms, type UseTerms } from './useTerms.js'
+
 /** Catalog-eligibility verdict for a license. Only 'yes' clears the public (commercial) catalog. */
 export type CommercialVerdict = 'yes' | 'no' | 'conditional' | 'unknown'
 
@@ -43,10 +45,11 @@ const LICENSE_COMMERCIAL: Record<string, CommercialVerdict> = {
   'flux-2-dev-nc': 'no',          // BFL FLUX.2 [dev] + [klein] 9B Non-Commercial (only klein 4B is Apache)
   'closed': 'no',                 // FLUX.1 pro / API-only — not self-hostable
   'cc-by-nc': 'no',               // any non-commercial Creative Commons variant
-  'minimax-h3': 'no',             // MiniMax H3 — restrictive in the US; ❌ unless separately
-                                  // licensed. Mony Group LLC holds a US operating licence
-                                  // (rth 2026-09-01), so the CANONICAL H3 seeds carry an
-                                  // explicit commercialUse:'yes'. This entry governs THIRD-PARTY
+  'minimax-h3': 'no',             // MiniMax H3 — the Community License excludes the US; ❌ unless
+                                  // separately licensed. MiniMax granted Mony Group LLC that
+                                  // exception on 2026-11-13, CONDITIONAL on the commitments in the
+                                  // request (see LICENCE_GRANTS), so the CANONICAL H3 seeds carry
+                                  // an explicit commercialUse:'yes'. This entry governs THIRD-PARTY
                                   // imports, which our grant does not cover — keep it 'no'.
   'stability-community': 'conditional',  // SD3/3.5, SDXL-Turbo — revenue/entity thresholds; verify
   'krea-community': 'conditional',       // Krea 2 Community — commercial only for entities <$1M revenue
@@ -66,10 +69,72 @@ export function licenseCommercial(license: string | undefined): CommercialVerdic
  * trailing-12mo USD revenue TRIPWIRE (see `licenseTripwire.ts` + `CONDITIONAL_CAP_USD` below)
  * watches that revenue against the tightest active cap and alerts before we cross it, so counsel
  * can pre-negotiate an enterprise license (ADR-0012). 'no'/'unknown' are refused (fail-closed)
- * pending an admin license clearance (see the backfill path).
+ * pending an admin license clearance (see the backfill path). A model under a licence we hold by
+ * conditional grant (`LICENCE_GRANTS`) is refused whatever its verdict while the grant's conditions
+ * are not live — pass its `license` so the gate can tell.
  */
-export function isCatalogEligible(verdict: CommercialVerdict | undefined): boolean {
-  return verdict === 'yes' || verdict === 'conditional'
+export function isCatalogEligible(
+  verdict: CommercialVerdict | undefined,
+  license?: string,
+  terms: (id: string) => UseTerms | undefined = lookupUseTerms,
+): boolean {
+  if (verdict !== 'yes' && verdict !== 'conditional') return false
+  return grantConditionsLive(license, terms)
+}
+
+// ── Conditional licence grants ───────────────────────────────────────────────────────────────
+//
+// A licence we hold by grant rather than by an open licence text, where the grant is conditioned
+// on commitments we made to get it. While those commitments are not running, the grant does not
+// cover us, so a model under that licence must stay off the public (commercial) catalog however
+// its `commercialUse` was recorded.
+
+/** A licence granted to us on conditions. */
+export interface LicenceGrant {
+  /** Who granted it, and when (the date of the written grant on file). */
+  grantor: string
+  grantedOn: string
+  /** Where the grant and the commitments it is conditioned on are recorded. */
+  record: string
+  /**
+   * The flow-down terms the grant requires every user to be bound to (a `USE_TERMS` id). The
+   * condition is live when those terms are published and carry a strike limit — the reporting
+   * and repeat-violator suspension the grant's safeguards commitment names.
+   */
+  useTerms: string
+}
+
+/**
+ * Licences held by conditional grant, keyed by licence id.
+ *
+ * MiniMax H3: the Community License excludes self-hosted use in the US. MiniMax authorized Mony
+ * Group LLC to use H3 and H3 Works on 2026-11-13, "subject to and conditioned upon" continued
+ * compliance with the commitments in the request: binding every user to terms at least as
+ * protective as the licence's use restrictions (flow-down), and running safeguards with reporting
+ * and suspension of repeat violators.
+ */
+export const LICENCE_GRANTS: Record<string, LicenceGrant> = {
+  'minimax-h3': {
+    grantor: 'MiniMax',
+    grantedOn: '2026-11-13',
+    record: 'docs/legal/minimax-h3-license-proposal.md',
+    useTerms: 'minimax-h3',
+  },
+}
+
+/**
+ * True unless `license` is held by a conditional grant whose conditions are not live. A licence
+ * with no grant entry has no grant conditions, so this is true for it. Fail-closed for a granted
+ * licence: terms that are missing, or carry no strike limit, mean the conditions are not live.
+ */
+export function grantConditionsLive(
+  license: string | undefined,
+  terms: (id: string) => UseTerms | undefined = lookupUseTerms,
+): boolean {
+  const grant = license ? LICENCE_GRANTS[license] : undefined
+  if (!grant) return true
+  const t = terms(grant.useTerms)
+  return t !== undefined && t.strikeLimit > 0
 }
 
 // ── Conditional-license revenue caps (the tripwire's registry) ───────────────────────────────

@@ -1037,10 +1037,17 @@ export const INTELLA_WAN21_VAE: Intella = {
 // =============================================================================
 // MiniMax H3 — video+audio generation (noema-372)
 //
-// LICENSING. The H3 weights are NOT openly licensed and are restrictive in the
-// United States. Mony Group LLC — the company that owns noema — requested and
-// received a licence to operate them in the US (rth, 2026-09-01). That grant is
-// why these canonical seeds carry `commercialUse: 'yes'` while the shared
+// LICENSING. The H3 weights are NOT openly licensed: the MiniMax H3 Community
+// License excludes self-hosted use in the United States. Mony Group LLC — the
+// company that owns noema — filed MiniMax's territorial-exception request, and
+// MiniMax granted it in writing on 2026-11-13 (docs/legal/minimax-h3-license-proposal.md).
+// The grant is CONDITIONAL on the commitments in that request: every user bound to
+// the licence's use restrictions before access (flow-down, `crystal/useTerms.ts`),
+// and safeguards with reporting and suspension of repeat violators. While those are
+// not live the grant does not cover us, and `isCatalogEligible` keeps these seeds
+// off the public catalog regardless of the verdict below (`LICENCE_GRANTS` in
+// `modelLicense.ts`). That grant is why these canonical seeds carry
+// `commercialUse: 'yes'` while the shared
 // register in `modelLicense.ts` maps the bare `minimax-h3` licence id to 'no'.
 // The register is right and this is not an exception to it: `licenseCommercial()`
 // classifies THIRD-PARTY IMPORTS, which are not covered by our grant and must stay
@@ -1061,7 +1068,7 @@ export const INTELLA_MINIMAX_H3_FL2VA: Intella = {
   id: 'intella.minimax-h3-fl2va-int8',
   nomen: 'MiniMax H3 — first/last-frame to video (pruned int8 convrot)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'model',
   architectura: 'dit',
   familia: 'minimax-h3',
@@ -1092,7 +1099,7 @@ export const INTELLA_MINIMAX_H3_REF2VA: Intella = {
   id: 'intella.minimax-h3-ref2va-int8',
   nomen: 'MiniMax H3 — reference to video (pruned int8 convrot)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'model',
   architectura: 'dit',
   familia: 'minimax-h3',
@@ -1128,7 +1135,7 @@ export const INTELLA_MINIMAX_H3_TEXT_ENCODER: Intella = {
   id: 'intella.qwen3vl-32b-minimax-h3-int8',
   nomen: 'Qwen3-VL-32B for MiniMax H3 (int8 convrot)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'embedding',
   architectura: 'transformer',
   parametri: 32_000_000_000,
@@ -1158,7 +1165,7 @@ export const INTELLA_MINIMAX_H3_VIDEO_VAE: Intella = {
   id: 'intella.minimax-h3-video-vae',
   nomen: 'MiniMax H3 — video VAE (fp16)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'embedding',
   architectura: 'vae',
   parametri: 0,
@@ -1193,7 +1200,7 @@ export const INTELLA_MINIMAX_H3_AUDIO_VAE: Intella = {
   id: 'intella.minimax-h3-audio-vae',
   nomen: 'MiniMax H3 — audio VAE (fp32)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'embedding',
   architectura: 'vae',
   parametri: 0,
@@ -1233,7 +1240,7 @@ export const INTELLA_MINIMAX_H3_FL2V_TURBO: Intella = {
   id: 'intella.minimax-h3-fl2v-turbo-4step',
   nomen: 'MiniMax H3 fl2v — 4-step turbo LoRA (768p, bf16)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'lora',
   architectura: 'dit',
   parametri: 0,
@@ -1263,7 +1270,7 @@ export const INTELLA_MINIMAX_H3_REF2V_TURBO: Intella = {
   id: 'intella.minimax-h3-ref2v-turbo-4step',
   nomen: 'MiniMax H3 ref2v — 4-step turbo LoRA (bf16)',
   license: 'minimax-h3',
-  commercialUse: 'yes',            // Mony Group LLC holds a US operating licence — see header
+  commercialUse: 'yes',            // MiniMax's 2026-11-13 grant, conditional — see header
   genus: 'lora',
   architectura: 'dit',
   parametri: 0,
