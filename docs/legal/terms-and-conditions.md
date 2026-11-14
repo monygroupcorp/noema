@@ -170,7 +170,8 @@ any of its outputs:
 
 **11.3 No training other models.** You will not use MiniMax H3 or any of its outputs or results to
 improve any other artificial-intelligence model, including by distillation or by training on its
-outputs.
+outputs. Fine-tuning MiniMax H3 itself, such as training a LoRA on it, is not "another model"; the
+result is a model derived from MiniMax H3 and stays bound by this section.
 
 **11.4 Updates from MiniMax.** You will also comply with MiniMax's acceptable-use policy for
 MiniMax H3 as MiniMax revises it from time to time, wherever it is stricter than 11.2. When it
