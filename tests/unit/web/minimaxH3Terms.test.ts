@@ -64,6 +64,10 @@ test('Section 11 carries no-training, territory, acceptance, reporting and suspe
   const s = flat(section11())
   assert.match(s, /improve any other artificial-intelligence model/)                 // V.3
   assert.match(s, /European Union, the United Kingdom or the Republic of Korea/)    // V.4
+  // Item 1 of 11.2 points at the territories 11.1 EXCLUDES — not "outside" them, which would
+  // forbid use everywhere but the excluded ones.
+  assert.match(s, /1\. in or into any territory 11\.1 excludes;/)
+  assert.doesNotMatch(s, /outside the territories in 11\.1/)
   assert.match(s, /must accept this section before your first MiniMax H3 run/)       // V.2
   assert.match(s, /Report this output/)                                              // V.5
   assert.match(s, /two confirmed violations is suspended from MiniMax H3 flows/)     // V.5

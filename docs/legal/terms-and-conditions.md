@@ -120,16 +120,16 @@ changes materially. Until you do, a MiniMax H3 run is refused before anything is
 terms are in addition to the rest of these terms, and where the two differ the stricter one applies.
 
 **11.1 Where you may use it.** MiniMax's licence does not extend to the European Union, the United
-Kingdom or the Republic of Korea. You will not run MiniMax H3, or use, reproduce, distribute or
-display its outputs, from or into any of them. (We hold a separate licence from MiniMax for the
+Kingdom or the Republic of Korea. You will not run MiniMax H3, or use, reproduce, modify,
+distribute or display it or its outputs, from or into any of them. (We hold a separate licence from MiniMax for the
 United States.)
 
 **11.2 What you may not do with it.** You will not use MiniMax H3, any model derived from it, or
 any of its outputs:
 
-1. outside the territories in 11.1;
+1. in or into any territory 11.1 excludes;
 2. in any manner that violates any applicable national, federal, state, local or international
-   law, regulation or other legal requirement, or that infringes, misappropriates or otherwise
+   law, regulation or other legal requirement (including trade-compliance laws), or that infringes, misappropriates or otherwise
    violates anyone's intellectual-property or other proprietary rights, including through
    unauthorized reproduction, distribution, public display, public performance or creation of
    derivative works;
@@ -172,9 +172,10 @@ any of its outputs:
 improve any other artificial-intelligence model, including by distillation or by training on its
 outputs.
 
-**11.4 Updates from MiniMax.** MiniMax may revise its acceptable-use policy. A revision that is
-stricter than 11.2 binds you from the time we publish it here, and we will ask you to accept the
-revised section before your next MiniMax H3 run.
+**11.4 Updates from MiniMax.** You will also comply with MiniMax's acceptable-use policy for
+MiniMax H3 as MiniMax revises it from time to time, wherever it is stricter than 11.2. When it
+changes we will update this section and ask you to accept the revised section before your next
+MiniMax H3 run.
 
 **11.5 Reporting and suspension.** Anyone can report a MiniMax H3 output they believe breaks this
 section: use **Report this output** on the run, or write to

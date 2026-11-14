@@ -121,6 +121,9 @@ import { MongoScholium } from './crystal/MongoScholium.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoQuerela } from './crystal/MongoQuerela.js'
+import { gateDispatch } from './crystal/useTerms.js'
+import type { AuctorKey } from './flow/types.js'
+import { ownerKeyOf } from './crystal/ownerKey.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoPartnerRequest } from './crystal/MongoPartnerRequest.js'
 import type { PartnerRequestStore } from './types/partnerRequest.js'
@@ -919,10 +922,20 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const terminusOf = async (m: Modus, a: Record<string, unknown>): Promise<number> =>
     await cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS
   compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum, terminusOf)
+  // Every collection piece is a paid run under the funder, dispatched below the run entry point,
+  // so each one is held to its flow's licence terms (MiniMax H3) here as well: a funder suspended
+  // mid-collection gets no further pieces, and a collection fired before the terms existed gets
+  // none until its funder accepts them. A refused piece throws before it is initiated, so it is
+  // booked as a failed piece and charged nothing.
+  const collectioDispatch = gateDispatch(sharedDispatch, {
+    find: (id) => modorum.find(id),
+    accepted: async (by) => (await config.consuetudinum?.resolveGeneratio(by as AuctorKey))?.termsAccepted,
+    strikes: (by, termsId) => querelae.countViolations(ownerKeyOf(by as AuctorKey), termsId),
+  })
   // Review ON by default: every completed piece waits for the creator's approve/reject
   // (curation) before it counts toward the collection and the next piece fires. This is
   // a GLOBAL flag today (not per-collection) — a per-collection review toggle is net-new.
-  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
+  const collectioCursor = new CollectioCursor(collectioDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,

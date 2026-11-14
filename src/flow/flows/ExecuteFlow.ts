@@ -141,11 +141,15 @@ export function useTermsCopy(
   siteUrl?: string,
 ): string {
   if (verdict.reason === 'unknown') return 'This flow cannot run here right now.'
-  const where = siteUrl ? `${siteUrl}${verdict.terms.href}` : 'on the web, under Terms'
+  const terms = siteUrl ? `${siteUrl}${verdict.terms.href}` : 'on the web, under Terms'
+  const web = siteUrl ?? 'the web'
   if (verdict.reason === 'suspended') {
     return `Your access to flows under the ${verdict.terms.nomen} is suspended after repeated violations of them.`
   }
-  return `This flow runs under the ${verdict.terms.nomen}. Read and accept them at ${where}, then run it again.`
+  // The terms page itself is read-only: acceptance is taken when a run is started on the web,
+  // under the account this chat is linked to. Say that, rather than send people to a page with
+  // nothing to press.
+  return `This flow runs under the ${verdict.terms.nomen} (${terms}). Accept them by starting this flow once on ${web}, signed in to the account linked here (you will be asked there), then run it here again.`
 }
 
 export function topUpCopy(required: bigint, balance: bigint, fundingUrl?: string): string {

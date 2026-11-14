@@ -43,7 +43,7 @@ export const USE_TERMS: Record<string, UseTerms> = {
     licenseHref: '/legal/minimax-h3-license',
     // Two, not one: a first confirmed violation is met by removing the content and a warning;
     // the second makes the user a repeat violator. A violation that warrants immediate
-    // termination on its own (Section 3 of the terms) is handled by termination, not by strikes.
+    // termination on its own (Section 9 of the terms) is handled by termination, not by strikes.
     strikeLimit: 2,
   },
 }
@@ -72,24 +72,26 @@ export function isAccepted(id: string, accepted: Record<string, TermsAcceptance>
 const MAX_DEPTH = 4
 
 /**
- * Every terms id a modus carries: its own declaration plus, for a composite, its steps'. A
- * composite whose step runs MiniMax H3 binds its caller exactly as running H3 directly does,
- * and the steps dispatch internally, below the run entry point, so they are collected here.
+ * Every terms id a modus carries: its own declaration, its steps' for a composite, and its
+ * parent's for a saved flow (`fonte`). A composite whose step runs MiniMax H3 binds its caller
+ * exactly as running H3 directly does, and the steps dispatch internally, below the run entry
+ * point, so they are collected here. A flow a user saved from H3 runs H3's weights; following
+ * `fonte` holds it to H3's terms even when it was saved before the parent declared them.
  */
 export async function requiredUseTerms(
-  modus: Pick<Modus, 'useTerms' | 'gradus'> | null | undefined,
-  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus'> | null>,
+  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined,
+  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>,
 ): Promise<string[]> {
   const out = new Set<string>()
   const seen = new Set<string>()
-  async function walk(m: Pick<Modus, 'useTerms' | 'gradus'> | null | undefined, depth: number): Promise<void> {
+  async function walk(m: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined, depth: number): Promise<void> {
     if (!m) return
     for (const id of m.useTerms ?? []) out.add(id)
     if (depth >= MAX_DEPTH) return
-    for (const g of m.gradus ?? []) {
-      if (seen.has(g.modusId)) continue
-      seen.add(g.modusId)
-      await walk(await find(g.modusId), depth + 1)
+    for (const next of [...(m.fonte ? [m.fonte] : []), ...(m.gradus ?? []).map(g => g.modusId)]) {
+      if (seen.has(next)) continue
+      seen.add(next)
+      await walk(await find(next), depth + 1)
     }
   }
   await walk(modus, 0)
@@ -113,8 +115,8 @@ export type UseTermsVerdict =
  * strike count only when a counter is supplied; without one no caller counts as suspended.
  */
 export async function useTermsVerdict(args: {
-  modus: Pick<Modus, 'useTerms' | 'gradus'> | null | undefined
-  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus'> | null>
+  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined
+  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
   accepted: () => Promise<Record<string, TermsAcceptance> | undefined>
   /** Confirmed violations under terms `id` for this caller. */
   strikes?: (id: string) => Promise<number>
@@ -129,4 +131,33 @@ export async function useTermsVerdict(args: {
     if (args.strikes && (await args.strikes(id)) >= terms.strikeLimit) return { ok: false, reason: 'suspended', terms }
   }
   return { ok: true }
+}
+
+/**
+ * Wrap a dispatcher so every run it starts is held to its flow's licence terms under the run's
+ * own `by`. For runs that start below the run entry point, such as the pieces a collection
+ * cursor dispatches tick by tick: a funder suspended mid-collection gets no further pieces, and
+ * a collection fired before its flow declared terms gets none until the funder accepts. A
+ * refused run throws before `dispatch` is called, so nothing is initiated or reserved. An
+ * arcanum-proof spender has no account to accept on, so a terms-bearing flow is refused for it.
+ */
+export function gateDispatch<I extends { modusId: string; by: object }, R>(
+  dispatch: (inc: I) => Promise<R>,
+  deps: {
+    find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
+    accepted: (by: I['by']) => Promise<Record<string, TermsAcceptance> | undefined>
+    strikes: (by: I['by'], termsId: string) => Promise<number>
+  },
+): (inc: I) => Promise<R> {
+  return async (inc) => {
+    const anonymousProof = 'arcanumProof' in inc.by
+    const verdict = await useTermsVerdict({
+      modus: await deps.find(inc.modusId),
+      find: deps.find,
+      accepted: async () => (anonymousProof ? undefined : deps.accepted(inc.by)),
+      ...(anonymousProof ? {} : { strikes: (id: string) => deps.strikes(inc.by, id) }),
+    })
+    if (!verdict.ok) throw new Error(`run refused under licence terms (${verdict.reason})`)
+    return dispatch(inc)
+  }
 }

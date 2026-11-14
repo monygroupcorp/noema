@@ -1882,6 +1882,8 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
     }
+    // The new pieces are paid runs of the collection's flow, so its licence terms bind the funder.
+    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     // Checked after the gates, so a malformed count never tells a stranger whether the
     // collection exists. An extend raises the dispatch budget, so the SUM has to stay exact
     // too — a valid `addCount` on an already-large collection is still refused if it would
@@ -1933,6 +1935,9 @@ export class CrystalApi {
     // resolves the operator lifts the flag first, then resume works.
     await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
+    // Resuming dispatches paid pieces under the collection's funder, so the flow's licence terms
+    // bind the funder — the identity the pieces are charged to, whoever presses resume.
+    await this._assertUseTerms(c.by, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     await this.deps.collectioCursor?.resume(id)
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
@@ -2007,6 +2012,8 @@ export class CrystalApi {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can reject a piece (a rejection rerolls it at the funder’s expense)')
     }
+    // The reroll is a new paid run of the collection's flow, held to its licence terms.
+    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
   }
 

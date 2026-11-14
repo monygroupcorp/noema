@@ -20,7 +20,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/C
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { CANONICAL_ESSENTIAE } from '../../../../src/crystal/seeds/essentiae.js'
 import { MemoryConsuetudinum } from '../../../../src/crystal/MemoryConsuetudinum.js'
-import { USE_TERMS, useTermsVerdict } from '../../../../src/crystal/useTerms.js'
+import { USE_TERMS, useTermsVerdict, requiredUseTerms, gateDispatch } from '../../../../src/crystal/useTerms.js'
 import { ownerKeyOf } from '../../../../src/crystal/ownerKey.js'
 import { useTermsCopy } from '../../../../src/flow/flows/ExecuteFlow.js'
 import type { Gradus, Modus } from '../../../../src/types/modus.js'
@@ -188,4 +188,82 @@ test('the chat path says where to accept, and says suspended plainly', async () 
   if (suspended.ok) return
   assert.equal(suspended.reason, 'suspended')
   assert.match(useTermsCopy(suspended), /suspended/)
+})
+
+test('a flow saved from an H3 flow carries the H3 terms, even with no declaration of its own', async () => {
+  // Saved before the parent declared terms: no `useTerms`, only the `fonte` link.
+  const saved = { ...essentia('minimax-h3-t2v'), id: 'my-h3', canonica: false, fonte: 'minimax-h3-t2v', useTerms: undefined }
+  const find = async (id: string) => (id === 'minimax-h3-t2v' ? essentia(id) : null)
+  assert.deepEqual(await requiredUseTerms(saved, find), ['minimax-h3'])
+})
+
+// ── Collections: every verb that dispatches new paid pieces is held to the flow's terms ──────
+
+function collectionHarness(opts: { strikes?: number } = {}) {
+  const calls: string[] = []
+  const collectio = {
+    id: 'col-1', by: CALLER, modusId: 'minimax-h3-t2v', status: 'agens', numerus: 10, reiectae: 0,
+    tractus: [], aditusBase: {}, acta: [], completae: 0, fractae: 0, concurrentia: 3,
+  }
+  const consuetudinum = new MemoryConsuetudinum()
+  const deps = {
+    modorum: { async find(id: string) { return [...H3_IDS.map(essentia)].find(m => m.id === id) ?? null } },
+    consuetudinum,
+    querelae: { async countViolations() { return opts.strikes ?? 0 } },
+    collectiones: { async find(id: string) { return id === collectio.id ? collectio : null } },
+    collectioCursor: {
+      async extend() { calls.push('extend') },
+      async resume() { calls.push('resume') },
+      async rejectAndRevive() { calls.push('reject') },
+    },
+  }
+  return { api: new CrystalApi(deps as unknown as CrystalApiDeps), calls }
+}
+
+const COLLECTION_VERBS: Array<[string, (api: CrystalApi) => Promise<unknown>]> = [
+  ['extend', (api) => api.extendCollection(CALLER, 'col-1', 5)],
+  ['resume', (api) => api.resumeCollection(CALLER, 'col-1')],
+  ['reject', (api) => api.rejectCollectionPiece(CALLER, 'col-1', 'piece-1')],
+]
+
+test('extend, resume and reject on an H3 collection are refused until the funder accepts', async () => {
+  for (const [name, verb] of COLLECTION_VERBS) {
+    const h = collectionHarness()
+    await assert.rejects(() => verb(h.api), (e: unknown) => e instanceof ApiError && e.code === 'terms.required', name)
+    assert.deepEqual(h.calls, [], `${name}: nothing was dispatched`)
+    await h.api.acceptUseTerms(CALLER, 'minimax-h3')
+    await verb(h.api)
+    assert.deepEqual(h.calls, [name], `${name}: goes through once accepted`)
+  }
+})
+
+test('extend, resume and reject are refused to a suspended funder', async () => {
+  for (const [name, verb] of COLLECTION_VERBS) {
+    const h = collectionHarness({ strikes: H3.strikeLimit })
+    await h.api.acceptUseTerms(CALLER, 'minimax-h3')
+    await assert.rejects(() => verb(h.api), (e: unknown) => e instanceof ApiError && e.code === 'terms.suspended', name)
+    assert.deepEqual(h.calls, [], `${name}: nothing was dispatched`)
+  }
+})
+
+test('a collection piece dispatched by the cursor is held to the funder\'s terms, piece by piece', async () => {
+  let accepted: Record<string, { versio: string; acceptedAt: number }> | undefined
+  let strikes = 0
+  const dispatched: string[] = []
+  const gated = gateDispatch(async (inc: { modusId: string; by: object }) => { dispatched.push(inc.modusId); return 'ran' }, {
+    find: async (id) => H3_IDS.map(essentia).find(m => m.id === id) ?? (id === 'plain-flow' ? PLAIN : null),
+    accepted: async () => accepted,
+    strikes: async () => strikes,
+  })
+  const piece = { modusId: 'minimax-h3-t2v', by: CALLER }
+  await assert.rejects(() => gated(piece), /licence terms \(required\)/)
+  accepted = { 'minimax-h3': { versio: H3.versio, acceptedAt: 0 } }
+  assert.equal(await gated(piece), 'ran')
+  strikes = H3.strikeLimit // suspended mid-collection
+  await assert.rejects(() => gated(piece), /licence terms \(suspended\)/)
+  // an arcanum-proof spender has no account to accept on
+  await assert.rejects(() => gated({ modusId: 'minimax-h3-t2v', by: { arcanumProof: {} } }), /required/)
+  // a flow with no terms is not touched
+  assert.equal(await gated({ modusId: 'plain-flow', by: { arcanumProof: {} } }), 'ran')
+  assert.deepEqual(dispatched, ['minimax-h3-t2v', 'plain-flow'])
 })
