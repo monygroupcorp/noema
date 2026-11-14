@@ -61,6 +61,7 @@ tests/unit/crystal/ownedPurse.test.ts
 tests/unit/crystal/projects.test.ts
 tests/unit/crystal/modelLicense.caps.test.ts
 tests/unit/crystal/licenseTripwire.test.ts
+tests/unit/crystal/modelLicense.grant.test.ts
 tests/unit/crystal/VestigiaProjection.test.ts
 tests/unit/api/vestigiaRouter.test.ts
 tests/unit/api/querelaRouter.test.ts
