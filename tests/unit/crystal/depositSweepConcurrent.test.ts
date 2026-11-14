@@ -31,7 +31,7 @@ import { fixedPricer } from '../../../src/crystal/AssetPricer.js'
 import type { Petitionum, Testimoniorum } from '../../../src/types/catena.js'
 
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
-const DB = 'noemaplane_test_deposit_sweep_concurrent'
+const DB = 'noemaplane_test_deposit_sweep'
 
 const TOPIC_PAYMENT = '0x1266483a1ee1398eb3bf0eb2a3ccbce80bffd031a593fa1b9dad6272b40e3121'
 const VAULT   = '0x00000001152d633eb2ac3cf91eac9994aeefc021'
