@@ -8,6 +8,9 @@
 //   · the canonical H3 seeds cite that grant, not any other date;
 //   · `isCatalogEligible` refuses an H3 model whatever its verdict while the conditions are not
 //     live, and the public catalog listing drops it;
+//   · the conditions are live only in a process that runs both safeguards: a report store that
+//     counts strikes, and the run-entry terms gate's acceptance record. A terms record in code is
+//     the policy, not the enforcement;
 //   · every canonical flow that loads an H3 weight declares the grant's flow-down terms, so the
 //     run gate binds its users.
 //
@@ -20,8 +23,10 @@ import { readFileSync } from 'node:fs'
 
 import {
   LICENCE_GRANTS,
+  NO_SAFEGUARDS,
   grantConditionsLive,
   isCatalogEligible,
+  type GrantSafeguards,
 } from '../../../src/crystal/modelLicense.js'
 import { USE_TERMS, type UseTerms } from '../../../src/crystal/useTerms.js'
 import { CANONICAL_INTELLAE } from '../../../src/crystal/seeds/intellae.js'
@@ -33,6 +38,8 @@ const live = (id: string): UseTerms | undefined => USE_TERMS[id]
 const absent = (): UseTerms | undefined => undefined
 const noSuspension = (id: string): UseTerms | undefined =>
   USE_TERMS[id] ? { ...USE_TERMS[id], strikeLimit: 0 } : undefined
+
+const wired: GrantSafeguards = { strikes: true, termsGate: true }
 
 const h3Seeds = CANONICAL_INTELLAE.filter((i) => i.license === 'minimax-h3')
 
@@ -59,24 +66,39 @@ test('the canonical H3 seeds and the register cite the 2026-11-13 grant, not 202
 // ── the gate ─────────────────────────────────────────────────────────────────
 
 test('isCatalogEligible admits canonical H3 while the grant conditions are live', () => {
-  assert.equal(grantConditionsLive('minimax-h3', live), true)
-  for (const seed of h3Seeds) assert.equal(isCatalogEligible(seed.commercialUse, seed.license), true, seed.id)
+  assert.equal(grantConditionsLive('minimax-h3', wired, live), true)
+  for (const seed of h3Seeds) assert.equal(isCatalogEligible(seed.commercialUse, seed.license, wired), true, seed.id)
 })
 
 test('isCatalogEligible refuses H3 when the flow-down terms are not published', () => {
-  assert.equal(grantConditionsLive('minimax-h3', absent), false)
-  for (const seed of h3Seeds) assert.equal(isCatalogEligible(seed.commercialUse, seed.license, absent), false, seed.id)
+  assert.equal(grantConditionsLive('minimax-h3', wired, absent), false)
+  for (const seed of h3Seeds) assert.equal(isCatalogEligible(seed.commercialUse, seed.license, wired, absent), false, seed.id)
 })
 
 test('isCatalogEligible refuses H3 when the terms carry no repeat-violator suspension', () => {
-  assert.equal(grantConditionsLive('minimax-h3', noSuspension), false)
-  assert.equal(isCatalogEligible('yes', 'minimax-h3', noSuspension), false)
+  assert.equal(grantConditionsLive('minimax-h3', wired, noSuspension), false)
+  assert.equal(isCatalogEligible('yes', 'minimax-h3', wired, noSuspension), false)
+})
+
+test('the H3 grant is not live in a process with no strike count, though its terms are published', () => {
+  assert.equal(grantConditionsLive('minimax-h3', { strikes: false, termsGate: true }, live), false)
+  assert.equal(isCatalogEligible('yes', 'minimax-h3', { strikes: false, termsGate: true }, live), false)
+})
+
+test('the H3 grant is not live in a process with no run-entry terms gate, though its terms are published', () => {
+  assert.equal(grantConditionsLive('minimax-h3', { strikes: true, termsGate: false }, live), false)
+  assert.equal(isCatalogEligible('yes', 'minimax-h3', { strikes: true, termsGate: false }, live), false)
+})
+
+test('a caller that does not say what is wired claims no safeguards', () => {
+  assert.equal(isCatalogEligible('yes', 'minimax-h3'), false)
+  assert.equal(grantConditionsLive('minimax-h3', NO_SAFEGUARDS, live), false)
 })
 
 test('a licence with no grant entry is unaffected by grant conditions', () => {
-  assert.equal(isCatalogEligible('yes', 'apache-2.0', absent), true)
-  assert.equal(isCatalogEligible('conditional', 'krea-community', absent), true)
-  assert.equal(isCatalogEligible('yes', undefined, absent), true)
+  assert.equal(isCatalogEligible('yes', 'apache-2.0', NO_SAFEGUARDS, absent), true)
+  assert.equal(isCatalogEligible('conditional', 'krea-community', NO_SAFEGUARDS, absent), true)
+  assert.equal(isCatalogEligible('yes', undefined, NO_SAFEGUARDS, absent), true)
   assert.equal(isCatalogEligible('no', 'flux-1-dev-nc'), false)
 })
 
@@ -91,10 +113,32 @@ function registry(fixtures: Intella[]): Intellarum {
   } as unknown) as Intellarum
 }
 
+// The two stores the safeguards read. Their contents do not matter to the listing, only that the
+// process has them.
+const querelae = { countViolations: async () => 0 }
+const consuetudinum = { resolveGeneratio: async () => undefined }
+const other = CANONICAL_INTELLAE.find((i) => i.license !== 'minimax-h3' && i.genus === 'model')!
+
+function api(extra: Partial<Record<'querelae' | 'consuetudinum', unknown>>): CrystalApi {
+  return new CrystalApi(({ intellarum: registry([...h3Seeds, other]), ...extra } as unknown) as CrystalApiDeps)
+}
+const listedBy = async (a: CrystalApi) => (await a.listModels({ includeAdult: true, limit: 1000 })).map((m) => m.intellaId)
+
+for (const [missing, extra] of [
+  ['report store (strike count)', { consuetudinum }],
+  ['run-entry terms gate', { querelae }],
+  ['report store and terms gate', {}],
+] as const) {
+  test(`listModels drops H3 in a process with no ${missing}`, async () => {
+    const listed = await listedBy(api(extra))
+    for (const seed of h3Seeds) assert.ok(!listed.includes(seed.id), `${seed.id} hidden without the ${missing}`)
+    assert.ok(listed.includes(other.id), 'other models stay listed')
+  })
+}
+
 test('listModels drops H3 from the public catalog while its grant conditions are not live', async () => {
-  const other = CANONICAL_INTELLAE.find((i) => i.license !== 'minimax-h3' && i.genus === 'model')!
-  const api = new CrystalApi(({ intellarum: registry([...h3Seeds, other]) } as unknown) as CrystalApiDeps)
-  const listed = async () => (await api.listModels({ includeAdult: true, limit: 1000 })).map((m) => m.intellaId)
+  const wiredApi = api({ querelae, consuetudinum })
+  const listed = () => listedBy(wiredApi)
 
   const withGrant = await listed()
   for (const seed of h3Seeds) assert.ok(withGrant.includes(seed.id), `${seed.id} listed while live`)

@@ -71,15 +71,17 @@ export function licenseCommercial(license: string | undefined): CommercialVerdic
  * can pre-negotiate an enterprise license (ADR-0012). 'no'/'unknown' are refused (fail-closed)
  * pending an admin license clearance (see the backfill path). A model under a licence we hold by
  * conditional grant (`LICENCE_GRANTS`) is refused whatever its verdict while the grant's conditions
- * are not live — pass its `license` so the gate can tell.
+ * are not live — pass its `license`, and what this process has wired (`safeguards`), so the gate
+ * can tell. Omitting `safeguards` claims none, so a granted licence is refused.
  */
 export function isCatalogEligible(
   verdict: CommercialVerdict | undefined,
   license?: string,
+  safeguards: GrantSafeguards = NO_SAFEGUARDS,
   terms: (id: string) => UseTerms | undefined = lookupUseTerms,
 ): boolean {
   if (verdict !== 'yes' && verdict !== 'conditional') return false
-  return grantConditionsLive(license, terms)
+  return grantConditionsLive(license, safeguards, terms)
 }
 
 // ── Conditional licence grants ───────────────────────────────────────────────────────────────
@@ -123,16 +125,33 @@ export const LICENCE_GRANTS: Record<string, LicenceGrant> = {
 }
 
 /**
+ * Whether this process runs the safeguards a conditional grant is conditioned on. A terms record
+ * with a strike limit is only the policy; these say the policy is enforced here.
+ */
+export interface GrantSafeguards {
+  /** A report store counts confirmed violations, so a repeat violator is suspended. */
+  strikes: boolean
+  /** The run entry point reads each caller's recorded acceptance of the flow-down terms. */
+  termsGate: boolean
+}
+
+/** A process that runs neither safeguard. The default wherever a caller does not say. */
+export const NO_SAFEGUARDS: GrantSafeguards = Object.freeze({ strikes: false, termsGate: false })
+
+/**
  * True unless `license` is held by a conditional grant whose conditions are not live. A licence
  * with no grant entry has no grant conditions, so this is true for it. Fail-closed for a granted
- * licence: terms that are missing, or carry no strike limit, mean the conditions are not live.
+ * licence: terms that are missing or carry no strike limit, or a process that has not wired both
+ * the strike count and the run-entry terms gate, mean the conditions are not live.
  */
 export function grantConditionsLive(
   license: string | undefined,
+  safeguards: GrantSafeguards,
   terms: (id: string) => UseTerms | undefined = lookupUseTerms,
 ): boolean {
   const grant = license ? LICENCE_GRANTS[license] : undefined
   if (!grant) return true
+  if (!safeguards.strikes || !safeguards.termsGate) return false
   const t = terms(grant.useTerms)
   return t !== undefined && t.strikeLimit > 0
 }
