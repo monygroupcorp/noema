@@ -133,6 +133,13 @@ test('classifyModelLicense: any other Qwen-Image version or spelling is unknown 
   }
 })
 
+test('classifyBaseModel: a Qwen-Image name mentioning another family is still Qwen (no other family claims it)', () => {
+  for (const base of ['Qwen-Image-2.1-chroma', 'Qwen-Image-2.1 pony style', 'qwen-image-2.1-sdxl-lora', 'Qwen-Image-2.1 krea']) {
+    assert.deepEqual(classifyBaseModel(base), { familia: null, license: 'qwen-image-2.1-research-nc' }, base)
+  }
+  assert.deepEqual(classifyBaseModel('qwen-image-v1-5'), { familia: null, license: 'unknown' })
+})
+
 test('classifyBaseModel: Qwen-Image has no base flow yet, so no name of it is importable (familia null)', () => {
   for (const base of ['Qwen/Qwen-Image', 'Qwen/Qwen-Image-2512', 'Qwen/Qwen-Image-2.1', 'Qwen-Image-2.2']) {
     assert.equal(classifyBaseModel(base).familia, null, base)

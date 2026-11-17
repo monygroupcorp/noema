@@ -257,6 +257,16 @@ export function licenseNote(commercialUse: CommercialVerdict | undefined, licens
 // base string, the compat `familia` (null = no base flow, reject), and the license id. Order is
 // load-bearing (variant checks before the bare family; 'kontext'/'flux2' before 'flux').
 const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; license: string }> = [
+  // Qwen-Image — the license hinges on the VERSION. Alibaba dropped Apache 2.0 starting with 2.1
+  // (2026-09-20, Qwen Research License Agreement, non-commercial); 1.0 and 2512 stay Apache. The
+  // version check must precede the others (most-specific-first, same pattern as FLUX variants), and
+  // these rows lead the table so a Qwen name that also mentions another family ('qwen-image-2.1-chroma')
+  // is never claimed by that family's row.
+  // Apache goes to the NAMED pre-2.1 checkpoints only; any other Qwen-Image name (2.0, 2.2, a
+  // spelling of 2.1 we don't parse) is unknown (fail-closed). No base flow yet → familia null.
+  { test: (t) => isQwenImage(t) && isQwenImage21(t), familia: null, license: 'qwen-image-2.1-research-nc' },
+  { test: (t) => isQwenImagePre21(t), familia: null, license: 'apache-2.0' },
+  { test: (t) => isQwenImage(t), familia: null, license: 'unknown' },
   // FLUX.1 Kontext — a FLUX.1-family edit model on the shared FLUX base stack (existing flux.1
   // LoRAs apply). Must precede 'flux' ("Flux.1 Kontext" ⊃ 'flux') so it keeps its own NC license
   // instead of falling through to the bare-flux row.
@@ -284,14 +294,6 @@ const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; 
   { test: (t) => t.includes('chroma'), familia: 'chroma', license: 'apache-2.0' },
   { test: (t) => t.includes('krea'), familia: 'krea2', license: 'krea-community' },
   { test: (t) => t.includes('z-image') || t.includes('zimage') || t.includes('z image'), familia: 'zimage', license: 'apache-2.0' },
-  // Qwen-Image — the license hinges on the VERSION. Alibaba dropped Apache 2.0 starting with 2.1
-  // (2026-09-20, Qwen Research License Agreement, non-commercial); 1.0 and 2512 stay Apache. The
-  // version check must precede the others (most-specific-first, same pattern as FLUX variants).
-  // Apache goes to the NAMED pre-2.1 checkpoints only; any other Qwen-Image name (2.0, 2.2, a
-  // spelling of 2.1 we don't parse) is unknown (fail-closed). No base flow yet → familia null.
-  { test: (t) => isQwenImage(t) && isQwenImage21(t), familia: null, license: 'qwen-image-2.1-research-nc' },
-  { test: (t) => isQwenImagePre21(t), familia: null, license: 'apache-2.0' },
-  { test: (t) => isQwenImage(t), familia: null, license: 'unknown' },
   // SD 2.x / SD 3.x — real models, but NO base flow yet → not importable (familia null).
   { test: (t) => t.includes('sd3') || t.includes('sd 3') || t.includes('sd2') || t.includes('sd 2'), familia: null, license: 'stability-community' },
 ]
