@@ -5,6 +5,7 @@ import { Ic } from '../lib/icons';
 import { api, type DepositConfig, type DepositQuote, type MyDeposit, type Pack } from '../lib/api';
 import { connectWallet, waitForReceipt, type ConnectedWallet } from '../lib/wallet';
 import { sendEthDeposit } from '../lib/deposit';
+import { purchaseAllocutio, safeSessionStorage } from '../lib/telegramLaunch';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { useSession } from '../state/session';
 import { Meter } from './IdentityMeter';
@@ -183,7 +184,7 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     const returnTo = window.location.pathname + window.location.search;
     if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId, returnTo)); return; }
     setCardBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, returnTo))
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, returnTo, purchaseAllocutio(safeSessionStorage())))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCardErr(e instanceof Error ? e.message : String(e)); setCardBusy(null); });
   }

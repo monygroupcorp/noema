@@ -4,6 +4,7 @@ import {
   setPendingToken, takeLegacySession, type AuthResult, type StoredAccount, type SessionStore,
 } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
+import { takeTelegramLaunch, type LaunchWindow } from '../lib/telegramLaunch';
 
 // The REAL fiat session layer — now MULTI-ACCOUNT (the Twitter model). One browser
 // holds several named logins at once, keyed by animaId, with a single ACTIVE pointer.
@@ -17,6 +18,18 @@ import { connectWallet } from '../lib/wallet';
 // commitment and a named anima are DIFFERENT souls — anon work does not migrate on login.
 
 interface SessionState { token: string; animaId: string; username?: string }
+
+// A page opened from the bot as a Mini App carries a signed Telegram launch. It is read and
+// redeemed once per page load — the launch is single-use, and StrictMode mounts effects twice —
+// so the exchange is shared here rather than started per mount.
+let telegramLaunchSignIn: Promise<AuthResult | null> | undefined;
+function signInFromTelegramLaunch(): Promise<AuthResult | null> {
+  if (!telegramLaunchSignIn) {
+    const initData = typeof window === 'undefined' ? null : takeTelegramLaunch(window as unknown as LaunchWindow);
+    telegramLaunchSignIn = initData ? api.auth.telegramWebApp(initData).catch(() => null) : Promise.resolve(null);
+  }
+  return telegramLaunchSignIn;
+}
 
 // Refresh a live token this long before it lapses; also the "is this near expiry?" window
 // a switch uses to decide instant-activate vs refresh-then-activate.
@@ -76,15 +89,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, ms);
   }
 
-  // On mount: migrate a pre-multi-account single token (once), then validate the active
-  // account via refresh — hydrating its animaId and renewing the token.
+  // On mount: a Telegram launch signs in as the Telegram user who tapped (they are who is here),
+  // and the page is ready once it has. Otherwise migrate a pre-multi-account single token (once),
+  // then validate the active account via refresh — hydrating its animaId and renewing the token.
   useEffect(() => {
+    let live = true;
+    void signInFromTelegramLaunch().then((launched) => {
+      if (!live) return;
+      if (launched) { adopt(launched); setReady(true); return; }
+      restoreStored();
+    });
+    return () => {
+      live = false;
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    };
+
+    function restoreStored() {
     const legacy = takeLegacySession();     // pre-multi-account single token, if any
     if (legacy) setPendingToken(legacy.token);   // let refresh sign with it until it's adopted
     const initial = getAccounts();
     setStore(initial);
     if (!initial.activeAnimaId && !legacy) { setReady(true); return; }
-    let live = true;
     const priorName = legacy?.username ?? activeOf(initial)?.username;
     api.auth.refresh()
       .then((res) => { if (live) adopt(res, priorName); })
@@ -100,10 +125,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (legacy || rejected) setStore(dropActiveAccount());
       })
       .finally(() => { if (live) setReady(true); });
-    return () => {
-      live = false;
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -106,3 +106,10 @@ describe('signInThenBuy — the page they came from survives the door', () => {
     expect(signInThenBuy('plus_50', '/funding')).toBe('/onboard?next=%2Ffunding%3Fpack%3Dplus_50');
   });
 });
+
+describe('buildCheckoutRequest attribution', () => {
+  it('carries allocutio telegram when the tab came from the bot, and nothing otherwise', () => {
+    expect(buildCheckoutRequest('starter_10', 'https://noema.test', null, 'telegram').allocutio).toBe('telegram');
+    expect('allocutio' in buildCheckoutRequest('starter_10', 'https://noema.test', null)).toBe(false);
+  });
+});
