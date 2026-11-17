@@ -157,8 +157,12 @@ export function topUpCopy(required: bigint, balance: bigint, fundingUrl?: string
   return [
     `This run costs ${required} impetus and your balance is ${balance}.`,
     '',
-    `To top up: send /recover, then ${where} choose "Recover with Telegram", paste the code,`,
-    'and buy credits on the Funding page. Then tap Try again.',
+    ...(fundingUrl
+      ? ['Tap Buy credits: in a private chat with the bot it opens the Funding page signed in as this account.',
+         `If the page asks you to sign in, send /recover, then ${where} choose "Recover with Telegram" and paste the code.`]
+      : [`To top up: send /recover, then ${where} choose "Recover with Telegram", paste the code,`,
+         'and buy credits on the Funding page.']),
+    'Then tap Try again.',
   ].join('\n')
 }
 
@@ -490,7 +494,7 @@ export class ExecuteFlow implements Flow {
           label: 'Insufficient balance',
           content: topUpCopy(reservation, balance, fundingUrl),
           actions: [
-            ...(fundingUrl ? [{ id: 'buy_credits', label: 'Buy credits', url: fundingUrl }] : []),
+            ...(fundingUrl ? [{ id: 'buy_credits', label: 'Buy credits', url: fundingUrl, asAccount: true }] : []),
             { id: 'run_again', label: 'Try again' },
             { id: 'cancel',    label: '✕'         },
           ],

@@ -1,4 +1,4 @@
-import { topUpMarkup } from '../telegramRender.js'
+import { topUpMarkup, isPrivateChat } from '../telegramRender.js'
 import type { EnvelopeMediaType } from '../envelopeMedia.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
@@ -282,7 +282,7 @@ export class CommandRouter {
           await this.deps.showStatus(userId, chatId)
         } else {
           // Fallback for tests/contexts that don't wire the status aggregator.
-          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, topUpMarkup(this.deps.fundingUrl))
+          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, topUpMarkup(chatId, this.deps.fundingUrl))
         }
         return
 
@@ -290,7 +290,7 @@ export class CommandRouter {
         // The bot takes no payment. What it can do is say, in full, how this account tops up —
         // with the link when the deployment knows it. (This used to say "coming soon" above two
         // buttons that did nothing.)
-        await this.deps.sendMessage(chatId, COPY.command.topUp(this.deps.fundingUrl), topUpMarkup(this.deps.fundingUrl))
+        await this.deps.sendMessage(chatId, COPY.command.topUp(this.deps.fundingUrl, isPrivateChat(chatId)), topUpMarkup(chatId, this.deps.fundingUrl))
         ack()
         return
 

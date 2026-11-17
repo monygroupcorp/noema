@@ -180,8 +180,13 @@ export const COPY = {
      * How a Telegram user gets credits. The bot cannot take a payment; the web can, signed in
      * as the account this chat resolves to, and /recover is the way in. Said in full every time
      * it is needed — on /wallet, under a refused run, and in place of a bare "not enough credits".
+     * `oneTap`: the button under it opens Funding already signed in (a private chat), so the
+     * /recover steps would only be in the way.
      */
-    topUp: (fundingUrl?: string): string => [
+    topUp: (fundingUrl?: string, oneTap = false): string => oneTap && fundingUrl ? [
+      'Credits are bought on the web. Tap Buy credits: it opens the Funding page signed in as this account.',
+      'Then come back and run again.',
+    ].join('\n') : [
       'Credits are bought on the web, signed in as this account:',
       '1. Send /recover here and copy the code.',
       `2. ${fundingUrl ? `At ${fundingUrl}` : 'On the web'}, choose “Recover with Telegram” and paste it.`,

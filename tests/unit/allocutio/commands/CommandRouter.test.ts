@@ -229,16 +229,31 @@ test('silentOnUnknown never suppresses a command we do own', async () => {
   assert.equal(calls.enter.length, 1, 'a bare /make in a group still works')
 })
 
-test('/wallet says the whole top-up route, links the funding page, and acks', async () => {
+type WalletMsg = { text: string; extra?: { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; web_app?: { url: string } }>> } } }
+
+test('/wallet in a private chat is one tap: Buy credits opens Funding as a Mini App, signed in', async () => {
   const { router, calls } = make({ fundingUrl: 'https://example.test/funding' })
   await router.dispatch('u1', 456, '/wallet', 50)
-  const msg = calls.msg[0] as { text: string; extra?: { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string }>> } } }
+  const msg = calls.msg[0] as WalletMsg
   assert.doesNotMatch(msg.text, /coming soon/i)
+  assert.doesNotMatch(msg.text, /\/recover/, 'no code to fetch and paste')
+  assert.match(msg.text, /signed in as this account/)
+  const buttons = msg.extra?.reply_markup?.inline_keyboard.flat() ?? []
+  assert.deepEqual(buttons.map(b => b.web_app?.url), ['https://example.test/funding'])
+  assert.ok(buttons.every(b => b.url === undefined), 'a Mini App button, not a plain link')
+  assert.deepEqual(calls.ack, [{ chatId: 456, messageId: 50 }])
+})
+
+test('/wallet in a group says the whole /recover route under a plain link (Telegram allows no Mini App there)', async () => {
+  const { router, calls } = make({ fundingUrl: 'https://example.test/funding' })
+  await router.dispatch('u1', -100456, '/wallet', 50)
+  const msg = calls.msg[0] as WalletMsg
   assert.match(msg.text, /\/recover/)
   assert.match(msg.text, /Recover with Telegram/)
   assert.match(msg.text, /https:\/\/example\.test\/funding/)
-  assert.deepEqual(msg.extra?.reply_markup?.inline_keyboard.flat().map(b => b.url), ['https://example.test/funding'])
-  assert.deepEqual(calls.ack, [{ chatId: 456, messageId: 50 }])
+  const buttons = msg.extra?.reply_markup?.inline_keyboard.flat() ?? []
+  assert.deepEqual(buttons.map(b => b.url), ['https://example.test/funding'])
+  assert.ok(buttons.every(b => b.web_app === undefined))
 })
 
 test('/wallet with no funding url still says the route, with no button', async () => {
