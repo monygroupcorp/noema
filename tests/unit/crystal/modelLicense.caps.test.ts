@@ -125,6 +125,10 @@ test('classifyModelLicense: pre-2.1 Qwen-Image checkpoints stay Apache 2.0', () 
     classifyModelLicense({ baseModel: 'Qwen/Qwen-Image-2512' }),
     { license: 'apache-2.0', commercialUse: 'yes' },
   )
+  assert.deepEqual(
+    classifyModelLicense({ baseModel: 'qwen_image_2512' }),
+    { license: 'apache-2.0', commercialUse: 'yes' },
+  )
 })
 
 test('classifyModelLicense: any other Qwen-Image version or spelling is unknown (fail-closed)', () => {
@@ -134,7 +138,8 @@ test('classifyModelLicense: any other Qwen-Image version or spelling is unknown 
 })
 
 test('classifyBaseModel: a Qwen-Image name mentioning another family is still Qwen (no other family claims it)', () => {
-  for (const base of ['Qwen-Image-2.1-chroma', 'Qwen-Image-2.1 pony style', 'qwen-image-2.1-sdxl-lora', 'Qwen-Image-2.1 krea']) {
+  for (const base of ['Qwen-Image-2.1-chroma', 'Qwen-Image-2.1 pony style', 'qwen-image-2.1-sdxl-lora', 'Qwen-Image-2.1 krea',
+    'qwen_image_2.1_chroma', 'qwen.image-2.1-pony']) {
     assert.deepEqual(classifyBaseModel(base), { familia: null, license: 'qwen-image-2.1-research-nc' }, base)
   }
   assert.deepEqual(classifyBaseModel('qwen-image-v1-5'), { familia: null, license: 'unknown' })

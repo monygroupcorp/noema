@@ -449,10 +449,10 @@ function is4b(t: string): boolean { return t.includes('4b') || t.includes('4-b')
 function isSchnell(t: string): boolean { return t.includes('schnell') || /\bflux\.?1?\s*\[?s(chnell)?\]?\b/.test(t) || t.includes('.1 s') || t.includes('.1s') }
 function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 d') || t.includes('.1d') || t.includes('[d]') }
 function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }
-function isQwenImage(t: string): boolean { return t.includes('qwen-image') || t.includes('qwen image') || t.includes('qwenimage') }
+function isQwenImage(t: string): boolean { return /qwen[-_. ]?image/.test(t) }
 function isQwenImage21(t: string): boolean { return t.includes('2.1') || t.includes('2-1') || t.includes('v2.1') }
 /** The pre-2.1 checkpoints by WHOLE name (optionally under the `qwen/` org): bare Qwen-Image
  *  (1.0, optionally spelled 1.0 / v1) or 2512. Anything before or after that is not a match. */
 function isQwenImagePre21(t: string): boolean {
-  return /^(?:qwen\/)?qwen(?:-| |)image(?:[-_ ]?(?:v?1(?:\.0)?|2512))?$/.test(t)
+  return /^(?:qwen\/)?qwen[-_. ]?image(?:[-_. ]?(?:v?1(?:\.0)?|2512))?$/.test(t)
 }
