@@ -128,7 +128,7 @@ test('classifyModelLicense: pre-2.1 Qwen-Image checkpoints stay Apache 2.0', () 
 })
 
 test('classifyModelLicense: any other Qwen-Image version or spelling is unknown (fail-closed)', () => {
-  for (const baseModel of ['qwen-image-v21', 'qwenimage2_1', 'Qwen-Image-2.2', 'Qwen-Image-2.0']) {
+  for (const baseModel of ['qwen-image-v21', 'qwenimage2_1', 'Qwen-Image-2.2', 'Qwen-Image-2.0', '2.2 qwen-image', 'pixel-art-qwen-image']) {
     assert.deepEqual(classifyModelLicense({ baseModel }), { license: 'unknown', commercialUse: 'unknown' }, baseModel)
   }
 })

@@ -449,8 +449,8 @@ function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 
 function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }
 function isQwenImage(t: string): boolean { return t.includes('qwen-image') || t.includes('qwen image') || t.includes('qwenimage') }
 function isQwenImage21(t: string): boolean { return t.includes('2.1') || t.includes('2-1') || t.includes('v2.1') }
-/** The pre-2.1 checkpoints by name: bare Qwen-Image (1.0, optionally spelled 1.0 / v1) or 2512. */
+/** The pre-2.1 checkpoints by WHOLE name (optionally under the `qwen/` org): bare Qwen-Image
+ *  (1.0, optionally spelled 1.0 / v1) or 2512. Anything before or after that is not a match. */
 function isQwenImagePre21(t: string): boolean {
-  const m = t.match(/qwen(?:-| |)image(.*)$/)
-  return m !== null && /^(?:[-_ ]?(?:v?1(?:\.0)?|2512))?$/.test(m[1])
+  return /^(?:qwen\/)?qwen(?:-| |)image(?:[-_ ]?(?:v?1(?:\.0)?|2512))?$/.test(t)
 }
