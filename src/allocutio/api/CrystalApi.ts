@@ -226,7 +226,7 @@ import { ModelImportError, SecretRequiredError } from '../../crystal/modelImport
 import type { SecretWriter, SecretPresence, SecretProvider } from '../../types/secretum.js'
 import { isSecretProvider, SECRET_PROVIDERS, DEFAULT_SECRET_IDLE_DAYS } from '../../types/secretum.js'
 import { ownerKeyOf } from '../../crystal/ownerKey.js'
-import { isCatalogEligible, grantConditionsLive, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
+import { isCatalogEligible, grantConditionsLive, type GrantSafeguards, classifyModelLicense, activeConditionalLicenses, bindingCapUsd, type CommercialVerdict } from '../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd, type ThresholdBand, type TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../api/webhooks/stripeWebhook.js'
@@ -613,11 +613,11 @@ export function normalizeCatalogSort(sort: string | undefined): CatalogSort {
  * directly; stores that do not (fakes, read-only registries) fall back to the canonical set, so a
  * registry never has to grow a method to keep working.
  */
-async function readPublicCatalog(registry: Intellarum): Promise<Intella[]> {
+async function readPublicCatalog(registry: Intellarum, safeguards: GrantSafeguards): Promise<Intella[]> {
   const pool = registry.publicCatalog ? await registry.publicCatalog() : await registry.canonical()
   // A model under a licence we hold by conditional grant (MiniMax H3) leaves the public catalog
   // while the grant's conditions are not live: the grant does not cover us then.
-  return pool.filter((i) => grantConditionsLive(i.license))
+  return pool.filter((i) => grantConditionsLive(i.license, safeguards))
 }
 
 /** Order a catalog page. Applied BEFORE any `limit` slice, so paging returns the intended page.
@@ -700,6 +700,13 @@ export class CrystalApi {
     if (anima?.disputeFrozen) {
       throw Errors.authForbidden('This account is frozen pending review of a payment dispute. Spending is paused until the dispute is resolved.')
     }
+  }
+
+  /** The licence-grant safeguards this instance runs: a strike count for suspending repeat
+   *  violators (`querelae`) and the acceptance record `_assertUseTerms` reads (`consuetudinum`).
+   *  Without either, a model held under a conditional grant stays off the public catalog. */
+  private _grantSafeguards(): GrantSafeguards {
+    return { strikes: this.deps.querelae !== undefined, termsGate: this.deps.consuetudinum !== undefined }
   }
 
   /** Refuse a run of a flow whose licence terms the caller has not accepted, or is suspended
@@ -2087,7 +2094,7 @@ export class CrystalApi {
     // conditional caps); 'no'/'unknown' are refused pending an ADMIN license clearance (setModelLicense
     // backfill). A model with NO recorded verdict (undefined) is not gated here (legacy). Private/
     // personal use is never blocked — this is listing, not use (`docs/spec/model-import.md`).
-    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse, owned.intella.license)) {
+    if (ref.kind === 'intella' && visibility !== 'private' && owned.intella?.commercialUse && !isCatalogEligible(owned.intella.commercialUse, owned.intella.license, this._grantSafeguards())) {
       throw Errors.licenseRestricted(
         `this model cannot be promoted to the public catalog under its license (${owned.intella.license ?? 'unknown'}, commercial use: ${owned.intella.commercialUse}). It remains usable privately; an admin can clear it after license review.`,
       )
@@ -4817,7 +4824,7 @@ export class CrystalApi {
         }
       }
     }
-    let pool = await readPublicCatalog(registry)
+    let pool = await readPublicCatalog(registry, this._grantSafeguards())
     // Ids the caller owns, captured where the union happens. Empty without `auctor`, so every
     // existing caller's result set is unchanged.
     const ownedIds = new Set<string>()
