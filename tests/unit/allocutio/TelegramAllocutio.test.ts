@@ -2134,6 +2134,13 @@ test('start screen without a funding url offers no top-up button (no link beats 
   assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url), 'no url button')
 })
 
+test('start screen states the group rule, same words as /help', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  assert.match(sender.sent[0].text, /group/i)
+  assert.match(sender.sent[0].text, /mention me/i)
+})
+
 test('plain text into an idle private chat gets the hint, once a minute', async () => {
   const { allocutio, sender } = makeAllocutio()
   await allocutio.receive(msgUpdate(123, 456, 'a cat on a bike'))
@@ -2229,6 +2236,43 @@ test('the bot being removed from a group is logged with the chat and timestamp, 
   assert.equal(line?.at, '2023-11-14T22:13:20.000Z')
   assert.equal(router.calls.length, 0)
   assert.equal(sender.sent.length, 0)
+})
+
+test('being added to a group posts the group rule once; no other my_chat_member event posts anything', async () => {
+  const added = makeAllocutio()
+  await added.allocutio.receive({
+    update_id: 7,
+    my_chat_member: {
+      chat: { id: -2001, type: 'supergroup', title: 'Bastion' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'left', user: { id: 7 } },
+      new_chat_member: { status: 'member', user: { id: 7 } },
+    },
+  })
+  assert.equal(added.sender.sent.length, 1)
+  assert.equal(added.sender.sent[0].chatId, -2001)
+  assert.match(added.sender.sent[0].text, /group/i)
+
+  for (const [oldStatus, newStatus] of [
+    ['administrator', 'kicked'],   // removed
+    ['member', 'administrator'],  // promoted
+    ['administrator', 'member'],  // demoted
+    ['member', 'restricted'],     // restricted
+  ] as const) {
+    const other = makeAllocutio()
+    await other.allocutio.receive({
+      update_id: 8,
+      my_chat_member: {
+        chat: { id: -2002, type: 'supergroup' },
+        from: { id: 42 },
+        date: 1_700_000_000,
+        old_chat_member: { status: oldStatus, user: { id: 7 } },
+        new_chat_member: { status: newStatus, user: { id: 7 } },
+      },
+    })
+    assert.equal(other.sender.sent.length, 0, `${oldStatus} -> ${newStatus} should post nothing`)
+  }
 })
 
 test('a group migrating to a supergroup is logged with both chat ids', async () => {

@@ -237,6 +237,18 @@ test('classifyError: CUDA OOM is an execution failure even without the word "fai
 })
 
 // ---------------------------------------------------------------------------
+// Test 21b — a terminal training failure is reported as terminal, never as try again
+// ---------------------------------------------------------------------------
+
+test('classifyError: a training failure says it is terminal, not "Generation failed — try again"', () => {
+  const raw = 'aitoolkit training error at step 0: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED'
+  const result = classifyError(new Error(raw))
+  assert.notEqual(result, 'Generation failed on the pod — try again.')
+  assert.doesNotMatch(result, /^Generation failed/, 'wrong noun for a training run')
+  assert.doesNotMatch(result, /try again/i, 'the same settings fail the same way — this is not a transient fluke')
+})
+
+// ---------------------------------------------------------------------------
 // Test 22 — the generic sentence still exists, for genuinely unidentified failures
 // ---------------------------------------------------------------------------
 
@@ -270,6 +282,7 @@ test('classifyError: no sentence claims credits were not charged — it cannot s
     'operation timed out',
     'model download failed: wget returned non-zero exit status 3',
     'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host',
+    'aitoolkit training error at step 0: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED',
     'a brand new failure nobody has classified',
   ]
   for (const raw of corpus) {

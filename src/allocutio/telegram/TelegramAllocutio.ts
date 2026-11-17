@@ -54,7 +54,7 @@ import { inlineKeyboard, btn, urlBtn, topUpMarkup, renderPrimitive, decodeCallba
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
-import { COPY } from '../lexicon/copy.js'
+import { COPY, GROUP_RULE } from '../lexicon/copy.js'
 import { isPrivateMarker } from '../../crystal/MediaFetcher.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 // Re-export the adapter contracts so existing importers (index, TelegramSenderAdapter) keep working.
@@ -585,11 +585,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   async receive(update: TelegramUpdate): Promise<void> {
     log.info('telegram update', describeUpdate(update))
 
-    // The bot's own membership of a chat changed (added, removed, promoted, demoted). Nothing to
-    // dispatch — the record is the point, so a report about a group can be traced to the moment
-    // the bot lost its seat or its rights there.
+    // The bot's own membership of a chat changed (added, removed, promoted, demoted). The
+    // record is the point — a report about a group can be traced to the moment the bot lost
+    // its seat or its rights there — except for 'added': that gets one reply stating the
+    // group rule, sent as a reaction to this event only. Never a backfill into a group the
+    // bot is already in; there is no loop here over existing memberships, only this update.
     if (update.my_chat_member) {
-      log.info('telegram chat membership', describeMyChatMember(update.my_chat_member))
+      const described = describeMyChatMember(update.my_chat_member)
+      log.info('telegram chat membership', described)
+      if (described.event === 'added') {
+        await this.sender.sendMessage(update.my_chat_member.chat.id, COPY.command.groupJoined).catch(() => {})
+      }
       return
     }
     const migration = update.message && describeChatMigration(update.message)
@@ -1133,7 +1139,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const text = `\
 noema
 
-Generate AI art, chat with models, explore creative tools.`
+Generate AI art, chat with models, explore creative tools.
+
+${GROUP_RULE}`
 
     // Every button here answers: the second row used to be "connect wallet" and "balance",
     // which no handler ever received.
