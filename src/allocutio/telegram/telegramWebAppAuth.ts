@@ -21,7 +21,7 @@ export type WebAppInitDataVerdict =
   | { ok: false; reason: 'malformed' | 'bad_hash' | 'expired' | 'no_user' }
 
 /** Seconds a launch may run ahead of this server's clock before it reads as forged. */
-const CLOCK_SKEW_SECONDS = 60
+export const CLOCK_SKEW_SECONDS = 60
 
 export function verifyWebAppInitData(
   initData: string,

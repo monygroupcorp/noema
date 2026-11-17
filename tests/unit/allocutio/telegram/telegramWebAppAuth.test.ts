@@ -65,3 +65,12 @@ test('a validly signed launch with no user is refused', () => {
   const { user: _user, ...noUser } = launch()
   assert.deepEqual(verifyWebAppInitData(signInitData(noUser), BOT_TOKEN, opts), { ok: false, reason: 'no_user' })
 })
+
+test('the third-party signature field Telegram now sends stays inside the signed string', () => {
+  const withSignature = launch({ signature: 'ZmFrZS1lZDI1NTE5LXNpZ25hdHVyZQ' })
+  assert.equal(verifyWebAppInitData(signInitData(withSignature), BOT_TOKEN, opts).ok, true)
+  const stripped = new URLSearchParams(signInitData(withSignature))
+  stripped.delete('signature')
+  assert.deepEqual(verifyWebAppInitData(stripped.toString(), BOT_TOKEN, opts), { ok: false, reason: 'bad_hash' },
+    'dropping a signed field breaks the hash')
+})
