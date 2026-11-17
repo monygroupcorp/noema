@@ -50,7 +50,7 @@ import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMen
 import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
-import { inlineKeyboard, btn, urlBtn, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { inlineKeyboard, btn, accountBtn, isPrivateChat, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
@@ -632,7 +632,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           // the link, rather than a sentence that sends them to /status to read the same zero.
           const broke = /insufficient funds/i.test(err instanceof Error ? err.message : String(err))
           await this.sender
-            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl) : classifyError(err), broke ? topUpMarkup(this.deps.fundingUrl) : undefined)
+            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl, isPrivateChat(chatId)) : classifyError(err), broke ? topUpMarkup(chatId, this.deps.fundingUrl) : undefined)
             .catch(() => {})
         }
       }
@@ -941,7 +941,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      const { text, extra } = renderPrimitive(primitive)
+      const { text, extra } = renderPrimitive(primitive, chatId)
 
       // Feature 2: edit in place if we have a pending edit message ID and this primitive has a keyboard
       if (editMessageId !== undefined && extra?.reply_markup) {
@@ -1149,7 +1149,7 @@ ${GROUP_RULE}`
     await this.sender.sendMessage(chatId, text, {
       reply_markup: inlineKeyboard([
         [btn('make', 's:make'), btn('chat', 's:chat'), btn('flows', 's:flows')],
-        [btn('status', 's:status'), ...(fundingUrl ? [urlBtn('top up', fundingUrl)] : [])],
+        [btn('status', 's:status'), ...(fundingUrl ? [accountBtn('top up', fundingUrl, chatId)] : [])],
       ]),
     })
   }

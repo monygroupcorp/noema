@@ -21,16 +21,21 @@ export function canCheckout(session: unknown): boolean {
 // leaving them to re-find it. It is a same-origin app path or it is dropped — the value comes
 // back to us through a URL Stripe redirects to, which is exactly the position `next` is in at
 // the door.
+//
+// `allocutio` is the surface the buyer came from ('telegram' after the bot opened this tab); the
+// server records it on the credit for attribution and never prices by it.
 export function buildCheckoutRequest(
   packId: string,
   origin: string,
   returnTo?: string | null,
-): { packId: string; successUrl: string; cancelUrl: string } {
+  allocutio?: 'telegram',
+): { packId: string; successUrl: string; cancelUrl: string; allocutio?: 'telegram' } {
   const back = safeReturn(returnTo) ? `&back=${encodeURIComponent(returnTo as string)}` : '';
   return {
     packId,
     successUrl: `${origin}/funding?checkout=success${back}`,
     cancelUrl: `${origin}/funding?checkout=cancel${back}`,
+    ...(allocutio ? { allocutio } : {}),
   };
 }
 

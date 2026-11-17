@@ -50,6 +50,8 @@ import {
 } from '../../crystal/sessionToken.js'
 import { normalizeAddress, mintWalletChallenge, verifyWalletChallenge } from '../../crystal/walletAuth.js'
 import type { LinkTokenStore } from '../../types/linkToken.js'
+import { verifyWebAppInitData, CLOCK_SKEW_SECONDS } from '../telegram/telegramWebAppAuth.js'
+import { TELEGRAM_RECOVERY_TTL_SECONDS } from '../telegram/telegramRecovery.js'
 import { makeLogger } from '../../lib/logger.js'
 
 /** Link-code lifetime (seconds) for the Telegram deep-link handshake. */
@@ -67,6 +69,8 @@ export interface AuthRouterDeps {
   linkTokens?: LinkTokenStore
   /** Bot @username — composes the `https://t.me/<bot>?start=link_<code>` deep link. */
   botUsername?: string
+  /** The bot's token: the key Telegram signs a Mini App launch with. Absent → /telegram/webapp reports 501. */
+  botToken?: string
   now?: () => Date
   ttl?: {
     /** Session lifetime (s). Default 7d. */
@@ -94,7 +98,7 @@ function isDuplicateKeyError(err: unknown): boolean {
 }
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
-  const { credenta, personae, animae, jwtSecret, linkTokens, botUsername } = deps
+  const { credenta, personae, animae, jwtSecret, linkTokens, botUsername, botToken } = deps
   const sessionSeconds = deps.ttl?.sessionSeconds ?? DEFAULT_SESSION_TTL_SECONDS
   const rl = deps.rateLimiters ?? {}
 
@@ -287,6 +291,28 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     const code = typeof req.body?.code === 'string' ? req.body.code.trim() : ''
     const animaId = code ? await linkTokens.consume(code, 'tg-recover') : null
     if (!animaId) return fail(res, 400, 'auth.token_invalid', 'That recovery code is invalid or has expired')
+    res.status(200).json({ session: mint(animaId), animaId })
+  })
+
+  // ── POST /telegram/webapp ──────────────────────────────────────────────────────────────
+  // Public: sign in as the Telegram user who opened this page from the bot (a Mini App launch).
+  // The proof is Telegram's own signature over the launch, checked with the bot token — no code
+  // is minted, so none can leak. A launch is good for as long as a /recover code, and once.
+  router.post('/telegram/webapp', rl.wallet ?? noop, async (req: Request, res: Response) => {
+    if (!linkTokens || !botToken) return fail(res, 501, 'unsupported', 'Telegram sign-in is not configured')
+    const initData = typeof req.body?.initData === 'string' ? req.body.initData : ''
+    const now = deps.now?.() ?? new Date()
+    const verdict = verifyWebAppInitData(initData, botToken, { now, maxAgeSeconds: TELEGRAM_RECOVERY_TTL_SECONDS })
+    if (!verdict.ok) {
+      log.info('auth: telegram webapp sign-in refused', { reason: verdict.reason })
+      return fail(res, 400, 'auth.token_invalid', 'That Telegram sign-in is invalid or has expired — open it from the bot again')
+    }
+    // Held for as long as the launch itself could still verify (its window plus the skew allowed
+    // for a launch stamped ahead of this clock), so it never outlives its own claim.
+    if (!(await linkTokens.claim(verdict.hash, 'tg-webapp', TELEGRAM_RECOVERY_TTL_SECONDS + CLOCK_SKEW_SECONDS))) {
+      return fail(res, 400, 'auth.token_invalid', 'That Telegram sign-in was already used — open it from the bot again')
+    }
+    const animaId = await resolveOrCreateAnima(personae, animae, 'telegram', verdict.telegramUserId)
     res.status(200).json({ session: mint(animaId), animaId })
   })
 

@@ -536,3 +536,32 @@ test("a frozen anima is BLOCKED (auth.forbidden) at provisionStudio / provisionT
   )
   assert.equal((await animae.find(KNOWN_ANIMA))?.disputeFrozen, true)
 })
+
+// ── attribution: which surface the purchase came through ────────────────────
+
+test('a purchase started from the bot is credited with allocutio telegram; an unknown surface is dropped', async () => {
+  const gateway = fakeGateway()
+  await handleStripeCheckout({ packId: 'starter_10', animaId: KNOWN_ANIMA, allocutio: 'telegram' }, { gateway })
+  await handleStripeCheckout({ packId: 'starter_10', animaId: KNOWN_ANIMA, allocutio: 'billboard' }, { gateway })
+  assert.equal(gateway.checkouts[0]?.allocutio, 'telegram', 'rides to Stripe in metadata')
+  assert.equal(gateway.checkouts[1]?.allocutio, undefined, 'only a known surface is passed on')
+
+  const deps = makeDeps()
+  const event = completedSession({ packId: 'starter_10', paymentIntent: 'pi_tg' })
+  ;(event.data.object as { metadata: Record<string, string> }).metadata.allocutio = 'telegram'
+  await deliver(deps, event)
+  const [credit] = await deps.signorum.history({ animaId: KNOWN_ANIMA })
+  assert.equal(credit?.allocutio, 'telegram')
+  assert.equal(credit?.valor, 20800n, 'the tag never touches the amount: the pack constant')
+})
+
+test('a purchase with no surface, or a forged one in metadata, is credited untagged', async () => {
+  const deps = makeDeps()
+  await deliver(deps, completedSession({ packId: 'starter_10', paymentIntent: 'pi_plain' }))
+  const forged = completedSession({ packId: 'starter_10', paymentIntent: 'pi_forged' })
+  ;(forged.data.object as { metadata: Record<string, string> }).metadata.allocutio = '<script>'
+  await deliver(deps, forged)
+  const history = await deps.signorum.history({ animaId: KNOWN_ANIMA })
+  assert.equal(history.length, 2)
+  assert.ok(history.every(s => s.allocutio === undefined))
+})

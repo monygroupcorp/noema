@@ -1323,6 +1323,7 @@ async function main(): Promise<void> {
       jwtSecret: process.env.JWT_SECRET as string,
       linkTokens,
       ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
+      botToken: BOT_TOKEN,
       ...(process.env.SESSION_TTL_SECONDS ? { ttl: { sessionSeconds: Number(process.env.SESSION_TTL_SECONDS) } } : {}),
       rateLimiters: { register: limiter(20), login: limiter(20), wallet: limiter(30) },
     })

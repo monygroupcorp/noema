@@ -4702,7 +4702,7 @@ export class CrystalApi {
    */
   async createCheckout(
     auctor: AuctorKey,
-    opts: { packId: string; successUrl?: string; cancelUrl?: string },
+    opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string },
   ): Promise<{ url: string; sessionId: string }> {
     const gateway = this.resolveStripeGateway()
     if (!gateway) throw Errors.paymentsUnavailable()
@@ -4713,6 +4713,7 @@ export class CrystalApi {
         animaId,
         ...(opts.successUrl ? { successUrl: opts.successUrl } : {}),
         ...(opts.cancelUrl ? { cancelUrl: opts.cancelUrl } : {}),
+        ...(opts.allocutio ? { allocutio: opts.allocutio } : {}),
       },
       { gateway },
     )
