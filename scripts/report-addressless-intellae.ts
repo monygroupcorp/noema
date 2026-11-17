@@ -34,13 +34,19 @@ interface Row {
   owner: string
 }
 
-/** The query: no `sources`, an empty list, or a first source with no usable uri. */
-export const ADDRESSLESS_QUERY: Document = {
-  $or: [
-    { sources: { $exists: false } },
-    { sources: { $size: 0 } },
-    { 'sources.0.uri': { $in: [null, ''] } },
-  ],
+/**
+ * A record whose weight has no usable download address: no `sources`, an empty list, or a
+ * first source with no non-empty `uri`. A plain JS predicate, not a Mongo query — the prior
+ * version matched this with `{'sources.0.uri': {$in: [null, '']}}`, whose null-equality on a
+ * positional path into an array overcounted on the production registry (314 of 338 records
+ * flagged; the true count was 24, R2 2026-11-16). Filtering in JS after a flat fetch is exactly
+ * as correct as the condition reads, and testable without a database.
+ */
+export function isAddressless(doc: Document): boolean {
+  const sources = doc.sources
+  if (!Array.isArray(sources) || sources.length === 0) return true
+  const uri = sources[0]?.uri
+  return typeof uri !== 'string' || uri === ''
 }
 
 function asRow(doc: Document): Row {
@@ -73,7 +79,7 @@ export async function run(argv: string[]): Promise<number> {
     await client.connect()
     const col = client.db(dbName).collection(coll)
     const total = await col.countDocuments({})
-    const docs = await col.find(ADDRESSLESS_QUERY).sort({ genus: 1, nomen: 1 }).toArray()
+    const docs = (await col.find({}).sort({ genus: 1, nomen: 1 }).toArray()).filter(isAddressless)
     const rows = docs.map(asRow)
 
     if (json) {

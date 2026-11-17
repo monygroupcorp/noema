@@ -149,3 +149,4 @@ tests/unit/execution/sessionSpendParity.test.ts
 tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts
 tests/unit/crystal/intellaSourceGuard.test.ts
 tests/unit/crystal/loraSourceBackfill.test.ts
+tests/unit/scripts/report-addressless-intellae.test.ts

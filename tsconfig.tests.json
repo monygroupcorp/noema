@@ -65,6 +65,7 @@
     "tests/unit/architecture/**/*",
     "tests/unit/lib/**/*",
     "tests/unit/migrations/**/*",
-    "tests/unit/rag/**/*"
+    "tests/unit/rag/**/*",
+    "tests/unit/scripts/**/*"
   ]
 }

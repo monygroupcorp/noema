@@ -8,12 +8,20 @@
 
 import { GLYPH } from './symbols.js'
 
+/**
+ * The one sentence that explains the group gate (`_isAddressedToBot`) to a user who only
+ * sees its effect — silence. Shared by /help, the start screen and the one-time message
+ * posted when the bot joins a group, so the rule is said in the same words everywhere.
+ */
+export const GROUP_RULE = 'In a group, start with a /command, mention me, or reply to one of my messages. I stay quiet otherwise, so I don\'t talk over other bots.'
+
 export const HELP_TEXT = `\
 noema
 
   Creative
   /make <prompt>        — generate an image
   /run <flow> [prompt]  — run any flow by name
+  /bind <verb> <flow>   — rebind a command to a flow
   /chat                 — chat with an AI model
   /flows                — browse all available tools
   /arm                  — set up a warm studio
@@ -24,7 +32,10 @@ noema
   /recover  — sign in on the web as this account
 
   /cancel   — cancel current action
-  /help     — show this message\
+  /stop     — same as /cancel
+  /help     — show this message
+
+${GROUP_RULE}\
 `
 
 export const COPY = {
@@ -162,6 +173,8 @@ export const COPY = {
   command: {
     help: HELP_TEXT,
     cancelled: 'Cancelled.',
+    /** Posted once, as the reply to being added to a group — never backfilled into groups already joined. */
+    groupJoined: `I'm in. ${GROUP_RULE}`,
     statusComingSoon: 'Balance and account info coming soon.',
     /**
      * How a Telegram user gets credits. The bot cannot take a payment; the web can, signed in

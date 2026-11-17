@@ -33,6 +33,7 @@ const SSH_COPY       = 'Pod started but SSH was unreachable — try again.'
 const BOOTSTRAP_COPY = 'Runtime startup timed out — try again.'
 const DOWNLOAD_COPY  = "Couldn't get the model weights onto the pod — try again."
 const EXECUTE_COPY   = 'Generation failed on the pod — try again.'
+const TRAINING_COPY  = 'Training failed and will not succeed by retrying as-is. Check /status for your balance, or contact support if you want to try the same settings again.'
 const GENERIC_COPY   = 'Something went wrong. Please try again.'
 
 /**
@@ -85,6 +86,14 @@ export function classifyError(err: unknown): string {
     /comfyrunner not reachable/i.test(msg)
   )
     return BOOTSTRAP_COPY
+
+  // A training run that died inside the job itself (aitktrainer.py's RuntimeError, e.g. a
+  // cuDNN init failure at step 0) ran and failed on its own terms — the identical retry
+  // fails the same way (R2, 2026-11-16). Named ahead of EXECUTE_COPY, whose "Generation
+  // failed … try again" is both the wrong noun for a training run and a false invitation:
+  // this is terminal, not a transient pod fluke.
+  if (/training (error|failed) at step/i.test(msg))
+    return TRAINING_COPY
 
   if (/comfyrunner.*job failed/i.test(msg) || /execution.*failed/i.test(msg))
     return EXECUTE_COPY
