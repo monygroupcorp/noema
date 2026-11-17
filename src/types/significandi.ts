@@ -116,6 +116,23 @@ export interface Signum {
    * future hooks may use it for other resource ids (modusId, intellaId, etc.).
    */
   contextId?: string
+
+  /**
+   * The platform surface a purchased credit was bought through — 'telegram' when the buyer
+   * came from the bot's Buy credits, 'web' otherwise. Set on fiat credits only, from a fixed
+   * set (`SIGNUM_ALLOCUTIONES`). Attribution, never authority: nothing reads it for an amount
+   * or a permission. Absent on every signum written before it existed.
+   */
+  allocutio?: SignumAllocutio
+}
+
+/** The surfaces a purchase can be attributed to. */
+export const SIGNUM_ALLOCUTIONES = ['telegram', 'web'] as const
+export type SignumAllocutio = typeof SIGNUM_ALLOCUTIONES[number]
+
+/** A client- or metadata-supplied surface, kept only when it is one we know. */
+export function asSignumAllocutio(value: unknown): SignumAllocutio | undefined {
+  return (SIGNUM_ALLOCUTIONES as readonly unknown[]).includes(value) ? value as SignumAllocutio : undefined
 }
 
 /** "Signa" — nominative/accusative plural. Your credits. */
