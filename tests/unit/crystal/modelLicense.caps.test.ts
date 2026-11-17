@@ -6,6 +6,7 @@ import {
   bindingCapUsd,
   activeConditionalLicenses,
   classifyModelLicense,
+  classifyBaseModel,
 } from '../../../src/crystal/modelLicense.js'
 
 // ── The cap registry ─────────────────────────────────────────────────────────
@@ -111,19 +112,31 @@ test('classifyModelLicense: an empty baseModel string is skipped, not treated as
 // 1.0 and 2512 stay Apache. Mirrors the FLUX.1 schnell/dev version split above.
 
 test('classifyModelLicense: Qwen-Image 2.1 fails closed (Qwen Research License, non-commercial)', () => {
-  const m = { baseModel: 'Qwen/Qwen-Image-2.1', familia: 'qwen-image' }
+  const m = { baseModel: 'Qwen/Qwen-Image-2.1' }
   assert.deepEqual(classifyModelLicense(m), { license: 'qwen-image-2.1-research-nc', commercialUse: 'no' })
 })
 
 test('classifyModelLicense: pre-2.1 Qwen-Image checkpoints stay Apache 2.0', () => {
   assert.deepEqual(
-    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image', familia: 'qwen-image' }),
+    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image' }),
     { license: 'apache-2.0', commercialUse: 'yes' },
   )
   assert.deepEqual(
-    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image-2512', familia: 'qwen-image' }),
+    classifyModelLicense({ baseModel: 'Qwen/Qwen-Image-2512' }),
     { license: 'apache-2.0', commercialUse: 'yes' },
   )
+})
+
+test('classifyModelLicense: any other Qwen-Image version or spelling is unknown (fail-closed)', () => {
+  for (const baseModel of ['qwen-image-v21', 'qwenimage2_1', 'Qwen-Image-2.2', 'Qwen-Image-2.0']) {
+    assert.deepEqual(classifyModelLicense({ baseModel }), { license: 'unknown', commercialUse: 'unknown' }, baseModel)
+  }
+})
+
+test('classifyBaseModel: Qwen-Image has no base flow yet, so no name of it is importable (familia null)', () => {
+  for (const base of ['Qwen/Qwen-Image', 'Qwen/Qwen-Image-2512', 'Qwen/Qwen-Image-2.1', 'Qwen-Image-2.2']) {
+    assert.equal(classifyBaseModel(base).familia, null, base)
+  }
 })
 
 test('classifyModelLicense: the brutalite shape (familia only, no baseModel/provenance) still fails closed to unknown', () => {

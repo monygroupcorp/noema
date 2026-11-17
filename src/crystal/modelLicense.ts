@@ -286,9 +286,12 @@ const BASE_TABLE: Array<{ test: (t: string) => boolean; familia: string | null; 
   { test: (t) => t.includes('z-image') || t.includes('zimage') || t.includes('z image'), familia: 'zimage', license: 'apache-2.0' },
   // Qwen-Image — the license hinges on the VERSION. Alibaba dropped Apache 2.0 starting with 2.1
   // (2026-09-20, Qwen Research License Agreement, non-commercial); 1.0 and 2512 stay Apache. The
-  // version check must precede the bare check (most-specific-first, same pattern as FLUX variants).
-  { test: (t) => isQwenImage(t) && isQwenImage21(t), familia: 'qwen-image', license: 'qwen-image-2.1-research-nc' },
-  { test: (t) => isQwenImage(t), familia: 'qwen-image', license: 'apache-2.0' },
+  // version check must precede the others (most-specific-first, same pattern as FLUX variants).
+  // Apache goes to the NAMED pre-2.1 checkpoints only; any other Qwen-Image name (2.0, 2.2, a
+  // spelling of 2.1 we don't parse) is unknown (fail-closed). No base flow yet → familia null.
+  { test: (t) => isQwenImage(t) && isQwenImage21(t), familia: null, license: 'qwen-image-2.1-research-nc' },
+  { test: (t) => isQwenImagePre21(t), familia: null, license: 'apache-2.0' },
+  { test: (t) => isQwenImage(t), familia: null, license: 'unknown' },
   // SD 2.x / SD 3.x — real models, but NO base flow yet → not importable (familia null).
   { test: (t) => t.includes('sd3') || t.includes('sd 3') || t.includes('sd2') || t.includes('sd 2'), familia: null, license: 'stability-community' },
 ]
@@ -446,3 +449,8 @@ function isDev(t: string): boolean { return t.includes('dev') || t.includes('.1 
 function isSdxl(t: string): boolean { return t.includes('sdxl') || t.includes('sd_xl') || t.includes('sd-xl') || t.includes('stable-diffusion-xl') || t.includes('sd xl') }
 function isQwenImage(t: string): boolean { return t.includes('qwen-image') || t.includes('qwen image') || t.includes('qwenimage') }
 function isQwenImage21(t: string): boolean { return t.includes('2.1') || t.includes('2-1') || t.includes('v2.1') }
+/** The pre-2.1 checkpoints by name: bare Qwen-Image (1.0, optionally spelled 1.0 / v1) or 2512. */
+function isQwenImagePre21(t: string): boolean {
+  const m = t.match(/qwen(?:-| |)image(.*)$/)
+  return m !== null && /^(?:[-_ ]?(?:v?1(?:\.0)?|2512))?$/.test(m[1])
+}
