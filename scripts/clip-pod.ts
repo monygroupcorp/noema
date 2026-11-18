@@ -25,12 +25,15 @@ import { randomBytes } from 'node:crypto'
 import {
   SecurePodClient,
   makeSecurePodSshFactory,
-  DEFAULT_CPU_INSTANCE_IDS,
+  DEFAULT_CPU_FLAVORS,
+  type CpuFlavor,
 } from '../src/crystal/SecurePodClient.js'
 
 const API_KEY = process.env.RUNPOD_API_KEY
 const IMAGE = process.env.CLIP_POD_IMAGE
-const INSTANCE_IDS = process.env.CLIP_POD_INSTANCE_IDS?.split(',').map(s => s.trim()).filter(Boolean)
+// CLIP_POD_FLAVORS: comma-separated `<flavor>x<vcpus>`, e.g. `cpu3gx4,cpu5gx8`.
+const FLAVORS: CpuFlavor[] | undefined = process.env.CLIP_POD_FLAVORS?.split(',').map(s => s.trim()).filter(Boolean)
+  .map(s => { const [id, n] = s.split('x'); return { id: id!, vcpuCount: Number(n) } })
 
 async function main(): Promise<void> {
   if (!API_KEY) throw new Error('RUNPOD_API_KEY is not set')
@@ -48,11 +51,11 @@ async function main(): Promise<void> {
     globalThis.fetch,
   )
 
-  console.log(`provisioning a CPU pod (${(INSTANCE_IDS ?? DEFAULT_CPU_INSTANCE_IDS).join(', ')}) for ${IMAGE}…`)
+  console.log(`provisioning a CPU pod (${(FLAVORS ?? DEFAULT_CPU_FLAVORS).map(f => `${f.id} x${f.vcpuCount}`).join(', ')}) for ${IMAGE}…`)
   const { podId, baseUrl } = await client.bootstrapClipService({
     jobToken,
     imageName: IMAGE,
-    ...(INSTANCE_IDS ? { instanceIds: INSTANCE_IDS } : {}),
+    ...(FLAVORS ? { flavors: FLAVORS } : {}),
   })
 
   console.log(`\npod ${podId} is up, embed routes token-gated. Set these on the platform:\n`)
