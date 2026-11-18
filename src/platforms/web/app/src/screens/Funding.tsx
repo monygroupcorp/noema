@@ -6,6 +6,7 @@ import { api, ApiRequestError, type ArcanumConfig, type DepositConfig, type Pack
 import { purseIsOff } from '../lib/purseSwitch';
 import { connectWallet } from '../lib/wallet';
 import { useSession } from '../state/session';
+import { purchaseAllocutio, safeSessionStorage } from '../lib/telegramLaunch';
 import { canCheckout, buildCheckoutRequest, signInThenBuy } from '../lib/checkout';
 import { doorPath } from '../lib/entry';
 import { safeNext } from './Onboard';
@@ -174,7 +175,7 @@ export function Funding() {
     setCheckoutErr(null);
     if (!canCheckout(session)) { navigate(signInThenBuy(packId, cameFrom)); return; }
     setCheckoutBusy(packId);
-    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom))
+    api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom, purchaseAllocutio(safeSessionStorage())))
       .then((s) => { window.location.href = s.url; })
       .catch((e) => { setCheckoutErr(e instanceof Error ? e.message : String(e)); setCheckoutBusy(null); });
   }

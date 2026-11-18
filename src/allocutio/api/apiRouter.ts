@@ -228,7 +228,7 @@ export interface ApiFacade {
   // --- Fiat funding rail (Stripe) ---
   /** PUBLIC display catalog (no auth) — the single source the pricing + Funding UIs render from. */
   listPacks(): PackView[]
-  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
 
@@ -490,11 +490,12 @@ export function createApiRouter(deps: {
     '/payments/checkout',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const { packId, successUrl, cancelUrl } = req.body ?? {}
+      const { packId, successUrl, cancelUrl, allocutio } = req.body ?? {}
       const out = await api.createCheckout(auctor, {
         packId,
         ...(typeof successUrl === 'string' ? { successUrl } : {}),
         ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+        ...(typeof allocutio === 'string' ? { allocutio } : {}),
       })
       res.status(200).json(out)
     }),

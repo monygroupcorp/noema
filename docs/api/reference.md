@@ -1267,6 +1267,14 @@ Buy a fixed credit pack with fiat: create a Stripe Checkout session for the chos
     "cancelUrl": {
       "type": "string",
       "description": "Optional redirect URL on abandoned checkout; falls back to the server default."
+    },
+    "allocutio": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "web"
+      ],
+      "description": "Optional: the surface the buyer came from, recorded on the credit for attribution. Never changes the amount; an unknown value is ignored."
     }
   },
   "required": [

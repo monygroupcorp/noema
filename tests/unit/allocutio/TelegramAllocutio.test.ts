@@ -2066,7 +2066,7 @@ test('a public result still falls back to the URL as text when the send fails', 
 
 const FUNDING = 'https://example.test/funding'
 const linkButtons = (extra: unknown) =>
-  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } } | undefined)
+  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string; web_app?: { url: string } }>> } } | undefined)
     ?.reply_markup?.inline_keyboard ?? []).flat()
 
 test('a tap on a button whose flow is gone is answered with a toast, not silence', async () => {
@@ -2115,12 +2115,12 @@ test('start screen: the make button runs the bound /make flow, not the generic p
   assert.equal(init.state?.modusId, 'flux-schnell', 'with the canon /make flow, exactly as /make does')
 })
 
-test('start screen: second row is status + a top-up link; the dead wallet/balance buttons are gone', async () => {
+test('start screen: second row is status + a signed-in top-up; the dead wallet/balance buttons are gone', async () => {
   const { allocutio, sender } = makeAllocutio({ fundingUrl: FUNDING })
   await allocutio.receive(msgUpdate(123, 456, '/start'))
   const buttons = linkButtons(sender.sent[0].extra)
   assert.ok(buttons.some(b => b.callback_data === 's:status'))
-  assert.ok(buttons.some(b => b.url === FUNDING && /top up/i.test(b.text)))
+  assert.ok(buttons.some(b => b.web_app?.url === FUNDING && /top up/i.test(b.text)), 'a Mini App button: opens Funding signed in')
   assert.ok(!buttons.some(b => b.callback_data?.startsWith('a:')), 'no action button with no handler behind it')
 
   sender.sent.length = 0
@@ -2131,7 +2131,7 @@ test('start screen: second row is status + a top-up link; the dead wallet/balanc
 test('start screen without a funding url offers no top-up button (no link beats a dead one)', async () => {
   const { allocutio, sender } = makeAllocutio()
   await allocutio.receive(msgUpdate(123, 456, '/start'))
-  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url), 'no url button')
+  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url || b.web_app), 'no link button')
 })
 
 test('start screen states the group rule, same words as /help', async () => {
@@ -2171,8 +2171,8 @@ test('an empty balance reaching the adapter is answered with the top-up route an
   router.enter = realEnter
   const msg = sender.sent.find(m => /Credits are bought on the web/.test(m.text))
   assert.ok(msg, 'says how to top up, not just that the balance is short')
-  assert.match(msg!.text, /\/recover/)
-  assert.ok(linkButtons(msg!.extra).some(b => b.url === FUNDING), 'with the link')
+  assert.doesNotMatch(msg!.text, /\/recover/, 'a private chat needs no code')
+  assert.ok(linkButtons(msg!.extra).some(b => b.web_app?.url === FUNDING), 'with a button that opens Funding signed in')
 })
 
 test('a flow completed by ✕ says Cancelled, not Done', async () => {

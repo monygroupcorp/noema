@@ -834,7 +834,7 @@ export const api = {
   // the impetus credited is the pack constant, applied later by the signature-verified
   // webhook on payment completion — never computed client-side. 401
   // payments.identity_required for an anon/purse caller (a fiat pack can't fund a purse).
-  createCheckoutSession: (body: { packId: string; successUrl?: string; cancelUrl?: string }) =>
+  createCheckoutSession: (body: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: 'telegram' }) =>
     fetch('/v1/payments/checkout', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<CheckoutSession>),
 
@@ -1399,6 +1399,10 @@ export const api = {
       fetch('/v1/auth/telegram', { headers: readHeaders() }).then(jAuth<{ linked: boolean }>),
     telegramRecover: (code: string) =>
       fetch('/v1/auth/telegram/recover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })
+        .then(jAuth<AuthResult>),
+    // A Mini App launch (the bot's Buy credits button) → a session, verified by Telegram's signature.
+    telegramWebApp: (initData: string) =>
+      fetch('/v1/auth/telegram/webapp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData }) })
         .then(jAuth<AuthResult>),
   },
 

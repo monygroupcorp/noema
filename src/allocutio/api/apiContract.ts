@@ -1541,6 +1541,11 @@ const CheckoutRequestSchema: JsonSchema = {
     },
     successUrl: { type: 'string', description: 'Optional redirect URL on completed payment; falls back to the server default.' },
     cancelUrl: { type: 'string', description: 'Optional redirect URL on abandoned checkout; falls back to the server default.' },
+    allocutio: {
+      type: 'string',
+      enum: ['telegram', 'web'],
+      description: 'Optional: the surface the buyer came from, recorded on the credit for attribution. Never changes the amount; an unknown value is ignored.',
+    },
   },
   required: ['packId'],
 }

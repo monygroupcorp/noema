@@ -36,7 +36,7 @@
 // inject a fake, so no live key is needed to verify (real keys are go-live config).
 // =============================================================================
 
-import type { Signorum, Signum } from '../../types/significandi.js'
+import { asSignumAllocutio, type Signorum, type Signum, type SignumAllocutio } from '../../types/significandi.js'
 import type { Redituum } from '../../types/reditus.js'
 import type { AnimaStore } from '../../types/anima.js'
 import { resolvePack, type CreditPack } from '../../ledger/stripePacks.js'
@@ -58,6 +58,8 @@ export interface StripeCheckoutInput {
   label: string
   successUrl?: string
   cancelUrl?: string
+  /** The surface the buyer came from; rides in metadata to the credit signum. */
+  allocutio?: SignumAllocutio
 }
 
 /** A created Checkout Session — the id + the hosted URL to redirect the buyer to. */
@@ -116,6 +118,8 @@ export interface StripeCheckoutRequest {
   animaId: string | undefined
   successUrl?: string
   cancelUrl?: string
+  /** Where the buyer says they came from. Attribution only; an unknown value is dropped. */
+  allocutio?: unknown
 }
 
 export type StripeCheckoutResult =
@@ -145,6 +149,7 @@ export async function handleStripeCheckout(
   if (!pack) {
     return { ok: false, status: 400, code: 'payments.unknown_pack', message: `Unknown pack '${req.packId}'` }
   }
+  const allocutio = asSignumAllocutio(req.allocutio)
   const session = await deps.gateway.createCheckoutSession({
     packId: pack.id,
     animaId: req.animaId,
@@ -152,6 +157,7 @@ export async function handleStripeCheckout(
     label: pack.label,
     ...(req.successUrl ? { successUrl: req.successUrl } : {}),
     ...(req.cancelUrl ? { cancelUrl: req.cancelUrl } : {}),
+    ...(allocutio ? { allocutio } : {}),
   })
   return { ok: true, url: session.url, sessionId: session.id }
 }
@@ -268,7 +274,8 @@ export async function handleStripeWebhook(
       // durable unique indexes (see creditPayment) — a redelivery/concurrent instance replays the
       // original credit rather than minting a second. A DB failure propagates (→ 500 at the
       // router) so Stripe retries the delivery; the retry is idempotent.
-      const outcome = await creditPayment({ animaId, pack, paymentKey }, deps)
+      const allocutio = asSignumAllocutio(obj.metadata?.allocutio)
+      const outcome = await creditPayment({ animaId, pack, paymentKey, ...(allocutio ? { allocutio } : {}) }, deps)
       log.info('stripe payment credited', { paymentKey, animaId, packId: pack.id, credited: outcome.credited.toString(), signumId: outcome.signumId })
       return { status: 200, body: { received: true, credited: outcome.credited.toString() } }
     } catch (err) {
@@ -493,10 +500,10 @@ async function findStripeCredit(
  * crashed between the issue and the record; it is idempotent on chargeRef.
  */
 async function creditPayment(
-  args: { animaId: string; pack: CreditPack; paymentKey: string },
+  args: { animaId: string; pack: CreditPack; paymentKey: string; allocutio?: SignumAllocutio },
   deps: StripeWebhookDeps,
 ): Promise<CreditOutcome> {
-  const { animaId, pack, paymentKey } = args
+  const { animaId, pack, paymentKey, allocutio } = args
   const testis = `stripe:${paymentKey}`
 
   // Resolve the credit signum: replay a prior one if present, else mint it.
@@ -516,6 +523,7 @@ async function creditPayment(
         valor: pack.impetus,
         auctor: STRIPE_AUCTOR,
         testis,
+        ...(allocutio ? { allocutio } : {}),
       })
     } catch (err) {
       // The durable guard fired: another instance won the race for this payment. Replay its credit.
