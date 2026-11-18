@@ -1,5 +1,33 @@
 # Changelog
 
+## [5.34.0](https://github.com/monygroupcorp/noema/compare/v5.33.0...v5.34.0) (2026-11-18)
+
+
+### Features
+
+* **allocutio:** Buy credits in a private chat opens Funding signed in ([3291788](https://github.com/monygroupcorp/noema/commit/3291788ea1d80bd79fc1813f2a0af95f5e507220))
+* **allocutio:** Buy credits in the bot lands on Funding signed in ([acf8889](https://github.com/monygroupcorp/noema/commit/acf8889035d5ee1490477d16a2e124ce46b7c4ac))
+* **allocutio:** the bot explains the group rule, and two silent misreports are fixed ([399d24a](https://github.com/monygroupcorp/noema/commit/399d24ac0ca969e6320e7954bc200d5c835a370e))
+* **auth:** sign in from a Telegram Mini App launch, verified by its signature ([4c62e71](https://github.com/monygroupcorp/noema/commit/4c62e71925da87b32ce2549559f44c7361200bf7))
+* bind MiniMax H3 users to its use restrictions before they run it ([7594f8b](https://github.com/monygroupcorp/noema/commit/7594f8bd08b8d663677e886cfb9b3247d75e6f8c))
+* **ledger:** record which surface a purchased credit was bought through ([96f139c](https://github.com/monygroupcorp/noema/commit/96f139ccb4dd07e2232f2f085ed392af1e50d925))
+* **web:** a Telegram Mini App launch lands signed in on Funding ([ceb7ae7](https://github.com/monygroupcorp/noema/commit/ceb7ae7164eb52946ecc37d448657bc097b2e90b))
+
+
+### Bug Fixes
+
+* **allocutio:** stop /status from listing every terminated studio ([cbaba09](https://github.com/monygroupcorp/noema/commit/cbaba09c31d6011e1a1b9d84d1cefacf577bddbe))
+* **auth:** hold a Mini App launch's claim for as long as it can verify ([405f85a](https://github.com/monygroupcorp/noema/commit/405f85a6631aa2c6d000a901fc6c94739bd5511c))
+* **crystal:** ask RunPod v2 to inject SSH keys, and walk GPUs by its retry table ([a275bed](https://github.com/monygroupcorp/noema/commit/a275beddafe579687a44b5675978171000d94dba))
+* **crystal:** count the H3 grant live only where its safeguards are wired ([8f63908](https://github.com/monygroupcorp/noema/commit/8f63908188a6749950a03fd4a82a71cd14cd6ed6))
+* **crystal:** count the H3 grant live only where its safeguards are wired ([dc4116a](https://github.com/monygroupcorp/noema/commit/dc4116a12bb9056bb944239cc408961eb21b7ffc))
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([5f32beb](https://github.com/monygroupcorp/noema/commit/5f32bebb052475f0f9a7c2078d6d6414affdea05))
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([e638c04](https://github.com/monygroupcorp/noema/commit/e638c040ee1d0b558ccf29918744c361135a7510))
+* **crystal:** move RunPod pod calls to REST API v2 ([38b840c](https://github.com/monygroupcorp/noema/commit/38b840cb2fc3b0d6bd16073efc881570bd1b26f2))
+* **crystal:** move RunPod pod calls to REST API v2 ([1f946ff](https://github.com/monygroupcorp/noema/commit/1f946ff4980d40eb7c6339154d4dd2a5abd893bf))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([e5297e5](https://github.com/monygroupcorp/noema/commit/e5297e5cf0d6d955f239a5f78f1c07193a9cd53c))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([23458e3](https://github.com/monygroupcorp/noema/commit/23458e30f44eb19552686cef64a2a5def911b83c))
+
 ## [5.33.0](https://github.com/monygroupcorp/noema/compare/v5.32.2...v5.33.0) (2026-11-14)
 
 
