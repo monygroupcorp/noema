@@ -16,6 +16,7 @@ import { terminatePod as _terminatePodUtil } from './terminatePod.js'
 import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 import { DEFAULT_POD_DISK_GB } from './podDisk.js'
+import { createRunPodPod, runpodFetch, runpodPodUrl, describeRunPodError, directSshOf, type RunPodPod } from './runpodRest.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 // The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
@@ -172,10 +173,11 @@ export type { R2Config } from './comfyrunnerClient.js'
 // Ordered roughly by expected speed (fastest/most available first).
 //
 // Every entry MUST be present in ACCEPTED_GPU_TYPE_IDS below (RunPod's current
-// gpuTypeIds enum). RunPod's REST API rejects an unknown gpuTypeId with a 400 on
-// POST rest.runpod.io/v1/pods — a stale/renamed SKU here silently degrades the
-// SECURE tier (both SECURE attempts 400 and the run falls back to COMMUNITY, losing
-// the private/TEE guarantee). `assertGpuTypeIdsAccepted` enforces this at construct
+// GPU type enum). RunPod's REST v2 places exactly one GPU type per create, so this
+// list is walked in order, one POST /v2/pods per id, until one is placed (see
+// `createRunPodPod`). A stale/renamed SKU here costs a refused create on every
+// provision and, if every entry is stale, degrades the SECURE tier to the COMMUNITY
+// fallback, losing the private/TEE guarantee. `assertGpuTypeIdsAccepted` enforces this at construct
 // time so a future enum drift fails loud and early instead of as a mid-provision 400.
 // (noema-103, 2026-07-14: pruned the A30 SKU — absent from RunPod's accepted enum.)
 export const DEFAULT_GPU_TYPE_IDS = [
@@ -261,53 +263,60 @@ export const ACCEPTED_GPU_TYPE_IDS = [
 // small), and renting a 24 GB GPU to compute 512-float vectors would pay GPU rates for
 // work no GPU accelerates.
 //
-// A CPU pod is the SAME RunPod pod API with a different shape of request: `computeType:
-// 'CPU'` and `instanceIds` in place of `gpuCount`/`gpuTypeIds`. Everything downstream —
-// the proxy hostname, termination, the 8080 http port — is unchanged.
+// A CPU pod is the SAME RunPod pod API with a different shape of request: `cpu: { id,
+// vcpuCount }` (a CPU flavor and a size) in place of `gpu`. Everything downstream — the
+// proxy hostname, termination, the 8080 http port — is unchanged.
+
+/** A CPU pod request: a flavor from RunPod's CPU catalogue and a power-of-two vCPU count. */
+export interface CpuFlavor {
+  id: string
+  vcpuCount: number
+}
 
 /**
- * CPU SKUs to ask for, in preference order. A CLIP pass is memory-bound rather than
+ * CPU flavors to ask for, in preference order. A CLIP pass is memory-bound rather than
  * core-bound (the model and its activations have to fit; four cores saturate the batch
- * sizes `clip_service` accepts), so the general-purpose 4-core/16 GB SKU leads and the
- * larger ones follow as availability fallbacks.
+ * sizes `clip_service` accepts), so the general-purpose 4-core flavor leads and the larger
+ * ones follow as availability fallbacks. These are the same machines REST v1 named as
+ * `cpu3g-4-16`, `cpu3g-8-32`, `cpu5g-4-16` and `cpu5g-8-32` (flavor-vcpus-GB).
  */
-export const DEFAULT_CPU_INSTANCE_IDS = [
-  'cpu3g-4-16',
-  'cpu3g-8-32',
-  'cpu5g-4-16',
-  'cpu5g-8-32',
+export const DEFAULT_CPU_FLAVORS: readonly CpuFlavor[] = [
+  { id: 'cpu3g', vcpuCount: 4 },
+  { id: 'cpu3g', vcpuCount: 8 },
+  { id: 'cpu5g', vcpuCount: 4 },
+  { id: 'cpu5g', vcpuCount: 8 },
 ]
 
 /**
- * RunPod's accepted `instanceIds` enum for CPU pods, snapshotted from its published CPU
- * catalogue (2026-09-07). Same role as `ACCEPTED_GPU_TYPE_IDS`: RunPod answers an unknown
- * instance id with a 400, and a stale SKU here would surface as an opaque provision failure
- * rather than as the enum drift it is. When RunPod changes the catalogue, refresh this
- * snapshot and `DEFAULT_CPU_INSTANCE_IDS` together — never suppress the guard.
+ * RunPod's CPU flavor ids, carried over from the v1 instance-id catalogue (2026-09-07)
+ * with the size suffix dropped, since v2 takes the size as `vcpuCount`. Same role as
+ * `ACCEPTED_GPU_TYPE_IDS`: a stale flavor here would surface as an opaque provision failure
+ * rather than as the drift it is.
+ *
+ * NOT yet confirmed against a live `GET /v2/catalog/cpus` — the published v2 spec's own
+ * examples disagree on the id form (`cpu5c` on the request, `cpu3c-2-4` in the catalogue
+ * sample). Check it against the live catalogue before relying on CPU pods, and refresh this
+ * list and `DEFAULT_CPU_FLAVORS` together — never suppress the guard.
  */
-export const ACCEPTED_CPU_INSTANCE_IDS = [
-  'cpu3c-2-4',  'cpu3c-4-8',  'cpu3c-8-16',
-  'cpu3g-2-8',  'cpu3g-4-16', 'cpu3g-8-32',
-  'cpu5c-2-4',  'cpu5c-4-8',  'cpu5c-8-16',
-  'cpu5g-2-8',  'cpu5g-4-16', 'cpu5g-8-32',
-]
+export const ACCEPTED_CPU_FLAVOR_IDS = ['cpu3c', 'cpu3g', 'cpu5c', 'cpu5g']
 
 /**
- * The same construct-time guard `assertGpuTypeIdsAccepted` is for the GPU tier, for CPU
- * instance ids. Throws naming the offending SKU(s) rather than letting a drifted catalogue
- * reach a live provision POST.
+ * The same guard `assertGpuTypeIdsAccepted` is for the GPU tier, for CPU flavors: every id
+ * must be a known flavor and every vCPU count a power of two of at least 2 (the v2 contract).
+ * Throws naming the offending entries rather than letting them reach a live provision POST.
  */
-export function assertCpuInstanceIdsAccepted(
-  ids: readonly string[],
-  accepted: readonly string[] = ACCEPTED_CPU_INSTANCE_IDS,
+export function assertCpuFlavorsAccepted(
+  flavors: readonly CpuFlavor[],
+  accepted: readonly string[] = ACCEPTED_CPU_FLAVOR_IDS,
 ): void {
-  const offending = ids.filter(id => !accepted.includes(id))
+  const isPow2 = (n: number) => Number.isInteger(n) && n >= 2 && (n & (n - 1)) === 0
+  const offending = flavors.filter(f => !accepted.includes(f.id) || !isPow2(f.vcpuCount))
   if (offending.length > 0) {
     throw new Error(
-      `SecurePodClient: CPU instance id(s) not in RunPod's accepted instanceIds enum: ` +
-      `${offending.map(s => `'${s}'`).join(', ')}. RunPod rejects unknown instanceIds with a 400 ` +
-      `on pod provision. Update DEFAULT_CPU_INSTANCE_IDS and/or the ACCEPTED_CPU_INSTANCE_IDS ` +
-      `snapshot to match RunPod's current catalogue.`,
+      `SecurePodClient: CPU flavor(s) RunPod will not accept: ` +
+      `${offending.map(f => `'${f.id}' x${f.vcpuCount}`).join(', ')}. A CPU pod needs a flavor ` +
+      `from RunPod's CPU catalogue and a power-of-two vcpuCount >= 2. Update DEFAULT_CPU_FLAVORS ` +
+      `and/or the ACCEPTED_CPU_FLAVOR_IDS snapshot to match RunPod's current catalogue.`,
     )
   }
 }
@@ -395,19 +404,10 @@ interface SshInfo {
   region?: string
 }
 
-interface RunPodPodStatus {
-  desiredStatus?: string
-  publicIp?: string
-  portMappings?: Record<string, number>
-  costPerHr?: number
-  gpuTypeIds?: string[]
-  machine?: { gpuDisplayName?: string; dataCenterId?: string; location?: string }
-}
-
 /** A status poll that returned successfully but the pod is not SSH-ready yet — the fields
  *  that distinguish "wrong values" from "never got a reading" (see SshPollResult). */
 interface SshPollObservation {
-  desiredStatus?: string
+  status?: string
   publicIp?: string
   port22?: number
 }
@@ -1031,37 +1031,27 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
   }
 
-  // gpuTypeIds=null → omit from request (let RunPod pick any available GPU)
+  // gpuTypeIds=null → any GPU we accept: RunPod v2 has no "any GPU" create, so the full
+  // DEFAULT_GPU_TYPE_IDS preference list is walked instead.
   private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null, diskGb?: number): Promise<string> {
-    const resolvedGpus = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
-    const body: Record<string, unknown> = {
+    const resolved = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
+    const gpuIds = resolved ?? DEFAULT_GPU_TYPE_IDS
+    const base = {
       name: `noema-${Date.now()}`,
-      imageName,
-      gpuCount: 1,
-      cloudType: cloudType ?? this.config.cloudType ?? 'SECURE',
+      image: imageName,
+      cloud: cloudType ?? this.config.cloudType ?? 'SECURE',
       // The flow's own requirement wins: a 56 GB weight set on the flat default fills the
       // disk mid-fetch and surfaces as "model download failed" naming the mirror (noema-372).
-      containerDiskInGb: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
+      disk: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
       ports: ['22/tcp', '8188/http', '8080/http'],
-      supportPublicIp: true,
     }
-    if (resolvedGpus !== null) body.gpuTypeIds = resolvedGpus
-    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, this.config.provisionTimeoutMs ?? 30_000)
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RunPod pod provision failed: ${res.status} ${text}`)
-    }
-
-    const data = await res.json() as { id: string }
-    return data.id
+    const pod = await createRunPodPod({
+      fetchFn: this.fetchFn,
+      apiKey: this.config.apiKey,
+      candidates: gpuIds.map(id => ({ label: id, body: { ...base, gpu: { id, count: 1 } } })),
+      timeoutMs: this.config.provisionTimeoutMs ?? 30_000,
+    })
+    return pod.id
   }
 
   /**
@@ -1089,7 +1079,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const abandon = (reason: string): void => {
       log.warn('abandoning pod', {
         podId, reason, polls: pollCount, elapsedMs: Date.now() - startedAt,
-        desiredStatus: lastObservation?.desiredStatus, publicIp: lastObservation?.publicIp,
+        status: lastObservation?.status, publicIp: lastObservation?.publicIp,
         port22: lastObservation?.port22,
       })
     }
@@ -1113,7 +1103,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
         lastObservation = result.observation
         lastError = undefined
         // The ip-less window only runs while the pod is RUNNING and reporting no public IP.
-        if (result.observation.desiredStatus === 'RUNNING' && !result.observation.publicIp) {
+        if (result.observation.status === 'RUNNING' && !result.observation.publicIp) {
           iplessSince ??= Date.now()
           const iplessMs = Date.now() - iplessSince
           if (iplessMs >= iplessBailoutMs) {
@@ -1140,7 +1130,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     if (lastObservation) {
       throw new Error(
         `Pod ${podId} SSH not ready within ${timeoutMs}ms — last seen after ${pollCount} polls:\n` +
-        `desiredStatus=${lastObservation.desiredStatus ?? '<absent>'} ` +
+        `status=${lastObservation.status ?? '<absent>'} ` +
         `publicIp=${lastObservation.publicIp ?? '<absent>'} ` +
         `port22=${lastObservation.port22 ?? '<absent>'}`,
       )
@@ -1154,7 +1144,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   private async _getSshInfo(podId: string): Promise<SshPollResult> {
     let res: Response
     try {
-      res = await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
+      res = await runpodFetch(this.fetchFn, runpodPodUrl(podId), {
         headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
       }, this.config.sshInfoTimeoutMs ?? 10_000)
     } catch (err) {
@@ -1162,31 +1152,20 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // _waitForSsh deadline governs the overall give-up point.
       return { info: null, error: err instanceof Error ? err.message : String(err) }
     }
-    if (!res.ok) return { info: null, error: `HTTP ${res.status}` }
+    if (!res.ok) return { info: null, error: await describeRunPodError(res) }
 
-    const data = await res.json() as RunPodPodStatus
-    log.debug('pod status poll', {
-      podId,
-      desiredStatus: data.desiredStatus,
-      publicIp: data.publicIp,
-      portMappings: data.portMappings,
-    })
+    const data = await res.json() as RunPodPod
+    const ssh = directSshOf(data)
+    log.debug('pod status poll', { podId, status: data.status, sshHost: ssh.host, sshPort: ssh.port })
     // An observation is a status read that succeeded, whether or not the pod is ready yet —
     // this is what a give-up message names, kept distinct from never getting a read at all.
-    const observation: SshPollObservation = {
-      desiredStatus: data.desiredStatus,
-      publicIp: data.publicIp,
-      port22: data.portMappings?.['22'],
-    }
-    if (data.desiredStatus !== 'RUNNING') return { info: null, observation }
-    if (!data.publicIp) return { info: null, observation }
+    const observation: SshPollObservation = { status: data.status, publicIp: ssh.host, port22: ssh.port }
+    if (data.status !== 'RUNNING') return { info: null, observation }
+    if (!ssh.host || !ssh.port) return { info: null, observation }
 
-    const sshPort = data.portMappings?.['22']
-    if (!sshPort) return { info: null, observation }
-
-    const gpuType = data.machine?.gpuDisplayName ?? data.gpuTypeIds?.[0]
-    const region  = data.machine?.dataCenterId ?? data.machine?.location
-    return { info: { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr, gpuType, region } }
+    const gpuType = data.gpu?.id
+    const region  = data.dataCenterId ?? undefined
+    return { info: { host: ssh.host, port: ssh.port, user: 'root', costPerHr: data.cost, gpuType, region } }
   }
 
   private async _terminatePod(podId: string): Promise<void> {
@@ -1379,45 +1358,33 @@ export class SecurePodClient implements RunPodClient, Procurator {
    */
   async provisionCpuPod(opts: {
     imageName: string
-    /** Overrides `DEFAULT_CPU_INSTANCE_IDS`. Validated against RunPod's accepted enum. */
-    instanceIds?: string[]
+    /** Overrides `DEFAULT_CPU_FLAVORS`, tried in order. Validated against RunPod's catalogue. */
+    flavors?: readonly CpuFlavor[]
     containerDiskGb?: number
     /** HTTP/TCP ports to expose. Default: the service port, 8080. */
     ports?: string[]
     env?: Record<string, string>
   }): Promise<string> {
-    const instanceIds = opts.instanceIds ?? DEFAULT_CPU_INSTANCE_IDS
-    // Checked before the POST, so a drifted SKU names itself instead of arriving as a 400.
-    assertCpuInstanceIdsAccepted(instanceIds)
+    const flavors = opts.flavors ?? DEFAULT_CPU_FLAVORS
+    // Checked before the POST, so a drifted flavor names itself instead of arriving as a 400.
+    assertCpuFlavorsAccepted(flavors)
 
-    const body: Record<string, unknown> = {
+    const base = {
       name: `noema-cpu-${Date.now()}`,
-      imageName: opts.imageName,
-      computeType: 'CPU',
-      instanceIds,
-      containerDiskInGb: opts.containerDiskGb ?? DEFAULT_CPU_POD_DISK_GB,
+      image: opts.imageName,
+      disk: opts.containerDiskGb ?? DEFAULT_CPU_POD_DISK_GB,
       ports: opts.ports ?? ['8080/http'],
-      supportPublicIp: true,
       ...(opts.env ? { env: opts.env } : {}),
     }
-
-    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, this.config.provisionTimeoutMs ?? 30_000)
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RunPod CPU pod provision failed: ${res.status} ${text}`)
-    }
-
-    const data = await res.json() as { id: string }
-    log.info('cpu pod provisioned', { podId: data.id, imageName: opts.imageName })
-    return data.id
+    const pod = await createRunPodPod({
+      fetchFn: this.fetchFn,
+      apiKey: this.config.apiKey,
+      candidates: flavors.map(f => ({ label: `${f.id} x${f.vcpuCount}`, body: { ...base, cpu: { id: f.id, vcpuCount: f.vcpuCount } } })),
+      timeoutMs: this.config.provisionTimeoutMs ?? 30_000,
+      what: 'CPU pod',
+    })
+    log.info('cpu pod provisioned', { podId: pod.id, imageName: opts.imageName })
+    return pod.id
   }
 
   /**
@@ -1441,7 +1408,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     /** The bearer the service will require. Generated per pod by the caller. */
     jobToken: string
     imageName: string
-    instanceIds?: string[]
+    flavors?: readonly CpuFlavor[]
     containerDiskGb?: number
     /** How long to wait for the service to answer /health. Default 10 min. */
     readyTimeoutMs?: number
@@ -1450,7 +1417,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }): Promise<ClipPodHandle> {
     const podId = await this.provisionCpuPod({
       imageName: opts.imageName,
-      ...(opts.instanceIds ? { instanceIds: opts.instanceIds } : {}),
+      ...(opts.flavors ? { flavors: opts.flavors } : {}),
       ...(opts.containerDiskGb !== undefined ? { containerDiskGb: opts.containerDiskGb } : {}),
       env: { CLIP_JOB_TOKEN: opts.jobToken },
     })
