@@ -23,6 +23,17 @@ const log = makeLogger('runpod:rest')
 
 export const RUNPOD_REST_BASE = 'https://api.runpod.io/v2'
 export const RUNPOD_PODS_URL = `${RUNPOD_REST_BASE}/pods`
+/** Retries of one candidate on a 429 or 5xx before the create gives up. */
+const CREATE_TRANSIENT_RETRIES = 2
+const CREATE_BACKOFF_MS = 2_000
+const RETRY_AFTER_CAP_MS = 30_000
+
+/** `Retry-After` in seconds, capped; the backoff base when it is absent or unreadable. */
+function retryAfterMs(res: Response): number {
+  const secs = Number(res.headers.get('retry-after'))
+  return Number.isFinite(secs) && secs >= 0 ? Math.min(secs * 1000, RETRY_AFTER_CAP_MS) : CREATE_BACKOFF_MS
+}
+
 export const runpodPodUrl = (podId: string): string => `${RUNPOD_PODS_URL}/${podId}`
 
 /** v2 `PodStatus`. */
@@ -100,11 +111,12 @@ export async function describeRunPodError(res: Response): Promise<string> {
  * Create a pod from the first candidate body RunPod can place.
  *
  * RunPod v2 places exactly the GPU (or CPU flavor) named and never falls back, so a
- * preference list is walked here, one create per candidate. Only a `400` moves on — the
- * spec's answer for "this combination could not be placed". A `422` is a malformed body and
- * every other status is an account- or service-level failure; retrying another candidate
- * would only repeat it, so those throw at once. No `queue` is ever sent, so a `202` (queued,
- * no pod yet) is not a pod and is an error.
+ * preference list is walked here, one create per candidate, following the spec's retry
+ * table: `400` (could not be placed) and `403` (no access to that pool) move on to the next
+ * candidate; `429` waits out `Retry-After` and `5xx` backs off, both retrying the same
+ * candidate a bounded number of times; `402` (no balance), `422` (malformed body) and every
+ * other status throw at once, since another candidate would only repeat them. No `queue` is
+ * ever sent, so a `202` (queued, no pod yet) is not a pod and is an error.
  */
 export async function createRunPodPod(opts: {
   fetchFn: FetchLike
@@ -112,24 +124,37 @@ export async function createRunPodPod(opts: {
   candidates: Array<{ label: string; body: Record<string, unknown> }>
   timeoutMs: number
   what?: string
+  /** Injected in tests; defaults to a real timer. */
+  sleepFn?: (ms: number) => Promise<void>
 }): Promise<RunPodPod> {
   const what = opts.what ?? 'pod'
   if (opts.candidates.length === 0) throw new Error(`RunPod ${what} provision failed: no candidates to try`)
   const refused: string[] = []
+  const sleepFn = opts.sleepFn ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   for (const c of opts.candidates) {
-    const res = await runpodFetch(opts.fetchFn, RUNPOD_PODS_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(c.body),
-    }, opts.timeoutMs)
-    if (res.status === 201 || res.status === 200) return await res.json() as RunPodPod
-    if (res.status === 202) {
-      throw new Error(`RunPod ${what} provision failed: request for '${c.label}' was queued (202), not placed`)
+    for (let retry = 0; ; retry++) {
+      const res = await runpodFetch(opts.fetchFn, RUNPOD_PODS_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(c.body),
+      }, opts.timeoutMs)
+      if (res.status === 201 || res.status === 200) return await res.json() as RunPodPod
+      if (res.status === 202) {
+        throw new Error(`RunPod ${what} provision failed: request for '${c.label}' was queued (202), not placed`)
+      }
+      const reason = await describeRunPodError(res)
+      const transient = res.status === 429 || res.status >= 500
+      if (transient && retry < CREATE_TRANSIENT_RETRIES) {
+        const waitMs = res.status === 429 ? retryAfterMs(res) : CREATE_BACKOFF_MS * 2 ** retry
+        log.info('transient create failure, retrying the same candidate', { what, candidate: c.label, reason, waitMs })
+        await sleepFn(waitMs)
+        continue
+      }
+      if (res.status !== 400 && res.status !== 403) throw new Error(`RunPod ${what} provision failed: ${reason}`)
+      log.info('candidate not placed, trying the next', { what, candidate: c.label, reason })
+      refused.push(`'${c.label}': ${reason}`)
+      break
     }
-    const reason = await describeRunPodError(res)
-    if (res.status !== 400) throw new Error(`RunPod ${what} provision failed: ${reason}`)
-    log.info('candidate not placed, trying the next', { what, candidate: c.label, reason })
-    refused.push(`'${c.label}': ${reason}`)
   }
   throw new Error(`RunPod ${what} provision failed: no candidate could be placed — ${refused.join('; ')}`)
 }

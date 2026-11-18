@@ -567,6 +567,7 @@ test('default-path provision asks for DEFAULT_GPU_TYPE_IDS[0] first, as a single
   assert.equal(body.image, 'runpod/pytorch:2.4.0')
   assert.equal(body.cloud, 'SECURE')
   assert.deepEqual(body.ports, ['22/tcp', '8188/http', '8080/http'])
+  assert.equal(body.startSsh, true, 'without startSsh v2 injects no PUBLIC_KEY and bootstrap cannot log in')
   assert.equal(typeof body.disk, 'number')
   for (const v1 of ['gpuTypeIds', 'gpuCount', 'imageName', 'cloudType', 'containerDiskInGb', 'supportPublicIp']) {
     assert.equal(body[v1], undefined, `v1 field ${v1} must not be sent`)

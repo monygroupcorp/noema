@@ -109,6 +109,50 @@ test('a 401 is not retried on another candidate', async () => {
   assert.equal(calls.length, 1)
 })
 
+const noSleep = async (): Promise<void> => {}
+const placed = (id: string) => new Response(JSON.stringify({ id }), { status: 201 })
+const gpuOf = (c: { body?: Record<string, unknown> }) => (c.body!.gpu as { id: string }).id
+
+test('a 403 (no access to that pool) skips to the next candidate', async () => {
+  const { fetchFn, calls } = recorder(c => gpuOf(c) === 'A' ? problem(403, 'Forbidden', 'pool not available') : placed('p3'))
+  const pod = await createRunPodPod({ fetchFn, apiKey: 'k', candidates: gpuCandidates('A', 'B'), timeoutMs: 1000, sleepFn: noSleep })
+  assert.equal(pod.id, 'p3')
+  assert.deepEqual(calls.map(gpuOf), ['A', 'B'])
+})
+
+test('a 429 waits out Retry-After and retries the same candidate', async () => {
+  let n = 0
+  const waits: number[] = []
+  const { fetchFn, calls } = recorder(() => n++ === 0
+    ? new Response(JSON.stringify({ title: 'Too Many Requests', status: 429, detail: 'slow down' }), { status: 429, headers: { 'Retry-After': '3' } })
+    : placed('p4'))
+  const pod = await createRunPodPod({ fetchFn, apiKey: 'k', candidates: gpuCandidates('A', 'B'), timeoutMs: 1000, sleepFn: async ms => { waits.push(ms) } })
+  assert.equal(pod.id, 'p4')
+  assert.deepEqual(calls.map(gpuOf), ['A', 'A'])
+  assert.deepEqual(waits, [3000])
+})
+
+test('a 5xx retries the same candidate with backoff, then gives up without trying others', async () => {
+  const waits: number[] = []
+  const { fetchFn, calls } = recorder(() => problem(503, 'Service Unavailable', 'try later'))
+  await assert.rejects(
+    createRunPodPod({ fetchFn, apiKey: 'k', candidates: gpuCandidates('A', 'B'), timeoutMs: 1000, sleepFn: async ms => { waits.push(ms) } }),
+    /503 Service Unavailable: try later/,
+  )
+  assert.deepEqual(calls.map(gpuOf), ['A', 'A', 'A'])
+  assert.equal(waits.length, 2)
+  assert.ok(waits[1]! > waits[0]!, 'backoff grows')
+})
+
+test('a 402 (insufficient balance) stops at once', async () => {
+  const { fetchFn, calls } = recorder(() => problem(402, 'Payment Required', 'insufficient balance'))
+  await assert.rejects(
+    createRunPodPod({ fetchFn, apiKey: 'k', candidates: gpuCandidates('A', 'B'), timeoutMs: 1000, sleepFn: noSleep }),
+    /402 Payment Required/,
+  )
+  assert.equal(calls.length, 1)
+})
+
 test('a 202 (queued, no pod yet) is an error, not a pod', async () => {
   const { fetchFn } = recorder(() => new Response(JSON.stringify({ id: 'q1', status: 'QUEUED', podId: null }), { status: 202 }))
   await assert.rejects(

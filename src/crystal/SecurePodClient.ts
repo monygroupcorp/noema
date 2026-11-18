@@ -1044,6 +1044,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // disk mid-fetch and surfaces as "model download failed" naming the mirror (noema-372).
       disk: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
       ports: ['22/tcp', '8188/http', '8080/http'],
+      // v2 injects the account's registered SSH keys as PUBLIC_KEY only when asked; without
+      // it the pod reports ssh.direct but refuses our key, and bootstrap can never log in.
+      startSsh: true,
     }
     const pod = await createRunPodPod({
       fetchFn: this.fetchFn,
