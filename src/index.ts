@@ -1120,6 +1120,8 @@ async function main(): Promise<void> {
   const mandata = new MongoMandatum(mongo.db(DB_NAME).collection('mandata'))
   await mandata.ensureIndexes().catch((err) => log.warn('mandata index ensure failed', { error: String(err) }))
 
+  void ring.proMonthlySubscriptions.ensureIndexes?.().catch(err => log.warn('proMonthlySubscriptions: ensureIndexes failed', { error: String(err) }))
+
   const crystalApi = new CrystalApi({
     pricer,
     mandata,
@@ -1136,6 +1138,7 @@ async function main(): Promise<void> {
     completor: ring.completor,
     actorum: ring.actorum,
     signorum: ring.signorum,
+    proMonthlySubscriptions: ring.proMonthlySubscriptions,
     fundamentorum: ring.fundamentorum,
     hospitia: ring.hospitia,
     materiae: ring.materiae,

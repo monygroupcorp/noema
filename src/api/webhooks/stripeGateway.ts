@@ -14,6 +14,10 @@ import type {
   StripeGateway,
   StripeWebhookEvent,
 } from './stripeWebhook.js'
+import type {
+  ProMonthlyGateway,
+  ProMonthlyWebhookEvent,
+} from './stripeProMonthlyWebhook.js'
 
 const log = makeLogger('stripe-gateway')
 
@@ -91,6 +95,44 @@ export function makeStripeGateway(config: StripeConfig): StripeGateway {
       // handler catches it and returns 400 (no credit path is reached).
       const event = stripe.webhooks.constructEvent(rawBody, signature ?? '', config.webhookSecret)
       return event as unknown as StripeWebhookEvent
+    },
+  }
+}
+
+/**
+ * Build the live `ProMonthlyGateway` from the SAME env config as the pack rail (one Stripe
+ * account, one webhook secret — Stripe multiplexes event types onto one endpoint). `mode:
+ * 'subscription'` + a recurring `price_data` is the one thing that differs from
+ * `makeStripeGateway`'s one-time Checkout Session.
+ */
+export function makeProMonthlyGateway(config: StripeConfig): ProMonthlyGateway {
+  const stripe = new Stripe(config.secretKey)
+  return {
+    async createSubscriptionCheckoutSession(input) {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        client_reference_id: input.animaId,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'usd',
+              unit_amount: input.amountCents,
+              recurring: { interval: 'month' },
+              product_data: { name: input.label },
+            },
+          },
+        ],
+        success_url: input.successUrl ?? config.successUrl,
+        cancel_url: input.cancelUrl ?? config.cancelUrl,
+      })
+      if (!session.url) throw new Error('Stripe returned a subscription session with no checkout URL')
+      return { id: session.id, url: session.url }
+    },
+
+    constructWebhookEvent(rawBody, signature): ProMonthlyWebhookEvent {
+      const event = stripe.webhooks.constructEvent(rawBody, signature ?? '', config.webhookSecret)
+      return event as unknown as ProMonthlyWebhookEvent
     },
   }
 }
