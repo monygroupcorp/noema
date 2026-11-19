@@ -14,6 +14,7 @@
     "guard:weight-addresses": "npx tsx scripts/guard-weight-addresses.ts",
     "report:addressless-weights": "npx tsx scripts/report-addressless-intellae.ts",
     "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
+    "census:modules": "npx tsx scripts/module-census.ts",
     "muse:roll": "npx tsx scripts/muse-roll.ts",
     "refresh:ofac": "npx tsx scripts/refresh-ofac-blocklist.ts data/ofac-blocklist.json",
     "ceremony:finalize": "npx tsx scripts/ceremony-finalize.ts",
