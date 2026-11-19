@@ -12,15 +12,17 @@ import './feed.css';
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // The feed reads the newest FEED_LIMIT editions; GET /v1/feed offers no narrowing beyond that
-// and no total. The intro therefore states what these are and how many (DESIGN.md D-55):
-// an exact count when the read came back short, "the latest N" when it filled the page.
+// and no total. The intro states what these are, how many, and how to narrow them (DESIGN.md
+// D-55) — the honest answer to the third part, while the API offers nothing more, is that there
+// isn't one yet, which the rule is satisfied by saying rather than by omitting.
 export const FEED_LIMIT = 60;
 export function feedShape(items: FeedItem[] | null, limit = FEED_LIMIT): string {
   const base = 'What people are making and choosing to share';
-  if (!items || items.length === 0) return `${base}.`;
+  const narrow = 'Newest first — no filters yet.';
+  if (!items || items.length === 0) return `${base}. ${narrow}`;
   const n = items.length;
-  if (n >= limit) return `${base} — the latest ${limit} pieces.`;
-  return `${base} — ${n} ${n === 1 ? 'piece' : 'pieces'}.`;
+  if (n >= limit) return `${base} — the latest ${limit} pieces. ${narrow}`;
+  return `${base} — ${n} ${n === 1 ? 'piece' : 'pieces'}. ${narrow}`;
 }
 
 // Relative "3m ago" without pulling a date library.

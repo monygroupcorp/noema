@@ -34,6 +34,11 @@ export function Blog() {
     <Chrome>
       <article className="prose">
         <h1>Guides</h1>
+        {POSTS.length > 0 && (
+          <p className="blog-empty">
+            {POSTS.length} {POSTS.length === 1 ? 'guide' : 'guides'}, newest first — no filters yet.
+          </p>
+        )}
         {POSTS.length === 0 ? (
           <p className="blog-empty">
             Nothing published yet. Guides to training a model, composing a workflow and running
