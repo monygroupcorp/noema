@@ -430,4 +430,32 @@
 
   /* The grid is what the user scrolled here to see. */
   .muse-stream { margin: 12px 0 18px; }
+
+  /* noema/muse-is-the-jewel — the picture is the interface, at 390px first (draft, not a
+     ruling): the title, the promote-a-collection explainer and the launcher card are the
+     tallest chrome standing between the top of the screen and the first tile, on a route
+     whose own name is the fragments it draws from and whose own point is the piece it
+     makes — neither needs a hero-sized banner to say so. This is a compacting pass only:
+     nothing here reorders or removes a control, so every one of the five named chrome
+     pieces (floor, chips, steer dock, stageline, nozzle) is exactly as reachable as before,
+     just not costing as much height to get there. Scoped to `.muse-pw` so no other screen
+     sharing `.garden-head`/`.pw.wide` is touched. */
+  .muse-pw .garden-head {
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .muse-pw .garden-head h1 {
+    font-size: clamp(18px, 5.5vw, 22px);
+    line-height: 1.25;
+  }
+  .muse-pw .muse-launcher { margin-bottom: 10px; }
+  .muse-pw .muse-launcher-promote {
+    padding: 6px 0;
+    gap: 6px;
+  }
+  /* The explainer sentence ("a draft — you set the supply next…") restates what the
+     button beside it already says ("make a collection…"); dropped at this width, where
+     the line it would otherwise cost is the line a tile could have instead. The button
+     itself — the only part of this row that does anything — is unchanged. */
+  .muse-pw .muse-launcher-promote span { display: none; }
 }
