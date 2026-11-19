@@ -15,6 +15,8 @@
 // No new Cursor class. See ApiCursor.ts for the single cursor these drive.
 // =============================================================================
 
+import { MICRO_USD_PER_IMPETUS } from '../ledger/rates.js'
+
 /** The three capabilities a hosted-API provider can serve. */
 export type ApiCapability = 'chat' | 'image' | 'imageEdit'
 
@@ -35,8 +37,24 @@ export interface ApiCapabilitySpec {
 export interface ApiPricing {
   /** Chat: impetus charged per 1,000 tokens (prompt + completion). */
   chatImpetusPer1kTokens?: bigint
-  /** Image gen / edit: impetus charged per image produced. */
-  imageImpetusPerImage?: bigint
+  /**
+   * Image gen / edit, OpenAI's own billing unit — micro-USD per token, by token kind
+   * (its `usage` response reports them separately: text prompt tokens, input image tokens
+   * on an edit, and output image tokens, which dominate the cost and vary by orders of
+   * magnitude with `quality`/`size`). Converted to impetus via `MICRO_USD_PER_IMPETUS`
+   * (`imageTokenImpetus`), the same way chat tokens convert via `chatImpetusPer1kTokens` —
+   * a per-token rate so the charge tracks what the vendor actually billed, not a flat guess.
+   */
+  imageTextInputMicroUsdPerToken?: bigint
+  imageInputMicroUsdPerToken?: bigint
+  imageOutputMicroUsdPerToken?: bigint
+}
+
+/** Token usage an OpenAI image response reports, by kind. Absent/zero kinds cost nothing. */
+export interface ImageTokenUsage {
+  textInputTokens?: number
+  imageInputTokens?: number
+  outputTokens?: number
 }
 
 /** A hosted-API provider — the unit the ApiCursor is bound to. */
@@ -59,12 +77,20 @@ export const OPENAI_PROVIDER: ApiProvider = {
   authEnv: 'OPENAI_API_KEY',
   capabilities: {
     chat:      { path: '/chat/completions', defaultModel: 'gpt-4o' },
-    image:     { path: '/images/generations', defaultModel: 'gpt-image-1' },
-    imageEdit: { path: '/images/edits', defaultModel: 'gpt-image-1' },
+    // Flare: OpenAI's fast/general text-to-image lane — the right default for a one-shot
+    // generation with no prior art to match. Sunburst: the quality/consistency lane, which is
+    // what an edit needs (it is reworking a specific existing image, not drawing from scratch).
+    // Both superseded gpt-image-1 on 2026-11-04 (gpt-image-2.6, OpenAI's current image family).
+    image:     { path: '/images/generations', defaultModel: 'gpt-image-2.6-flare' },
+    imageEdit: { path: '/images/edits', defaultModel: 'gpt-image-2.6-sunburst' },
   },
   pricing: {
     chatImpetusPer1kTokens: 3n,
-    imageImpetusPerImage:   40n,
+    // OpenAI's published gpt-image-2.6 per-token rates (both Flare and Sunburst, same table):
+    // text input $5/1M tokens, image input $8/1M, image output $30/1M → micro-USD/token.
+    imageTextInputMicroUsdPerToken: 5n,
+    imageInputMicroUsdPerToken:     8n,
+    imageOutputMicroUsdPerToken:    30n,
   },
 }
 
@@ -110,4 +136,30 @@ export function chatImpetus(tokens: number, per1k: bigint | undefined): bigint {
   const rate = per1k ?? 0n
   if (rate === 0n || tokens <= 0) return 0n
   return (BigInt(tokens) * rate + 999n) / 1000n
+}
+
+/**
+ * Image gen/edit metering: usage tokens (by kind) → impetus, at the provider's real per-token
+ * USD rate — the counterpart to `chatImpetus` for the image rail. A flat per-image charge
+ * cannot bound this: OpenAI's `quality`/`size` span roughly a 100x range in output tokens, so
+ * it either overcharges the cheap end badly or undercharges the expensive end — exactly the
+ * gap this closes by reading what the vendor actually billed off `usage` instead of guessing
+ * a flat rate for "an image".
+ * Each token kind is converted to micro-USD, ceil-divided to impetus via
+ * `MICRO_USD_PER_IMPETUS` (never under-charges on the sub-unit remainder, same as `chatImpetus`),
+ * then summed. A kind with no usage or no configured rate costs 0.
+ */
+export function imageTokenImpetus(usage: ImageTokenUsage, pricing: ApiPricing): bigint {
+  const part = (tokens: number | undefined, microUsdPerToken: bigint | undefined): bigint => {
+    const rate = microUsdPerToken ?? 0n
+    const n = tokens ?? 0
+    if (rate === 0n || n <= 0) return 0n
+    const microUsd = BigInt(n) * rate
+    return (microUsd + MICRO_USD_PER_IMPETUS - 1n) / MICRO_USD_PER_IMPETUS
+  }
+  return (
+    part(usage.textInputTokens, pricing.imageTextInputMicroUsdPerToken) +
+    part(usage.imageInputTokens, pricing.imageInputMicroUsdPerToken) +
+    part(usage.outputTokens, pricing.imageOutputMicroUsdPerToken)
+  )
 }
