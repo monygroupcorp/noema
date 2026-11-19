@@ -315,7 +315,9 @@ export function Ceremony() {
         </p>
         <div className="cer-status-row"><StatusPill status={status} /></div>
         <div className="cta">
-          <a className="btn lg" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
+          {/* The hero CTA jumps to the form (#contribute); the actual action is "Fold in my
+              randomness" below, so only that one carries the accent fill (DESIGN.md D-42). */}
+          <a className="btn lg ghost" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
           <a className="btn-ghost" href="#how">How it works</a>
         </div>
         {hero.note && <p className="cer-fold-note">{hero.note}</p>}
