@@ -277,6 +277,15 @@ export interface Modus {
   intellae?: Array<{ id: string; role: string }>
 
   /**
+   * Upstream licence terms the caller must have accepted before this flow runs, by id in
+   * `crystal/useTerms.ts` (e.g. `'minimax-h3'`). Declared, not derived from the weights: the
+   * obligation is the licence's, and a flow that carries it says so here. The run entry point
+   * refuses a caller who has not accepted the current version, or who is suspended under the
+   * terms, before anything is reserved. A composite inherits its steps' declarations.
+   */
+  useTerms?: string[]
+
+  /**
    * Which execution service (cursor) handles this modus.
    * "ministerium" = service/office in Latin — the function assigned to this modus.
    * Maps to a registered Cursor in the Cursorum.

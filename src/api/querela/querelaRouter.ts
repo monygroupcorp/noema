@@ -1,6 +1,12 @@
 // =============================================================================
-// querelaRouter — POST /v1/reports (in-app bug/feature/feedback reports)
+// querelaRouter — POST /v1/reports (in-app bug/feature/feedback/abuse reports)
 // =============================================================================
+//
+// `abuse` is the reporting mechanism licence terms such as MiniMax H3's require: anyone can
+// report a run whose output they believe breaks the terms. The report names the run; who OWNS
+// it, and which terms its flow carried, are resolved here from the run itself — a reporter
+// cannot point a strike at someone else by naming them. An admin's verdict on the report
+// (querelaAdminRouter) is what counts toward suspension.
 //
 // Backend half of in-app reporting: persists a rich,
 // kind-discriminated report to the private `Querela` store. No GitHub egress,
@@ -28,9 +34,12 @@ const log = makeLogger('querela:router')
 export interface QuerelaRouterDeps {
   querelae: QuerelaStore
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
+  /** The owner key of a run, and the licence terms its flow carries; null for no such run.
+   *  Absent → abuse reports are refused, since none could name whom they are about. */
+  resolveRun?: (runId: string) => Promise<{ ownerKey: string; useTerms: string[] } | null>
 }
 
-const KINDS = ['bug', 'feature', 'feedback'] as const
+const KINDS = ['bug', 'feature', 'feedback', 'abuse'] as const
 type Kind = typeof KINDS[number]
 
 // Per-owner rate limit (Decision record Q3): anon DB spam is possible even with
@@ -95,13 +104,28 @@ export function createQuerelaRouter(deps: QuerelaRouterDeps): Router {
         ...(typeof cs.actumId === 'string' ? { actumId: cs.actumId } : {}),
       }
     }
+    // An abuse report is about one run. Its subject and terms come from the run, not the body.
+    let subjectOwnerKey: string | null = null
+    let useTerms: string[] | null = null
+    if (kind === 'abuse') {
+      const cs = (body.capturedState && typeof body.capturedState === 'object') ? body.capturedState as Record<string, unknown> : {}
+      const runId = typeof cs.runId === 'string' && cs.runId.trim() ? cs.runId.trim() : null
+      if (!runId) throw Errors.inputMalformed('an abuse report names the run it is about (capturedState.runId)')
+      if (!deps.resolveRun) throw Errors.internal('abuse reports are not available on this deployment')
+      const run = await deps.resolveRun(runId)
+      if (!run) throw Errors.notFoundRun(runId)
+      subjectOwnerKey = run.ownerKey
+      useTerms = run.useTerms
+      capturedState = { runId, ...(typeof cs.route === 'string' ? { route: cs.route } : {}) }
+    }
     const clientError = typeof body.clientError === 'string' ? body.clientError : null
     const device = typeof body.device === 'string' ? body.device : null
     const userAgent = typeof body.userAgent === 'string' ? body.userAgent : (req.headers['user-agent'] ?? null)
 
-    // Dedup (Q3): identical report from the same owner returns the existing id, 200.
-    const hashInput = feature ?? capturedState?.route ?? ''
-    const contentHash = computeContentHash(ownerKey, kind, description, hashInput)
+    // Dedup (Q3): identical report from the same owner returns the existing id, 200. An abuse
+    // report dedups on the run, so one reporter repeating themselves files one report.
+    const hashInput = kind === 'abuse' ? (capturedState?.runId ?? '') : (feature ?? capturedState?.route ?? '')
+    const contentHash = computeContentHash(ownerKey, kind, kind === 'abuse' ? '' : description, hashInput)
     const existing = await querelae.findByOwnerAndHash(ownerKey, contentHash)
     if (existing) {
       res.status(200).json({ id: existing.id })
@@ -127,6 +151,7 @@ export function createQuerelaRouter(deps: QuerelaRouterDeps): Router {
       device,
       userAgent: userAgent as string | null,
       contentHash,
+      ...(kind === 'abuse' ? { subjectOwnerKey, useTerms, verdict: null } : {}),
     }
     const created = await querelae.create(record)
     res.status(200).json({ id: created.id })

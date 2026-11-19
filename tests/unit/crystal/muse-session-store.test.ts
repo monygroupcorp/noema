@@ -52,7 +52,7 @@ import type { Credentials, ResolvedCaller } from '../../../src/allocutio/api/Ide
 const URI = process.env.MONGO_PASS ?? process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const DB = 'noemaplane_test'
 const SESSIONS_COL = 'muse_sessions_unit'
-const DATASETS_COL = 'datasets_unit'
+const DATASETS_COL = 'muse_session_datasets_unit'
 
 let client: MongoClient
 let sessionsCol: Collection

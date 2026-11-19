@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ethForCredits, lineMode, walletGateState } from './BuyCreditsModal';
+import { depositStatusLabel, ethForCredits, lineMode, walletGateState } from './BuyCreditsModal';
 import type { DepositQuote } from '../lib/api';
 
 // No jsdom/@testing-library/react in this app's toolchain today (see package.json) — so
@@ -86,5 +86,24 @@ describe('walletGateState — the three wallet-link gate states', () => {
   it('linked — signed in and the connected wallet IS linked (case-insensitive match)', () => {
     expect(walletGateState(true, wallet, [wallet.toLowerCase()])).toBe('linked');
     expect(walletGateState(true, wallet, [wallet.toUpperCase()])).toBe('linked');
+  });
+});
+
+// The settle line used to interpolate the raw backend status word straight into the polling
+// copy — "still not credited — confirmatum · stopped watching" — so a confirmed-but-uncredited
+// deposit (funds real, just held pending the webhook's credit) read as Latin, not a sentence.
+describe('depositStatusLabel — a held reservation reads as held, not as the backend\'s enum word', () => {
+  it('a confirmed, not-yet-credited deposit reads as held', () => {
+    expect(depositStatusLabel('confirmatum')).toMatch(/held/i);
+  });
+
+  it('never surfaces the raw Latin status token', () => {
+    for (const status of ['detectum', 'confirmatum', 'processatum', 'praesolutum', 'fractum'] as const) {
+      expect(depositStatusLabel(status)).not.toBe(status);
+    }
+  });
+
+  it('a null status (not yet polled) reads as seen, not as a stale default', () => {
+    expect(depositStatusLabel(null)).toBe('seen, not yet confirmed');
   });
 });

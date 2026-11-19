@@ -22,6 +22,7 @@ const PROMPTS: Record<QuerelaKind, string> = {
   bug: "what went wrong?",
   feature: "what would you like to see?",
   feedback: "what's on your mind?",
+  abuse: 'what in this output breaks the terms?',
 };
 
 // Only /train/run/:id carries an actual run id in the URL today (App.tsx route table) — no

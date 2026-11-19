@@ -61,10 +61,12 @@ tests/unit/crystal/ownedPurse.test.ts
 tests/unit/crystal/projects.test.ts
 tests/unit/crystal/modelLicense.caps.test.ts
 tests/unit/crystal/licenseTripwire.test.ts
+tests/unit/crystal/modelLicense.grant.test.ts
 tests/unit/crystal/VestigiaProjection.test.ts
 tests/unit/api/vestigiaRouter.test.ts
 tests/unit/api/querelaRouter.test.ts
 tests/unit/api/querelaAdminRouter.test.ts
+tests/unit/api/querelaAbuse.test.ts
 tests/unit/api/partnerRequestRouter.test.ts
 tests/unit/api/partnerAdminRouter.test.ts
 tests/unit/api/treasuryPersonaIntake.test.ts
@@ -89,6 +91,7 @@ tests/unit/arcanum/ceremonyKeyPublish.test.ts
 tests/unit/arcanum/ceremonyCustody.test.ts
 tests/unit/arcanum/ceremoniaReopen.test.ts
 tests/unit/crystal/SecurePodClient.test.ts
+tests/unit/crystal/runpodRest.test.ts
 tests/unit/execution/ActumCompletor.test.ts
 tests/unit/crystal/executionWebhook.test.ts
 tests/unit/crystal/modelImport.test.ts
@@ -147,3 +150,6 @@ tests/unit/crystal/TesseraCursor.test.ts
 tests/unit/crystal/Vocator.test.ts
 tests/unit/execution/sessionSpendParity.test.ts
 tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts
+tests/unit/crystal/intellaSourceGuard.test.ts
+tests/unit/crystal/loraSourceBackfill.test.ts
+tests/unit/scripts/report-addressless-intellae.test.ts

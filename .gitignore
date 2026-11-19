@@ -61,6 +61,7 @@ docs/*
 !docs/arcanum-blind-issuance.md
 !docs/arcanum-bursa-frontend.md
 !docs/arcanum-ceremony.md
+!docs/module-census.md
 !docs/adr/
 !docs/spec/
 !docs/api/

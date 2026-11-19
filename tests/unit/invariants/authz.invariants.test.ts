@@ -949,6 +949,10 @@ const COVERED_RESOURCES: Record<string, string[]> = {
  * act this guard exists to force.
  */
 const UNCOVERED_ALLOWLIST: Record<string, string> = {
+  'not_found.terms':
+    'not owner-scoped: a terms id names published licence terms (crystal/useTerms.ts), the same ' +
+    'for every caller, so there is no other identity\'s record for it to leak. Covered by ' +
+    'tests/unit/allocutio/api/useTermsGate.test.ts.',
   'not_found.studio':
     'covered behaviourally by the studio-binding regression tests in ' +
     'tests/unit/allocutio/api/CrystalApi.test.ts (a studioId the caller does not host, and the ' +

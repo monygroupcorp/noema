@@ -10,6 +10,7 @@ import type { Primitive, Step, Resolution, FlowContext, AuctorKey } from '../../
 import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
+import { describeUpdate, describeMyChatMember, describeChatMigration } from './updateLog.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
 import type { Progressus } from '../../types/progressus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
@@ -49,11 +50,11 @@ import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMen
 import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
-import { inlineKeyboard, btn, urlBtn, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { inlineKeyboard, btn, accountBtn, isPrivateChat, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
-import { COPY } from '../lexicon/copy.js'
+import { COPY, GROUP_RULE } from '../lexicon/copy.js'
 import { isPrivateMarker } from '../../crystal/MediaFetcher.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 // Re-export the adapter contracts so existing importers (index, TelegramSenderAdapter) keep working.
@@ -582,6 +583,24 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // -------------------------------------------------------------------------
 
   async receive(update: TelegramUpdate): Promise<void> {
+    log.info('telegram update', describeUpdate(update))
+
+    // The bot's own membership of a chat changed (added, removed, promoted, demoted). The
+    // record is the point — a report about a group can be traced to the moment the bot lost
+    // its seat or its rights there — except for 'added': that gets one reply stating the
+    // group rule, sent as a reaction to this event only. Never a backfill into a group the
+    // bot is already in; there is no loop here over existing memberships, only this update.
+    if (update.my_chat_member) {
+      const described = describeMyChatMember(update.my_chat_member)
+      log.info('telegram chat membership', described)
+      if (described.event === 'added') {
+        await this.sender.sendMessage(update.my_chat_member.chat.id, COPY.command.groupJoined).catch(() => {})
+      }
+      return
+    }
+    const migration = update.message && describeChatMigration(update.message)
+    if (migration) log.info('telegram chat migration', migration)
+
     const chatId =
       update.message?.chat.id ??
       update.callback_query?.message?.chat.id
@@ -613,7 +632,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           // the link, rather than a sentence that sends them to /status to read the same zero.
           const broke = /insufficient funds/i.test(err instanceof Error ? err.message : String(err))
           await this.sender
-            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl) : classifyError(err), broke ? topUpMarkup(this.deps.fundingUrl) : undefined)
+            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl, isPrivateChat(chatId)) : classifyError(err), broke ? topUpMarkup(chatId, this.deps.fundingUrl) : undefined)
             .catch(() => {})
         }
       }
@@ -922,7 +941,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      const { text, extra } = renderPrimitive(primitive)
+      const { text, extra } = renderPrimitive(primitive, chatId)
 
       // Feature 2: edit in place if we have a pending edit message ID and this primitive has a keyboard
       if (editMessageId !== undefined && extra?.reply_markup) {
@@ -1120,7 +1139,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const text = `\
 noema
 
-Generate AI art, chat with models, explore creative tools.`
+Generate AI art, chat with models, explore creative tools.
+
+${GROUP_RULE}`
 
     // Every button here answers: the second row used to be "connect wallet" and "balance",
     // which no handler ever received.
@@ -1128,7 +1149,7 @@ Generate AI art, chat with models, explore creative tools.`
     await this.sender.sendMessage(chatId, text, {
       reply_markup: inlineKeyboard([
         [btn('make', 's:make'), btn('chat', 's:chat'), btn('flows', 's:flows')],
-        [btn('status', 's:status'), ...(fundingUrl ? [urlBtn('top up', fundingUrl)] : [])],
+        [btn('status', 's:status'), ...(fundingUrl ? [accountBtn('top up', fundingUrl, chatId)] : [])],
       ]),
     })
   }

@@ -68,7 +68,7 @@ export class MongoEditionum implements Editionum {
 
   async update(
     id: string,
-    patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation' | 'hostedOutput'>>,
+    patch: Partial<Pick<Editio, 'status' | 'externalRef' | 'visibility' | 'custody' | 'reviewOutcome' | 'leasedUntil' | 'moderation' | 'hostedOutput' | 'failure'>>,
   ): Promise<Editio> {
     const result = await this.col.findOneAndUpdate(
       { id },

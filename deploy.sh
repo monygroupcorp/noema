@@ -286,6 +286,10 @@ NEW_CONTAINER="${APP_CONTAINER}-new"
 NEW_ALIAS="${CONTAINER_ALIAS}-new"
 stop_container_if_exists "${NEW_CONTAINER}"
 
+# Logs go to the host journal, not docker's json-file: a json-file log is deleted with its
+# container, and step 8 below removes the old container on every deploy, so an incident from
+# before the last deploy left nothing to read. The journal keeps them across deploys, rotated by
+# journald's own size cap. Read them with `journalctl -t noema` (`docker logs` still works too).
 run_logged "Starting new container (${IMAGE})..." docker run -d \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
   --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
@@ -294,8 +298,8 @@ run_logged "Starting new container (${IMAGE})..." docker run -d \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
   --restart unless-stopped \
-  --log-opt max-size=100m \
-  --log-opt max-file=3 \
+  --log-driver journald \
+  --log-opt tag=noema \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
   -v "${COMPLIANCE_DIR}:/usr/src/app/dist/private/compliance:ro" \
   -v "${CEREMONY_DIR}:${CEREMONY_DIR_IN_CONTAINER}" \

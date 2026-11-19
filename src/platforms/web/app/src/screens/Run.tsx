@@ -6,6 +6,7 @@ import { useIdentity } from '../state/identity';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
 import { Lightbox } from '../components/Lightbox';
+import { ReportOutput } from '../shell/ReportOutput';
 import { api, type SettledRun } from '../lib/api';
 import { flowSummaries } from '../lib/flows';
 import { toUI } from './Catalog';
@@ -225,6 +226,7 @@ export function Run() {
                 <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> View in Space</Link>
                 <Link className="btn-ghost" to="/canvas"><Ic name="workflow" /> Send to Canvas</Link>
                 <Link className="btn-ghost" to="/catalog"><Ic name="rotate-cw" /> New run</Link>
+                {imgDone && <ReportOutput runId={id} />}
               </div>
             </div>
           </div>

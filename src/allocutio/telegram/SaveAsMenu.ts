@@ -14,6 +14,7 @@
 // Telegram-specific beyond the PromptSender slice.
 
 import type { Modorum, Modus, AuctorKey } from '../../types/modus.js'
+import { requiredUseTerms } from '../../crystal/useTerms.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { COPY } from '../lexicon/copy.js'
 
@@ -238,6 +239,9 @@ export class SaveAsMenu {
       ...(draft.suffixum !== undefined ? { promptSuffixum: draft.suffixum } : {}),
       pinned: draft.seed.pinned,
     })
+    // The base's licence terms, through its whole lineage, travel with the saved flow.
+    const terms = await requiredUseTerms(draft.base, (id) => this.deps.modorum.find(id))
+    if (terms.length > 0) modus.useTerms = terms
     await this.deps.modorum.register(modus)
     await this.deps.sink.editMessageText?.(draft.chatId, messageId, COPY.saveAs.saved(draft.slug)).catch(() => {})
   }

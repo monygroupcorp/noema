@@ -227,7 +227,16 @@ gen uses that model (the ChainEngine royalty surface). So:
      placeholder above; the our-bucket leg is done. **Weights STREAM end-to-end** (2026-06-22): `_hostModel`
      uses `MediaFetcher.fetchStream` → `ObjectStore.putStream` (lib-storage multipart) when both are present,
      so a multi-GB checkpoint never buffers whole in memory; it falls back to the buffered path for
-     LoRA-sized files / test fakes.
+     LoRA-sized files / test fakes. **Civitai-origin weights need a Bearer token (2026-11-13):** Civitai
+     gates its download endpoint even for ordinary public LoRAs now, so `_hostModel` sends
+     `CIVITAI_API_TOKEN` as `Authorization: Bearer` to civitai.com only (`civitaiAwareFetcher`,
+     `src/crystal/civitaiAuth.ts`) — dropped on any redirect off that host, never logged. Missing/rejected
+     → a typed `CivitaiDownloadError` instead of a bare 401; the buffered path also verifies the downloaded
+     bytes are a real safetensors file before upload (`isValidSafetensorsHeader`) — not done on the
+     streaming path (a multi-GB checkpoint can't be peeked without buffering it). An adapter throw of any
+     kind is no longer silent: it is logged and recorded on the Editio (`Editio.failure`,
+     `Edition.failureNote` — `CrystalApi._settlePublication`). A PRIVATE import stays origin-only
+     (unaffected — `docs/spec/model-import.md`'s custody decision; only a PUBLIC promotion mirrors into R2).
    - ✅ **3c — one-call finality (`custody:'both'`) + auto-trigger (SHIPPED 2026-06-22).** A single `publish`
      of a model with `custody:'both'` creates TWO durable publications: the EXTERNAL registry copy (custody
      `theirs` when the caller has a BYO account for that registry, else our org) AND an R2 bucket MIRROR

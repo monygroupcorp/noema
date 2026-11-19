@@ -11,8 +11,10 @@ import { MemoryCredentum } from '../../../../src/crystal/MemoryCredentum.js'
 import { MemoryLinkToken } from '../../../../src/crystal/MemoryLinkToken.js'
 import { linkTelegramToAccount, issueTelegramRecoveryCode } from '../../../../src/allocutio/telegram/telegramRecovery.js'
 import { Wallet, type HDNodeWallet } from 'ethers'
+import { createHmac } from 'node:crypto'
 
 const SECRET = 'test-secret'
+const BOT_TOKEN = '123456:test-bot-token'
 
 // Inline persona/anima fakes (the apiAcceptors.test pattern) — a `'password'` persona
 // per username, minting one anima per fresh externusId and reusing it thereafter. Personas
@@ -79,7 +81,7 @@ function harness() {
   } as unknown as ApiFacade
 
   const app = express()
-  app.use('/v1/auth', express.json(), createAuthRouter({ credenta, personae, animae, jwtSecret: SECRET, linkTokens, botUsername: 'noemabot' }))
+  app.use('/v1/auth', express.json(), createAuthRouter({ credenta, personae, animae, jwtSecret: SECRET, linkTokens, botUsername: 'noemabot', botToken: BOT_TOKEN }))
   app.use('/v1', createApiRouter({ api, identity }))
   return { app, credenta, created, personae, animae, linkTokens }
 }
@@ -410,6 +412,75 @@ test('telegram recover: a reused / bogus code → 400 (single-use), never a sess
   // Second use of the same code is rejected (single-use).
   assert.equal((await request(app).post('/v1/auth/telegram/recover').send({ code })).status, 400)
   assert.equal((await request(app).post('/v1/auth/telegram/recover').send({ code: 'garbage' })).status, 400)
+})
+
+// ── Telegram Mini App sign-in (the bot's Buy credits button) ─────────────────────────
+
+/** A Mini App launch for `telegramUserId`, signed the way Telegram signs one. */
+function miniAppLaunch(telegramUserId: number, botToken = BOT_TOKEN, authDate = Math.floor(Date.now() / 1000)): string {
+  const fields: Record<string, string> = {
+    auth_date: String(authDate),
+    query_id: `q${telegramUserId}`,
+    user: JSON.stringify({ id: telegramUserId, first_name: 'T' }),
+  }
+  const checkString = Object.keys(fields).sort().map(k => `${k}=${fields[k]}`).join('\n')
+  const secret = createHmac('sha256', 'WebAppData').update(botToken).digest()
+  const hash = createHmac('sha256', secret).update(checkString).digest('hex')
+  return new URLSearchParams({ ...fields, hash }).toString()
+}
+
+test('telegram webapp: a signed launch signs in as the account that Telegram user is bound to', async () => {
+  const { app, personae, linkTokens } = harness()
+  const { animaId } = await signUp(app, 'tgwebapp')
+  await linkTelegramToAccount({ personae, linkTokens }, '4242', await linkTokens.issue(animaId, 'tg-link', 600))
+
+  const res = await request(app).post('/v1/auth/telegram/webapp').send({ initData: miniAppLaunch(4242) })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.animaId, animaId, 'lands on the web account the bot chat is linked to')
+  const me = await request(app).get('/v1/me').set('authorization', `Bearer ${res.body.session.token}`)
+  assert.equal(me.body.animaId, animaId, 'the minted session is a working bearer for that account')
+})
+
+test('telegram webapp: an unlinked Telegram user signs in as the account the bot already uses for them', async () => {
+  const { app, personae, animae, linkTokens } = harness()
+  const botSide = await issueTelegramRecoveryCode({ personae, animae, linkTokens }, '5151')
+  const viaRecover = await request(app).post('/v1/auth/telegram/recover').send({ code: botSide })
+  const viaLaunch = await request(app).post('/v1/auth/telegram/webapp').send({ initData: miniAppLaunch(5151) })
+  assert.equal(viaLaunch.status, 200)
+  assert.equal(viaLaunch.body.animaId, viaRecover.body.animaId, 'same account /recover would have signed into')
+})
+
+test('telegram webapp: a launch is single-use', async () => {
+  const { app } = harness()
+  const initData = miniAppLaunch(6161)
+  assert.equal((await request(app).post('/v1/auth/telegram/webapp').send({ initData })).status, 200)
+  const replay = await request(app).post('/v1/auth/telegram/webapp').send({ initData })
+  assert.equal(replay.status, 400)
+  assert.equal(replay.body.session, undefined)
+})
+
+test('telegram webapp: a forged, foreign-signed or stale launch never yields a session, and mints no account', async () => {
+  const { app, created } = harness()
+  const forged = new URLSearchParams(miniAppLaunch(7171))
+  forged.set('user', JSON.stringify({ id: 1, first_name: 'Mallory' }))
+  for (const initData of [
+    forged.toString(),
+    miniAppLaunch(7171, '999:another-bot'),
+    miniAppLaunch(7171, BOT_TOKEN, Math.floor(Date.now() / 1000) - 11 * 60),
+    '',
+  ]) {
+    const res = await request(app).post('/v1/auth/telegram/webapp').send({ initData })
+    assert.equal(res.status, 400, initData)
+    assert.equal(res.body.session, undefined)
+  }
+  assert.deepEqual(created, [], 'no anima minted for a refused launch')
+})
+
+test('telegram webapp: no bot token configured → 501, even for a well-formed launch', async () => {
+  const { personae, animae } = stores()
+  const app = express()
+  app.use('/v1/auth', express.json(), createAuthRouter({ credenta: new MemoryCredentum(), personae, animae, jwtSecret: SECRET, linkTokens: new MemoryLinkToken() }))
+  assert.equal((await request(app).post('/v1/auth/telegram/webapp').send({ initData: miniAppLaunch(8181) })).status, 501)
 })
 
 test('an invalid link code does not bind anything', async () => {

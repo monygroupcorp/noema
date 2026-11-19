@@ -15,10 +15,11 @@ import tls from 'tls'
 import crypto from 'crypto'
 import type { TeePodProvisioner, TeeProvisionResult, TeeIngress } from './TeePodProvisioner.js'
 import { makeLogger } from '../lib/logger.js'
+import { createRunPodPod, deleteRunPodPod } from './runpodRest.js'
+import { DEFAULT_GPU_TYPE_IDS } from './SecurePodClient.js'
 
 const log = makeLogger('tee:provisioner')
 
-const RUNPOD_REST_API    = 'https://rest.runpod.io/v1'
 const RUNPOD_GQL_API     = 'https://api.runpod.io/graphql'
 const MACHINE_POLL_MS    = 8_000
 const MACHINE_TIMEOUT_MS = 5 * 60 * 1_000
@@ -33,7 +34,7 @@ export interface TeeProvisionerConfig {
   imageId: string
   /** Public URL the pod calls back to (e.g. "https://staging.noema.art"). No trailing slash. */
   platformCallback: string
-  /** RunPod GPU type IDs to request. Defaults to RTX 4090. */
+  /** RunPod GPU type IDs to try, in order. Defaults to DEFAULT_GPU_TYPE_IDS. */
   gpuTypeIds?: string[]
   cloudType?: string
   containerDiskGb?: number
@@ -73,14 +74,8 @@ export class TeeProvisioner implements TeePodProvisioner {
   }
 
   async terminate(podId: string): Promise<void> {
-    const res = await fetch(`${RUNPOD_REST_API}/pods/${podId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      log.warn('terminate failed', { podId, status: res.status, text })
-    }
+    const { ok, reason } = await deleteRunPodPod(fetch, this.config.apiKey, podId, 15_000)
+    if (!ok) log.warn('terminate failed', { podId, reason })
   }
 
   /**
@@ -97,17 +92,14 @@ export class TeeProvisioner implements TeePodProvisioner {
   }
 
   private async _startPod(sessionId: string, wgClientPublicKey: string, runnerToken?: string): Promise<{ podId: string; costPerHrUsd?: number }> {
-    // REST v1 is used for SECURE cloud (podFindAndDeployOnDemand GQL creates community pods).
+    // REST is used for SECURE cloud (podFindAndDeployOnDemand GQL creates community pods).
     // SECURE pods on dedicated hardware have NET_ADMIN by default — no dockerArgs needed.
-    const body: Record<string, unknown> = {
+    const base = {
       name: `noema-tee-${sessionId.slice(0, 8)}`,
-      imageName: this.config.imageId,
-      gpuCount: 1,
-      cloudType: this.config.cloudType ?? 'SECURE',
-      containerDiskInGb: this.config.containerDiskGb ?? 40,
+      image: this.config.imageId,
+      cloud: this.config.cloudType ?? 'SECURE',
+      disk: this.config.containerDiskGb ?? 40,
       ports: ['8080/http'],
-      supportPublicIp: true,
-      ...(this.config.gpuTypeIds ? { gpuTypeIds: this.config.gpuTypeIds } : {}),
       env: {
         SESSION_ID:        sessionId,
         PLATFORM_CALLBACK: this.config.platformCallback,
@@ -115,23 +107,15 @@ export class TeeProvisioner implements TeePodProvisioner {
         ...(runnerToken ? { RUNNER_TOKEN: runnerToken } : {}),
       },
     }
-
-    const res = await fetch(`${RUNPOD_REST_API}/pods`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+    const gpuIds = this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS
+    const pod = await createRunPodPod({
+      fetchFn: fetch,
+      apiKey: this.config.apiKey,
+      candidates: gpuIds.map(id => ({ label: id, body: { ...base, gpu: { id, count: 1 } } })),
+      timeoutMs: 30_000,
+      what: 'TEE pod',
     })
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RunPod pod creation failed: ${res.status} ${text}`)
-    }
-
-    const data = await res.json() as { id: string; costPerHr?: number }
-    return { podId: data.id, costPerHrUsd: data.costPerHr }
+    return { podId: pod.id, costPerHrUsd: pod.cost }
   }
 
   private async _waitForHealth(podId: string): Promise<void> {

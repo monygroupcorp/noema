@@ -116,3 +116,16 @@ test('a Detail action with a url renders as a link button, not a callback', () =
   assert.deepEqual(rows[0], [{ text: 'Buy credits', url: 'https://example.test/funding' }])
   assert.deepEqual(rows[1], [{ text: 'Try again', callback_data: 'a:run_again' }])
 })
+
+test('an asAccount Detail link opens as a Mini App in a private chat and stays a plain link in a group', () => {
+  const card = {
+    kind: 'Detail' as const, label: 'Insufficient balance', content: 'x',
+    actions: [{ id: 'buy_credits', label: 'Buy credits', url: 'https://example.test/funding', asAccount: true }],
+  }
+  assert.deepEqual(renderPrimitive(card, 456).extra!.reply_markup!.inline_keyboard[0],
+    [{ text: 'Buy credits', web_app: { url: 'https://example.test/funding' } }])
+  assert.deepEqual(renderPrimitive(card, -100456).extra!.reply_markup!.inline_keyboard[0],
+    [{ text: 'Buy credits', url: 'https://example.test/funding' }])
+  assert.deepEqual(renderPrimitive(card).extra!.reply_markup!.inline_keyboard[0],
+    [{ text: 'Buy credits', url: 'https://example.test/funding' }], 'no chat known → never a Mini App')
+})

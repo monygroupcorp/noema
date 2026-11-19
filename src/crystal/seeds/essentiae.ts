@@ -1125,6 +1125,8 @@ export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [
@@ -1193,6 +1195,8 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [
@@ -1277,6 +1281,8 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [

@@ -100,6 +100,40 @@ test('YOUR STUDIOS: draining status renders explicitly', () => {
   assert.match(text, /draining \(balance depleted\)/)
 })
 
+test('YOUR STUDIOS: terminated studios are counted, not enumerated', () => {
+  const makeTerminated = (i: number) => ({
+    studioId: `mat-dead-${i}`, materiaId: `mat-dead-${i}`, label: 'pytorch on RTX 4090',
+    status: 'terminated' as const, guestsToday: 0, netImpetus: -10n, netUsd: -0.003,
+  })
+  const { text, keyboard } = StatusView.render({
+    ...empty,
+    studios: [
+      { studioId: 'mat-live', materiaId: 'mat-live', label: 'flux-v1 on H100', status: 'idle', guestsToday: 0, netImpetus: 0n, netUsd: 0 },
+      ...Array.from({ length: 52 }, (_, i) => makeTerminated(i)),
+    ],
+  })
+  assert.match(text, /YOUR STUDIOS \(1\)/, 'header counts live studios only')
+  assert.match(text, /flux-v1 on H100 — idle/, 'the live studio still gets its row')
+  assert.ok(!text.includes('terminated —'), 'no per-row terminated line')
+  assert.match(text, /\(\+52 terminated\)/, 'one terse count line for the rest')
+  assert.equal(text.split('\n').filter(l => l.includes('pytorch on RTX 4090')).length, 0,
+    'the dead studios never print their own line')
+  assert.ok(cb(keyboard).includes('stat:bulletin:mat-live'), 'the live studio keeps its bulletin button')
+  assert.ok(!cb(keyboard).some(d => d.startsWith('stat:bulletin:mat-dead')),
+    'terminated studios get no bulletin button — nothing to jump to')
+})
+
+test('YOUR STUDIOS: all studios terminated still surfaces the count', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    studios: [{
+      studioId: 'mat-1', materiaId: 'mat-1', label: 'flux-v1 on H100', status: 'terminated',
+      guestsToday: 0, netImpetus: 0n, netUsd: 0,
+    }],
+  })
+  assert.match(text, /\(\+1 terminated\)/)
+})
+
 test('JOINABLE: open vs queue depth', () => {
   const { text, keyboard } = StatusView.render({
     ...empty,

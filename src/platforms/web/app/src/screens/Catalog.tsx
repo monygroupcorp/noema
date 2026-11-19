@@ -163,7 +163,7 @@ export function Catalog() {
               {flows === null
                 ? <span style={{ color: 'var(--faint)' }}>Loading the corpus…</span>
                 : <>
-                    {models.toLocaleString()} open models — yours to run.
+                    {models.toLocaleString()} open models.
                   </>}
             </h1>
             {/* The count is plain text: accent marks what can be pressed (DESIGN.md D-9). Under

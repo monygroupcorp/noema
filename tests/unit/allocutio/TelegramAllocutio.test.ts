@@ -2066,7 +2066,7 @@ test('a public result still falls back to the URL as text when the send fails', 
 
 const FUNDING = 'https://example.test/funding'
 const linkButtons = (extra: unknown) =>
-  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } } | undefined)
+  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string; web_app?: { url: string } }>> } } | undefined)
     ?.reply_markup?.inline_keyboard ?? []).flat()
 
 test('a tap on a button whose flow is gone is answered with a toast, not silence', async () => {
@@ -2115,12 +2115,12 @@ test('start screen: the make button runs the bound /make flow, not the generic p
   assert.equal(init.state?.modusId, 'flux-schnell', 'with the canon /make flow, exactly as /make does')
 })
 
-test('start screen: second row is status + a top-up link; the dead wallet/balance buttons are gone', async () => {
+test('start screen: second row is status + a signed-in top-up; the dead wallet/balance buttons are gone', async () => {
   const { allocutio, sender } = makeAllocutio({ fundingUrl: FUNDING })
   await allocutio.receive(msgUpdate(123, 456, '/start'))
   const buttons = linkButtons(sender.sent[0].extra)
   assert.ok(buttons.some(b => b.callback_data === 's:status'))
-  assert.ok(buttons.some(b => b.url === FUNDING && /top up/i.test(b.text)))
+  assert.ok(buttons.some(b => b.web_app?.url === FUNDING && /top up/i.test(b.text)), 'a Mini App button: opens Funding signed in')
   assert.ok(!buttons.some(b => b.callback_data?.startsWith('a:')), 'no action button with no handler behind it')
 
   sender.sent.length = 0
@@ -2131,7 +2131,14 @@ test('start screen: second row is status + a top-up link; the dead wallet/balanc
 test('start screen without a funding url offers no top-up button (no link beats a dead one)', async () => {
   const { allocutio, sender } = makeAllocutio()
   await allocutio.receive(msgUpdate(123, 456, '/start'))
-  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url), 'no url button')
+  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url || b.web_app), 'no link button')
+})
+
+test('start screen states the group rule, same words as /help', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  assert.match(sender.sent[0].text, /group/i)
+  assert.match(sender.sent[0].text, /mention me/i)
 })
 
 test('plain text into an idle private chat gets the hint, once a minute', async () => {
@@ -2164,8 +2171,8 @@ test('an empty balance reaching the adapter is answered with the top-up route an
   router.enter = realEnter
   const msg = sender.sent.find(m => /Credits are bought on the web/.test(m.text))
   assert.ok(msg, 'says how to top up, not just that the balance is short')
-  assert.match(msg!.text, /\/recover/)
-  assert.ok(linkButtons(msg!.extra).some(b => b.url === FUNDING), 'with the link')
+  assert.doesNotMatch(msg!.text, /\/recover/, 'a private chat needs no code')
+  assert.ok(linkButtons(msg!.extra).some(b => b.web_app?.url === FUNDING), 'with a button that opens Funding signed in')
 })
 
 test('a flow completed by ✕ says Cancelled, not Done', async () => {
@@ -2176,4 +2183,106 @@ test('a flow completed by ✕ says Cancelled, not Done', async () => {
   router.triggerResolution(ctx, { kind: 'complete', output: { cancelled: true } })
   await new Promise(r => setImmediate(r))
   assert.equal(sender.sent[0]?.text, 'Cancelled.')
+})
+
+// -----------------------------------------------------------------------------
+// Activity log: every received update leaves an info line keyed by chat.
+// -----------------------------------------------------------------------------
+
+async function captureTelegramLog(fn: () => Promise<void>): Promise<import('../../../src/lib/logger.js').LogEntry[]> {
+  const entries: import('../../../src/lib/logger.js').LogEntry[] = []
+  const collect = (e: import('../../../src/lib/logger.js').LogEntry) => { if (e.component === 'telegram:allocutio') entries.push(e) }
+  bus.on('log', collect)
+  try { await fn() } finally { bus.off('log', collect) }
+  return entries
+}
+
+test('a received message is logged at info with its chat id and chat type', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(msgUpdate(123, 456, 'just chatting')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.ok(line, 'an info line for the update')
+  assert.equal(line!.level, 'info')
+  assert.equal(line!.chatId, 456)
+  assert.equal(line!.chatType, 'private')
+  assert.equal(line!.kind, 'message')
+})
+
+test('a received callback is logged at info with its chat id', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(cbUpdate(123, -789, 'noop')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.chatId, -789)
+  assert.equal(line?.kind, 'callback_query')
+})
+
+test('the bot being removed from a group is logged with the chat and timestamp, and nothing is dispatched', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 5,
+    my_chat_member: {
+      chat: { id: -1002, type: 'supergroup', title: 'Night Shift' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'administrator', user: { id: 7 } },
+      new_chat_member: { status: 'kicked', user: { id: 7 } },
+    },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat membership')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.event, 'removed')
+  assert.equal(line?.chatId, -1002)
+  assert.equal(line?.at, '2023-11-14T22:13:20.000Z')
+  assert.equal(router.calls.length, 0)
+  assert.equal(sender.sent.length, 0)
+})
+
+test('being added to a group posts the group rule once; no other my_chat_member event posts anything', async () => {
+  const added = makeAllocutio()
+  await added.allocutio.receive({
+    update_id: 7,
+    my_chat_member: {
+      chat: { id: -2001, type: 'supergroup', title: 'Bastion' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'left', user: { id: 7 } },
+      new_chat_member: { status: 'member', user: { id: 7 } },
+    },
+  })
+  assert.equal(added.sender.sent.length, 1)
+  assert.equal(added.sender.sent[0].chatId, -2001)
+  assert.match(added.sender.sent[0].text, /group/i)
+
+  for (const [oldStatus, newStatus] of [
+    ['administrator', 'kicked'],   // removed
+    ['member', 'administrator'],  // promoted
+    ['administrator', 'member'],  // demoted
+    ['member', 'restricted'],     // restricted
+  ] as const) {
+    const other = makeAllocutio()
+    await other.allocutio.receive({
+      update_id: 8,
+      my_chat_member: {
+        chat: { id: -2002, type: 'supergroup' },
+        from: { id: 42 },
+        date: 1_700_000_000,
+        old_chat_member: { status: oldStatus, user: { id: 7 } },
+        new_chat_member: { status: newStatus, user: { id: 7 } },
+      },
+    })
+    assert.equal(other.sender.sent.length, 0, `${oldStatus} -> ${newStatus} should post nothing`)
+  }
+})
+
+test('a group migrating to a supergroup is logged with both chat ids', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 6,
+    message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: -55, type: 'group' }, migrate_to_chat_id: -100155 },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat migration')
+  assert.equal(line?.event, 'migrated_to')
+  assert.equal(line?.chatId, -55)
+  assert.equal(line?.toChatId, -100155)
 })

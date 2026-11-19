@@ -1,6 +1,7 @@
 import type { Collection, Document } from 'mongodb'
 import type { Intella, Intellae, IntellaGenus, IntellaSource, Intellarum } from '../types/intelligendi.js'
 import { inferFamilia } from './inferFamilia.js'
+import { assertLoraSources } from './intellaSourceGuard.js'
 
 // =============================================================================
 // V2 → V1 backward-compat shim
@@ -226,19 +227,26 @@ export class MongoIntella implements Intellarum {
 
   /** Insert or fully replace an Intella record. Used for seeding canonical models. Self-heals
    *  the first-class `familia` from the tag/name heuristic when a record arrives without one, so
-   *  every write seam keeps `familia` populated and `triggerMap` (which keys on it) stays whole. */
+   *  every write seam keeps `familia` populated and `triggerMap` (which keys on it) stays whole.
+   *  Refuses a canonica/public LoRA with no download source (see `intellaSourceGuard`). */
   async upsert(intella: Intella): Promise<void> {
     const record = intella.familia ? intella : (() => {
       const familia = inferFamilia(intella)
       return familia ? { ...intella, familia } : intella
     })()
+    assertLoraSources(record, 'write')
     await this.col.replaceOne({ id: record.id }, record, { upsert: true })
   }
 
   /** Flip a model's resolvability — the publishing reconciler's write seam (§5d).
    *  Sets the v1 binary `access` string; the top-level `ownerAnimaId` gating is
-   *  untouched, so a later flip back to 'private' restores owner-scoped resolution. */
+   *  untouched, so a later flip back to 'private' restores owner-scoped resolution. Refuses to
+   *  make a LoRA public while it names no download source. */
   async setAccess(id: string, access: 'public' | 'private'): Promise<Intella | null> {
+    if (access === 'public') {
+      const current = await this.col.findOne({ id })
+      if (current) assertLoraSources({ ...current, access }, 'publish')
+    }
     const doc = await this.col.findOneAndUpdate(
       { id },
       { $set: { access, mutatum: new Date() } },
@@ -273,12 +281,14 @@ export class MongoIntella implements Intellarum {
     return doc ? projectV2ToV1(doc) : null
   }
 
-  /** Remove a download source by uri — the inverse of `addSource` (retract). */
+  /** Remove a download source by uri — the inverse of `addSource` (retract). Refuses to remove
+   *  the last source of a canonica/public LoRA. */
   async removeSource(id: string, uri: string): Promise<Intella | null> {
     const current = await this.col.findOne({ id })
     if (!current) return null
     const existing = (Array.isArray(current.sources) ? current.sources : []) as IntellaSource[]
     const sources = existing.filter((s) => s?.uri !== uri)
+    assertLoraSources({ ...current, sources }, 'remove the last source of')
     const doc = await this.col.findOneAndUpdate(
       { id },
       { $set: { sources, mutatum: new Date() } },

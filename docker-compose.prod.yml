@@ -18,6 +18,11 @@ x-common: &common
     - ALL
   security_opt:
     - no-new-privileges
+  # Logs go to the host journal so they outlive the container; deploy.sh does the same.
+  logging:
+    driver: journald
+    options:
+      tag: noema
 
 services:
   clip:
@@ -81,6 +86,10 @@ services:
     container_name: hyperbot-staging
     image: ghcr.io/monygroupcorp/noema:staging
     env_file: .env.staging
+    logging:
+      driver: journald
+      options:
+        tag: noema-staging
     networks:
       hyperbot:
         aliases:

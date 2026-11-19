@@ -134,6 +134,7 @@ export interface ApiFacade {
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
   eraseMe(auctor: AuctorKey): Promise<import('../../types/erasure.js').ErasureReceipt>
   recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }>
+  acceptUseTerms(auctor: AuctorKey, termsId: string): Promise<{ terms: string; versio: string; acceptedAt: number }>
   putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
   removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
   setAppearance(auctor: AuctorKey, appearance: import('../../types/consuetudo.js').Appearance): Promise<import('../../types/consuetudo.js').Appearance>
@@ -227,7 +228,7 @@ export interface ApiFacade {
   // --- Fiat funding rail (Stripe) ---
   /** PUBLIC display catalog (no auth) — the single source the pricing + Funding UIs render from. */
   listPacks(): PackView[]
-  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
 
@@ -489,11 +490,12 @@ export function createApiRouter(deps: {
     '/payments/checkout',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const { packId, successUrl, cancelUrl } = req.body ?? {}
+      const { packId, successUrl, cancelUrl, allocutio } = req.body ?? {}
       const out = await api.createCheckout(auctor, {
         packId,
         ...(typeof successUrl === 'string' ? { successUrl } : {}),
         ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+        ...(typeof allocutio === 'string' ? { allocutio } : {}),
       })
       res.status(200).json(out)
     }),
@@ -1558,6 +1560,13 @@ export function createApiRouter(deps: {
   // be enabled. Anon-capable (keyed by AuctorKey — anon Bursa/commitment and named Anima both work).
   router.post('/me/attestation', wrap(async (req, res) => {
     res.status(200).json({ attestation: await api.recordAttestation(await auth(req)) })
+  }))
+
+  // POST /v1/me/terms/:id — accept the current version of a flow's upstream licence terms
+  // (`Modus.useTerms`, e.g. MiniMax H3's use restrictions). A flow that declares them refuses to
+  // run with `terms.required` until this is on file. Anon-capable, like the attestation above.
+  router.post('/me/terms/:id', wrap(async (req, res) => {
+    res.status(200).json({ acceptance: await api.acceptUseTerms(await auth(req), String(req.params.id)) })
   }))
 
   // PUT/DELETE /v1/me/secrets/:provider — connect/disconnect a BYO gated-origin credential

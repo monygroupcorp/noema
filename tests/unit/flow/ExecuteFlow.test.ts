@@ -365,6 +365,8 @@ test('insufficient balance: with a funding url the step links the page and every
   if (p.kind !== 'Detail') return
   const buy = p.actions.find(a => a.id === 'buy_credits')
   assert.equal(buy?.url, 'https://example.test/funding', 'Buy credits is a link to the funding page')
+  assert.equal(buy?.asAccount, true, 'opens signed in as this account where the platform can prove who taps')
+  assert.match(p.content, /Tap Buy credits/)
   assert.match(p.content, /https:\/\/example\.test\/funding/)
   assert.deepEqual(p.actions.map(a => a.id), ['buy_credits', 'run_again', 'cancel'])
 })

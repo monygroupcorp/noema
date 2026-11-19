@@ -199,6 +199,35 @@ service, error tracking, dashboards, or any automated wiring of the above snippe
 `deploy.sh` or a droplet-side scheduler. This item documents the pattern; it does not
 stand it up.
 
+## Logs
+
+The app writes one JSON object per line to stdout. Both app containers send stdout to the
+host's **systemd journal** (`--log-driver journald` in `deploy.sh` and `deploy-staging.sh`,
+`logging:` in `docker-compose.prod.yml`), tagged `noema` and `noema-staging`.
+
+Why not docker's default json-file driver: a json-file log is deleted with its container, and
+every deploy removes the old container. Under json-file, an issue reported a week later could
+not be read from logs once a deploy had happened since.
+
+Retention is journald's: the droplet keeps a persistent journal (`/var/log/journal`) with the
+default size cap (10% of the filesystem, at most 4G), and old entries rotate out first. As of
+2026-11 the journal held four months in 1.4G, and the app writes on the order of kilobytes per
+hour, so the window is months, not days. `journalctl --disk-usage` shows the current size.
+
+```bash
+journalctl -t noema --since "2026-11-01" --until "2026-11-03"            # prod, a date range
+journalctl -t noema -o cat | grep '"chatId":-1001234567890'              # one Telegram chat
+journalctl -t noema -o cat | grep '"msg":"telegram chat membership"'     # bot added/removed/promoted
+journalctl -t noema-staging -f                                           # follow staging
+```
+
+`docker logs <container>` still works for the current container.
+
+Telegram lines to look for: `telegram update` (every inbound message/callback, with `chatId`,
+`chatType`, `userId`, the command word; never message text), `telegram chat membership` (the
+bot added, removed, promoted, demoted or restricted in a chat, with `oldStatus`, `newStatus`,
+`at`), and `telegram chat migration` (a group upgraded to a supergroup, with both chat ids).
+
 ## Backups
 
 **Audited 2026-11-06:** the droplet runs no app- or database-specific cron or systemd

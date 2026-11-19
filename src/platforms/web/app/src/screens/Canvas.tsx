@@ -718,7 +718,10 @@ export function Canvas() {
         )}
         <div className="canvas-bar">
           <span className="hint">
-            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''}
+            {/* An empty count is noise (D-58): "Add a tool" above already says the canvas is
+                new, so the counter earns its place only once there's something to count. */}
+            {nodes.length > 0 ? `${nodes.length} tools` : ''}
+            {saveState !== 'idle' ? `${nodes.length > 0 ? ' · ' : ''}${saveState === 'saving' ? 'saving…' : 'saved'}` : ''}
             {/* Pointer and keyboard hints — hidden on a phone or a touch screen, where none of
                 them applies (DESIGN.md P-1a); the facts before them stay. */}
             <span className="keys"> · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges</span>

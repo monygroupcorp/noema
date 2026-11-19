@@ -9,7 +9,7 @@
 
 import type { Actum, ActumStatus } from '../../types/actum.js'
 import type { Collectio, CollectioStatus } from '../../types/collectio.js'
-import type { Editio, EditioModeration } from '../../types/editio.js'
+import type { Editio, EditioModeration, EditioFailure } from '../../types/editio.js'
 import type { Sodalitas } from '../../types/sodalitas.js'
 import type { Provincia } from '../../types/provincia.js'
 import type { ActumIndex } from '../../types/actumIndex.js'
@@ -266,6 +266,19 @@ export function publisherModerationNote(m: EditioModeration): string {
     : 'Refused by automated review.'
 }
 
+/**
+ * What the publisher is told about a FAILED publish attempt (the adapter threw). Pure.
+ *
+ * `category` is the closed taxonomy (`EditioFailure`); the raw `reason` stays admin-only (same
+ * privacy posture as `publisherModerationNote` for the gate's raw verdict text) since it may
+ * name a host or a filename a publisher need not see.
+ */
+export function publisherFailureNote(f: EditioFailure): string {
+  return f.category === 'origin_auth'
+    ? "This model's weights could not be downloaded from its origin — it needs a connected credential. Contact support if this persists."
+    : 'Publishing failed. Try again, or contact support if it keeps happening.'
+}
+
 /** Project an Editio onto its public, JSON-safe Edition shape. Pure. */
 export function toEdition(e: Editio): Edition {
   const out: Edition = {
@@ -283,6 +296,8 @@ export function toEdition(e: Editio): Edition {
   // admin-only (`CrystalApi.getEditionModeration`), never reaches this public
   // projection (docs/spec/moderation-reject-reason.md §3(a) privacy note).
   if (e.moderation !== undefined) out.moderationNote = publisherModerationNote(e.moderation)
+  // Same posture for an adapter failure: the raw `e.failure.reason` stays admin-only.
+  if (e.failure !== undefined) out.failureNote = publisherFailureNote(e.failure)
   if (e.externalRef !== undefined) out.externalRef = e.externalRef
   if (e.owners !== undefined) out.owners = e.owners
   if (e.license !== undefined) out.license = e.license
