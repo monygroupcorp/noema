@@ -45,9 +45,9 @@ function extractFromAppTsx(source: string): { path: string; params: string[] }[]
 // Landing/Doc/Pricing pages and the sign-in door itself. HEURISTIC, not a route-level marker —
 // update this set if a route's public/auth posture changes.
 const PUBLIC_PATHS = new Set<string>([
-  '/', '/about', '/features', '/pricing', '/blog',
+  '/', '/about', '/features', '/pricing', '/blog', '/blog/:slug',
   '/legal/privacy', '/legal/cookies', '/legal/terms',
-  '/landing', '/onboard',
+  '/landing', '/onboard', '/partners', '/ceremony', '/lab/landing',
 ]);
 
 function appTsxPath(): string {
