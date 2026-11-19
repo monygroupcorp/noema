@@ -81,14 +81,14 @@ export function Teams() {
         {!session && ready && (
           <div className="warn gate">
             <div>Teams need an identified account. Sign in to create and manage them.</div>
-            <Link className="btn ghost" to={doorPath(here)}>Sign in</Link>
+            <Link className="btn accent" to={doorPath(here)}>Sign in</Link>
           </div>
         )}
 
         <div className="sectionhead">New team</div>
         <div style={{ display: 'flex', gap: 'var(--s3)', marginBottom: 'var(--s5)', flexWrap: 'wrap' }}>
           <input className="inp" style={{ flex: '1 1 260px' }} placeholder="team name" value={nomen} onChange={(e) => setNomen(e.target.value)} disabled={!session} />
-          <button className="btn accent" onClick={create} disabled={creating || !session || !nomen.trim()}>
+          <button className={session ? 'btn accent' : 'btn ghost'} onClick={create} disabled={creating || !session || !nomen.trim()}>
             <Ic name="users" /> {creating ? 'Creating…' : 'Create team'}
           </button>
         </div>

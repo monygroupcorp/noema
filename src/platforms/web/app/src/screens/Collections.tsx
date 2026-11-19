@@ -201,7 +201,7 @@ export function Collections() {
         {emptyShown && (
           <div className="empty">
             <div className="t">{scope ? `No collections filed into ${scope.name} yet` : 'No collections yet'}</div>
-            <div className="s">Name one — it costs nothing. You pick the flow and the traits afterwards.</div>
+            <div className="s">Name one — it costs nothing, and you pick the flow and traits afterwards.</div>
             <button className="btn" onClick={() => setCreating(true)}><Ic name="plus" /> New collection</button>
           </div>
         )}
