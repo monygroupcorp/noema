@@ -85,8 +85,15 @@ test('the MiniMax licence is published in full, with the clauses we flow down', 
 })
 
 test('the licence page is routed', () => {
+  // App.tsx lazy-loads every non-landing route (landing-load-budget), so the licence page's
+  // route no longer names `minimaxH3LicenseMd` inline — it's wired up through a dynamic
+  // import of the same content file, rendered through the same Doc component. What this
+  // test must still pin: the route exists, it reaches the published licence text, and Doc
+  // renders it — not the exact shape of the import.
   const app = readFileSync(`${WEB}/App.tsx`, 'utf8')
-  assert.match(app, /path="\/legal\/minimax-h3-license" element={<Doc md={minimaxH3LicenseMd} \/>}/)
+  assert.match(app, /path="\/legal\/minimax-h3-license"/)
+  assert.match(app, /content\/minimax-h3-license\.md\?raw/)
+  assert.match(app, /<Doc md={md}/)
 })
 
 test('the reference copy matches the published terms', () => {

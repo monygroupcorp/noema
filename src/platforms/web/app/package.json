@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && tsx scripts/check-entry-budget.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "check:entry-budget": "tsx scripts/check-entry-budget.ts",
+    "report:route-bytes": "tsx scripts/route-bytes-report.ts",
     "lint:tokens": "stylelint \"src/**/*.css\" --config .stylelintrc.json",
     "walk": "tsx walk/walk.ts",
     "walk:review": "tsx walk/review.ts",
