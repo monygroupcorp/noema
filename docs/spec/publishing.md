@@ -369,7 +369,18 @@ per-instance `agentDelegationEnabled` mechanism) — not a one-off NOEMA-owned c
 EOA's key must never again reach an app container as a raw env var (the threat model that cost
 `audit-high-eth-signer-key-plaintext-env` its finding): design #6's signing path — a local signer
 process reached over a unix socket, or a KMS-backed signer — before wiring the first real call, and
-provision the key through that boundary from the start.
+provision the key through that boundary from the start. The key is freshly generated for this
+purpose and holds only working gas — never the retired STATIONTHIS keystore, and never treasury
+funds — so a leak costs gas money and an agent revoke, not the vault.
+
+**Agent-key misuse monitoring for build-order #6:** from the day the noema agent address is first
+registered on `MasterRegistryV1`, watch that address on-chain: alert on every `AgentUpdated` event
+naming it, and on any `addEdition` / `setEditionSchedule` / `setEditionFreeMintAllocation` /
+`updateEditionMetadata` / `setStyle` call it makes that the ops channel did not expect. Those are
+exactly the calls `MasterRegistryV1.emergencyRevoker.revokeAgent()` exists to cut off (it bypasses
+the timelock); the alert has no value unless it reaches someone who can pull that switch before an
+unexpected batch of calls compounds. Wire the watcher and the alert route as part of #6 itself —
+there is no agent address to watch before one is registered.
 
 **Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when
 adding or removing one.
