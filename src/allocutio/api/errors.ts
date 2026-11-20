@@ -189,6 +189,10 @@ export const Errors = {
   /** No `PartnerStore` wired into this deployment's router — distinct from `notFoundPartner`
    *  (the store IS wired and simply has no record for this caller). */
   partnerDirectoryUnavailable: () => new ApiError('internal.unavailable', 'The partner directory is not available on this deployment', 503, { retryable: true }),
+  /** A modus's `ministerium` has no `Cursor` registered for it — a deployment-configuration
+   *  gap (e.g. no API key configured for that provider), not a caller mistake. */
+  ministeriumUnavailable: (ministerium: string | undefined) =>
+    new ApiError('internal.unavailable', `No execution backend is configured for ministerium '${ministerium}' on this deployment`, 503, { retryable: true, details: { ministerium } }),
   priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
   /** Account erasure is globally disabled on this deployment (feature flag off). Only reachable
    *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */
