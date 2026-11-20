@@ -1,52 +1,51 @@
 # The 8 — examples-of-our-own showcase plan
 
-rth's ruling set the target count at **8** (2026-11-20, on the "which one?" deliverable). This is
-the concrete list those 8 slots fill, each grounded in a real, already-registered noema modus —
-nothing here is invented or copied from a third-party corpus.
+rth's ruling set the target count at **8** (2026-11-20, "which one?" → picks 8). A second ruling
+on this same plan corrected its weighting: *"We don't give a shit about openai image really it's
+boring and we only have it to be quick we want to showvase the rh pod ones with trained models."*
+— read as: RunPod-pod flows and trained/forked models are the showcase; `gpt-image` is the quick
+fallback, not the bulk. This revision reflects that.
 
-Every row is fired with `scripts/examples-gallery/fire-example.ts` (now generalized to take
+Every row is fired with `scripts/examples-gallery/fire-example.ts` (generalized to take
 `--aditus '<json>'` for any modus, not just `--prompt` for gpt-image) against a scratch DB
 (`CRYSTAL_DB`, never `noema`/`noemaplane`), then the real JSON row goes into
 `src/platforms/web/app/src/lib/exampleGallery.ts`'s `SHOWCASE_EXAMPLES`.
 
 | # | id | feature | kind | modus | needs |
 |---|----|---------|------|-------|-------|
-| 1 | make-01 | make | image | `modus.gpt-image` | OpenAI only |
-| 2 | make-02 | make | image | `modus.gpt-image` | OpenAI only |
-| 3 | make-03 | make | image | `modus.gpt-image-edit` (i2i restyle) | OpenAI only |
-| 4 | collections-01 | collections | image | `modus.gpt-image`, fired 3× on one prompt axis (`Collections.tsx`'s own `SEED_MODUS_ID` pattern — a trait grid, not a single fire) | OpenAI only |
-| 5 | video-01 | make | video | `modus.frames-to-video` stitching 4–6 `modus.gpt-image` frames — `ministerium:'ffmpeg'`, host-side, no GPU | OpenAI + ffmpeg (always registered) |
-| 6 | video-02 | make | video | `modus.ltx-t2v` — real generated motion (not a slideshow); lightest of the t2v pod flows | **RunPod** |
-| 7 | muse-01 | muse | image | a captioned/decomposed dataset (`modus.dataset-caption` → `modus.dataset-decompose`) with one fragment combo kept — the image itself still fires through `modus.gpt-image` or a FLUX pod flow | **RunPod** (captioning runs "on a provisioned, billed pod" — `DatasetCaptionCursor.ts`) |
-| 8 | model-01 | model | image | `stationthis` — the real forked/LoRA custom modus already seeded (`src/crystal/seeds/modiCustom.ts`): forks `klein-edit-4b`, stacks the `impresstation-klein` LoRA | **RunPod** |
+| 1 | model-01 | model | image | `stationthis` — the real forked/LoRA custom modus already seeded (`src/crystal/seeds/modiCustom.ts`): forks `klein-edit-4b`, stacks the `impresstation-klein` LoRA | **RunPod** |
+| 2 | model-02 | model | image | `modus.aitoolkit-training` trains a fresh LoRA from a small image set + trigger word, then a make/edit flow generates with it — the "trained" half of clause 3, distinct from `stationthis`'s "forked" half | **RunPod** (two pod jobs: train, then generate) |
+| 3 | muse-01 | muse | image | a captioned/decomposed dataset (`modus.dataset-caption` → `modus.dataset-decompose`), one fragment combo kept, generated on a pod flow (FLUX/Krea), not gpt-image | **RunPod** (captioning "runs on a provisioned, billed pod" — `DatasetCaptionCursor.ts`) |
+| 4 | video-01 | make | video | `wan22-t2v` — Wan2.2 text-to-video (MoE), the higher-quality pod t2v | **RunPod** |
+| 5 | video-02 | make | video | `wan22-i2v` or `minimax-h3-fl2v` — animates a still into motion | **RunPod** |
+| 6 | video-03 | make | video | `minimax-h3-t2v` — text-to-video **with synced audio** in one pass, a flashy noema-only capability (no OpenAI equivalent) | **RunPod** |
+| 7 | collections-01 | collections | image | a trait-grid collection (`Collections.tsx`'s pattern — one flow, one prompt axis, several values) run on `flux-schnell` or `krea-turbo`, not the gpt-image seed default | **RunPod** |
+| 8 | make-01 | make | image | `modus.gpt-image` — the one quick/cheap anchor for the "make" bucket, kept to exactly one per the ruling above | OpenAI only |
 
-5 of 8 need only an OpenAI key (a few cents total). 3 need a RunPod pod up (real GPU minutes,
-real $ — rough order a few dollars total, not precisely priced here since I have not run one).
+7 of 8 need a RunPod pod up; only the one `make` anchor is OpenAI-only. This is a real shift from
+this plan's first draft (5 OpenAI-only / 3 RunPod) — expect real GPU minutes and real $ across
+training (slowest), captioning, two video renders, and three more pod generations. I have not
+run one of these myself, so I can't price it precisely; `modus.aitoolkit-training` and the video
+modi are the heaviest by wall-clock.
 
-## Why not more RunPod, and why not fewer
+## What's unchanged from the first draft
 
-`muse` and `model` are structurally pod-bound in the current codebase — there is no API-hosted
-substitute for LoRA training/forking or for ai-toolkit captioning, so clause 3's minimum ("at
-least muse, collections, and a trained or forked model") cannot be met on OpenAI credentials
-alone. `video` has a genuinely free path (`frames-to-video`) and a genuinely-motion path
-(`ltx-t2v`); I kept both rather than picking one, since a slideshow-of-stills alone would
-undersell "video is represented."
-
-## The blocker this plan does not solve
-
-This worktree has no path to live `OPENAI_API_KEY`/`MONGODB_URI`/`RUNPOD_*` — gripe `g-4c355a68`
-(open, filed by the prior seat) — and copying the primary checkout's `.env` in to get them was
-just refused by this session's own guard as unauthorized credential access, which I did not try
-to route around. Firing these 8 needs rth (or a seat rth hands credentials to directly) to run
-them by hand with `fire-example.ts`, or a decision on how credentials should reach a worktree
-safely.
+- No example's text or media is copied or adapted from any third-party corpus — every row above
+  is a real, already-registered noema modus, fired for real.
+- This worktree still has no path to live `OPENAI_API_KEY`/`MONGODB_URI`/`RUNPOD_*` — gripe
+  `g-4c355a68` (open) — and copying the primary checkout's `.env` in was refused by this session's
+  own guard as unauthorized credential access, which I did not try to route around. Firing these
+  8 needs rth (or a seat rth hands credentials to directly) to run them, or a decision on how
+  credentials should reach a worktree safely. With 7 of 8 rows now RunPod-bound, this is now the
+  binding blocker on every clause but 2.
 
 ## What this seat built without credentials
 
-- Generalized `fire-example.ts`: `--aditus '<json>'` for any modus, exitus extraction now reads
-  `image` or `video` (was `image`-only), OpenAI key now optional (host-side modi never touch it).
-  Verified: `npm run typecheck` and `npm run test:hermetic` both green, no regressions (3696/3696).
-- This plan — the 8 slots, mapped to real modi, the RunPod-cost rows named explicitly.
+- Generalized `fire-example.ts`: `--aditus '<json>'` for any modus, exitus extraction reads
+  `image` or `video`, OpenAI key now optional (host-side/pod modi never touch it). Verified:
+  `npm run typecheck` and `npm run test:hermetic` both green (3696/3696), no regressions.
+- This plan — now weighted to rth's ruling: pod flows and trained models lead, gpt-image is the
+  one quick anchor.
 
 ## Still open after this plan is approved
 
