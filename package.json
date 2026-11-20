@@ -13,6 +13,7 @@
     "guard:site-truth": "node scripts/guard-site-truth.mjs",
     "guard:weight-addresses": "npx tsx scripts/guard-weight-addresses.ts",
     "report:addressless-weights": "npx tsx scripts/report-addressless-intellae.ts",
+    "report:funnel": "npx tsx scripts/funnel-report.ts",
     "gen:api-docs": "npx tsx scripts/gen-api-docs.ts",
     "census:modules": "npx tsx scripts/module-census.ts",
     "muse:roll": "npx tsx scripts/muse-roll.ts",

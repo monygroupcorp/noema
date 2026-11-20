@@ -223,6 +223,16 @@ export interface Actorum {
    * collection's acta.
    */
   countByIdsWithStatus?(ids: string[], statuses: ActumStatus[]): Promise<number>
+  /**
+   * Count acta CREATED since `since`, grouped by their current status — attempts and
+   * completions, counted separately, from the one record every attempt already leaves
+   * (`create()` writes `status: 'nascens'` before any execution happens; see
+   * `ActumInceptor.initiate`). A status absent from the result is zero, not missing.
+   *
+   * Optional, the same way `countByIdsWithStatus` is: a store may omit it and the caller
+   * (the analytics totals endpoint) falls back to "not available on this store."
+   */
+  statusCountsSince?(since: Date): Promise<Partial<Record<ActumStatus, number>>>
 }
 
 // ---------------------------------------------------------------------------

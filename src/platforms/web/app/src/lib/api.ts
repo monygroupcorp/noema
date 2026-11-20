@@ -17,7 +17,15 @@ export interface QuerelaContext {
   runId?: string;
   actumId?: string;
   userAgent?: string;
+  /** Best-effort error text surfaced by the ErrorBoundary or a global error handler —
+   *  not typed by the user. See reportClientError() below. */
+  clientError?: string;
 }
+
+// noema/user-behaviour-corpus: the non-run visitor events the behaviour corpus records.
+// Mirrors the backend's closed vocabulary (src/analytics/BehaviourEvent.ts) — kept in step
+// by hand, same convention as QuerelaKind above.
+export type BehaviourEventKind = 'catalog_view' | 'quote' | 'sign_in' | 'funding_attempt';
 
 // The flow's canon verb, derived server-side at query time (`resolveCanonVerb`, noema-054).
 // Mirrors the backend's `CanonVerb` union (src/crystal/verbResolver.ts) and the
@@ -275,14 +283,25 @@ async function jSecret(res: Response): Promise<SecretView> {
 // Anonymous self-asserting spend identity (arcanum commitment). Stable per browser session.
 // For quotes it just identifies the caller; real spend is validated downstream against a funded note.
 export function commitment(): string {
-  let c = localStorage.getItem('noema-commitment');
-  if (!c) {
+  try {
+    let c = localStorage.getItem('noema-commitment');
+    if (!c) {
+      const b = new Uint8Array(24);
+      crypto.getRandomValues(b);
+      c = '0x' + Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('noema-commitment', c);
+    }
+    return c;
+  } catch (err) {
+    // Blocked/throwing localStorage (private mode, quota, a hardened browser setting) —
+    // the class of failure that otherwise never reaches the server. One anon commitment
+    // per call is a worse experience than a persisted one, but it keeps the app usable
+    // instead of crashing every anon-capable screen.
+    reportClientError(`commitment(): localStorage unavailable — ${String(err)}`);
     const b = new Uint8Array(24);
     crypto.getRandomValues(b);
-    c = '0x' + Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
-    localStorage.setItem('noema-commitment', c);
+    return '0x' + Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
   }
-  return c;
 }
 
 // ── Active Arcanum purse — the anonymous bearer token runs spend from ────────
@@ -292,11 +311,20 @@ export function commitment(): string {
 // the Card run surface shows a "paying with purse …" indicator + a clear affordance.
 const ACTIVE_PURSE_KEY = 'noema-active-purse';
 export function setActivePurse(token: string | null): void {
-  if (token) localStorage.setItem(ACTIVE_PURSE_KEY, token);
-  else localStorage.removeItem(ACTIVE_PURSE_KEY);
+  try {
+    if (token) localStorage.setItem(ACTIVE_PURSE_KEY, token);
+    else localStorage.removeItem(ACTIVE_PURSE_KEY);
+  } catch (err) {
+    reportClientError(`setActivePurse(): localStorage unavailable — ${String(err)}`);
+  }
 }
 export function getActivePurse(): string | null {
-  return localStorage.getItem(ACTIVE_PURSE_KEY);
+  try {
+    return localStorage.getItem(ACTIVE_PURSE_KEY);
+  } catch (err) {
+    reportClientError(`getActivePurse(): localStorage unavailable — ${String(err)}`);
+    return null;
+  }
 }
 
 // ── Multi-session store (JWT) — layered OVER the anon commitment ─────────────
@@ -335,7 +363,16 @@ function readStore(): SessionStore {
   } catch { /* fall through to empty */ }
   return { accounts: [], activeAnimaId: null };
 }
-function writeStore(s: SessionStore) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+function writeStore(s: SessionStore) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+  } catch (err) {
+    // Blocked localStorage means a sign-in cannot persist past this page load — degraded,
+    // but the caller's in-memory `next` still renders correctly for the current render, and
+    // the failure is now visible server-side instead of silently eating the session.
+    reportClientError(`writeStore(): localStorage unavailable — ${String(err)}`);
+  }
+}
 
 export function getAccounts(): SessionStore { return readStore(); }
 
@@ -412,6 +449,47 @@ const authHeaders = (): Record<string, string> => {
 // Read headers (GET): bearer if signed in, else the anon commitment (no content-type).
 const readHeaders = (): Record<string, string> =>
   getSession() ? { authorization: `Bearer ${getSession()}` } : { 'x-commitment': commitment() };
+
+// noema/user-behaviour-corpus clause 4: the web client reports its OWN errors, so a
+// failure that never reaches the server (e.g. blocked localStorage throwing during a
+// read/write above, or a render error the ErrorBoundary catches) is visible. Fire-and-forget
+// by design — a telemetry call must never itself throw or block the caller. Reuses the
+// existing Querela ("report an issue") store rather than a parallel channel: a `bug`
+// report with `clientError` set and no user-typed description.
+function reportClientError(message: string, route?: string): void {
+  try {
+    fetch('/v1/reports', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        kind: 'bug',
+        description: 'Automatically captured client error',
+        capturedState: { route: route ?? window.location?.pathname },
+        clientError: message.slice(0, 2000),
+        userAgent: navigator.userAgent,
+      }),
+    }).catch(() => { /* best-effort — a failed error report is not itself reported */ });
+  } catch {
+    /* authHeaders()/fetch threw synchronously — nothing more to do */
+  }
+}
+
+// noema/user-behaviour-corpus clauses 2/3: records one non-run visitor event, keyed on
+// the identity `authHeaders()` already attaches (bearer if signed in, else the anon
+// commitment) — never a new identity scheme. Fire-and-forget: a dropped behaviour event
+// must never block or fail the screen that triggered it. The server derives the device
+// bucket from the request's own User-Agent header; nothing about the device is sent here.
+function recordEvent(kind: BehaviourEventKind, meta: Record<string, string> = {}): void {
+  try {
+    fetch('/v1/events', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ kind, ...meta }),
+    }).catch(() => { /* best-effort */ });
+  } catch {
+    /* nothing more to do */
+  }
+}
 
 // A read only a named account can answer. The anonymous commitment path carries no animaId,
 // so the server has nothing to look up and can only refuse: GET /v1/me/partner answers 404
@@ -1441,8 +1519,13 @@ export const api = {
         description,
         capturedState: { route: context.route, runId: context.runId, actumId: context.actumId },
         userAgent: context.userAgent,
+        ...(context.clientError ? { clientError: context.clientError } : {}),
       }),
     }).then(j<{ id: string }>),
+
+  // noema/user-behaviour-corpus — see the module-level functions above for the contract.
+  recordEvent,
+  reportClientError,
 };
 
 // Every collection the caller owns, newest first — the pre-pagination reading of

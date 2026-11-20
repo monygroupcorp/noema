@@ -72,4 +72,13 @@ export class MemoryActorum implements Actorum {
     }
     return n
   }
+
+  async statusCountsSince(since: Date): Promise<Partial<Record<ActumStatus, number>>> {
+    const out: Partial<Record<ActumStatus, number>> = {}
+    for (const a of this.store.values()) {
+      if (a.inceptum < since) continue
+      out[a.status] = (out[a.status] ?? 0) + 1
+    }
+    return out
+  }
 }

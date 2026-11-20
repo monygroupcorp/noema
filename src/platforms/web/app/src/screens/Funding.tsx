@@ -173,6 +173,10 @@ export function Funding() {
   // door with this pack in hand — signing in returns them here and the purchase resumes.
   function buyPack(packId: string) {
     setCheckoutErr(null);
+    // noema/user-behaviour-corpus clause 2 — the ATTEMPT, fired on the click regardless of
+    // whether it needs a sign-in detour first: that detour is exactly the drop-off point the
+    // corpus exists to show.
+    api.recordEvent('funding_attempt', { packageId: packId });
     if (!canCheckout(session)) { navigate(signInThenBuy(packId, cameFrom)); return; }
     setCheckoutBusy(packId);
     api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, cameFrom, purchaseAllocutio(safeSessionStorage())))

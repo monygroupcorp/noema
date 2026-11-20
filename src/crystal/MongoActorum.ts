@@ -123,4 +123,14 @@ export class MongoActorum implements Actorum {
     if (ids.length === 0 || statuses.length === 0) return 0
     return this.col.countDocuments({ id: { $in: ids }, status: { $in: statuses } })
   }
+
+  async statusCountsSince(since: Date): Promise<Partial<Record<ActumStatus, number>>> {
+    const rows = await this.col.aggregate<{ _id: ActumStatus; count: number }>([
+      { $match: { inceptum: { $gte: since } } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]).toArray()
+    const out: Partial<Record<ActumStatus, number>> = {}
+    for (const row of rows) out[row._id] = row.count
+    return out
+  }
 }
