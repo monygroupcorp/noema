@@ -125,6 +125,7 @@ are permanent: never reused, never renumbered, so a citation in a past critique 
 | REF-15 | `/run` | Run | Replicate's model run tab | Inputs on one side, output on the other, and the cost of pressing the button visible before it is pressed. |
 | REF-16 | `/card` | Card | Replicate's model page | A model's description and its run panel on the same screen, so reading about it and using it are not two destinations. |
 | REF-17 | `/catalog` | Catalog | Civitai's model browse | Filtering a large model library by the things people actually filter by, with the result count always visible. |
+| REF-42 | `/examples` | Examples | **unnamed** | New this session (`noema/examples-of-our-own`) — the curated set itself is still empty pending real noema-generated media, and rth has not yet seen or ruled on the screen; naming a comparison app before the job has been looked at would be invented, not earned. |
 | REF-18 | `/models` | Shelf ("Model shelf") | Hugging Face's "your models" list | Your own artifacts, including the ones that are private, unfinished, or failed. |
 | REF-19 | `/canvas` | Canvas | ComfyUI's graph | A node graph for users who arrive already fluent in one — this product's users disproportionately do. |
 

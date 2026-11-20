@@ -59,6 +59,7 @@ const Studio = lazy(() => import('./screens/Studio').then((m) => ({ default: m.S
 const Onboard = lazy(() => import('./screens/Onboard').then((m) => ({ default: m.Onboard })));
 const Ceremony = lazy(() => import('./screens/Ceremony').then((m) => ({ default: m.Ceremony })));
 const Feed = lazy(() => import('./screens/Feed').then((m) => ({ default: m.Feed })));
+const Examples = lazy(() => import('./screens/Examples').then((m) => ({ default: m.Examples })));
 const Review = lazy(() => import('./screens/Review').then((m) => ({ default: m.Review })));
 const AdminWorkspace = lazy(() => import('./screens/AdminWorkspace').then((m) => ({ default: m.AdminWorkspace })));
 const AdminPartnerRequests = lazy(() => import('./screens/AdminPartnerRequests').then((m) => ({ default: m.AdminPartnerRequests })));
@@ -134,6 +135,7 @@ export function App() {
       <Route path="/collections/:id/export" element={lazyEl(<EditioExport />)} />
       <Route path="/card" element={lazyEl(<Card />)} />
       <Route path="/catalog" element={lazyEl(<Catalog />)} />
+      <Route path="/examples" element={lazyEl(<Examples />)} />
       <Route path="/feed" element={lazyEl(<Feed />)} />
       {/* Moderation held-queue (publishing spec §4). /review was the author-facing home; its
           pending-items UI is now a conditional section on Feed itself (noema-075), so /review is

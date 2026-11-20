@@ -170,6 +170,7 @@ export function Landing({
         <nav className="lp-cand-nav">
           <span className="brand"><LandingWordmark face={mark} height={26} /></span>
           <span className="lp-cand-navlinks">
+            <Link to="/examples">Examples</Link>
             <Link to="/catalog">Catalogue</Link>
             <Link to="/models">Models</Link>
             <Link to="/datasets">Training</Link>
