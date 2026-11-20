@@ -263,8 +263,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .hint .dest .ttdot{width:6px;height:6px}
 .hint .keys{margin-left:auto;display:flex;gap:14px}
 /* A phone has no Enter-to-send convention, so the keyboard hints are noise there; the flow
-   name beside them stays (REFERENCES.md REF-14). */
-@media (max-width:760px),(hover:none) and (pointer:coarse){.hint .keys{display:none}}
+   name beside them stays (REFERENCES.md REF-14). Below 1080px the right context column is
+   already gone (app.css's own lg breakpoint) and chat has nowhere wider to go, so `.hint`
+   stretches to fill `.main` and its right-aligned `.keys` lands under the fixed report-trigger
+   bubble (`.report-trigger.floating`, right:18px;bottom:78px) — confirmed by walk's
+   hintTriggerClearance measurement across the whole 761-1080 band. Hidden through that band too,
+   same as on a phone, rather than overlapping a clickable control. */
+@media (max-width:1080px),(hover:none) and (pointer:coarse){.hint .keys{display:none}}
 .hint .mono{color:var(--faint)}
 .hint .dest b{color:var(--text);font-weight:500}
 

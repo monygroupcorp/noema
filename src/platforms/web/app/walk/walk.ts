@@ -1,6 +1,6 @@
 // walk/walk.ts — the walker. Playwright chromium over every route in the census: a desktop +
-// mobile screenshot, and an axe-core accessibility scan. Advisory only in this item — it exits
-// 0 even with axe findings; the JSON report is the input for a future gated promotion.
+// tablet + mobile screenshot, and an axe-core accessibility scan. Advisory only in this item —
+// it exits 0 even with axe findings; the JSON report is the input for a future gated promotion.
 //
 // `npm run walk -- --list`            → static self-check: enumerates planned shots, no target.
 // `npm run walk`                      → walk against WALK_BASE_URL, into the `latest` run.
@@ -52,8 +52,14 @@ const BASE_URL = process.env.WALK_BASE_URL ?? 'http://localhost:5173';
 const EMAIL = process.env.WALK_EMAIL;       // the app's username field — no email auth exists
 const PASSWORD = process.env.WALK_PASSWORD;
 
+// `tablet` sits inside the band app.css calls out as its own breakpoint (the responsive comment
+// block in app.css: "lg 1080 : drop the right context sidebar"): the context column is already
+// gone (<=1080) but the rail hasn't collapsed to a bottom bar yet (>760), so whatever the wide
+// and narrow shots agree on can still be wrong in exactly this width. 900 sits in the middle of
+// it, nowhere near either edge.
 const VIEWPORTS = [
   { name: 'desktop', width: 1280, height: 800 },
+  { name: 'tablet', width: 900, height: 800 },
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
 
@@ -306,6 +312,43 @@ async function pinnedElements(page: import('playwright').Page): Promise<PinnedEl
   return await page.evaluate(PINNED_JS).catch(() => []) as PinnedElement[];
 }
 
+/** Whether the chat composer's keyboard-shortcut legend (`.hint .keys` — the part of the hint
+ *  row that `margin-left:auto`s to the row's right edge) collides with the fixed report-trigger
+ *  bubble, measured rather than eyeballed off a screenshot. `.hint` itself is a block-level flex
+ *  container that spans its max-width regardless of what's inside it, painting nothing where a
+ *  child is hidden — so the box to measure is `.keys` (the part with actual painted content that
+ *  moves toward the trigger), not `.hint` as a whole, which would flag empty space as a collision.
+ *  Both rects are real: `.keys` sits at the bottom of the flex column that *is* the viewport
+ *  height, and `.report-trigger.floating` is `position:fixed`, so neither is inferred from layout
+ *  math that could be stale. Null when the route carries no `.hint` at all (every route but chat,
+ *  today); `false` (not null) when `.hint` exists but `.keys` is hidden (narrow/touch) or there is
+ *  no trigger to collide with — a route with the row IS something to report a clean pass on.
+ *  Source, not a closure, for the same reason as SETTLE_JS. */
+const HINT_TRIGGER_JS = `(function () {
+  function visibleRect(sel) {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return null;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return null;
+    return r;
+  }
+  if (!document.querySelector('.hint')) return null;
+  const keys = visibleRect('.hint .keys');
+  const trigger = visibleRect('.report-trigger');
+  if (!keys || !trigger) return { overlapsReportTrigger: false };
+  const overlaps = keys.left < trigger.right && trigger.left < keys.right
+    && keys.top < trigger.bottom && trigger.top < keys.bottom;
+  return { overlapsReportTrigger: overlaps };
+})()`;
+
+type HintTriggerClearance = { overlapsReportTrigger: boolean } | null;
+
+async function hintTriggerClearance(page: import('playwright').Page): Promise<HintTriggerClearance> {
+  return await page.evaluate(HINT_TRIGGER_JS).catch(() => null) as HintTriggerClearance;
+}
+
 const BLANK_JS = "(function(){return (document.body && document.body.innerText || '').trim().length === 0})()";
 const BLANK_RETRY_MS = 3_000;
 
@@ -350,6 +393,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
     blank: boolean;
     filled: FilledControl[];
     pinned: PinnedElement[];
+    hintTriggerClearance: HintTriggerClearance;
   }[] = [];
   const failed: { route: string; viewport: string; error: string }[] = [];
 
@@ -390,6 +434,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
         // document offset the shot shows it at.
         const filled = await filledControls(page);
         const pinned = await pinnedElements(page);
+        const clearance = await hintTriggerClearance(page);
         await page.screenshot({ path: file, fullPage: true });
         if (capture.grown) await page.setViewportSize({ width: vp.width, height: vp.height });
         shots.push({
@@ -401,6 +446,7 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
           blank,
           filled,
           pinned,
+          hintTriggerClearance: clearance,
         });
 
         // Scanned at the width that was photographed, and recorded under that width. A contrast or
@@ -463,6 +509,11 @@ async function walkAll(rows: RouteRow[]): Promise<void> {
 
   console.log('\nper-route axe violation count (-1 = route unreachable):');
   for (const [path, n] of Object.entries(counts)) console.log(`  ${String(n).padStart(3)}  ${path}`);
+  const collisions = shots.filter((s) => s.hintTriggerClearance?.overlapsReportTrigger);
+  if (collisions.length) {
+    console.log('\n! hint row collides with the report trigger:');
+    for (const s of collisions) console.log(`  ${s.route} [${s.viewport}]`);
+  }
   console.log(`\nrun "${RUN}" — ${shots.length} shots`);
   console.log(`  shots:    ${SHOTS_DIR}`);
   console.log(`  report:   ${REPORT_FILE}`);
