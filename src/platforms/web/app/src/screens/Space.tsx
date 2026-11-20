@@ -38,6 +38,18 @@ export function formatVestigiumDate(natum: string): string {
   const d = new Date(natum);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
+
+// noema/space-navigation-fights-the-user: Escape backs out one overlay at a time —
+// viewer, then the gallery drawer, then the point peek — the modeler convention (Esc
+// deselects/cancels) standing in for having to find an on-screen ✕. Pure so the stacking
+// order is covered without a DOM render (this app's toolchain has no jsdom).
+export type SpaceOverlay = 'viewer' | 'gallery' | 'peek';
+export function topOverlayToClose(state: { viewerOpen: boolean; galleryOpen: boolean; peekOpen: boolean }): SpaceOverlay | null {
+  if (state.viewerOpen) return 'viewer';
+  if (state.galleryOpen) return 'gallery';
+  if (state.peekOpen) return 'peek';
+  return null;
+}
 // buildFallbackItems: the flat-grid data shape, newest first — the CALLER's full
 // vestigia history as returned by GET /api/vestigia (already sorted newest-first
 // server-side; this just narrows/normalizes for the grid).
@@ -517,15 +529,23 @@ function CorpusSpace() {
 
   const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };
 
-  // Single click on a point: highlight it, open its neighborhood sphere at the atomic
-  // default radius, and open the side panel — the camera stays exactly where the user
-  // put it. Double-click is this plus a fly-to (focusPoint below).
+  // Single click on a point: highlight it and open its neighborhood sphere at the atomic
+  // default radius — the camera stays exactly where the user put it. Double-click is this
+  // plus a fly-to (focusPoint below).
+  //
+  // noema/space-navigation-fights-the-user: this used to also force the gallery drawer
+  // open on every click, which is the trap rth reported (2026-09-12) — double-click to fly
+  // somewhere, then have to go find the ✕ on a drawer nobody asked for before you could
+  // keep moving. Inspecting a point now only shows the light "peek" card (bottom-right,
+  // dismissed by Escape or by picking something else — see the Escape handler below); the
+  // full drawer is opened on request, from the peek card's own "explore neighborhood"
+  // button, never automatically.
   const selectPoint = (i: number) => {
     if (!corpus) return;
     const p = corpus.positions;
     const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
     setSphere({ x, y, z, r: DEFAULT_R });
-    setActiveCluster(null); setGalleryOpen(true); setPicked(i);
+    setActiveCluster(null); setPicked(i);
   };
   // Single click that hit no point: deselect. Routed through the pick result rather than
   // a click bubbling off the canvas, so a click that DID hit a point is not cancelled.
@@ -537,6 +557,8 @@ function CorpusSpace() {
     setFocus({ x, y, z, dist: 1.5, key: focusKey.current });
     selectPoint(i);
   };
+  const openNeighborhood = () => setGalleryOpen(true);
+  const closeGallery = () => { setGalleryOpen(false); setSphere(null); };
   const focusCluster = (id: number) => {
     if (!corpus) return;
     setSphere(null);
@@ -549,6 +571,20 @@ function CorpusSpace() {
     s /= c; focusKey.current++;
     setFocus({ x: cx, y: cy, z: cz, dist: Math.min(Math.max(s * 2.4, 1.6), 8), key: focusKey.current });
   };
+
+  // Escape is the zero-click way out of any inspection overlay — no hunting for a ✕.
+  // See topOverlayToClose for the stacking order this mirrors.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const layer = topOverlayToClose({ viewerOpen: viewer != null, galleryOpen, peekOpen: picked != null });
+      if (layer === 'viewer') setViewer(null);
+      else if (layer === 'gallery') closeGallery();
+      else if (layer === 'peek') clearPick();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewer, galleryOpen, picked]);
 
   // Source check: does the caller (signed-in or anon-commitment) have any vestigia at
   // all? Runs once — decides real-vs-static for every subsequent layer load below.
@@ -763,6 +799,17 @@ function CorpusSpace() {
                 </mesh>
               )}
               <CameraRig focus={focus} />
+              {/* noema/space-navigation-fights-the-user: the chosen, recorded navigation
+                  grammar is Blender/CAD-style orbit — drag rotates, mid/right-drag pans,
+                  scroll zooms to the cursor — the convention a 3D point cloud's own
+                  explorers (Blender, Sketchfab, the three.js editor) already share, and
+                  what rth asked for by name on 2026-09-12 ("blender or whatever most
+                  popular modeler navigation... most recognizable to user"). It carries
+                  REF-13's named qualities (pan, zoom, select, getting back to a prior
+                  view — REFERENCES.md) into the dimension Figma's flat canvas doesn't
+                  have: this space's three axes ARE the content, so the view must rotate,
+                  not just pan. No click is spent moving: every gesture below is a
+                  drag/scroll, never a click-and-release. */}
               <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={0.4} maxDistance={22}
                 zoomToCursor screenSpacePanning panSpeed={1.1} zoomSpeed={1.1}
                 mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} />
@@ -801,7 +848,7 @@ function CorpusSpace() {
                 {hasReal ? 'your space' : 'the public exhibit'} · {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
               </div>
               <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2, opacity: .8 }}>
-                drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there
+                blender-style orbit · drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there · esc backs out
               </div>
             </div>
 
@@ -875,13 +922,18 @@ function CorpusSpace() {
               </button>
             )}
 
-            {/* small peek (hover/last pick) */}
+            {/* small peek (hover/last pick) — never forces the gallery drawer; that is an
+                explicit ask via the button below, not a side effect of inspecting a point */}
             <div className={`peek${peek ? ' show' : ''}`} onClick={(e) => { e.stopPropagation(); if (picked != null) setViewer(picked); }} style={{ cursor: peek ? 'pointer' : 'default' }}>
               {peek && <>
                 {peek.s ? <div className="pimg" style={{ backgroundImage: `url(${peek.s})`, backgroundSize: 'cover', backgroundPosition: 'center' }} /> : <div className="pimg" />}
                 <div className="pmeta">
                   <b style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{peek.p || '(no prompt)'}</b>
                   <span className="mono" style={{ color: 'var(--faint)' }}>{peek.m} · {peek.c} · {peek.d} · click to enlarge</span>
+                  <button onClick={(e) => { e.stopPropagation(); openNeighborhood(); }}
+                    style={{ marginTop: 6, padding: '3px 8px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--accent-soft)', fontSize: 11, cursor: 'pointer' }}>
+                    ▦ explore neighborhood
+                  </button>
                 </div>
               </>}
             </div>
@@ -896,7 +948,7 @@ function CorpusSpace() {
                   <span style={{ flex: '0 0 auto', width: 9, height: 9, borderRadius: '50%', background: galInfo.color }} />
                   <b style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{galInfo.label}</b>
                   <span className="mono" style={{ color: 'var(--faint)', fontSize: 11, flex: '0 0 auto' }}>{Math.min(galLimit, galleryIdx.length)} / {galInfo.count.toLocaleString()}</span>
-                  <button onClick={() => { setGalleryOpen(false); setSphere(null); }} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                  <button onClick={closeGallery} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
                 </div>
                 {sphere && (
                   <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--hair)', display: 'flex', flexDirection: 'column', gap: 8 }}>

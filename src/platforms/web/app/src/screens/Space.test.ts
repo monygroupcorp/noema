@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFallbackItems, formatVestigiumDate, vestigiumSnippet,
   computeBounds, normalizeToUnitScale, frameCameraToBounds, SCENE_EXTENT,
-  axesGridSize,
+  axesGridSize, topOverlayToClose,
 } from './Space';
 import type { Vestigium } from '../lib/api';
 
@@ -134,5 +134,22 @@ describe('axesGridSize', () => {
   it('the box always encloses the labeled axis length', () => {
     const { boxSize, axisLength } = axesGridSize(SCENE_EXTENT);
     expect(boxSize / 2).toBeGreaterThan(axisLength - 0.2);
+  });
+});
+
+// noema/space-navigation-fights-the-user: Escape is the zero-click way out of an
+// inspection overlay — no hunting for an on-screen ✕. Nearest overlay first.
+describe('topOverlayToClose', () => {
+  it('nothing open -> nothing to close', () => {
+    expect(topOverlayToClose({ viewerOpen: false, galleryOpen: false, peekOpen: false })).toBeNull();
+  });
+  it('the full-size viewer, when open, closes before anything behind it', () => {
+    expect(topOverlayToClose({ viewerOpen: true, galleryOpen: true, peekOpen: true })).toBe('viewer');
+  });
+  it('the gallery drawer closes next, once the viewer is not in the way', () => {
+    expect(topOverlayToClose({ viewerOpen: false, galleryOpen: true, peekOpen: true })).toBe('gallery');
+  });
+  it('the point peek is the last thing Escape clears', () => {
+    expect(topOverlayToClose({ viewerOpen: false, galleryOpen: false, peekOpen: true })).toBe('peek');
   });
 });
