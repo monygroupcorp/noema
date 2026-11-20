@@ -221,6 +221,17 @@ at top).
   case the goal names: a caller we CAN place inside an excluded territory. The chat bot
   (Telegram webhook) and any other non-Cloudflare-proxied channel carry no per-request geo
   signal today and are not covered until one is wired for them.
+  **Second limitation, flagged at review (not yet verified here):** `cf-ipcountry` is trusted
+  verbatim off the request headers in `apiRouter.ts`/`mcpRouter.ts`. That header is genuinely
+  set by Cloudflare's edge, but this app-level code has no way to tell "Cloudflare set this" from
+  "a direct caller to the origin set this" — if the origin (the droplet) is reachable other than
+  through Cloudflare's proxy, a caller could forge the header to claim a non-excluded country and
+  bypass the control entirely. This is very likely already closed at the infra layer (the
+  droplet's firewall should only accept inbound from Cloudflare's published IP ranges, same as any
+  app that trusts `cf-ipcountry`/`cf-connecting-ip`), but that has not been confirmed from this
+  seat — confirm the droplet firewall is Cloudflare-IP-restricted (or add an app-level check that
+  the request arrived via Cloudflare) before relying on this control against an adversarial
+  caller rather than an ordinary browser/app client.
 
 ---
 
