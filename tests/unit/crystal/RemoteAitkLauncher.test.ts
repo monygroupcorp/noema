@@ -4,7 +4,7 @@
 // manifest — no pod, no SSH, no GPU. The provisioner's SSH/GPU work is the live seam (step 5).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR, POD_AITK_DIR, POD_RESUME_PATH, DEFAULT_AITK_IMAGE, DEFAULT_AITK_REF } from '../../../src/crystal/RemoteAitkLauncher.js'
+import { RemoteAitkLauncher, securePodTrainingProvisioner, POD_DATASET_DIR, POD_AITK_DIR, POD_RESUME_PATH, DEFAULT_AITK_IMAGE, DEFAULT_AITK_REF, POD_CUDA_RUNTIME_PINS } from '../../../src/crystal/RemoteAitkLauncher.js'
 import type { TrainingPodProvisioner } from '../../../src/crystal/RemoteAitkLauncher.js'
 import { makeDatasetResolver } from '../../../src/crystal/datasetManifest.js'
 import type { Corporum, Corpus, Corpora } from '../../../src/types/corpus.js'
@@ -44,6 +44,13 @@ test('launch: resolves the dataset, generates the config, assembles env, provisi
   assert.ok(setup.some(c => c.includes('pip install') && c.includes('requirements.txt') && c.includes('boto3')))
   // and the torch-stack restore (matched cu128 trio) as the final step — guards the torchaudio ABI crash.
   assert.ok(setup.some(c => c.includes('--force-reinstall') && c.includes('torch==2.9.1') && c.includes('cu128')))
+  // the SAME step also restores the CUDA runtime wheels torch declares (cuDNN, cuBLAS, …) — a
+  // run can bootstrap clean, pass the torchaudio import, and still die at training step 0 with
+  // CUDNN_STATUS_NOT_INITIALIZED if these were left at whatever version requirements.txt pulled.
+  const torchStep = setup.find(c => c.includes('--force-reinstall') && c.includes('torch==2.9.1'))
+  assert.ok(torchStep)
+  for (const pin of POD_CUDA_RUNTIME_PINS) assert.ok(torchStep!.includes(pin), `missing ${pin}`)
+  assert.ok(torchStep!.includes('--no-deps'), 'the restore must stay --no-deps, or pip can re-disturb the set it just fixed')
 
   const env = h.calls[0].env
   assert.equal(env.AITK_DIR, POD_AITK_DIR)
