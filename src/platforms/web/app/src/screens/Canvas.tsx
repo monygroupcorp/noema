@@ -48,12 +48,15 @@ export function buildPalette(flows: FlowDescription[]): PaletteEntry[] {
 // The canonical catalog (GET /v1/flows) plus the caller's own (GET /v1/me/flows,
 // the picker's owner-scoped twin) — one palette row per flow.
 //
-// Two rows can be the same flow under different ids: the registry carries an older
-// registration beside the current one (`runmake.flux-schnell` and `flux-schnell`, both
-// "FLUX Schnell — text to image" 1.0.0, same schema, same fundament), an owner's copy of a
-// canonical flow keeps the canonical name, and two versions of one flow share it too. So
-// after the id union, rows are folded by name: the newest version wins, and between equal
-// versions the one that describes itself (`descriptio`), else the first listed.
+// Two rows can be the same flow under different ids: an owner's copy of a canonical flow
+// keeps the canonical name, and two versions of one flow share it too. (The registry twin
+// this guarded against — an older `runmake.flux-schnell` registration left live beside
+// `flux-schnell` — is retired at the source now: `scripts/migrations/
+// 2026_11_retire_runmake_flow_twins.ts` sets its `canonica` false, so `GET /v1/flows` no
+// longer carries it. This fold stays as a guard against the id-union cases above, and
+// against a future registration twin recurring the same way.) So after the id union, rows
+// are folded by name: the newest version wins, and between equal versions the one that
+// describes itself (`descriptio`), else the first listed.
 export function dedupeFlows(canonical: FlowSummary[], mine: FlowSummary[]): FlowSummary[] {
   const byId = new Map<string, FlowSummary>();
   for (const f of canonical) byId.set(f.id, f);
