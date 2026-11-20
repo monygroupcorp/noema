@@ -8,6 +8,11 @@ import type {
 } from '../../../src/flow/types.js'
 import type { TelegramUpdate } from '../../../src/allocutio/telegram/telegramTypes.js'
 import type { WideEvent } from '../../../src/lib/wide.js'
+import { MemoryConsuetudinum } from '../../../src/crystal/MemoryConsuetudinum.js'
+import { isArchived, liveMedia } from '../../../src/types/dataset.js'
+import type { Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../src/types/dataset.js'
+import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
+import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 
 // =============================================================================
 // Mock types
@@ -259,10 +264,64 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
   }
 }
 
+// ── Collecting (noema/telegram-photos-into-a-dataset) test doubles ──
+
+class MemoryDatasets implements Datasets {
+  private store = new Map<string, Dataset>()
+  private seq = 0
+  async create(input: Omit<Dataset, 'id' | 'natum' | 'mutatum'>): Promise<Dataset> {
+    const now = new Date()
+    const d: Dataset = { ...input, id: `ds-${++this.seq}`, natum: now, mutatum: now }
+    this.store.set(d.id, d)
+    return d
+  }
+  async find(id: string): Promise<Dataset | null> { return this.store.get(id) ?? null }
+  async list(opts: DatasetListOpts): Promise<DatasetListPage> {
+    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner && !isArchived(d)) }
+  }
+  async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
+    const { entries } = await this.list(opts)
+    return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: liveMedia(d.media).length })) }
+  }
+  async addCaptionset(): Promise<Dataset | null> { throw new Error('unused') }
+  async setCaption(): Promise<Dataset | null> { throw new Error('unused') }
+  async setFragments(): Promise<Dataset | null> { throw new Error('unused') }
+  async setAccess(): Promise<Dataset | null> { throw new Error('unused') }
+  async addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const updated: Dataset = { ...d, media: [...d.media, ...items], mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async archiveDataset(): Promise<Dataset | null> { throw new Error('unused') }
+  async restoreDataset(): Promise<Dataset | null> { throw new Error('unused') }
+  async archiveMedia(): Promise<Dataset | null> { throw new Error('unused') }
+  async restoreMedia(): Promise<Dataset | null> { throw new Error('unused') }
+}
+
+/** Builds the four deps collecting mode needs, seeded with `initialCollecting`'s Generatio
+ *  state for `{animaId: 'test-anima'}` — the identity `makeIdentity()` always resolves to. */
+function makeCollectingDeps(initialCollecting: boolean) {
+  const consuetudinum = new MemoryConsuetudinum()
+  const datasets = new MemoryDatasets()
+  const fetchedUrls: string[] = []
+  const puts: Array<{ key: string; contentType: string }> = []
+  const mediaFetcher: MediaFetcher = {
+    fetch: async (url: string) => { fetchedUrls.push(url); return Buffer.from('fake-jpeg-bytes') },
+  }
+  const objectStore: ObjectStore = {
+    put: async (key: string, _bytes: Buffer, contentType: string) => { puts.push({ key, contentType }); return `https://bucket.example/${key}` },
+    del: async () => {},
+  }
+  void consuetudinum.setGeneratio({ animaId: 'test-anima' }, { collecting: initialCollecting })
+  return { consuetudinum, datasets, mediaFetcher, objectStore, fetchedUrls, puts }
+}
+
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined> } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean } = {}) {
   const sender = makeSender()
   const identity = makeIdentity()
   const router = makeRouter()
@@ -282,6 +341,11 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
   }
   const acta = { async findById(_id: string) { return fakeActum as unknown as import('../../../src/types/actum.js').Actum } }
 
+  // Collecting (noema/telegram-photos-into-a-dataset): wired only when a test asks for it, so
+  // every pre-existing test (no `collecting` opt) exercises the exact no-store-wired path it
+  // always has.
+  const collectingDeps = opts.collecting !== undefined ? makeCollectingDeps(opts.collecting) : undefined
+
   const allocutio = new TelegramAllocutio({
     router: router as unknown as import('../../../src/allocutio/telegram/TelegramAllocutio.js').RouterDeps,
     sender,
@@ -299,9 +363,15 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
       terminatePod: async (podId: string) => { terminated.push(podId) },
       cancelActum: async (actumId: string, reason: string) => { cancelCalls.push({ actumId, reason }); return true },
     } : {}),
+    ...(collectingDeps ? {
+      consuetudinum: collectingDeps.consuetudinum,
+      datasets: collectingDeps.datasets,
+      mediaFetcher: collectingDeps.mediaFetcher,
+      objectStore: collectingDeps.objectStore,
+    } : {}),
   })
 
-  return { allocutio, sender, identity, router, terminated, cancelCalls, materiaUpdates, fakeActum }
+  return { allocutio, sender, identity, router, terminated, cancelCalls, materiaUpdates, fakeActum, collectingDeps }
 }
 
 // =============================================================================
@@ -775,6 +845,103 @@ test('photo message with no active flow is a no-op', async () => {
 
   const handleCall = router.calls.find(c => c.method === 'handle')
   assert.equal(handleCall, undefined, 'router.handle should NOT be called with no active flow')
+})
+
+// Collecting (noema/telegram-photos-into-a-dataset): a bare idle photo's fate turns on
+// whether collecting mode is wired AND on.
+
+test('idle photo with no collecting deps wired falls back to the plain idle-media hint', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-only']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /send it again with \/make/)
+  assert.doesNotMatch(sender.sent[0].text, /\/collect/)
+})
+
+test('idle photo with collecting OFF gets the discoverable hint naming /collect, and nothing is filed', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: false })
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-only']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /turn on \/collect/)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('idle photo with collecting ON is downloaded, re-hosted, and appended to the default dataset — confirmed every time, not throttled', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1'], 1))
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-2'], 2))
+
+  assert.equal(sender.sent.length, 2, 'both confirmations sent — never throttled like the idle hint')
+  assert.match(sender.sent[0].text, /Saved to "Telegram collection" \(1 photo\)/)
+  assert.match(sender.sent[1].text, /Saved to "Telegram collection" \(2 photos\)/)
+
+  // The Telegram CDN link was fetched, but never stored — clause 2.
+  assert.ok(collectingDeps!.fetchedUrls.every((u) => u.includes('api.telegram.org')))
+  const { entries } = await collectingDeps!.datasets.list({ owner: 'test-anima' })
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].media.length, 2)
+  for (const item of entries[0].media) {
+    assert.ok(item.url.startsWith('https://bucket.example/'))
+    assert.doesNotMatch(item.url, /api\.telegram\.org/)
+  }
+})
+
+test('idle photo with collecting ON but a NON-photo bare media says so instead of silently dropping it (clause 4)', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+  const videoUpdate: TelegramUpdate = {
+    update_id: 9,
+    message: {
+      message_id: 1,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      date: Math.floor(Date.now() / 1000),
+      video: { file_id: 'clip-1' },
+    },
+  }
+  await allocutio.receive(videoUpdate)
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /photos only/)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('a group chat is unaffected by collecting mode — same silence as before, even when ON', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+  const groupPhoto: TelegramUpdate = {
+    update_id: 10,
+    message: {
+      message_id: 1,
+      from: { id: 123, username: 'tester' },
+      chat: { id: -100456, type: 'supergroup' },
+      date: Math.floor(Date.now() / 1000),
+      photo: [{ file_id: 'group-photo', width: 100, height: 100 }],
+    },
+  }
+  await allocutio.receive(groupPhoto)
+  assert.equal(sender.sent.length, 0)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('/collect on turns collecting on, and a following bare photo is then filed', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: false })
+  await allocutio.receive(msgUpdate(123, 456, '/collect on'))
+  assert.match(sender.sent.at(-1)!.text, /Collecting is ON/)
+
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1']))
+  const { entries } = await collectingDeps!.datasets.list({ owner: 'test-anima' })
+  assert.equal(entries[0]?.media.length, 1, 'the toggle set by /collect on is read by the idle-photo path')
+})
+
+test('bare /dataset reports the default dataset, minting it on first use', async () => {
+  const { allocutio, sender } = makeAllocutio({ collecting: false })
+  await allocutio.receive(msgUpdate(123, 456, '/dataset'))
+  assert.match(sender.sent.at(-1)!.text, /Default dataset: "Telegram collection" \(0 photos\)/)
+})
+
+test('/dataset with no dataset store wired reports unavailable', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/dataset'))
+  assert.match(sender.sent.at(-1)!.text, /Unknown command/)
 })
 
 // 20. Result primitive with textContent → sendMessage called

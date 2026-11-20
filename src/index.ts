@@ -872,6 +872,12 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     vocator: ring.vocator,
     consuetudinum,
+    datasets: ring.datasets,
+    mediaFetcher: httpMediaFetcher,
+    // Collecting (noema/telegram-photos-into-a-dataset): a bare idle photo gets re-hosted
+    // into the same bucket everything else on this deployment lands in. Absent on a
+    // deployment with no R2 configured, where collecting mode cannot turn on either.
+    ...(RUNPOD_R2 ? { objectStore: new R2Uploader(RUNPOD_R2) } : {}),
     fundingUrl: FUNDING_URL,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     // Private generation (noema-347): a private run's output is a marker, so the bot mints a

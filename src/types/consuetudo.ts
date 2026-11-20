@@ -110,6 +110,19 @@ export interface Generatio {
    *  holds against any caller), and — because they live here, on the anon-capable Generatio in
    *  `consuetudines` — hard-deleted with the account by `MeEraser`. */
   memoryNotes?: string[]
+  /** Default dataset (Dataset id) a Telegram photo collects into, and the account sees/changes
+   *  via `/dataset` (noema/telegram-photos-into-a-dataset). Mirrors `defaultProjectId`'s shape
+   *  for the same reason: the choice travels across web · Telegram · API. Absent -> no default
+   *  yet; `ensureDefaultDataset` mints one (and sets this) the first time collecting needs it. */
+  defaultDatasetId?: string
+  /** Telegram "collecting" mode (noema/telegram-photos-into-a-dataset). When ON, a bare photo
+   *  sent to an idle private chat is downloaded into our own storage and appended to
+   *  `defaultDatasetId` (minting it first if unset) instead of being silently dropped.
+   *  Default-absent reads as OFF everywhere — a bare photo must not silently change meaning.
+   *  Telegram-only today (`/collect`); the web Preferences screen does not surface either this
+   *  or `defaultDatasetId`, so `CrystalApi.setGeneratio` preserves both across a wholesale
+   *  Preferences replace the same way it preserves `ageAttestation`. */
+  collecting?: boolean
 }
 
 /** Longest single concierge memory note. A note is a line a person skims on /preferences,

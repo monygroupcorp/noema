@@ -5245,6 +5245,15 @@ export class CrystalApi {
     // acceptance nor erase one.
     delete merged.termsAccepted
     if (existing?.termsAccepted) merged.termsAccepted = existing.termsAccepted
+    // Telegram's `/dataset` + `/collect` are the only writers/readers of these two fields today —
+    // the web Preferences screen doesn't surface either, so a wholesale replace from THAT screen
+    // must not erase what Telegram set, the same reason ageAttestation is preserved above.
+    if (merged.defaultDatasetId === undefined && existing?.defaultDatasetId !== undefined) {
+      merged.defaultDatasetId = existing.defaultDatasetId
+    }
+    if (merged.collecting === undefined && existing?.collecting !== undefined) {
+      merged.collecting = existing.collecting
+    }
     // No attestation on file ⇒ spicyMode cannot be enabled (for anon or named callers alike).
     if (merged.spicyMode === true && !merged.ageAttestation) {
       throw Errors.authForbidden('Enabling spicy mode requires a recorded 18+ age attestation.')

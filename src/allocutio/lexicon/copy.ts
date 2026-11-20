@@ -26,6 +26,10 @@ noema
   /flows                — browse all available tools
   /arm                  — set up a warm studio
 
+  Collecting
+  /collect [on|off]       — save bare photos to your dataset (or report the state)
+  /dataset [list|use|new] — your default dataset: see it, switch it, or start one
+
   Account
   /status   — balance and running gens
   /wallet   — how to top up credits
@@ -197,6 +201,39 @@ export const COPY = {
     idleText: 'Nothing is running. Send /make <your prompt> to generate an image, or /help for every command.',
     /** A photo or clip with nothing running: it fills nothing on its own, so say how it would. */
     idleMedia: 'To use this, send it again with /make <prompt> as the caption, or reply to it with /make <prompt>.',
+    /** Same bare-media idle case, but collecting mode is WIRED and just OFF — name the other
+     *  thing a bare photo could do here, so the mode is discoverable the moment it's relevant. */
+    idleMediaCollectable: 'To use this, send it again with /make <prompt> as the caption, or reply to it with /make <prompt>. Or turn on /collect to save photos like this one to your dataset.',
+    /** Collecting is ON but the idle media wasn't a photo — named rather than silently dropped
+     *  (clause 4: video/audio stay out of scope for collecting). */
+    collectImageOnly: 'Collecting saves photos only, for now — video and audio clips aren\'t saved. Send it with /make <prompt> as the caption instead.',
+    /** A photo collecting mode just filed — confirms where it landed and how many are there now,
+     *  so the mode stays visible at a glance every time it fires. */
+    collected: (datasetName: string, count: number): string =>
+      `Saved to "${datasetName}" (${count} photo${count === 1 ? '' : 's'}). /collect off to stop.`,
+    /** Bare or malformed /collect — show the two states. */
+    collectUsage: 'Usage: /collect on|off (no argument reports the current state)',
+    /** /collect's current-state line, read bare or after a toggle. */
+    collectState: (on: boolean): string => on
+      ? 'Collecting is ON — a photo sent here with nothing running is saved to your dataset. /collect off to stop.'
+      : 'Collecting is OFF — a photo sent here with nothing running is not saved. /collect on to start.',
+    /** Bare or malformed /dataset — show the subcommands. */
+    datasetUsage: 'Usage: /dataset [list | use <name> | new <name>]',
+    /** Bare /dataset — the default dataset's name + how much it holds. */
+    datasetDefault: (name: string, count: number): string =>
+      `Default dataset: "${name}" (${count} photo${count === 1 ? '' : 's'}). /dataset list to see others, /dataset use <name> to switch, /dataset new <name> to start one.`,
+    /** No datasets yet — say how to get one, same voice as every other empty-state line. */
+    datasetEmpty: 'You have no datasets yet. /dataset new <name> to start one.',
+    /** /dataset list — every dataset the caller owns, the default one marked. */
+    datasetList: (entries: Array<{ name: string; isDefault: boolean }>): string =>
+      entries.map((e) => `${e.isDefault ? '• ' : '  '}${e.name}${e.isDefault ? ' (default)' : ''}`).join('\n'),
+    /** /dataset use with a name/id that matches nothing this caller owns. */
+    datasetNotFound: (query: string, available: string[]): string =>
+      `No dataset named '${query}'.${available.length ? ` Try: ${available.join(', ')}` : ''}`,
+    /** /dataset use succeeded. */
+    datasetSwitched: (name: string): string => `Default dataset is now "${name}".`,
+    /** /dataset new succeeded. */
+    datasetCreated: (name: string): string => `Created "${name}" and set it as your default dataset.`,
     /** A tap on a button whose menu is gone — answered as a toast, never as a chat message. */
     menuExpired: 'This menu has expired. Send /make to start again.',
     unknown: `Unknown command. Type /help to see what's available.`,
