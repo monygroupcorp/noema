@@ -1,5 +1,7 @@
-// Auth contract of the internal analytics router: the `x-internal-secret` / `?token=` gate is
+// Auth contract of the internal analytics router: the `x-internal-secret` header gate is
 // unconditional, so an unconfigured secret refuses every request instead of admitting it.
+// Header-only — `?token=` is deliberately not accepted (it lands in access logs, browser
+// history and the Referer header).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
@@ -30,9 +32,9 @@ test('configured secret + correct header → 200', async () => {
   assert.equal(res.body.count, 3)
 })
 
-test('configured secret + correct ?token= → 200', async () => {
+test('configured secret + correct ?token= → 401 (header only, no query fallback)', async () => {
   const res = await request(app(SECRET)).get('/internal/analytics/recent').query({ token: SECRET })
-  assert.equal(res.status, 200)
+  assert.equal(res.status, 401)
 })
 
 test('configured secret + wrong credential → 401', async () => {

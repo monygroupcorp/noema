@@ -77,7 +77,9 @@ tests/unit/api/arcanumRouter.test.ts
 tests/unit/api/alchemyWebhookAuth.test.ts
 tests/unit/api/liveRouter.test.ts
 tests/unit/api/analyticsRouter.test.ts
+tests/unit/lib/internalSecret.test.ts
 tests/unit/api/treasuryAdminRouter.test.ts
+tests/unit/api/depositsAdminRouter.test.ts
 tests/unit/arcanum/ArcanumPairing.test.ts
 tests/unit/arcanum/ArcanumParity.test.ts
 tests/unit/arcanum/zkeyChain.test.ts
