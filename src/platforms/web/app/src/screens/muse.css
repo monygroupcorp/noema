@@ -267,7 +267,10 @@
   border: 1px solid var(--hair-soft); border-radius: 12px;
   background: color-mix(in srgb, var(--panel) 60%, transparent);
 }
-.muse-add-images-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.muse-add-images-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-radius: 8px; }
+/* A drop target says so while something is dragged over it — the only feedback a drag gesture
+   gets until the drop itself lands in the pending list below. */
+.muse-add-images-body.drag-over { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .muse-add-images-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* One row per chosen file, each carrying its own state: a batch where one file failed
