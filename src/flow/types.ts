@@ -168,15 +168,3 @@ export interface Flow {
    */
   handle(ctx: FlowContext, event: PrimitiveEvent): Promise<Step | Resolution>
 }
-
-// ---------------------------------------------------------------------------
-// Type guards
-// ---------------------------------------------------------------------------
-
-export function isStep(value: Step | Resolution): value is Step {
-  return 'primitives' in value
-}
-
-export function isResolution(value: Step | Resolution): value is Resolution {
-  return 'kind' in value
-}
