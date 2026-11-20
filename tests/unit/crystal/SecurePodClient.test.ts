@@ -109,6 +109,8 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
   costPerHr?: number
+  /** Status `POST /job` answers with — set to a 4xx to simulate a deterministic submit rejection. */
+  jobPostStatus?: number
 } = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     sshReadyAfterCalls = 1,
@@ -116,6 +118,7 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
     costPerHr,
+    jobPostStatus = 200,
   } = opts
   let statusCalls = 0
   const runnerBase = `https://${podId}-8080.proxy.runpod.net`
@@ -143,7 +146,9 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
       return new Response(JSON.stringify({ status: runnerHealthStatus }), { status: 200 })
     }
     if (method === 'POST' && url === `${runnerBase}/job`) {
-      return new Response('{}', { status: 200 })
+      return jobPostStatus >= 400
+        ? new Response('rejected', { status: jobPostStatus })
+        : new Response('{}', { status: 200 })
     }
     if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
       return makeSseStream(sseEvents)
@@ -272,6 +277,55 @@ test('SSH bootstrap: no re-provision after comfyrunner accepted (no retry cascad
     c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'),
   )
   assert.equal(provisionCalls.length, 1)
+})
+
+// ── job-attempt outcome: rejected / throttled ──────────────────────────────────
+// These exercise the three JobAttemptOutcome kinds that weren't SecurePodClient-covered before
+// (`comfyrunnerClient.test.ts` covers `submitToRunner`/`classifyJobAttemptFailure` in isolation):
+// a deterministic (4xx) submit rejection, and a throttle bail that survives, then exhausts, retry.
+
+test('submit: a deterministic (4xx) job-submit rejection fails fast — no retry pod, one FAILED webhook keyed by the first pod', async () => {
+  const { fetch, calls, webhookPayloads } = makeFetchMock('pod-rejected', { jobPostStatus: 422 })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 1, 'a 422 is deterministic — no fresh pod is worth trying')
+  assert.equal(terminateSpy.calls.length, 1)
+  const failed = (webhookPayloads as Array<{ status?: string; id?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.equal(failed!.id, 'pod-rejected')
+  assert.match(failed!.error ?? '', /422/)
+})
+
+test('submit: a throttle bail retries on a fresh pod instead of stopping (comfyrunner owns nothing yet)', async () => {
+  // Every pod this mock provisions shares one SSE stream (fixed podId), so a throttle bail on
+  // attempt 1 reproduces on attempt 2 too — this asserts the RETRY happened, not that it escapes it.
+  // ~5 MB/s for 60s (well under the 20 MB/s floor) sustained past THROTTLE_WINDOW_MS — same
+  // sequence `comfyrunnerClient.test.ts`'s "throws ThrottleError on sustained low download
+  // velocity" uses to actually trip the bail (a 2-sample sequence only arms the window; it
+  // doesn't cross it).
+  const throttleSse = [
+    { type: 'download-progress', bytesDownloaded: 0,           elapsedMs: 0 },
+    { type: 'download-progress', bytesDownloaded: 75_000_000,  elapsedMs: 15_000 },
+    { type: 'download-progress', bytesDownloaded: 150_000_000, elapsedMs: 30_000 },
+    { type: 'download-progress', bytesDownloaded: 225_000_000, elapsedMs: 45_000 },
+    { type: 'download-progress', bytesDownloaded: 300_000_000, elapsedMs: 60_000 },
+  ]
+  const { fetch, calls, webhookPayloads } = makeFetchMock('pod-throttled', { sseEvents: throttleSse })
+  const client = makeClient(makeConfig({ podRetries: 3 }), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 3, 'all 3 attempts retried on a throttle bail — none treated it as comfyrunner-owned')
+  // Retries exhausted: comfyrunner DID accept each attempt (POST /job succeeded every time), yet
+  // the FAILED webhook still fires — nobody else is going to, since every pod was bailed before
+  // completion. This is the sticky-"everAccepted"-but-still-fire-on-throttle-exhaustion case.
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook even though comfyrunner accepted every attempt')
+  assert.match(failed!.error ?? '', /throttl/i)
 })
 
 // ── pod lifecycle ─────────────────────────────────────────────────────────────
