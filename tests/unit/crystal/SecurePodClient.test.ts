@@ -280,9 +280,11 @@ test('SSH bootstrap: no re-provision after comfyrunner accepted (no retry cascad
 })
 
 // ── job-attempt outcome: rejected / throttled ──────────────────────────────────
-// These exercise the three JobAttemptOutcome kinds that weren't SecurePodClient-covered before
-// (`comfyrunnerClient.test.ts` covers `submitToRunner`/`classifyJobAttemptFailure` in isolation):
+// These exercise the two JobAttemptOutcome kinds that weren't SecurePodClient-covered before:
 // a deterministic (4xx) submit rejection, and a throttle bail that survives, then exhausts, retry.
+// (`comfyrunnerClient.test.ts` covers `submitToRunner`'s non-permanent-5xx case and
+// `ThrottleError`'s own detection logic — not `classifyJobAttemptFailure` or the 4xx path, which
+// only this file exercises.)
 
 test('submit: a deterministic (4xx) job-submit rejection fails fast — no retry pod, one FAILED webhook keyed by the first pod', async () => {
   const { fetch, calls, webhookPayloads } = makeFetchMock('pod-rejected', { jobPostStatus: 422 })
@@ -326,6 +328,59 @@ test('submit: a throttle bail retries on a fresh pod instead of stopping (comfyr
   const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
   assert.ok(failed, 'expected a FAILED webhook even though comfyrunner accepted every attempt')
   assert.match(failed!.error ?? '', /throttl/i)
+})
+
+test('submit: a throttle bail followed by a plain provisioning failure does NOT fire a webhook for the throttle', async () => {
+  // Attempt 1 is accepted-then-throttled (comfyrunner owns nothing — Crystal deliberately bailed
+  // it), but the ladder is then exhausted by an ORDINARY provisioning failure on the final retry —
+  // never reaching comfyrunner at all. The webhook decision must answer for what actually ended
+  // the run (a plain provisioning failure, which comfyrunner never saw and never owns) rather than
+  // for the unrelated throttle bail two attempts earlier.
+  const podId = 'pod-mixed'
+  const runnerBase = `https://${podId}-8080.proxy.runpod.net`
+  const webhookPayloads: unknown[] = []
+  let provisionCalls = 0
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('api.runpod.io/v2') && url.includes('/pods')) {
+      provisionCalls++
+      if (provisionCalls === 1) return new Response(JSON.stringify({ id: podId }), { status: 200 })
+      // 400 ("could not be placed") exhausts the single configured GPU candidate immediately,
+      // with no backoff sleep — unlike a 5xx, which `createRunPodPod` retries with a real timer.
+      return new Response('{"error":"no capacity"}', { status: 400 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response(JSON.stringify({ status: 'RUNNING', ssh: { direct: { host: '1.2.3.4', port: 22 } } }), { status: 200 })
+    }
+    if (method === 'GET' && url === `${runnerBase}/health`) {
+      return new Response(JSON.stringify({ status: 'ready' }), { status: 200 })
+    }
+    if (method === 'POST' && url === `${runnerBase}/job`) {
+      return new Response('{}', { status: 200 })
+    }
+    if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
+      // Same sustained-low-velocity sequence as the throttle test above — trips ThrottleError.
+      return makeSseStream([
+        { type: 'download-progress', bytesDownloaded: 0,           elapsedMs: 0 },
+        { type: 'download-progress', bytesDownloaded: 75_000_000,  elapsedMs: 15_000 },
+        { type: 'download-progress', bytesDownloaded: 150_000_000, elapsedMs: 30_000 },
+        { type: 'download-progress', bytesDownloaded: 225_000_000, elapsedMs: 45_000 },
+        { type: 'download-progress', bytesDownloaded: 300_000_000, elapsedMs: 60_000 },
+      ])
+    }
+    if (method === 'POST') { webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}')); return new Response('{}', { status: 200 }) }
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof fetch
+
+  const client = makeClient(makeConfig({ podRetries: 3 }), () => makeSshTransport(), fetchFn)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+
+  assert.equal(provisionCalls, 3, 'attempt 1 provisions, then 2 more retries both fail to provision')
+  assert.equal(
+    (webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false,
+    'the run ended on a plain provisioning failure comfyrunner never saw — Crystal must not post a webhook on the stale throttle outcome from attempt 1',
+  )
 })
 
 // ── pod lifecycle ─────────────────────────────────────────────────────────────

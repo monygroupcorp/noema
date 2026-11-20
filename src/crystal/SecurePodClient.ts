@@ -13,7 +13,7 @@ import { bus } from '../lib/bus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
 import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
-import { submitToRunner, awaitViaStream, isCompiledSpec, classifyJobAttemptFailure, type R2Config, type JobAttemptOutcome } from './comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, classifyJobAttemptFailure, ThrottleError, type R2Config, type JobAttemptOutcome } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 import { DEFAULT_POD_DISK_GB } from './podDisk.js'
 import { createRunPodPod, runpodFetch, runpodPodUrl, describeRunPodError, directSshOf, type RunPodPod } from './runpodRest.js'
@@ -539,9 +539,6 @@ export class SecurePodClient implements RunPodClient, Procurator {
     // the failure webhook, so Crystal must not fire a second one — derived from `JobAttemptOutcome.kind`
     // (never duck-typed off the error) and never reset, matching the old closure boolean's lifetime.
     let everAccepted = false
-    // The most recent attempt's outcome, read by the final `.catch()` below to decide whether a
-    // throttle bail (not a webhook-owning acceptance) was what exhausted the retry ladder.
-    let lastOutcome: JobAttemptOutcome | undefined
 
     const runWithRetry = async () => {
       let currentPodId = podId!
@@ -581,7 +578,6 @@ export class SecurePodClient implements RunPodClient, Procurator {
           attempt > 1 ? currentPodId : undefined,
           params.onMetrics, params.provisioningContext, params.jobToken, params.r2,
         )
-        lastOutcome = outcome
         if (outcome.kind === 'ok') return
         everAccepted = everAccepted || outcome.kind === 'accepted-lost' || outcome.kind === 'throttled'
 
@@ -609,10 +605,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
     runWithRetry().catch(async (err) => {
       log.error(`Pod ${activePodId} failed`, { podId: activePodId, error: (err as Error).message })
       // Only fire Crystal-side webhook when comfyrunner never accepted the job —
-      // EXCEPT when the retry ladder was exhausted on throttle bails: comfyrunner accepted
-      // but we deliberately bailed every pod, so no webhook is coming and the client must
-      // be told (and refunded) "no good pods available".
-      if (params.webhook && (!everAccepted || lastOutcome?.kind === 'throttled')) {
+      // EXCEPT when the error that actually ended the ladder was a throttle bail:
+      // comfyrunner accepted but we deliberately bailed every pod, so no webhook is coming
+      // and the client must be told (and refunded) "no good pods available". Reading the
+      // THROWN error's own type (not a separately-tracked "last outcome") matters: if an
+      // earlier attempt was throttled but the ladder was later exhausted by something else
+      // (e.g. a plain provisioning failure on the final attempt), that something-else is
+      // what actually ended the run and is what this check must answer for.
+      if (params.webhook && (!everAccepted || err instanceof ThrottleError)) {
         // Key the failure webhook by `activePodId` — retries advance the actum's
         // externusJobId (via onPodActive) to the LAST pod, so posting the FIRST pod's
         // id 404s and the run never reaches `fractus` (incident 2026-06-19).
