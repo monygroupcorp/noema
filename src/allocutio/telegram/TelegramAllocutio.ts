@@ -25,6 +25,19 @@ import type { Intellarum } from '../../types/intelligendi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
+import type { Datasets } from '../../types/dataset.js'
+import { liveMedia } from '../../types/dataset.js'
+import type { MediaFetcher } from '../../crystal/MediaFetcher.js'
+import type { ObjectStore } from '../../crystal/R2Uploader.js'
+import { collectPhoto } from '../../crystal/collectPhoto.js'
+import {
+  ensureDefaultDataset,
+  getDefaultDataset,
+  createDefaultDataset,
+  setDefaultDataset,
+  listOwnDatasets,
+  type DefaultDatasetDeps,
+} from '../../crystal/defaultDataset.js'
 import { mintShareToken } from '../../crystal/shareToken.js'
 import { DRAIN_GRACE_MS } from '../../crystal/Census.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
@@ -34,6 +47,7 @@ import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/Bulletin
 import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
 import { BulletinModelCatalog } from './BulletinModelCatalog.js'
 import { envelopeMedia, type EnvelopeMediaType } from './envelopeMedia.js'
+import { redactSecrets } from './redact.js'
 
 /** Infer the runtime shape from a studio's container image name (best-effort label for the
  *  loadout view). ComfyUI is the common one today; vLLM / llama.cpp / Diffusers are coming. */
@@ -108,8 +122,20 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     actumIndex?: ActumIndexStore
     /** Warm-pod line — lets /status say where a waiting gen stands rather than just "queued". */
     vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
-    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution. */
+    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution.
+     *  Also backs /dataset (paired with `datasets`) and /collect's state (noema/telegram-
+     *  photos-into-a-dataset). */
     consuetudinum?: Consuetudinum
+    /** Dataset store — backs /dataset + the media a collected photo lands in. Absent → /dataset
+     *  reports unavailable and a bare idle photo is never filed, no matter the /collect state. */
+    datasets?: Datasets
+    /** Downloads a Telegram file URL's bytes, so a collected photo can be re-hosted under our
+     *  own key instead of staying the transient api.telegram.org link. Absent → collecting
+     *  mode's write path is unavailable (paired with `objectStore`). */
+    mediaFetcher?: MediaFetcher
+    /** Where a collected photo's bytes land once downloaded. Absent → collecting mode's write
+     *  path is unavailable (paired with `mediaFetcher`). */
+    objectStore?: ObjectStore
     /** Bot's @username — composes `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
@@ -199,8 +225,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
      *  on /status instead of a bare "queued". */
     vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
     /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make
-     *  resolution. Absent → /bind reports unavailable, every verb uses the default. */
+     *  resolution. Absent → /bind reports unavailable, every verb uses the default. Also
+     *  backs /dataset + /collect's persisted state (noema/telegram-photos-into-a-dataset). */
     consuetudinum?: Consuetudinum
+    /** Dataset store — backs /dataset + the media a collected photo lands in. Absent →
+     *  /dataset reports unavailable and a bare idle photo is never filed. */
+    datasets?: Datasets
+    /** Downloads a Telegram file URL's bytes for re-hosting a collected photo under our own
+     *  key. Absent → collecting mode's write path is unavailable (paired with `objectStore`). */
+    mediaFetcher?: MediaFetcher
+    /** Where a collected photo's bytes land once downloaded (paired with `mediaFetcher`). */
+    objectStore?: ObjectStore
     /** Bot's @username — used to compose `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** Redeem a web-issued account-link code (`/start link_<code>`) — binds this Telegram as
@@ -328,6 +363,21 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       ...(deps.consuetudinum ? {
         resolveVerb: async (userId, verb) => deps.consuetudinum!.resolve(await this.identity.resolve(userId), verb),
         bindVerb: async (userId, verb, modusId) => deps.consuetudinum!.bind(await this.identity.resolve(userId), verb, modusId),
+      } : {}),
+      // /dataset: see/switch/create the default dataset. Omitted when the dataset store or
+      // the preference store isn't wired.
+      ...(deps.consuetudinum && deps.datasets ? {
+        datasetStatus: (userId) => this._datasetStatusText(userId),
+        datasetList: (userId) => this._datasetListText(userId),
+        datasetUse: (userId, nameOrId) => this._datasetUseText(userId, nameOrId),
+        datasetNew: (userId, name) => this._datasetNewText(userId, name),
+      } : {}),
+      // /collect: the toggle that makes a bare idle photo land in the default dataset instead
+      // of being dropped. Needs the dataset + fetch/store trio to actually file a photo, so
+      // the command itself is gated on the full set rather than just the preference store.
+      ...(this._canCollect ? {
+        collectStatus: (userId) => this._collectStatusText(userId),
+        setCollecting: (userId, on) => this._setCollectingText(userId, on),
       } : {}),
       // Account backup/recovery (username-auth soul ⇆ Telegram) — wired in index.ts against
       // the link-token store. Absent → /recover + link deep links report unavailable.
@@ -731,9 +781,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           }
           return
         }
-        // A photo into an idle private chat fills nothing. Silence here read as a broken bot
-        // to anyone who remembered sending a picture and getting one back; say what would work.
-        if (message.chat.type === 'private') await this._idleHint(chatId, COPY.command.idleMedia)
+        // A photo into an idle private chat fills nothing on its own — unless collecting mode
+        // is on, in which case this is exactly the moment it exists for: file it into the
+        // default dataset instead of dropping it (noema/telegram-photos-into-a-dataset).
+        // Groups are out of scope for now — same gate the idle hint has always had.
+        if (message.chat.type === 'private') await this._handleIdleMedia(chatId, userId, bare)
         return
       }
 
@@ -764,6 +816,107 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     if (last !== undefined && now - last < TelegramAllocutio.IDLE_HINT_EVERY_MS) return
     this.idleHintAt.set(chatId, now)
     await this.sender.sendMessage(chatId, text).catch(() => {})
+  }
+
+  // ---------------------------------------------------------------------------
+  // Collecting (noema/telegram-photos-into-a-dataset) — /collect, /dataset, and
+  // the bare-idle-photo write path they gate.
+  // ---------------------------------------------------------------------------
+
+  /** Whether a bare idle photo can actually be filed: the dataset store, the preference
+   *  store (where the /collect toggle + default-dataset pointer live), and the fetch/store
+   *  pair a re-host needs are all wired. */
+  private get _canCollect(): boolean {
+    return !!(this.deps.consuetudinum && this.deps.datasets && this.deps.mediaFetcher && this.deps.objectStore)
+  }
+
+  private _defaultDatasetDeps(): DefaultDatasetDeps {
+    return { datasets: this.deps.datasets!, consuetudinum: this.deps.consuetudinum! }
+  }
+
+  /** A bare message's media when no flow is waiting on it (private chats only). Collecting
+   *  mode is what turns this from "fills nothing" into "files it" — and only for a photo:
+   *  video/audio stay out of scope for now, said so rather than silently dropped. */
+  private async _handleIdleMedia(chatId: number, userId: string, bare: { fileId: string; type: EnvelopeMediaType }): Promise<void> {
+    if (!this._canCollect) {
+      await this._idleHint(chatId, COPY.command.idleMedia)
+      return
+    }
+    const owner = await this.identity.resolve(userId).catch(() => null)
+    const generatio = owner ? await this.deps.consuetudinum!.resolveGeneratio(owner).catch(() => undefined) : undefined
+    if (!owner || generatio?.collecting !== true) {
+      await this._idleHint(chatId, COPY.command.idleMediaCollectable)
+      return
+    }
+    if (bare.type !== 'image') {
+      await this._idleHint(chatId, COPY.command.collectImageOnly)
+      return
+    }
+    const fileUrl = await this._resolveFileUrl(bare.fileId)
+    if (!fileUrl) {
+      await this._idleHint(chatId, COPY.command.idleMedia)
+      return
+    }
+    try {
+      const collected = await collectPhoto(owner, fileUrl, {
+        ...this._defaultDatasetDeps(),
+        fetcher: this.deps.mediaFetcher!,
+        store: this.deps.objectStore!,
+      })
+      // Not throttled by `_idleHint` — collecting mode must stay visible at a glance every
+      // time it fires, not once a minute.
+      await this.sender.sendMessage(chatId, COPY.command.collected(collected.datasetName, collected.count)).catch(() => {})
+    } catch (err) {
+      // The fetch failure's own message embeds the file URL on a throw — and that URL
+      // carries the bot token (`getFileLink`'s whole reason for existing in redact.ts).
+      // Scrub it the same way every outbound send already does before it reaches logs.
+      log.warn('telegram: collect photo failed', { error: redactSecrets(String(err)) })
+      await this._idleHint(chatId, COPY.command.idleMedia)
+    }
+  }
+
+  private async _collectStatusText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const generatio = await this.deps.consuetudinum!.resolveGeneratio(owner)
+    return COPY.command.collectState(generatio?.collecting === true)
+  }
+
+  private async _setCollectingText(userId: string, on: boolean): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const generatio = await this.deps.consuetudinum!.resolveGeneratio(owner)
+    await this.deps.consuetudinum!.setGeneratio(owner, { ...(generatio ?? {}), collecting: on })
+    return COPY.command.collectState(on)
+  }
+
+  private async _datasetStatusText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const dataset = await ensureDefaultDataset(owner, this._defaultDatasetDeps())
+    return COPY.command.datasetDefault(dataset.name, liveMedia(dataset.media).length)
+  }
+
+  private async _datasetListText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const deps = this._defaultDatasetDeps()
+    const [all, current] = await Promise.all([listOwnDatasets(owner, deps), getDefaultDataset(owner, deps)])
+    if (all.length === 0) return COPY.command.datasetEmpty
+    return COPY.command.datasetList(all.map((d) => ({ name: d.name, isDefault: d.id === current?.id })))
+  }
+
+  private async _datasetUseText(userId: string, nameOrId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const deps = this._defaultDatasetDeps()
+    const target = await setDefaultDataset(owner, nameOrId, deps)
+    if (!target) {
+      const available = await listOwnDatasets(owner, deps)
+      return COPY.command.datasetNotFound(nameOrId, available.map((d) => d.name))
+    }
+    return COPY.command.datasetSwitched(target.name)
+  }
+
+  private async _datasetNewText(userId: string, name: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const created = await createDefaultDataset(owner, name, this._defaultDatasetDeps())
+    return COPY.command.datasetCreated(created.name)
   }
 
   /** Group gate (ruling 2): was this message @-mentioning the bot, or replying to one

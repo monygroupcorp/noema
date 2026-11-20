@@ -7,8 +7,17 @@ function make(extra?: {
   resolveVerb?: (userId: string, verb: string) => Promise<string | undefined>
   bindVerb?: (userId: string, verb: string, modusId: string) => Promise<void>
   fundingUrl?: string
+  collectStatus?: (userId: string) => Promise<string>
+  setCollecting?: (userId: string, on: boolean) => Promise<string>
+  datasetStatus?: (userId: string) => Promise<string>
+  datasetList?: (userId: string) => Promise<string>
+  datasetUse?: (userId: string, nameOrId: string) => Promise<string>
+  datasetNew?: (userId: string, name: string) => Promise<string>
 }) {
-  const calls: Record<string, unknown[]> = { enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [], bind: [] }
+  const calls: Record<string, unknown[]> = {
+    enter: [], cancel: [], msg: [], start: [], ack: [], shareToken: [], arm: [], bind: [],
+    setCollecting: [], datasetUse: [], datasetNew: [],
+  }
   const router = new CommandRouter({
     enterExecute: async (userId, state) => { calls.enter.push({ userId, state }) },
     cancel: (userId) => { calls.cancel.push(userId) },
@@ -22,6 +31,18 @@ function make(extra?: {
     ...(extra?.resolveVerb ? { resolveVerb: extra.resolveVerb } : {}),
     ...(extra?.bindVerb
       ? { bindVerb: async (userId: string, verb: string, modusId: string) => { calls.bind.push({ userId, verb, modusId }); await extra.bindVerb!(userId, verb, modusId) } }
+      : {}),
+    ...(extra?.collectStatus ? { collectStatus: extra.collectStatus } : {}),
+    ...(extra?.setCollecting
+      ? { setCollecting: async (userId: string, on: boolean) => { calls.setCollecting.push({ userId, on }); return extra.setCollecting!(userId, on) } }
+      : {}),
+    ...(extra?.datasetStatus ? { datasetStatus: extra.datasetStatus } : {}),
+    ...(extra?.datasetList ? { datasetList: extra.datasetList } : {}),
+    ...(extra?.datasetUse
+      ? { datasetUse: async (userId: string, nameOrId: string) => { calls.datasetUse.push({ userId, nameOrId }); return extra.datasetUse!(userId, nameOrId) } }
+      : {}),
+    ...(extra?.datasetNew
+      ? { datasetNew: async (userId: string, name: string) => { calls.datasetNew.push({ userId, name }); return extra.datasetNew!(userId, name) } }
       : {}),
   })
   return { router, calls }
@@ -207,6 +228,82 @@ test('/bind with NO bindVerb dep reports the command unavailable and does not th
   const { router, calls } = make({ flows: async () => ['flux-schnell', 'sd1-5'] })
   await router.dispatch('u1', 456, '/bind make sd1-5', 50)
   assert.equal(calls.enter.length, 0)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
+})
+
+test('bare /collect reports the current state via collectStatus, and acks', async () => {
+  const { router, calls } = make({
+    collectStatus: async () => 'Collecting is OFF — a photo sent here with nothing running is not saved. /collect on to start.',
+    setCollecting: async () => 'n/a',
+  })
+  await router.dispatch('u1', 456, '/collect', 50)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Collecting is OFF/)
+  assert.equal(calls.ack.length, 1)
+})
+
+test('/collect on and /collect off call setCollecting with the parsed boolean', async () => {
+  const { router, calls } = make({ collectStatus: async () => 'n/a', setCollecting: async (_u, on) => (on ? 'ON' : 'OFF') })
+  await router.dispatch('u1', 456, '/collect on', 50)
+  await router.dispatch('u1', 456, '/collect OFF', 51)
+  assert.deepEqual(calls.setCollecting, [{ userId: 'u1', on: true }, { userId: 'u1', on: false }])
+  assert.equal((calls.msg.at(-2) as { text: string }).text, 'ON')
+  assert.equal((calls.msg.at(-1) as { text: string }).text, 'OFF')
+})
+
+test('/collect with a malformed argument shows usage and does not toggle', async () => {
+  const { router, calls } = make({ collectStatus: async () => 'n/a', setCollecting: async () => 'n/a' })
+  await router.dispatch('u1', 456, '/collect maybe', 50)
+  assert.equal(calls.setCollecting.length, 0)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Usage: \/collect/)
+})
+
+test('/collect with no collectStatus/setCollecting dep reports unavailable', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/collect', 50)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
+})
+
+test('bare /dataset reports the default via datasetStatus, and acks', async () => {
+  const { router, calls } = make({ datasetStatus: async () => 'Default dataset: "Telegram collection" (0 photos).' })
+  await router.dispatch('u1', 456, '/dataset', 50)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Telegram collection/)
+  assert.equal(calls.ack.length, 1)
+})
+
+test('/dataset list calls datasetList, not datasetStatus', async () => {
+  const { router, calls } = make({
+    datasetStatus: async () => { throw new Error('should not be called') },
+    datasetList: async () => '• a (default)\n  b',
+  })
+  await router.dispatch('u1', 456, '/dataset list', 50)
+  assert.equal((calls.msg.at(-1) as { text: string }).text, '• a (default)\n  b')
+})
+
+test('/dataset use <name> calls datasetUse with the rest of the line as the name', async () => {
+  const { router, calls } = make({ datasetStatus: async () => 'n/a', datasetUse: async (_u, q) => `switched:${q}` })
+  await router.dispatch('u1', 456, '/dataset use my photos', 50)
+  assert.deepEqual(calls.datasetUse, [{ userId: 'u1', nameOrId: 'my photos' }])
+  assert.equal((calls.msg.at(-1) as { text: string }).text, 'switched:my photos')
+})
+
+test('/dataset new <name> calls datasetNew with the rest of the line as the name', async () => {
+  const { router, calls } = make({ datasetStatus: async () => 'n/a', datasetNew: async (_u, n) => `created:${n}` })
+  await router.dispatch('u1', 456, '/dataset new vacation pics', 50)
+  assert.deepEqual(calls.datasetNew, [{ userId: 'u1', name: 'vacation pics' }])
+  assert.equal((calls.msg.at(-1) as { text: string }).text, 'created:vacation pics')
+})
+
+test('/dataset use/new with no name, or an unknown subcommand, shows usage', async () => {
+  const { router, calls } = make({ datasetStatus: async () => 'n/a', datasetUse: async () => 'n/a', datasetNew: async () => 'n/a' })
+  await router.dispatch('u1', 456, '/dataset use', 50)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Usage: \/dataset/)
+  await router.dispatch('u1', 456, '/dataset frobnicate', 50)
+  assert.match((calls.msg.at(-1) as { text: string }).text, /Usage: \/dataset/)
+})
+
+test('/dataset with no datasetStatus dep reports unavailable', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/dataset', 50)
   assert.match((calls.msg.at(-1) as { text: string }).text, /Unknown command/)
 })
 
