@@ -13,7 +13,7 @@ import { bus } from '../lib/bus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
 import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
-import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, classifyJobAttemptFailure, ThrottleError, type R2Config, type JobAttemptOutcome } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 import { DEFAULT_POD_DISK_GB } from './podDisk.js'
 import { createRunPodPod, runpodFetch, runpodPodUrl, describeRunPodError, directSshOf, type RunPodPod } from './runpodRest.js'
@@ -535,31 +535,15 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
 
     let activePodId = podId
-    // Tracks whether comfyrunner accepted the job. Once true, comfyrunner owns
-    // the failure webhook — Crystal must not fire a second one.
-    let runnerAcceptedJob = false
+    // Sticky across every attempt: has comfyrunner EVER accepted this run? Once true it owns
+    // the failure webhook, so Crystal must not fire a second one — derived from `JobAttemptOutcome.kind`
+    // (never duck-typed off the error) and never reset, matching the old closure boolean's lifetime.
+    let everAccepted = false
+
     const runWithRetry = async () => {
-      try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
-      } catch (firstErr) {
-        // Once comfyrunner accepted the job it OWNS the run and the webhook. A
-        // dropped SSE stream after that point means we lost visibility, not that
-        // the job failed — re-provisioning would spawn a redundant pod and
-        // re-download every model. Stop here and let comfyrunner fire the webhook.
-        // EXCEPTION: a throttle bail is a deliberate "this pod is fleecing us" abort
-        // — we DO want to re-provision on a fresh pod, so let it fall through to retry.
-        if (runnerAcceptedJob && !(firstErr as { isThrottleError?: boolean }).isThrottleError) {
-          log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId, error: (firstErr as Error).message })
-          return
-        }
-        // A permanent (4xx) error is deterministic — a fresh pod hits the same rejection. Fail fast
-        // instead of burning more provisions (each re-runs the heavy bootstrap + model download).
-        if ((firstErr as { permanent?: boolean }).permanent) {
-          log.warn('pod run failed permanently — not retrying', { podId, error: (firstErr as Error).message })
-          throw firstErr
-        }
-        log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
-        for (let attempt = 2; attempt <= maxAttempts; attempt++) {
+      let currentPodId = podId!
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (attempt > 1) {
           // Liveness gate — before spending a NEW pod on a retry, confirm the actum this
           // job belongs to hasn't already gone terminal (e.g. the expiry watchdog fired
           // mid-retry and refunded it). Without this, a slow retry cascade keeps
@@ -569,40 +553,51 @@ export class SecurePodClient implements RunPodClient, Procurator {
             return
           }
           log.info('retrying on new pod', { attempt })
-          let retryPodId: string
           try {
-            retryPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
+            currentPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
           } catch (provErr) {
             log.warn(`provision retry ${attempt}/${maxAttempts} failed`, { error: (provErr as Error).message })
             if (attempt === maxAttempts) throw provErr
             continue
           }
-          activePodId = retryPodId
+          activePodId = currentPodId
           // Second gate — the actum could have gone terminal during provisioning itself;
           // check again before submitting the job so we don't hand comfyrunner work for a
           // dead run, and terminate the pod we just spun up instead of leaking it.
           if (!(await this._actumStillLive())) {
             log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
-            await this._terminatePod(retryPodId).catch(() => {})
+            await this._terminatePod(currentPodId).catch(() => {})
             return
           }
-          // Update DB so the retry pod is tracked; webhook will fire with retryPodId
-          await params.onPodActive?.(retryPodId).catch(() => {})
-          try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
+          // Update DB so the retry pod is tracked; webhook will fire with the retry pod's id
+          await params.onPodActive?.(currentPodId).catch(() => {})
+        }
+
+        const outcome = await this._runBackground(
+          currentPodId, imageName, params.input, params.webhook,
+          attempt > 1 ? currentPodId : undefined,
+          params.onMetrics, params.provisioningContext, params.jobToken, params.r2,
+        )
+        if (outcome.kind === 'ok') return
+        everAccepted = everAccepted || outcome.kind === 'accepted-lost' || outcome.kind === 'throttled'
+
+        switch (outcome.kind) {
+          case 'accepted-lost':
+            // Once comfyrunner accepted the job it OWNS the run and the webhook. A dropped SSE
+            // stream after that point means we lost visibility, not that the job failed —
+            // re-provisioning would spawn a redundant pod and re-download every model. Stop here
+            // and let comfyrunner fire the webhook.
+            log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: currentPodId, error: outcome.error.message })
             return
-          } catch (runErr) {
-            if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
-              log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: retryPodId, error: (runErr as Error).message })
-              return
-            }
-            if ((runErr as { permanent?: boolean }).permanent) {
-              log.warn('pod run failed permanently — not retrying', { podId: retryPodId, error: (runErr as Error).message })
-              throw runErr
-            }
-            log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
-            if (attempt === maxAttempts) throw runErr
-          }
+          case 'rejected':
+            // Deterministic — a fresh pod hits the same rejection. Fail fast instead of burning
+            // more provisions (each re-runs the heavy bootstrap + model download).
+            log.warn('pod run failed permanently — not retrying', { podId: currentPodId, error: outcome.error.message })
+            throw outcome.error
+          case 'throttled':
+          case 'failed':
+            log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: currentPodId, error: outcome.error.message })
+            if (attempt === maxAttempts) throw outcome.error
         }
       }
     }
@@ -610,10 +605,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
     runWithRetry().catch(async (err) => {
       log.error(`Pod ${activePodId} failed`, { podId: activePodId, error: (err as Error).message })
       // Only fire Crystal-side webhook when comfyrunner never accepted the job —
-      // EXCEPT when we exhausted throttle-retries: comfyrunner accepted but we
-      // deliberately bailed every pod, so no webhook is coming and the client must
-      // be told (and refunded) "no good pods available".
-      if (params.webhook && (!runnerAcceptedJob || (err as { isThrottleError?: boolean }).isThrottleError)) {
+      // EXCEPT when the error that actually ended the ladder was a throttle bail:
+      // comfyrunner accepted but we deliberately bailed every pod, so no webhook is coming
+      // and the client must be told (and refunded) "no good pods available". Reading the
+      // THROWN error's own type (not a separately-tracked "last outcome") matters: if an
+      // earlier attempt was throttled but the ladder was later exhausted by something else
+      // (e.g. a plain provisioning failure on the final attempt), that something-else is
+      // what actually ended the run and is what this check must answer for.
+      if (params.webhook && (!everAccepted || err instanceof ThrottleError)) {
         // Key the failure webhook by `activePodId` — retries advance the actum's
         // externusJobId (via onPodActive) to the LAST pod, so posting the FIRST pod's
         // id 404s and the run never reaches `fractus` (incident 2026-06-19).
@@ -1175,21 +1174,25 @@ export class SecurePodClient implements RunPodClient, Procurator {
     await this.terminatePodFn(this.config.apiKey, podId)
   }
 
-  // externusJobId: the job ID stored on the actum (always the first pod's ID, even on retries)
-  // onRunnerAccepted: called with true once comfyrunner has accepted the job (owns the webhook from that point)
+  // externusJobId: the id the SSE/webhook job is addressed by on comfyrunner's side. Passed
+  // explicitly on a retry pod (where it equals `podId` anyway); absent on the first attempt,
+  // where it falls back to `podId` below.
+  //
+  // Returns the attempt's `JobAttemptOutcome` rather than throwing it — one classification,
+  // read identically by `submit()`'s first attempt and its retry loop, instead of each
+  // re-deriving "did comfyrunner accept this?" from a callback plus duck-typed error shapes.
   private async _runBackground(
     podId: string,
     imageName: string,
     input: unknown,
     webhook: string | undefined,
     externusJobId?: string,
-    onRunnerAccepted?: (accepted: boolean) => void,
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
     provisioningContext?: ProvisioningContext,
     jobToken?: string,
     /** Per-run object-store override — see submit(). Replaces `this.config.r2` for this job. */
     r2Override?: R2Config,
-  ): Promise<void> {
+  ): Promise<JobAttemptOutcome> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
     let sshInfo: SshInfo | null = null
@@ -1206,6 +1209,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const executio: ActumExecutio = { podId, coldStart: true }
     const reportMetrics = () => { void onMetrics?.({ ...executio }) }
     let jobSucceeded = false
+    // Whether `submitToRunner` succeeded — from that point comfyrunner owns the run and its
+    // failure webhook. Local to this attempt; `classifyJobAttemptFailure` reads it, nothing else does.
+    let accepted = false
 
     try {
       signal('provisioning')
@@ -1240,7 +1246,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
       const jobId = externusJobId ?? podId
       await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, r2Override ?? this.config.r2, jobToken)
-      onRunnerAccepted?.(true)  // comfyrunner now owns the failure webhook
+      accepted = true  // comfyrunner now owns the failure webhook
 
       const submitCtx = getTrace()
       if (submitCtx) submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
@@ -1253,6 +1259,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
         (m) => { Object.assign(executio, m); reportMetrics() },
       )
       jobSucceeded = true
+      return { kind: 'ok' }
+    } catch (err) {
+      return classifyJobAttemptFailure(err, accepted)
     } finally {
       await ssh?.close().catch(() => {})
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
