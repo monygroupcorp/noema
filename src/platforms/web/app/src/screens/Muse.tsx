@@ -2061,7 +2061,7 @@ export function Muse() {
 
   return (
     <AppShell title={crumb}>
-      <div className="page"><div className="pw wide">
+      <div className="page"><div className="pw wide muse-pw">
         <div className="garden-head">
           <div><h1>{d.name} — muse</h1></div>
           <div className="garden-nudge">
