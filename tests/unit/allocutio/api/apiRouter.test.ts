@@ -59,6 +59,8 @@ const fakeApi = {
     return {
       balanceImpetus: '100',
       balanceUsd: 0.01,
+      heldImpetus: '0',
+      heldUsd: 0,
       gens: [],
       studios: [],
       joinable: [],
