@@ -167,7 +167,7 @@ are permanent: never reused, never renumbered, so a citation in a past critique 
 | ID | Route | Screen | Reference | The reference is the reference **for** |
 |---|---|---|---|---|
 | REF-39 | `/admin/review` | Review | YouTube Studio's held-comments queue | A moderation queue worked one item at a time, where the reviewer can always see why an item is here. Carries `noema/moderation-visibility`. |
-| REF-40 | `/admin`, `/admin/partner-requests` | AdminWorkspace, AdminPartnerRequests | Linear's triage inbox | An operator queue: what arrived, what it needs, and one keystroke per decision. |
+| REF-40 | `/admin`, `/admin/partner-requests`, `/admin/reports` | AdminWorkspace, AdminPartnerRequests, AdminReports | Linear's triage inbox | An operator queue: what arrived, what it needs, and one keystroke per decision. Carries `noema/minimax-h3-violation-takedown`. |
 
 ### 1.8 Not screens
 

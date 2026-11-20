@@ -384,3 +384,20 @@ test('search per intella uses embeddingIntella', async () => {
   assert.ok(results.some(r => r.vestigium.id === a.id))
   assert.ok(!results.some(r => r.vestigium.id === b.id))
 })
+
+// ── findByActumId() — the admin-takedown seam (minimax-h3-violation-takedown) ──────────────
+
+test('findByActumId returns every vestigium traced back to the actum, regardless of visibilitas', async () => {
+  const store = new MemoryVestigiorum()
+  const a = await store.create(makeVestigium({ actumId: 'act-1', visibilitas: 'publica' }))
+  const b = await store.create(makeVestigium({ actumId: 'act-1', visibilitas: 'privata' }))
+  await store.create(makeVestigium({ actumId: 'act-2', visibilitas: 'publica' }))
+  const found = await store.findByActumId('act-1')
+  assert.deepEqual(found.map(v => v.id).sort(), [a.id, b.id].sort())
+})
+
+test('findByActumId returns empty for an actum with no trace', async () => {
+  const store = new MemoryVestigiorum()
+  await store.create(makeVestigium({ actumId: 'act-1' }))
+  assert.deepEqual(await store.findByActumId('act-unknown'), [])
+})

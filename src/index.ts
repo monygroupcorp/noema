@@ -1226,7 +1226,26 @@ async function main(): Promise<void> {
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
   // than shared via the CrystalApi facade.
-  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({ querelae: ring.querelae, identity: apiResolver }))
+  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({
+    querelae: ring.querelae,
+    identity: apiResolver,
+    // A confirmed violation takes the run's output down (minimax-h3-violation-takedown):
+    // retract every live, non-private Editio of the run (feed/bucket/marketplace/…), then
+    // privatize any gallery-listed/link-shared Vestigium trace of the same run. The admin
+    // auctor the router already resolved is reused (not re-derived) so `_assertPlatformAdmin`
+    // runs against the SAME identity both times.
+    takedownRun: async (auctor, runId) => {
+      const editions = await crystalApi.adminRetractAllEditions(auctor, { kind: 'actum', id: runId })
+      const traces = await ring.vestigiorum.findByActumId(runId)
+      const privatized: string[] = []
+      for (const v of traces) {
+        if (v.visibilitas === 'privata') continue
+        await ring.vestigiorum.update(v.id, { visibilitas: 'privata' })
+        privatized.push(v.id)
+      }
+      return { ...editions, privatizedVestigia: privatized }
+    },
+  }))
 
   // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
   // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution

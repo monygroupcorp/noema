@@ -214,6 +214,11 @@ export class MongoVestigiorum implements Vestigiorum {
     return doc ? fromDoc(doc as Record<string, unknown>) : null
   }
 
+  async findByActumId(actumId: string): Promise<Vestigia> {
+    const docs = await this.col.find({ actumId }).toArray()
+    return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
+
   async forIdentity(auctorKey: AuctorKey, limit = 100): Promise<Vestigia> {
     const docs = await this.col
       .find(auctorKeyQuery(auctorKey))

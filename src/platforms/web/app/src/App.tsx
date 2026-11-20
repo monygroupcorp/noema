@@ -62,6 +62,7 @@ const Feed = lazy(() => import('./screens/Feed').then((m) => ({ default: m.Feed 
 const Review = lazy(() => import('./screens/Review').then((m) => ({ default: m.Review })));
 const AdminWorkspace = lazy(() => import('./screens/AdminWorkspace').then((m) => ({ default: m.AdminWorkspace })));
 const AdminPartnerRequests = lazy(() => import('./screens/AdminPartnerRequests').then((m) => ({ default: m.AdminPartnerRequests })));
+const AdminReports = lazy(() => import('./screens/AdminReports').then((m) => ({ default: m.AdminReports })));
 const Blog = lazy(() => import('./screens/Blog').then((m) => ({ default: m.Blog })));
 const BlogPost = lazy(() => import('./screens/Blog').then((m) => ({ default: m.BlogPost })));
 const Pricing = lazy(() => import('./screens/Pricing').then((m) => ({ default: m.Pricing })));
@@ -147,6 +148,10 @@ export function App() {
           /v1/admin/partner-requests, linked from the admin workspace hub the same way
           /admin/review is. */}
       <Route path="/admin/partner-requests" element={lazyEl(<AdminPartnerRequests />)} />
+      {/* In-app report triage (bug/feature/feedback/abuse) for /v1/admin/reports
+          (minimax-h3-violation-takedown), linked from the admin workspace hub the same way
+          /admin/review and /admin/partner-requests are. */}
+      <Route path="/admin/reports" element={lazyEl(<AdminReports />)} />
       <Route path="/projects" element={lazyEl(<Projects />)} />
       <Route path="/projects/:id" element={lazyEl(<ProjectHub />)} />
       <Route path="/run" element={lazyEl(<Run />)} />

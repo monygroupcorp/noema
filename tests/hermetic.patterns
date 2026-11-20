@@ -49,6 +49,7 @@ tests/unit/ledger/MemorySignorum.earnings.test.ts
 tests/unit/ledger/earningAuctors.test.ts
 tests/unit/crystal/settlementConservation.test.ts
 tests/unit/crystal/publish.test.ts
+tests/unit/crystal/adminTakedown.test.ts
 tests/unit/ledger/MemorySignorum.reserve.test.ts
 tests/unit/ledger/MemoryRedituum.test.ts
 tests/unit/crystal/deriveAgentWorkspace.test.ts
@@ -69,6 +70,7 @@ tests/unit/api/vestigiaRouter.test.ts
 tests/unit/api/querelaRouter.test.ts
 tests/unit/api/querelaAdminRouter.test.ts
 tests/unit/api/querelaAbuse.test.ts
+tests/unit/api/querelaTakedown.test.ts
 tests/unit/api/partnerRequestRouter.test.ts
 tests/unit/api/partnerAdminRouter.test.ts
 tests/unit/api/treasuryPersonaIntake.test.ts

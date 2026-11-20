@@ -12,7 +12,7 @@ import { contentKey, toCachedVerdict, fromCachedVerdict } from '../../../crystal
 import { allMediaUrls, mediaTypeFor } from '../../../crystal/BucketAdapter.js'
 import { CivitaiDownloadError } from '../../../crystal/civitaiAuth.js'
 import { isCatalogEligible } from '../../../crystal/modelLicense.js'
-import type { PublishOpts, EditionPreview } from '../CrystalApi.js'
+import type { PublishOpts, EditionPreview, AdminTakedownResult } from '../CrystalApi.js'
 import { log, PLATFORM_ANIMA_ID, PUBLICATION_COPY_PREFIX } from './support.js'
 import { CrystalApiDatasets } from './datasets.js'
 
@@ -216,6 +216,49 @@ export abstract class CrystalApiEditions extends CrystalApiDatasets {
     const updated = await editiones.update(id, { status: 'retracted' })
     await this._reconcile(updated)
     return toEdition(updated)
+  }
+
+  /**
+   * ADMIN TAKEDOWN (minimax-h3-violation-takedown): pull down every LIVE, non-private
+   * publication of one artifact — what a confirmed abuse-report violation (querelaAdminRouter)
+   * acts on. Unlike `retractEdition`, this is NOT author-scoped (an abuse report is filed
+   * by a stranger, not the publisher) and it acts on EVERY Editio of the artifact across
+   * every destination, not one. PLATFORM-ADMIN ONLY.
+   *
+   * `private`-visibility Editiones are left alone — they were never the public access a
+   * violation takes away, only the owner could ever reach them. A destination with no
+   * `retract` (mint: permanent) or one that no longer resolves to a registered adapter is
+   * recorded in `skipped` rather than thrown — one unreachable surface must not stop the
+   * rest of the takedown, and the admin still sees exactly what is still live.
+   */
+  async adminRetractAllEditions(auctor: AuctorKey, ref: ArtifactRef): Promise<AdminTakedownResult> {
+    this._assertPlatformAdmin(auctor)
+    const editiones = this.deps.editiones
+    const result: AdminTakedownResult = { retracted: [], skipped: [] }
+    if (!editiones) return result
+    const all = await editiones.listByArtifact(ref)
+    for (const e of all) {
+      if (e.status !== 'published' || e.visibility === 'private') continue
+      let adapter: PublicationAdapter
+      try {
+        adapter = this._resolveAdapter(e.destination)
+      } catch {
+        log.error('admin takedown: destination adapter not registered — publication left live', { editioId: e.id, destination: e.destination, artifactRef: ref })
+        result.skipped.push({ id: e.id, destination: e.destination, reason: 'adapter_unavailable' })
+        continue
+      }
+      if (!adapter.retract) {
+        log.error('admin takedown: destination is permanent — cannot retract, publication left live', { editioId: e.id, destination: e.destination, artifactRef: ref })
+        result.skipped.push({ id: e.id, destination: e.destination, reason: 'permanent' })
+        continue
+      }
+      await adapter.retract(e)
+      await this._dropHostedOutput(e)
+      const updated = await editiones.update(e.id, { status: 'retracted' })
+      await this._reconcile(updated)
+      result.retracted.push(e.id)
+    }
+    return result
   }
 
   /**
