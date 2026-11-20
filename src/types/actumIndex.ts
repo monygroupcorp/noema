@@ -62,6 +62,16 @@ export interface ActumIndex {
   /** The modus label (`Modus.nomen`) at settle, so the spend list renders without a second
    *  join. Falls back to `modusId` when the modus can't be resolved. */
   modusLabel?: string
+
+  // ─ Released stamp — set only once the run terminates as `fractus` (failure/cancel) ─
+  // Mirrors the settled stamp above, but for the OTHER terminal outcome: signa released,
+  // nothing charged. A `fractus` run is still NOT spend (sumSettledImpetus/listSettled are
+  // untouched by this), but it is the other half of "what happened to my hold" — without it,
+  // a failed run simply vanishes from the owner's history the instant it is pruned, which is
+  // the same "reservation reads as credits gone" complaint this stamp exists to retire.
+  /** When the run released (from `actum.completum` on the fail path). Presence discriminates
+   *  a released row from an in-flight or settled one; `listReleased` filters + paginates on it. */
+  releasedAt?: Date
 }
 
 /**
@@ -74,10 +84,11 @@ export interface ActumIndex {
 export interface ActumIndexStore {
   /** Record a new dispatched actum for this AuctorKey. Idempotent on actumId. */
   record(entry: ActumIndex): Promise<void>
-  /** In-flight entries for an AuctorKey (settled rows excluded). Looks up by `animaId`
-   *  OR `commitment` depending on the union discriminant. Bounded to the owner's active
-   *  runs — settled spend history lives behind `listSettled`/`sumSettledImpetus`, never
-   *  here (both `/status` and the GDPR export depend on this staying in-flight-only). */
+  /** In-flight entries for an AuctorKey (settled AND released rows excluded). Looks up by
+   *  `animaId` OR `commitment` depending on the union discriminant. Bounded to the owner's
+   *  active runs — settled spend history lives behind `listSettled`/`sumSettledImpetus`,
+   *  released history behind `listReleased`, never here (both `/status` and the GDPR export
+   *  depend on this staying in-flight-only). */
   findFor(key: AuctorKey): Promise<ActumIndex[]>
   /** Drop the entry for a finished/failed actum. Idempotent. */
   remove(actumId: string): Promise<void>
@@ -115,4 +126,19 @@ export interface ActumIndexStore {
   /** Lifetime sum of settled impetus for the owner, serialised as a string — the running
    *  total. Owner-scoped by the index key; `'0'` when there is no settled history. */
   sumSettledImpetus?(key: AuctorKey): Promise<string>
+
+  /**
+   * Retain-on-release: mirrors `settle` for the OTHER terminal outcome. Stamps the EXISTING
+   * row released (`releasedAt` + `modusLabel`) in place instead of removing it, so a failed/
+   * cancelled run stays visible as "released, nothing charged" rather than vanishing. Keyed
+   * by `actumId`; idempotent (the webhook is at-least-once). No-op if the row is already gone.
+   * Optional, same as `settle` — a store that omits it keeps the pre-existing prune behaviour
+   * (the fail path falls back to `remove`).
+   */
+  release?(actumId: string, patch: { releasedAt: Date; modusLabel: string }): Promise<void>
+  /**
+   * Owner-scoped, cursor-paginated, released-only listing (newest released first) — the
+   * `listSettled` twin for the released half of terminal history. `[]` for a bursaToken key.
+   */
+  listReleased?(key: AuctorKey, opts: { limit: number; cursor?: string }): Promise<{ entries: ActumIndex[]; nextCursor?: string }>
 }

@@ -927,3 +927,70 @@ test('callbackNonce survives a round-trip through the actum store', async () => 
   assert.equal((await actorum.findByCallbackNonce('nonce-A'))?.id, 'actum-test-1')
   assert.equal(await actorum.findByCallbackNonce('nonce-B'), null)
 })
+
+// ── Retain-on-release (noema reservation-reads-as-credits-gone) ────────────────
+// A fractus run must stay visible as "released, nothing charged" rather than silently
+// vanishing the instant its hold clears — mirrors the COMPLETED branch's settle/remove pair.
+
+function makeActumIndexReleaseStub() {
+  const released: Array<{ actumId: string; patch: { releasedAt: Date; modusLabel: string } }> = []
+  const removed: string[] = []
+  return {
+    released, removed,
+    async record() {},
+    async findFor() { return [] },
+    async remove(actumId: string) { removed.push(actumId) },
+    async release(actumId: string, patch: { releasedAt: Date; modusLabel: string }) { released.push({ actumId, patch }) },
+  }
+}
+
+test('FAILED stamps the actumIndex row released (with the resolved modus label), never removes it', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const actumIndex = makeActumIndexReleaseStub()
+  const modus: Modus = {
+    id: 'flux-schnell', nomen: 'LoRA training', genus: 'atomicus', versio: '1.0.0',
+    contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
+    auctor: { animaId: 'a' }, natum: new Date(), mutatum: new Date(),
+  }
+  const deps: ExecutionWebhookDeps = {
+    actorum: makeActorum(actum),
+    completor,
+    actumIndex,
+    modorum: makeModorum(modus),
+  }
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'FAILED', error: 'GPU OOM' }), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(actumIndex.removed.length, 0, 'a store that supports release is never told to remove')
+  assert.equal(actumIndex.released.length, 1)
+  assert.equal(actumIndex.released[0].actumId, 'actum-test-1')
+  assert.equal(actumIndex.released[0].patch.modusLabel, 'LoRA training')
+})
+
+test('CANCELLED also stamps released, not removed', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const actumIndex = makeActumIndexReleaseStub()
+  const deps: ExecutionWebhookDeps = { actorum: makeActorum(actum), completor, actumIndex }
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'CANCELLED' }), deps)
+
+  assert.equal(result.status, 200)
+  assert.equal(actumIndex.removed.length, 0)
+  assert.equal(actumIndex.released.length, 1)
+})
+
+test('FAILED falls back to remove() when the wired store lacks release (legacy/dev doubles)', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const removed: string[] = []
+  const actumIndex = {
+    async record() {}, async findFor() { return [] },
+    async remove(actumId: string) { removed.push(actumId) },
+  }
+  const deps: ExecutionWebhookDeps = { actorum: makeActorum(actum), completor, actumIndex }
+  const result = await handleExecutionWebhook(makeReq({ id: 'job-abc-123', status: 'FAILED', error: 'OOM' }), deps)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(removed, ['actum-test-1'])
+})

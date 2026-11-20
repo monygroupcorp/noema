@@ -215,8 +215,11 @@ export interface EarningsView {
  */
 export type ActivityKind = 'training' | 'caption' | 'decompose' | 'generation'
 
-/** Lifecycle of one activity row: in-flight, or settled successfully. */
-export type ActivityStatus = 'running' | 'settled'
+/** Lifecycle of one activity row: in-flight, settled successfully (charged), or
+ *  released (failed/cancelled — signa released, nothing charged). Without `released`
+ *  a failed run simply vanished from this list the instant its hold cleared — the same
+ *  "reservation reads as credits gone" gap this status exists to close. */
+export type ActivityStatus = 'running' | 'settled' | 'released'
 
 /**
  * ActivityDoor — the way back to what a run produced: id references into the
@@ -249,12 +252,14 @@ export interface ActivityRow {
   modusId: string
   /** Human label of the modus, when the index row carries one. */
   modusLabel?: string
-  /** In-flight or settled. */
+  /** In-flight, settled, or released. */
   status: ActivityStatus
   /** When the run started, as an ISO-8601 string. */
   createdAt?: string
-  /** When the run settled, as an ISO-8601 string. Absent while in flight. */
+  /** When the run settled, as an ISO-8601 string. Absent unless `status === 'settled'`. */
   settledAt?: string
+  /** When the run released, as an ISO-8601 string. Absent unless `status === 'released'`. */
+  releasedAt?: string
   /** The link to the run's artifact, when one is resolvable. */
   door?: ActivityDoor
   /**
@@ -265,7 +270,7 @@ export interface ActivityRow {
   queue?: { place: number; depth: number }
 }
 
-/** A page of the owner's activity — in-flight and settled runs, newest first. */
+/** A page of the owner's activity — in-flight, settled, and released runs, newest first. */
 export interface ActivityPage {
   activity: ActivityRow[]
   /** Opaque cursor for the next page of settled rows; absent on the last page. */

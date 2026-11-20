@@ -2846,11 +2846,19 @@
                   "properties": {
                     "balanceImpetus": {
                       "type": "string",
-                      "description": "Spendable impetus balance, serialised as a string."
+                      "description": "Spendable impetus balance, serialised as a string. Excludes anything currently held — see `heldImpetus`."
                     },
                     "balanceUsd": {
                       "type": "number",
                       "description": "USD-equivalent balance (informational)."
+                    },
+                    "heldImpetus": {
+                      "type": "string",
+                      "description": "Impetus currently LOCKED against the caller's own in-flight runs (the sum of `gens[].heldImpetus`), serialised as a string. Not spendable, not spent — a training run that reserves 7200 against a future charge shows here, not as a silent drop in `balanceImpetus` with nothing to explain it."
+                    },
+                    "heldUsd": {
+                      "type": "number",
+                      "description": "USD-equivalent of `heldImpetus` (informational)."
                     },
                     "gens": {
                       "type": "array",
@@ -2885,6 +2893,8 @@
                   "required": [
                     "balanceImpetus",
                     "balanceUsd",
+                    "heldImpetus",
+                    "heldUsd",
                     "gens",
                     "studios",
                     "joinable",
@@ -3255,13 +3265,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "A page of the owner's activity: in-flight and settled runs merged newest-first.",
+                  "description": "A page of the owner's activity: in-flight, settled, and released runs merged newest-first.",
                   "properties": {
                     "activity": {
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One run in the owner's activity — in-flight or settled — with a door to its artifact.",
+                        "description": "One run in the owner's activity — in-flight, settled, or released — with a door to its artifact.",
                         "properties": {
                           "actumId": {
                             "type": "string",
@@ -3289,9 +3299,10 @@
                             "type": "string",
                             "enum": [
                               "running",
-                              "settled"
+                              "settled",
+                              "released"
                             ],
-                            "description": "In-flight, or settled successfully."
+                            "description": "In-flight, settled (charged), or released (failed/cancelled — nothing charged)."
                           },
                           "createdAt": {
                             "type": "string",
@@ -3301,7 +3312,12 @@
                           "settledAt": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "When the run settled, ISO-8601. Absent while in flight."
+                            "description": "When the run settled, ISO-8601. Absent unless status is \"settled\"."
+                          },
+                          "releasedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When the run released, ISO-8601. Absent unless status is \"released\"."
                           },
                           "door": {
                             "type": "object",

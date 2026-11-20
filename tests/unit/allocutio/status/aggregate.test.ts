@@ -142,6 +142,91 @@ test('gens: nascens + agens included; completus filtered out', async () => {
   assert.equal(snap.gens[0].modusLabel, 'Flux Schnell')
 })
 
+test('held: a locked reservation is summed into heldImpetus, GenEntry carries its own hold', async () => {
+  const deps = makeDeps()
+  await deps.modorum.register({
+    id: 'm.train', nomen: 'LoRA training', genus: 'atomicus', versio: '1.0.0',
+    contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
+    auctor: { animaId: 'a' }, natum: new Date(), mutatum: new Date(),
+  })
+  await deps.actorum.create({
+    id: 'act-train', modusId: 'm.train', modusVersiono: '1.0.0', impetus: 7_200n, signaConsumed: [],
+    aditus: {}, status: 'nascens', expirat: new Date(Date.now() + 60_000),
+  })
+  const snap = await aggregateStatus(deps, { auctorKey: ALICE, inFlightActumIds: ['act-train'] })
+  assert.equal(snap.heldImpetus, 7_200n)
+  assert.ok(Math.abs(snap.heldUsd - 7_200 * 0.000337) < 1e-9)
+  assert.equal(snap.gens[0].heldImpetus, 7_200n)
+})
+
+test('held: no in-flight runs → heldImpetus is zero, not absent', async () => {
+  const deps = makeDeps()
+  const snap = await aggregateStatus(deps, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.heldImpetus, 0n)
+  assert.equal(snap.heldUsd, 0)
+})
+
+test('held: balance (spendable) and held (locked) are reported separately, not merged', async () => {
+  const deps = makeDeps()
+  await deps.signorum.issue({ animaId: ALICE.animaId, forma: 'integer', valor: 1_000n, auctor: 'test' })
+  await deps.modorum.register({
+    id: 'm.train', nomen: 'LoRA training', genus: 'atomicus', versio: '1.0.0',
+    contentHash: 'h', aditus: {}, exitus: {}, canonica: true,
+    auctor: { animaId: 'a' }, natum: new Date(), mutatum: new Date(),
+  })
+  await deps.actorum.create({
+    id: 'act-train', modusId: 'm.train', modusVersiono: '1.0.0', impetus: 7_200n, signaConsumed: [],
+    aditus: {}, status: 'agens', expirat: new Date(Date.now() + 60_000),
+  })
+  const snap = await aggregateStatus(deps, { auctorKey: ALICE, inFlightActumIds: ['act-train'] })
+  assert.equal(snap.balanceImpetus, 1_000n, 'balance is NOT reduced by the held figure — signorum.balance() already excludes locked signa')
+  assert.equal(snap.heldImpetus, 7_200n)
+})
+
+test('recentSettlement: most recent settled charge surfaces when actumIndex supports it', async () => {
+  const deps = makeDeps()
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  await actumIndex.record({ animaId: ALICE.animaId, actumId: 'act-done', modusId: 'm.train', createdAt: new Date('2026-01-01') })
+  await actumIndex.settle('act-done', { settledAt: new Date('2026-01-02'), impetus: '4500', modusLabel: 'LoRA training' })
+  const snap = await aggregateStatus({ ...deps, actumIndex }, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.recentSettlement?.kind, 'charge')
+  assert.equal(snap.recentSettlement?.impetus, 4_500n)
+  assert.equal(snap.recentSettlement?.modusLabel, 'LoRA training')
+})
+
+test('recentSettlement: a release surfaces with zero impetus — "nothing charged" is derivable', async () => {
+  const deps = makeDeps()
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  await actumIndex.record({ animaId: ALICE.animaId, actumId: 'act-failed', modusId: 'm.train', createdAt: new Date('2026-01-01') })
+  await actumIndex.release('act-failed', { releasedAt: new Date('2026-01-02'), modusLabel: 'LoRA training' })
+  const snap = await aggregateStatus({ ...deps, actumIndex }, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.recentSettlement?.kind, 'release')
+  assert.equal(snap.recentSettlement?.impetus, 0n)
+})
+
+test('recentSettlement: the newer of a charge and a release wins', async () => {
+  const deps = makeDeps()
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  await actumIndex.record({ animaId: ALICE.animaId, actumId: 'act-older-charge', modusId: 'm.a', createdAt: new Date('2026-01-01') })
+  await actumIndex.settle('act-older-charge', { settledAt: new Date('2026-01-02'), impetus: '100', modusLabel: 'A' })
+  await actumIndex.record({ animaId: ALICE.animaId, actumId: 'act-newer-release', modusId: 'm.b', createdAt: new Date('2026-01-03') })
+  await actumIndex.release('act-newer-release', { releasedAt: new Date('2026-01-04'), modusLabel: 'B' })
+  const snap = await aggregateStatus({ ...deps, actumIndex }, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.recentSettlement?.kind, 'release')
+  assert.equal(snap.recentSettlement?.actumId, 'act-newer-release')
+})
+
+test('recentSettlement: absent when nothing has ever terminated', async () => {
+  const deps = makeDeps()
+  const { MemoryActumIndex } = await import('../../../../src/execution/MemoryActumIndex.js')
+  const actumIndex = new MemoryActumIndex()
+  const snap = await aggregateStatus({ ...deps, actumIndex }, { auctorKey: ALICE, inFlightActumIds: [] })
+  assert.equal(snap.recentSettlement, undefined)
+})
+
 test('takenAt: respects injected clock', async () => {
   const deps = makeDeps()
   const fixed = new Date('2026-01-01T00:00:00Z')

@@ -289,7 +289,7 @@ export async function handleExecutionWebhook(
     }
 
     if (status === 'FAILED' || status === 'CANCELLED') {
-      await deps.completor.fail(actum, payload.error ?? 'Job failed')
+      const failed = await deps.completor.fail(actum, payload.error ?? 'Job failed')
       await deps.flowRouter?.handleActumComplete(actum.id, { kind: 'failed', error: payload.error ?? 'Job failed' })
 
       if (deps.collectioRouter) {
@@ -303,9 +303,24 @@ export async function handleExecutionWebhook(
         await deps.compositusRouter.onStepComplete(actum.compositum.parentId, actum, false)
       }
 
-      // A `fractus` run is a failure (signa released, no charge) — NOT spend — so it is
-      // pruned, never retained as settled history (noema-026: spend view is completus-only).
-      if (deps.actumIndex) await deps.actumIndex.remove(actum.id).catch(() => {})
+      // Retain-on-release: the run terminated as `fractus` (signa released, no charge) — NOT
+      // spend, so it never joins settled history (noema-026: spend view is completus-only),
+      // but it is the other half of "what happened to my hold": stamp the index row released
+      // instead of pruning it, so it stays visible (as "released", not "settled"). `/status`'s
+      // buildGens still filters to nascens|agens, so the retained row never re-appears in the
+      // active view. Stores without `release` (in-memory legacy/dev doubles) keep the old
+      // prune behaviour, mirroring the COMPLETED branch's settle/remove fallback above.
+      if (deps.actumIndex?.release) {
+        const modus = deps.modorum ? await deps.modorum.find(actum.modusId) : null
+        await deps.actumIndex
+          .release(actum.id, {
+            releasedAt: failed.completum ?? new Date(),
+            modusLabel: modus?.nomen ?? actum.modusId,
+          })
+          .catch(() => {})
+      } else if (deps.actumIndex) {
+        await deps.actumIndex.remove(actum.id).catch(() => {})
+      }
 
       return { status: 200, body: { success: true } }
     }

@@ -333,7 +333,7 @@ const ActivityDoorSchema: JsonSchema = {
 /** One row of the owner's activity read. */
 const ActivityRowSchema: JsonSchema = {
   type: 'object',
-  description: 'One run in the owner\'s activity — in-flight or settled — with a door to its artifact.',
+  description: 'One run in the owner\'s activity — in-flight, settled, or released — with a door to its artifact.',
   properties: {
     actumId: { type: 'string', description: 'The run (Actum) identifier.' },
     kind: {
@@ -343,9 +343,10 @@ const ActivityRowSchema: JsonSchema = {
     },
     modusId: { type: 'string', description: 'The flow (modus) the run executed.' },
     modusLabel: { type: 'string', description: 'Human label of the modus, when the index row carries one.' },
-    status: { type: 'string', enum: ['running', 'settled'], description: 'In-flight, or settled successfully.' },
+    status: { type: 'string', enum: ['running', 'settled', 'released'], description: 'In-flight, settled (charged), or released (failed/cancelled — nothing charged).' },
     createdAt: { type: 'string', format: 'date-time', description: 'When the run started, ISO-8601.' },
-    settledAt: { type: 'string', format: 'date-time', description: 'When the run settled, ISO-8601. Absent while in flight.' },
+    settledAt: { type: 'string', format: 'date-time', description: 'When the run settled, ISO-8601. Absent unless status is "settled".' },
+    releasedAt: { type: 'string', format: 'date-time', description: 'When the run released, ISO-8601. Absent unless status is "released".' },
     door: ActivityDoorSchema,
     queue: QueuePlaceSchema,
   },
@@ -355,7 +356,7 @@ const ActivityRowSchema: JsonSchema = {
 /** The response for `GET /v1/me/activity` — a page of the owner's runs, newest first. */
 const ActivityPageSchema: JsonSchema = {
   type: 'object',
-  description: 'A page of the owner\'s activity: in-flight and settled runs merged newest-first.',
+  description: 'A page of the owner\'s activity: in-flight, settled, and released runs merged newest-first.',
   properties: {
     activity: { type: 'array', items: ActivityRowSchema, description: 'Activity rows, newest first.' },
     nextCursor: { type: 'string', description: 'Opaque cursor for the next page of settled rows; absent on the last page.' },
@@ -674,14 +675,16 @@ const StatusViewSchema: JsonSchema = {
   type: 'object',
   description: "The caller's account snapshot — balance, in-flight gens, studios.",
   properties: {
-    balanceImpetus: { type: 'string', description: 'Spendable impetus balance, serialised as a string.' },
+    balanceImpetus: { type: 'string', description: 'Spendable impetus balance, serialised as a string. Excludes anything currently held — see `heldImpetus`.' },
     balanceUsd: { type: 'number', description: 'USD-equivalent balance (informational).' },
+    heldImpetus: { type: 'string', description: 'Impetus currently LOCKED against the caller\'s own in-flight runs (the sum of `gens[].heldImpetus`), serialised as a string. Not spendable, not spent — a training run that reserves 7200 against a future charge shows here, not as a silent drop in `balanceImpetus` with nothing to explain it.' },
+    heldUsd: { type: 'number', description: 'USD-equivalent of `heldImpetus` (informational).' },
     gens: { type: 'array', description: 'In-flight generation entries.', items: { type: 'object', additionalProperties: true } },
     studios: { type: 'array', description: 'Active studio entries.', items: { type: 'object', additionalProperties: true } },
     joinable: { type: 'array', description: 'Joinable studio invites.', items: { type: 'object', additionalProperties: true } },
     takenAt: { type: 'string', format: 'date-time', description: 'When the snapshot was taken.' },
   },
-  required: ['balanceImpetus', 'balanceUsd', 'gens', 'studios', 'joinable', 'takenAt'],
+  required: ['balanceImpetus', 'balanceUsd', 'heldImpetus', 'heldUsd', 'gens', 'studios', 'joinable', 'takenAt'],
 }
 
 /** The owner's presentation skin (Profile). */

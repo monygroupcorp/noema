@@ -87,12 +87,21 @@ export function Dashboard() {
   const { projects } = useProject();
   const { ident, execution } = useIdentity();
   const [credits, setCredits] = useState<string | null>(null);
+  // A reservation is a HOLD, not a charge — named here so the credits tile never reads as
+  // money that vanished the instant a run (e.g. a training) locks it (noema
+  // reservation-reads-as-credits-gone). null while loading or when nothing is held.
+  const [held, setHeld] = useState<{ n: string; runs: number } | null>(null);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
   const [earnings, setEarnings] = useState<EarningsView | null>(null);
 
   useEffect(() => {
     let live = true;
-    api.meStatus().then((s) => { if (live && s?.balanceImpetus != null) setCredits(Number(s.balanceImpetus).toLocaleString()); }).catch(() => {});
+    api.meStatus().then((s) => {
+      if (!live || s?.balanceImpetus == null) return;
+      setCredits(Number(s.balanceImpetus).toLocaleString());
+      const heldN = Number(s.heldImpetus ?? '0');
+      setHeld(heldN > 0 ? { n: heldN.toLocaleString(), runs: s.gens.length } : null);
+    }).catch(() => {});
     // The royalties tile: what this account has been paid for its own published work. One row
     // is page enough — the tile reads `lifetime`, which covers the whole history whatever the
     // page size; the payments themselves are the API's, at GET /v1/me/earnings.
@@ -124,6 +133,9 @@ export function Dashboard() {
             <div className="ib-cell">
               <div className="ib-l">credits</div>
               <div className="ib-n gold"><span className="gem">◈</span> {cr}</div>
+              {held && (
+                <div className="ib-sub">{held.n} held for {held.runs === 1 ? '1 run' : `${held.runs} runs`} — reserved, not spent</div>
+              )}
               <div className="ib-sub"><Link to="/funding">Fund from a wallet ▸</Link></div>
             </div>
             <div className="ib-cell">
