@@ -62,9 +62,3 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
 export function packStatusAffordances(rows: Affordance[][]): UiKeyboard {
   return rows.map(row => row.map(a => ({ label: a.label, data: `stat:${a.id}` })))
 }
-
-/** Strip the `stat:` prefix from a callback data string. Returns null if not a
- *  status callback (lets the dispatcher fall through to other handlers). */
-export function parseStatusData(data: string): string | null {
-  return data.startsWith('stat:') ? data.slice(5) : null
-}

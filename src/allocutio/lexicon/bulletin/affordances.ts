@@ -298,9 +298,3 @@ import type { UiKeyboard } from '../ui/Keyboard.js'
 export function packAffordances(rows: Affordance[][]): UiKeyboard {
   return rows.map(row => row.map(a => ({ label: a.label, data: `bul:${a.id}` })))
 }
-
-/** The inverse: extract the action id from a `bul:<id>` callback data string.
- *  Returns null if the prefix is missing. */
-export function parseAffordanceData(data: string): string | null {
-  return data.startsWith('bul:') ? data.slice(4) : null
-}
