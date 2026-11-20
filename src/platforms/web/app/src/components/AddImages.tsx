@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Dataset as DatasetT } from '../lib/api';
+import { imagesFrom, imagesFromClipboard, imagesFromDrop, mergeFiles } from '../lib/fileIngest';
 import { appendFailureNote, appendMediaRequest } from '../lib/muse';
 import { runBatch, uploadAsset } from '../lib/upload';
 import '../screens/muse.css';
@@ -66,6 +67,31 @@ export function AddImages({
   const [states, setStates] = useState<Record<number, string>>({});
   const [appending, setAppending] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const folderInput = useRef<HTMLInputElement>(null);
+
+  // One entry point for the dialog, drag-drop, a pasted screenshot and a chosen folder — each
+  // hands back a `File[]`, already filtered to images, and this is where they join the same
+  // pending list rather than four call sites each re-deriving it.
+  function addFiles(files: File[]) {
+    if (files.length === 0) return;
+    setPending((cur) => mergeFiles(cur, files));
+    setStates({});
+    setMsg(null);
+  }
+
+  // A paste anywhere on the page, while this panel is open, adds the screenshot or copied
+  // image it carries — the same way drag-drop reaches the page rather than one input element.
+  useEffect(() => {
+    if (!open || appending) return;
+    function onPaste(e: ClipboardEvent) {
+      const images = imagesFromClipboard(e);
+      if (images.length > 0) addFiles(images);
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, appending]);
 
   async function append() {
     if (appending) return;
@@ -121,16 +147,39 @@ export function AddImages({
     <section className="muse-add-images">
       <details open={open} onToggle={(e) => onOpenChange((e.target as HTMLDetailsElement).open)}>
         <summary className="muse-manual-summary">{title}</summary>
-        <div className="muse-add-images-body">
+        <div
+          className={`muse-add-images-body${dragOver ? ' drag-over' : ''}`}
+          onDragOver={(e) => { if (appending) return; e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (!appending) addFiles(imagesFromDrop(e.nativeEvent));
+          }}
+        >
           <div className="gt-sub mono">
             Three steps, and only the first is free: the images join the set, a caption pass has to
             read the set, and a decompose is what turns those captions into fragments on the floor.
+            Drag images onto this panel, paste one from the clipboard, or choose a folder — every
+            path lands in the same pending list below.
           </div>
           <div className="muse-add-images-row">
             <input
               type="file" accept="image/*" multiple disabled={appending}
               aria-label="images to add"
-              onChange={(e) => { setPending(Array.from(e.target.files ?? [])); setStates({}); setMsg(null); }}
+              onChange={(e) => { addFiles(imagesFrom(e.target.files ?? [])); e.target.value = ''; }}
+            />
+            <button type="button" className="btn ghost sm" disabled={appending}
+              onClick={() => folderInput.current?.click()}>
+              choose a folder
+            </button>
+            <input
+              ref={folderInput} type="file" multiple disabled={appending} hidden
+              aria-label="a folder of images to add"
+              // @ts-expect-error — `webkitdirectory` has no type in React's DOM typings but every
+              // evergreen browser honors it; it is what flattens subfolders into one FileList.
+              webkitdirectory=""
+              onChange={(e) => { addFiles(imagesFrom(e.target.files ?? [])); e.target.value = ''; }}
             />
             <button type="button" className="btn accent sm" disabled={appending || pending.length === 0}
               onClick={() => void append()}>

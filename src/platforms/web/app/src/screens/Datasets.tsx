@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, datasetStatsLine, type Readiness } from '../lib/datasets';
+import { imagesFrom, imagesFromClipboard, imagesFromDrop, mergeFiles } from '../lib/fileIngest';
 import { runBatch, uploadAsset } from '../lib/upload';
 import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
 import { doorPath } from '../lib/entry';
@@ -105,6 +106,27 @@ export function Datasets() {
   const [pickedActa, setPickedActa] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const folderInput = useRef<HTMLInputElement>(null);
+
+  // Paste, drop and a folder choice are image-only here — an image is the modality this goal
+  // (dataset-ingest-is-starved) starves; a video or audio dataset keeps the plain file dialog
+  // it already had, unchanged.
+  function addFiles(incoming: File[]) {
+    if (incoming.length === 0) return;
+    setFiles((cur) => mergeFiles(cur, incoming));
+  }
+
+  useEffect(() => {
+    if (!open || source !== 'upload' || modality !== 'image' || busy) return;
+    function onPaste(e: ClipboardEvent) {
+      const images = imagesFromClipboard(e);
+      if (images.length > 0) addFiles(images);
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, source, modality, busy]);
 
   const openModal = () => {
     setOpen(true); setSource('upload'); setName(''); setModality('image');
@@ -297,11 +319,41 @@ export function Datasets() {
               </div>
 
               {source === 'upload' ? (
-                <div>
+                <div
+                  className={dragOver ? 'drag-over' : undefined}
+                  style={modality === 'image' ? { borderRadius: 8, outline: dragOver ? '2px dashed var(--accent)' : undefined, outlineOffset: 4 } : undefined}
+                  onDragOver={modality !== 'image' ? undefined : (e) => { if (busy) return; e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={modality !== 'image' ? undefined : () => setDragOver(false)}
+                  onDrop={modality !== 'image' ? undefined : (e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (!busy) addFiles(imagesFromDrop(e.nativeEvent));
+                  }}
+                >
                   <input
                     type="file" multiple accept="image/*,video/*,audio/*" disabled={busy}
-                    onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files ?? []);
+                      if (modality === 'image') { addFiles(imagesFrom(picked)); e.target.value = ''; } else setFiles(picked);
+                    }}
                   />
+                  {modality === 'image' && (
+                    <>
+                      <button type="button" className="btn ghost sm" disabled={busy} style={{ marginLeft: 8 }}
+                        onClick={() => folderInput.current?.click()}>
+                        choose a folder
+                      </button>
+                      <input
+                        ref={folderInput} type="file" multiple disabled={busy} hidden
+                        aria-label="a folder of images to add"
+                        // @ts-expect-error — `webkitdirectory` has no type in React's DOM typings but every
+                        // evergreen browser honors it; it flattens subfolders into one FileList.
+                        webkitdirectory=""
+                        onChange={(e) => { addFiles(imagesFrom(e.target.files ?? [])); e.target.value = ''; }}
+                      />
+                      <div className="sub mono" style={{ marginTop: 8, opacity: 0.7 }}>or drag images here, or paste one</div>
+                    </>
+                  )}
                   {files.length > 0 && <div className="sub mono" style={{ marginTop: 8 }}>{files.length} file{files.length === 1 ? '' : 's'} selected</div>}
                 </div>
               ) : (
