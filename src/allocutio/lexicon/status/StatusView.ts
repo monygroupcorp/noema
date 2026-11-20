@@ -4,7 +4,7 @@
 // The complementary surface to BulletinView. Same shape (text + keyboard) so
 // the Telegram adapter treats it identically. No I/O, no timers, no bus.
 
-import type { StatusSnapshot, GenEntry, StudioEntry, JoinableEntry } from './types.js'
+import type { StatusSnapshot, GenEntry, StudioEntry, JoinableEntry, RecentSettlement } from './types.js'
 import { statusAffordancesFor, packStatusAffordances } from './affordances.js'
 import type { UiKeyboard } from '../ui/Keyboard.js'
 
@@ -17,9 +17,15 @@ export const StatusView = {
   render(s: StatusSnapshot): RenderedStatus {
     const lines: string[] = []
 
-    // 1. Balance line — always present.
+    // 1. Balance line — always present. A held reservation is named here, not left to read
+    // as a drop in balance with nothing to explain it (noema reservation-reads-as-credits-gone).
     if (s.auctorKey) {
       lines.push(`Balance: ${formatImpetus(s.balanceImpetus)} (${money(s.balanceUsd)})`)
+      if (s.heldImpetus > 0n) {
+        const forRuns = s.gens.length === 1 ? '1 run' : `${s.gens.length} runs`
+        lines.push(`  Held for ${forRuns}: ${formatImpetus(s.heldImpetus)} (${money(s.heldUsd)}) — reserved, not spent`)
+      }
+      if (s.recentSettlement) lines.push(`  ${settlementLine(s.recentSettlement)}`)
     } else {
       lines.push('Not signed in — connect a wallet or run /start.')
     }
@@ -72,7 +78,16 @@ function genLine(g: GenEntry): string {
     g.status === 'agens' && g.elapsedMs !== undefined ? `${fmtDur(g.elapsedMs)} elapsed` :
     g.etaMs !== undefined ? `ETA ${fmtDur(g.etaMs)}` :
     g.status === 'nascens' ? 'queued' : 'running'
-  return `${g.modusLabel} — ${g.status === 'agens' ? 'running on' : 'queued on'} ${where} — ${timing}`
+  const held = g.heldImpetus > 0n ? ` — holding ${formatImpetus(g.heldImpetus)}` : ''
+  return `${g.modusLabel} — ${g.status === 'agens' ? 'running on' : 'queued on'} ${where} — ${timing}${held}`
+}
+
+/** The most-recently-terminated run, in the same line style as the balance section —
+ *  a charge says what it cost; a release says plainly that nothing was. */
+function settlementLine(r: RecentSettlement): string {
+  return r.kind === 'charge'
+    ? `Last settled: ${r.modusLabel} — charged ${formatImpetus(r.impetus)} (${money(r.usd)})`
+    : `Last settled: ${r.modusLabel} — released, nothing charged`
 }
 
 function studioLine(st: StudioEntry): string {

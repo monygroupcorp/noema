@@ -1977,6 +1977,9 @@ export interface TeeSessionView {
 export interface GenEntry {
   actumId: string;
   modusLabel: string;
+  // Impetus locked (held) against this run — a reservation, not a charge. Stringified
+  // bigint, same convention as StudioEntry.netImpetus below.
+  heldImpetus: string;
   studio: { id: string; hostLabel: string; isOwn: boolean } | null;
   status: 'nascens' | 'agens';
   elapsedMs?: number;
@@ -1996,6 +1999,10 @@ export interface JoinableEntry { studioId: string; label: string; hostLabel: str
 export interface MeStatus {
   balanceImpetus: string;
   balanceUsd: number;
+  // Impetus currently locked against the caller's own in-flight runs (sum of
+  // gens[].heldImpetus) — a hold, not a charge. Not included in balanceImpetus.
+  heldImpetus: string;
+  heldUsd: number;
   gens: GenEntry[];
   studios: StudioEntry[];
   joinable: JoinableEntry[];
@@ -2097,7 +2104,7 @@ export interface RunsPage {
 // as `CanonVerb` above. What a run produced (`generation` is the catch-all).
 export type ActivityKind = 'training' | 'caption' | 'decompose' | 'generation';
 // In-flight, or settled successfully.
-export type ActivityStatus = 'running' | 'settled';
+export type ActivityStatus = 'running' | 'settled' | 'released';
 // The way back to what a run produced: id references into the canonical asset stores. Every
 // field is optional — a field the run did not produce is absent rather than guessed.
 export interface ActivityDoor {
@@ -2115,12 +2122,14 @@ export interface ActivityRow {
   status: ActivityStatus;
   createdAt?: string;
   settledAt?: string;
+  /** When the run released (failed/cancelled — nothing charged). Present only when status is 'released'. */
+  releasedAt?: string;
   door?: ActivityDoor;
   /** Where an in-flight run waiting for a warm pod stands in line; absent once it dispatches. */
   queue?: { place: number; depth: number };
 }
-// A page of the owner's activity — in-flight and settled runs, newest first. In-flight rows
-// ride the first page only; `nextCursor` walks settled history.
+// A page of the owner's activity — in-flight, settled, and released runs, newest first.
+// In-flight and released rows ride the first page only; `nextCursor` walks settled history.
 export interface ActivityPage {
   activity: ActivityRow[];
   nextCursor?: string;

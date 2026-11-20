@@ -6,7 +6,7 @@ import type { MeStatus } from '../lib/api';
 // this exercises the pure derivation the stat row renders from.
 
 function me(over: Partial<MeStatus> = {}): MeStatus {
-  return { balanceImpetus: '0', balanceUsd: 0, gens: [], studios: [], joinable: [], takenAt: 'now', ...over };
+  return { balanceImpetus: '0', balanceUsd: 0, heldImpetus: '0', heldUsd: 0, gens: [], studios: [], joinable: [], takenAt: 'now', ...over };
 }
 
 describe('statCards — the row of figures under the Activity page head', () => {
@@ -27,5 +27,20 @@ describe('statCards — the row of figures under the Activity page head', () => 
     }));
     expect(cards.map((c) => [c.l, c.n])).toEqual([['Balance', '1,200'], ['Runs', '2'], ['Studios', '1']]);
     expect(cards[0].d).toBe('credits · ≈ $0.40');
+  });
+
+  it('a locked reservation draws its own Held card — never folded silently into Balance', () => {
+    const cards = statCards(me({
+      balanceImpetus: '0', balanceUsd: 0,
+      heldImpetus: '7200', heldUsd: 2.4264,
+      gens: [{} as MeStatus['gens'][number]],
+    }));
+    expect(cards.map((c) => [c.l, c.n])).toEqual([['Balance', '0'], ['Held', '7,200'], ['Runs', '1']]);
+    expect(cards[1].d).toBe('reserved for 1 run · ≈ $2.43');
+  });
+
+  it('nothing held → no Held card', () => {
+    const cards = statCards(me());
+    expect(cards.map((c) => c.l)).toEqual(['Balance']);
   });
 });

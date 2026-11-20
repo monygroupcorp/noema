@@ -1382,14 +1382,18 @@ export class CrystalApi {
     const index = this.deps.actumIndex
     if (!index?.listSettled) return { activity: [] }
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20) || 20, 1), 100)
-    const [inFlight, page] = await Promise.all([
+    const [inFlight, page, releasedPage] = await Promise.all([
       opts.cursor ? Promise.resolve([]) : index.findFor(auctor),
       index.listSettled(auctor, { limit, ...(opts.cursor ? { cursor: opts.cursor } : {}) }),
+      // Released rows ride the FIRST page alongside in-flight — same reasoning as `inFlight`
+      // above: they are few and recent, not a cursor-walked history of their own.
+      opts.cursor || !index.listReleased ? Promise.resolve({ entries: [] }) : index.listReleased(auctor, { limit }),
     ])
 
     const rows: ActivityRow[] = [
       ...inFlight.map(e => this._toActivityRow(e, 'running')),
       ...page.entries.map(e => this._toActivityRow(e, 'settled')),
+      ...releasedPage.entries.map(e => this._toActivityRow(e, 'released')),
     ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
 
     for (const row of rows) {
@@ -1409,7 +1413,7 @@ export class CrystalApi {
   }
 
   /** Project one owner-scoped index row onto its public activity row (doors added separately). */
-  private _toActivityRow(entry: ActumIndex, status: 'running' | 'settled'): ActivityRow {
+  private _toActivityRow(entry: ActumIndex, status: ActivityRow['status']): ActivityRow {
     const row: ActivityRow = {
       actumId: entry.actumId,
       kind: activityKindFor(entry.modusId),
@@ -1419,6 +1423,7 @@ export class CrystalApi {
     if (entry.modusLabel !== undefined) row.modusLabel = entry.modusLabel
     if (entry.createdAt !== undefined) row.createdAt = new Date(entry.createdAt).toISOString()
     if (entry.settledAt !== undefined) row.settledAt = new Date(entry.settledAt).toISOString()
+    if (entry.releasedAt !== undefined) row.releasedAt = new Date(entry.releasedAt).toISOString()
     return row
   }
 
@@ -5357,7 +5362,11 @@ export class CrystalApi {
     return {
       balanceImpetus: snap.balanceImpetus.toString(),
       balanceUsd: snap.balanceUsd,
-      gens: snap.gens,
+      heldImpetus: snap.heldImpetus.toString(),
+      heldUsd: snap.heldUsd,
+      // GenEntry carries a bigint (`heldImpetus`) — stringify it, same reason as netImpetus
+      // below (res.json/JSON.stringify throw on a raw bigint).
+      gens: snap.gens.map((g) => ({ ...g, heldImpetus: g.heldImpetus.toString() })),
       // StudioEntry carries a bigint (`netImpetus`) — stringify it so the whole view
       // is JSON-safe (res.json/JSON.stringify throw on a raw bigint).
       studios: snap.studios.map((s) => ({ ...s, netImpetus: s.netImpetus.toString() })),
@@ -5943,6 +5952,9 @@ export interface SteerProposalView {
 export interface StatusView {
   balanceImpetus: string
   balanceUsd: number
+  /** Impetus currently locked against the caller's own in-flight runs. See `StatusSnapshot.heldImpetus`. */
+  heldImpetus: string
+  heldUsd: number
   gens: unknown[]
   studios: unknown[]
   joinable: unknown[]

@@ -5,6 +5,14 @@ import { Ic } from '../lib/icons';
 import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
 import { activityDoorHref, activityDoorLabel, activityKindLabel, queueLabel } from '../lib/muse';
 
+// A released run is the OTHER terminal outcome besides a charge: the reservation was
+// released, nothing was charged. Named explicitly rather than folded into "Done" so a
+// failed/cancelled run never reads as if it simply vanished (same reason it stays in
+// this list at all, instead of being pruned).
+function activityStatusLabel(status: ActivityRow['status']): string {
+  return status === 'running' ? 'Running' : status === 'released' ? 'Released' : 'Done';
+}
+
 const IMPETUS_USD = 0.000337;
 
 // The stat cards under the page head. The balance is drawn whatever it reads: next to "Add
@@ -22,6 +30,14 @@ export function statCards(me: MeStatus | null, usdPerCredit = IMPETUS_USD): Stat
   const credits = Number(me.balanceImpetus);
   const usd = me.balanceUsd || credits * usdPerCredit;
   const cards: StatCard[] = [{ l: 'Balance', n: credits.toLocaleString(), d: `credits · ≈ $${usd.toFixed(2)}` }];
+  // A reservation is a HOLD, not a charge: shown as its own card next to Balance so it never
+  // reads as credits that simply vanished (the balance number alone already dropped by this).
+  const held = Number(me.heldImpetus);
+  if (held > 0) {
+    const heldUsdAmount = me.heldUsd || held * usdPerCredit;
+    const runs = me.gens.length === 1 ? '1 run' : `${me.gens.length} runs`;
+    cards.push({ l: 'Held', n: held.toLocaleString(), d: `reserved for ${runs} · ≈ $${heldUsdAmount.toFixed(2)}` });
+  }
   if (me.gens.length > 0) cards.push({ l: 'Runs', n: String(me.gens.length), d: 'all time' });
   if (me.studios.length > 0) cards.push({ l: 'Studios', n: String(me.studios.length), d: 'warm sessions' });
   return cards;
@@ -132,7 +148,7 @@ export function Status() {
           <div className="s">{activityKindLabel(row.kind)}{href ? ` · ${activityDoorLabel(row.kind)}` : ''}</div>
         </div>
         <div className="li-right" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-          <span className={`badge${row.status === 'running' ? ' accent' : ''}`}>{row.status === 'running' ? 'Running' : 'Done'}</span>
+          <span className={`badge${row.status === 'running' ? ' accent' : ''}`}>{activityStatusLabel(row.status)}</span>
           {right}
         </div>
       </>
@@ -170,7 +186,7 @@ export function Status() {
           </div>
         ) : (
           <div className="list">
-            {activityRows.slice(0, 8).map((row) => activityRow(row, row.status === 'running' ? runningRight(row) : fmtDate(row.settledAt)))}
+            {activityRows.slice(0, 8).map((row) => activityRow(row, row.status === 'running' ? runningRight(row) : fmtDate(row.settledAt ?? row.releasedAt)))}
           </div>
         )}
 

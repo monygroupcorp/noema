@@ -95,3 +95,55 @@ test('different commitments are isolated', async () => {
   assert.deepEqual((await idx.findFor({ commitment: 'X' })).map(e => e.actumId), ['x1'])
   assert.deepEqual((await idx.findFor({ commitment: 'Y' })).map(e => e.actumId), ['y1'])
 })
+
+// ── retain-on-settle / retain-on-release (noema-026 + reservation-reads-as-credits-gone) ──
+
+test('settle: stamps the row in place; findFor stops returning it; listSettled does', async () => {
+  const idx = new MemoryActumIndex()
+  await idx.record({ animaId: ANIMA.animaId, actumId: 'act1', modusId: 'm', createdAt: new Date('2026-01-01') })
+  await idx.settle('act1', { settledAt: new Date('2026-01-02'), impetus: '500', modusLabel: 'Flux' })
+  assert.deepEqual(await idx.findFor(ANIMA), [], 'settled row is no longer in-flight')
+  const page = await idx.listSettled(ANIMA, { limit: 10 })
+  assert.equal(page.entries.length, 1)
+  assert.equal(page.entries[0].actumId, 'act1')
+  assert.equal(page.entries[0].impetus, '500')
+  assert.equal(await idx.sumSettledImpetus(ANIMA), '500')
+})
+
+test('settle on an unknown/already-removed actumId is a no-op', async () => {
+  const idx = new MemoryActumIndex()
+  await idx.settle('ghost', { settledAt: new Date(), impetus: '1', modusLabel: 'x' })
+  assert.deepEqual(await idx.listSettled(ANIMA, { limit: 10 }), { entries: [] })
+})
+
+test('release: stamps the row in place; findFor stops returning it; listReleased does, with no cost', async () => {
+  const idx = new MemoryActumIndex()
+  await idx.record({ animaId: ANIMA.animaId, actumId: 'act1', modusId: 'm', createdAt: new Date('2026-01-01') })
+  await idx.release('act1', { releasedAt: new Date('2026-01-02'), modusLabel: 'LoRA training' })
+  assert.deepEqual(await idx.findFor(ANIMA), [], 'released row is no longer in-flight')
+  const page = await idx.listReleased(ANIMA, { limit: 10 })
+  assert.equal(page.entries.length, 1)
+  assert.equal(page.entries[0].actumId, 'act1')
+  assert.equal(page.entries[0].modusLabel, 'LoRA training')
+  assert.equal(await idx.sumSettledImpetus(ANIMA), '0', 'a release is never counted as spend')
+})
+
+test('settled and released rows are isolated from each other in their respective listings', async () => {
+  const idx = new MemoryActumIndex()
+  await idx.record({ animaId: ANIMA.animaId, actumId: 'charged', modusId: 'm', createdAt: new Date('2026-01-01') })
+  await idx.record({ animaId: ANIMA.animaId, actumId: 'released', modusId: 'm', createdAt: new Date('2026-01-01') })
+  await idx.settle('charged', { settledAt: new Date('2026-01-02'), impetus: '100', modusLabel: 'x' })
+  await idx.release('released', { releasedAt: new Date('2026-01-02'), modusLabel: 'y' })
+  assert.deepEqual((await idx.listSettled(ANIMA, { limit: 10 })).entries.map(e => e.actumId), ['charged'])
+  assert.deepEqual((await idx.listReleased(ANIMA, { limit: 10 })).entries.map(e => e.actumId), ['released'])
+})
+
+test('findByActumId resolves a row regardless of terminal state', async () => {
+  const idx = new MemoryActumIndex()
+  await idx.record({ animaId: ANIMA.animaId, actumId: 'act1', modusId: 'm', createdAt: new Date() })
+  assert.equal((await idx.findByActumId('act1'))?.actumId, 'act1')
+  await idx.release('act1', { releasedAt: new Date(), modusLabel: 'm' })
+  assert.equal((await idx.findByActumId('act1'))?.releasedAt?.getTime(), (await idx.findByActumId('act1'))?.releasedAt?.getTime())
+  assert.ok((await idx.findByActumId('act1'))?.releasedAt)
+  assert.equal(await idx.findByActumId('nope'), null)
+})
