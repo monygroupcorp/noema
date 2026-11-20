@@ -228,6 +228,37 @@ Telegram lines to look for: `telegram update` (every inbound message/callback, w
 bot added, removed, promoted, demoted or restricted in a chat, with `oldStatus`, `newStatus`,
 `at`), and `telegram chat migration` (a group upgraded to a supergroup, with both chat ids).
 
+### Caddy access log
+
+Before this item, Caddy ran with no `log` directive at all, so a visitor who hit
+`noema.art`/`www.noema.art`/`app.noema.art` and left was invisible on every disk the box
+has. The `Caddyfile` now gives all four sites (the three above plus `staging.noema.art`) a
+shared JSON access log at `/var/log/caddy/access.log`, bind-mounted from the host (not a
+named Docker volume), rolled at 100MB/10 files with a 2160h (90-day) `roll_keep_for`. A bind
+mount to a host path survives both a container restart and `docker rm -f` + recreate — it is
+outside the container entirely, same pattern as `LOG_DIR=/var/log/hyperbot` for the app.
+
+**One-time step this change needs, not covered by an ordinary deploy:** `deploy.sh`'s
+`start_caddy` only adds the new mount when it *creates* the `caddy_proxy` container —  if
+one is already running (the normal case), it just runs `caddy reload`, which cannot attach a
+mount to an already-running container. The first deploy after this ships, recreate Caddy
+once so the mount takes:
+
+```bash
+ssh noema
+docker rm -f caddy_proxy   # start_caddy recreates it with the new -v /var/log/caddy mount
+./deploy.sh                # or let the next normal deploy's start_caddy do it
+```
+
+Verify and count a day's arrivals:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://noema.art/          # generate one hit
+tail -n1 /var/log/caddy/access.log | jq .                             # confirm it landed
+jq -r 'select(.ts >= (now - 86400))' /var/log/caddy/access.log | wc -l # arrivals, last 24h
+jq -r '.request.host' /var/log/caddy/access.log | sort | uniq -c       # split by host
+```
+
 ## Backups
 
 **Audited 2026-11-06:** the droplet runs no app- or database-specific cron or systemd

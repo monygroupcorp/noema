@@ -106,6 +106,9 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      # Bind mount, not a named volume: deploy.sh's start_caddy uses the same host path
+      # (/var/log/caddy) so the access log is identical and durable under either launch path.
+      - /var/log/caddy:/var/log/caddy
     networks:
       - hyperbot
 

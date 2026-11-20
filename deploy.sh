@@ -46,6 +46,7 @@ CADDYFILE_PATH="${DEPLOY_ROOT}/Caddyfile"
 # Logging / maintenance
 LOG_DIR="/var/log/hyperbot"
 LOG_FILE="${LOG_DIR}/hyperbot.log"
+CADDY_LOG_DIR="/var/log/caddy"
 MAINT_DIR="/var/run/hyperbot"
 MAINT_FLAG="${MAINT_DIR}/maintenance.flag"
 
@@ -102,7 +103,7 @@ load_env_var() {
   printf ''
 }
 
-mkdir -p "${LOG_DIR}" "${MAINT_DIR}"
+mkdir -p "${LOG_DIR}" "${MAINT_DIR}" "${CADDY_LOG_DIR}"
 # Created-if-missing so the read-only bind mount below always has a source. Empty == stubs.
 mkdir -p "${COMPLIANCE_DIR}"
 # Empty is the correct state before a ceremony opens; it fills as contributions land.
@@ -168,7 +169,10 @@ ensure_network() {
 
 start_caddy() {
   if docker ps --format '{{.Names}}' | grep -q "^${CADDY_CONTAINER}$"; then
-    # Caddy already running with bind-mounted Caddyfile — just reload
+    # Caddy already running with bind-mounted Caddyfile — just reload. Note: a reload
+    # cannot add a mount to a container that doesn't have it yet — the access-log bind
+    # mount below only lands the first time this recreates the container (e.g. after a
+    # one-off `docker rm -f caddy_proxy`), not on an ordinary reload of an already-running one.
     log "Reloading Caddy config..."
     docker exec "${CADDY_CONTAINER}" caddy reload --config /etc/caddy/Caddyfile >> "${LOG_FILE}" 2>&1 || true
     return
@@ -185,6 +189,7 @@ start_caddy() {
     -v "${CADDYFILE_PATH}":/etc/caddy/Caddyfile \
     -v caddy_data:/data \
     -v caddy_config:/config \
+    -v "${CADDY_LOG_DIR}":/var/log/caddy \
     "${CADDY_IMAGE}"
 }
 
