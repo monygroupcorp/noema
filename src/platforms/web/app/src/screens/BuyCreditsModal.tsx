@@ -182,6 +182,9 @@ export function BuyCreditsModal({ open, onClose }: { open: boolean; onClose: () 
     // has to sign in on the way: dropping it at the door is what left the anon buyer, who walks
     // the longest version of this path, the only one with no way back to what they broke off.
     const returnTo = window.location.pathname + window.location.search;
+    // noema/user-behaviour-corpus clause 2 — see Funding.tsx's buyPack for why this fires
+    // before the sign-in-detour check.
+    api.recordEvent('funding_attempt', { packageId: packId });
     if (!canCheckout(session)) { onClose(); navigate(signInThenBuy(packId, returnTo)); return; }
     setCardBusy(packId);
     api.createCheckoutSession(buildCheckoutRequest(packId, window.location.origin, returnTo, purchaseAllocutio(safeSessionStorage())))

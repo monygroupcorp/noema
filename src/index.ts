@@ -74,6 +74,9 @@ import { WideEventStore }         from './analytics/WideEventStore.js'
 import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
+import { BehaviourEventStore }    from './analytics/BehaviourEventStore.js'
+import { ensureBehaviourIndexes } from './analytics/ensureBehaviourIndexes.js'
+import { createEventsRouter }     from './api/internal/eventsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
 import { selectModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
 import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
@@ -419,6 +422,7 @@ async function main(): Promise<void> {
   log.info('MongoDB connected')
   await ensureIndexes(mongo.db(DB_NAME))
   await ensureWideIndexes(mongo.db(DB_NAME))
+  await ensureBehaviourIndexes(mongo.db(DB_NAME))
   log.info('Indexes ensured')
 
   // 2. Build embedding functions (CLIP service) and hosted-API providers
@@ -1041,6 +1045,9 @@ async function main(): Promise<void> {
   // consumers below) so the admin COGS report can read off the SAME instance analyticsListener
   // writes through.
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
+  // Behaviour corpus (noema/user-behaviour-corpus) — non-run visitor events (catalog view,
+  // quote, sign-in, funding attempt), pseudonymous-keyed, device-bucketed, no IP/raw-UA.
+  const behaviourStore = new BehaviourEventStore(mongo.db(DB_NAME))
 
   // GDPR Art. 17 right-to-erasure (noema-025) — build the erased-account denylist (session
   // revocation, shared with the auth acceptors below so an erase is visible to verifyJwt at once)
@@ -1221,6 +1228,10 @@ async function main(): Promise<void> {
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
   // than shared via the CrystalApi facade.
   app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({ querelae: ring.querelae, identity: apiResolver }))
+
+  // Behaviour corpus intake (noema/user-behaviour-corpus) — non-run visitor events. Mirrors
+  // querelaRouter's shape: anon-capable, own rate limit, no CrystalApi facade.
+  app.use('/v1/events', express.json(), createEventsRouter({ events: behaviourStore, identity: apiResolver }))
 
   // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
   // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution
@@ -1723,7 +1734,7 @@ async function main(): Promise<void> {
   log.info('license tripwire started', { tickMs: 6 * 60 * 60 * 1000 })
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
-  app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+  app.use('/internal/analytics', createAnalyticsRouter({ wideStore, behaviourStore, actorum: ring.actorum }, INTERNAL_SECRET))
   // BYO-secrets Phase C: the weight-download proxy. Mounted only when a job-token secret AND a
   // secret store are configured (the same envs that let the Compiler rewrite gated urls). A pod
   // presents its per-job token; we stream the owner's gated private weights with their BYO token

@@ -96,7 +96,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let live = true;
     void signInFromTelegramLaunch().then((launched) => {
       if (!live) return;
-      if (launched) { adopt(launched); setReady(true); return; }
+      if (launched) { adopt(launched); api.recordEvent('sign_in', { method: 'telegram' }); setReady(true); return; }
       restoreStored();
     });
     return () => {
@@ -132,11 +132,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const register = async (username: string, password: string) => {
     const res = await api.auth.register(username, password); // 201 — mints a session (no verify step)
     adopt(res, username);
+    api.recordEvent('sign_in', { method: 'password' });
   };
 
   const login = async (username: string, password: string) => {
     const res = await api.auth.login(username, password);
     adopt(res, username);
+    api.recordEvent('sign_in', { method: 'password' });
   };
 
   // Wallet-first signup: prove a wallet with no username/password. An unknown wallet MINTS a new
@@ -149,6 +151,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const signature = await wallet.signMessage(statement);
     const res = await api.auth.walletRegister(token, signature);
     adopt(res);
+    api.recordEvent('sign_in', { method: 'wallet' });
   };
 
   // Forgot-password recovery: prove control of a linked wallet, adopt that soul. The username
@@ -159,12 +162,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const signature = await wallet.signMessage(statement);
     const res = await api.auth.walletRecover(token, signature);
     adopt(res);
+    api.recordEvent('sign_in', { method: 'wallet' });
   };
 
   // Forgot-password recovery via Telegram: the user pastes a code the bot handed them.
   const recoverWithTelegram = async (code: string) => {
     const res = await api.auth.telegramRecover(code.trim());
     adopt(res);
+    api.recordEvent('sign_in', { method: 'telegram' });
   };
 
   // Switch the active account. Activate immediately (instant if the token is still live),
