@@ -4771,12 +4771,24 @@ export class CrystalApi {
         for (const key of Object.keys(child.aditus)) {
           if (key in aditus) childAditus[key] = aditus[key]
         }
-        total += await this.deps.cursorum.resolve(child).reserve(child, childAditus)
+        total += await this._resolveCursor(child).reserve(child, childAditus)
       }
       return total
     }
 
-    return this.deps.cursorum.resolve(modus).reserve(modus, aditus)
+    return this._resolveCursor(modus).reserve(modus, aditus)
+  }
+
+  /** `cursorum.resolve` throws a plain `Error` when a modus's `ministerium` has no `Cursor`
+   *  registered (a deployment-configuration gap, e.g. a missing provider API key) — translate
+   *  that into a handled 503 rather than letting it fall through as an unhandled 500. */
+  private _resolveCursor(modus: Modus) {
+    try {
+      return this.deps.cursorum.resolve(modus)
+    } catch (err) {
+      if (err instanceof ApiError) throw err
+      throw Errors.ministeriumUnavailable(modus.ministerium)
+    }
   }
 
   /** List the canonical compute substrates (fundamenta) an agent can arm a studio on. */
