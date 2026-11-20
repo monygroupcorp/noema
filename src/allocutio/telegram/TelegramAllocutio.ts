@@ -47,6 +47,7 @@ import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/Bulletin
 import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
 import { BulletinModelCatalog } from './BulletinModelCatalog.js'
 import { envelopeMedia, type EnvelopeMediaType } from './envelopeMedia.js'
+import { redactSecrets } from './redact.js'
 
 /** Infer the runtime shape from a studio's container image name (best-effort label for the
  *  loadout view). ComfyUI is the common one today; vLLM / llama.cpp / Diffusers are coming. */
@@ -866,7 +867,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       // time it fires, not once a minute.
       await this.sender.sendMessage(chatId, COPY.command.collected(collected.datasetName, collected.count)).catch(() => {})
     } catch (err) {
-      log.warn('telegram: collect photo failed', { error: String(err) })
+      // The fetch failure's own message embeds the file URL on a throw — and that URL
+      // carries the bot token (`getFileLink`'s whole reason for existing in redact.ts).
+      // Scrub it the same way every outbound send already does before it reaches logs.
+      log.warn('telegram: collect photo failed', { error: redactSecrets(String(err)) })
       await this._idleHint(chatId, COPY.command.idleMedia)
     }
   }

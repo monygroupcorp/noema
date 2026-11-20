@@ -22,7 +22,7 @@ import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 // Mock builders
 // =============================================================================
 
-function makeSender() {
+function makeSender(opts: { getFileLink?: (fileId: string) => Promise<string> } = {}) {
   const sent: Array<{ chatId: number; text: string; extra?: unknown }> = []
   const edited: Array<{ chatId: number; messageId: number; text: string; extra?: unknown }> = []
   const answered: string[] = []
@@ -78,9 +78,9 @@ function makeSender() {
     setMessageReaction: async (chatId: number, messageId: number, reaction: Array<{ type: string; emoji: string }>) => {
       reactions.push({ chatId, messageId, emoji: reaction[0]?.emoji ?? '' })
     },
-    getFileLink: async (fileId: string) => {
+    getFileLink: opts.getFileLink ?? (async (fileId: string) => {
       return `https://api.telegram.org/file/bot-token/${fileId}`
-    },
+    }),
     captions,
     markups,
     editMessageCaption: async (chatId: number, messageId: number, caption: string, extra?: unknown) => {
@@ -321,8 +321,8 @@ function makeCollectingDeps(initialCollecting: boolean) {
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean } = {}) {
-  const sender = makeSender()
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean; getFileLink?: (fileId: string) => Promise<string> } = {}) {
+  const sender = makeSender({ ...(opts.getFileLink ? { getFileLink: opts.getFileLink } : {}) })
   const identity = makeIdentity()
   const router = makeRouter()
   const terminated: string[] = []
@@ -903,6 +903,38 @@ test('idle photo with collecting ON but a NON-photo bare media says so instead o
   assert.equal(sender.sent.length, 1)
   assert.match(sender.sent[0].text, /photos only/)
   assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('a collect failure never logs the raw Telegram file URL (it embeds the bot token)', async () => {
+  // A realistic getFileLink URL — `bot<id>:<secret>` is exactly the shape redactSecrets'
+  // TELEGRAM_TOKEN_URL pattern matches (the test harness's default getFileLink stub uses a
+  // literal 'bot-token' placeholder that doesn't, so it would pass this test even unredacted).
+  const { allocutio, sender, collectingDeps } = makeAllocutio({
+    collecting: true,
+    getFileLink: async (fileId: string) => `https://api.telegram.org/file/bot123456789:FAKE-secret-ABCDEFGHIJ1234567890/${fileId}`,
+  })
+  // The real httpMediaFetcher throws with the URL baked into the message on a failed fetch
+  // (`media fetch failed: ${url} → ${status}`) — reproduce that exact shape.
+  collectingDeps!.mediaFetcher.fetch = async (url: string) => {
+    throw new Error(`media fetch failed: ${url} → 404`)
+  }
+
+  const entries: Array<{ msg: string; [k: string]: unknown }> = []
+  const onLog = (entry: { msg: string; [k: string]: unknown }) => { entries.push(entry) }
+  bus.on('log', onLog)
+  try {
+    await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1']))
+  } finally {
+    bus.off('log', onLog)
+  }
+
+  const failureLog = entries.find((e) => e.msg === 'telegram: collect photo failed')
+  assert.ok(failureLog, 'the failure is logged')
+  const logged = JSON.stringify(failureLog)
+  assert.doesNotMatch(logged, /bot\d+:[A-Za-z0-9_-]{10,}/, 'the bot token never reaches the log')
+  assert.doesNotMatch(logged, /api\.telegram\.org/, 'the Telegram file URL never reaches the log')
+  // Falls back to the plain idle hint, same as any other collect failure.
+  assert.match(sender.sent.at(-1)!.text, /send it again with \/make/)
 })
 
 test('a group chat is unaffected by collecting mode — same silence as before, even when ON', async () => {
