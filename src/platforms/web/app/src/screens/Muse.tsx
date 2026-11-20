@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { BACK, LoadFailure } from '../components/LoadFailure';
@@ -14,25 +14,15 @@ import {
   type MuseSteerProposal,
   type ModelCard,
 } from '../lib/api';
-import { useRunStream } from '../lib/runStream';
 import { AddImages } from '../components/AddImages';
-import { RunStageline, Stageline } from '../components/RunStageline';
 import { AccountModal } from './AccountModal';
 import { BuyCreditsModal } from './BuyCreditsModal';
 import { getSession } from '../lib/api';
-import { doorPath } from '../lib/entry';
 import { fragmentKey } from '../../../../../crystal/muse/taxonomy.js';
 import {
   canFireDecompose,
-  canOfferDecompose,
   decomposeCaptionsetId,
-  decomposeFailureNote,
-  decomposePlanNote,
-  decomposeRunParam,
   decomposeWorkload,
-  launchCaptionJob,
-  launchDecomposeJob,
-  withDecomposeRunParam,
 } from '../lib/training';
 import {
   admitPiece,
@@ -40,13 +30,9 @@ import {
   appendFailureNote,
   confirmOutcomeNote,
   dismissalOffer,
-  droppedNote,
   appendMediaRequest,
   applyRunResult,
   buildGarden,
-  captionCoverageLine,
-  captionPassLabel,
-  captionPassNote,
   canFireOne,
   categoryColor,
   chipStates,
@@ -56,12 +42,8 @@ import {
   flattenGarden,
   floorCounts,
   floorDisabledIndices,
-  floorSheet,
   floorToggle,
   gardenCounts,
-  gestureBlock,
-  gestureBlockLine,
-  gestureTitle,
   hydrateSetup,
   ignitionBlockReason,
   ignitionRequest,
@@ -71,13 +53,11 @@ import {
   launchBlockReason,
   launchLabel,
   lineageBlockReason,
-  lineageOf,
   loraCatalog,
   loraCatalogReason,
   collapsedControls,
   loraChoiceLine,
   loraWeight,
-  chooseLora,
   setLoraWeight,
   nozzleChanged,
   nozzleTriggerLabel,
@@ -85,20 +65,16 @@ import {
   keptCount,
   keptRollRequest,
   keptRollsOf,
-  manualAddError,
   manualAddRequest,
   missingNozzleNote,
   nextPieceDecision,
-  pieceReadout,
   pieceRecord,
-  pieceStageline,
   decomposeGateReason,
   poolDatasetFragments,
   promptWithAffix,
   promoteBlockReason,
   promoteLabel,
   promotedCollectionPath,
-  proposalPills,
   reactionOf,
   recordDismissal,
   recordFloorChange,
@@ -115,7 +91,6 @@ import {
   ancestryOf,
   childrenOf,
   currentMiningNode,
-  isLocked,
   lockCount,
   lockSummaryLine,
   rootFrom,
@@ -125,7 +100,6 @@ import {
   varyFrom,
   varyInto,
   savedOf,
-  settlePieceResult,
   setControlHand,
   setupOf,
   steerBlockReason,
@@ -133,12 +107,7 @@ import {
   steerFloor,
   steerQuoteRequest,
   sessionEntry,
-  sessionHistory,
   sessionHistoryHref,
-  sessionHref,
-  sessionSearchEmptyNote,
-  filterSessionHistory,
-  streamColumns,
   streamPiece,
   firedRunRequest,
   streamStatusLine,
@@ -150,24 +119,17 @@ import {
   writesForConfirm,
   DEFAULT_STREAM_CONFIG,
   EMPTY_STREAM,
-  EXPANDED_GESTURES,
-  MANUAL_CATEGORIES,
   MAX_FLOOR_FRAGMENTS,
   MAX_INSTRUCTION_CHARS,
-  MUSE_NARROW_VIEWPORT,
   EMPTY_MINING,
   MAX_ROLLS,
   NO_LOCKS,
   SESSION_PARAM,
-  LORA_WEIGHT_MAX,
-  LORA_WEIGHT_MIN,
   NO_DISMISSALS,
-  TILE_GESTURES,
   type AffixInput,
   type BannerLineId,
   type DismissalState,
   type FloorPill,
-  type GestureGate,
   type ControlHand,
   type HoldState,
   type LockSet,
@@ -176,20 +138,32 @@ import {
   type MiningTree,
   type MuseControl,
   type VaryOrigin,
-  type PieceProgress,
-  type SessionRow,
   type SheetPhase,
-  type SteerPill,
   type RollReport,
   type RunResult,
   type StopCause,
   type StreamConfig,
   type StreamMode,
   type StreamPhase,
-  type StreamPiece,
   type StreamQuote,
 } from '../lib/muse';
+import { errText } from './muse/errText';
+import { ExpandedPiece, PieceTile, RunWatcher } from './muse/StreamPieces';
+import { FloorSheet } from './muse/FloorSheet';
+import { ConsentSheet } from './muse/ConsentSheet';
+import { useNarrowViewport } from './muse/useNarrowViewport';
+import { useStreamGrid } from './muse/useStreamGrid';
+import { usePieceSettlement } from './muse/usePieceSettlement';
+import { useDecompose } from './muse/useDecompose';
+import { useCaptionPass } from './muse/useCaptionPass';
+import { LoraPanel } from './muse/LoraPanel';
+import { RollFragments } from './muse/RollFragments';
+import { AppendNextSteps, DecomposeEmptyState } from './muse/DecomposeSteps';
 import './muse.css';
+
+// The session history screen lives beside this one and is exported from here, so the
+// route table keeps importing both from one module.
+export { MuseSessions } from './muse/MuseSessions';
 
 // Muse (Muse P3, noema-229) — the dataset's garden: `/datasets/:id/muse`, one route over
 // from `/datasets/:id/caption` and `/datasets/:id/derive` (App.tsx), following the shape
@@ -314,11 +288,6 @@ import './muse.css';
 //
 // The append is `POST /v1/data/datasets/:id/media`, which is append-only by design:
 // nothing here removes or reorders media, at this layer or any other.
-
-/** One error, as short prose. */
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 /** Which session-mutating call (if any) is in flight on this screen right now — see the
  *  `pendingAction` state below for why these five share one flag. */
@@ -484,72 +453,9 @@ export function Muse() {
   // Fired pieces, newest first, plus the ones held back while the grid is frozen.
   const [stream, setStream] = useState(EMPTY_STREAM);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  const [columns, setColumns] = useState(streamColumns(0));
-  // The freeze test, read at fire time rather than at render time: a piece may arrive
-  // from a run that finished while the user was scrolled deep into the grid.
-  const frozenRef = useRef(false);
-  const [frozen, setFrozen] = useState(false);
+  const { gridRef, columns, frozenRef, frozen } = useStreamGrid(stream.pieces.length);
 
-  // Frozen = the head of the grid has scrolled off the top of the viewport, i.e. the
-  // user is looking at older tiles. Inserting at the top then would move the tile under
-  // their thumb, and every tile gesture here is a steer (V8b).
-  useLayoutEffect(() => {
-    const read = () => {
-      const el = gridRef.current;
-      if (el) setColumns(streamColumns(el.clientWidth));
-      const away = !!el && el.getBoundingClientRect().top < 0;
-      frozenRef.current = away;
-      setFrozen(away);
-    };
-    read();
-    window.addEventListener('scroll', read, { passive: true });
-    window.addEventListener('resize', read);
-    return () => {
-      window.removeEventListener('scroll', read);
-      window.removeEventListener('resize', read);
-    };
-  }, [stream.pieces.length]);
-
-  // A piece's run reaching terminal is also what releases the stream loop: the next
-  // piece is requested on SETTLEMENT, never on a timer, so the loop parks on a promise
-  // that this resolves. One waiter per run, removed as it is resolved. The result is
-  // folded into the piece before the loop is released — `settlePieceResult` owns that
-  // ordering, and it is gated in tests/unit/web/muse.test.ts.
-  const settlers = useRef(new Map<string, (r: RunResult) => void>());
-
-  // What each running piece's own subscription is currently reporting (noema-273). The
-  // pod is already streaming its phases into this browser; this is where the tile and
-  // the expanded view read them from, so twelve pieces in flight are twelve pieces
-  // saying what they are doing — off ONE subscription each, the one the watcher for
-  // that piece already holds.
-  const [progress, setProgress] = useState<Record<string, PieceProgress>>({});
-  const onPieceProgress = useCallback((runId: string, live: PieceProgress) => {
-    setProgress((m) => {
-      const held = m[runId];
-      if (held && held.stageIdx === live.stageIdx && held.progressus === live.progressus) return m;
-      return { ...m, [runId]: live };
-    });
-  }, []);
-
-  const onPieceResult = useCallback((runId: string, result: RunResult) => {
-    const waiting = settlers.current.get(runId);
-    if (waiting) settlers.current.delete(runId);
-    // The run is over: its last frame is not a state anyone should still be shown, and
-    // holding it would grow one entry per finished piece for the life of the session.
-    setProgress((m) => {
-      if (!(runId in m)) return m;
-      const next = { ...m };
-      delete next[runId];
-      return next;
-    });
-    settlePieceResult(
-      runId,
-      result,
-      (id, r) => setStream((s) => applyRunResult(s, id, r)),
-      waiting,
-    );
-  }, []);
+  const { settlers, progress, onPieceProgress, onPieceResult } = usePieceSettlement(setStream);
 
   // ── The session (noema-241) ───────────────────────────────────────────────
   // Resume, don't respawn: the app route carries no session segment and the dataset
@@ -888,65 +794,16 @@ export function Muse() {
   // this holds a run id rather than a boolean, carries it in `?run=` the way the caption screen
   // carries its pass (noema-321) so navigating away does not lose a run that is still spending,
   // and re-reads the dataset when the run goes terminal.
-  const [decomposeSet, setDecomposeSet] = useState<string | null>(null);
-  const [trigger, setTrigger] = useState('');
-  const [decomposeRun, setDecomposeRun] = useState<string | null>(() => decomposeRunParam(searchParams));
-  const [decomposeStarting, setDecomposeStarting] = useState(false);
-  const [decomposeMsg, setDecomposeMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const decomposeMountChecked = useRef(false);
-
-  const decomposeStream = useRunStream(decomposeRun ?? undefined);
-  const decomposeTerminal = decomposeStream.terminal;
-  const decomposing = decomposeStarting || (decomposeRun !== null && decomposeTerminal === null);
-
-  // A `?run=` carried in on mount gets ONE validating fetch — a run that is gone or was never
-  // this caller's must clear rather than leave the screen showing a pass that is not running.
-  // `useRunStream`'s poll fallback reads a persistent 404 as "still pending", so the check
-  // belongs here rather than there.
-  useEffect(() => {
-    if (decomposeMountChecked.current) return;
-    decomposeMountChecked.current = true;
-    const carried = decomposeRun;
-    if (!carried) return;
-    let live = true;
-    api.getRun(carried).catch(() => {
-      if (!live) return;
-      setDecomposeRun(null);
-      setSearchParams((prev) => withDecomposeRunParam(prev, null), { replace: true });
-      setDecomposeMsg({ ok: false, text: 'that decompose is gone or not yours' });
-    });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // The pass landing. Fragments are written onto the DATASET, so the garden fills through a
-  // re-read of the record rather than through the run's own exitus.
-  useEffect(() => {
-    if (!decomposeRun || decomposeTerminal === null) return;
-    if (decomposeTerminal === 'failed') {
-      setDecomposeMsg({ ok: false, text: `decompose failed: ${decomposeStream.error ?? 'no reason reported'}` });
-      return;
-    }
-    let live = true;
-    void (async () => {
-      const { datasets: ds } = await api.listDatasetsFull().catch(() => ({ datasets: [] as DatasetT[] }));
-      if (!live) return;
-      setDatasets(await api.withDatasetFallback(ds, id));
-      setDecomposeMsg({ ok: true, text: 'decompose finished — the garden is built from it' });
-    })();
-    return () => { live = false; };
-  }, [decomposeRun, decomposeTerminal, decomposeStream.error, id]);
-  // noema-278 — the whole-set path, off by default and offered from BOTH decompose controls on
-  // this screen. An item that already carries fragments has been through the extractor, and a
-  // decompose spends one model call per item it runs, so the default pass is the new work only.
-  const [redoAll, setRedoAll] = useState(false);
+  const {
+    decomposeSet, setDecomposeSet, trigger, setTrigger, decomposeRun, decomposeStream,
+    decomposing, decomposeMsg, redoAll, setRedoAll, doDecompose,
+  } = useDecompose(id, searchParams, setSearchParams, setDatasets);
 
   // ── Add images (noema-260) ────────────────────────────────────────────────
   // The panel's own disclosure state lives here rather than in the panel, because the
   // empty-floor row's offer is what opens it and that row sits in the launcher above.
   const [addOpen, setAddOpen] = useState(false);
-  const [captioning, setCaptioning] = useState(false);
-  const [captionMsg, setCaptionMsg] = useState<{ ok: boolean; text: string; runId?: string } | null>(null);
+  const { captioning, captionMsg, doCaption, refreshDatasets } = useCaptionPass(id, setDatasets);
 
   useEffect(() => {
     let live = true;
@@ -1059,71 +916,6 @@ export function Muse() {
     }
   }
 
-  // A decompose is metered and it runs OFF-REQUEST: the dispatch comes back with a run id and
-  // every caption is one chat call from there on. So the button locks for as long as the run is
-  // live rather than for as long as a request is open, the state on screen says what is actually
-  // happening, and a failure keeps its text. The watch above re-reads the dataset when the run
-  // goes terminal, so the garden fills without a refresh.
-  async function doDecompose(dataset: DatasetT) {
-    const captionsetId = decomposeCaptionsetId(dataset, decomposeSet);
-    // With `redo` the workload is the whole pass, so the pending count is not what gates it.
-    const pending = redoAll ? undefined : decomposeWorkload(dataset, captionsetId).pending;
-    if (!canFireDecompose({ captionsetId, inFlight: decomposing, pending })) return;
-    setDecomposeStarting(true);
-    setDecomposeMsg(null);
-    try {
-      const run = await launchDecomposeJob({ datasetId: dataset.id, captionsetId: captionsetId!, trigger, redo: redoAll });
-      if (run.status === 'failed') {
-        setDecomposeMsg({ ok: false, text: `decompose failed: ${run.failure?.message ?? 'no reason reported'}` });
-        return;
-      }
-      // The dispatch is done, the pass is not: attach to the run and let the watch above finish
-      // the story. The id goes into the URL in the same breath, before anything can navigate away.
-      setDecomposeRun(run.id);
-      setSearchParams((prev) => withDecomposeRunParam(prev, run.id), { replace: true });
-      setDecomposeMsg({ ok: true, text: `decompose started · run ${run.id.slice(0, 8)}` });
-    } catch (e) {
-      // Same reading the dataset screen does: a refusal because one is already running, or
-      // because there is nothing left to decompose, is a status rather than a failure.
-      setDecomposeMsg({ ok: false, text: decomposeFailureNote(String((e as Error).message)) });
-    } finally {
-      setDecomposeStarting(false);
-    }
-  }
-
-  // A caption pass is a normal metered run and it is ASYNCHRONOUS — it provisions a pod
-  // and the captionset lands on the set when the pass finishes, so this returns at
-  // dispatch rather than at completion. The screen says that instead of implying the
-  // captions are already there, and offers the re-read that picks the new pass up.
-  async function doCaption(dataset: DatasetT) {
-    if (captioning) return;
-    setCaptioning(true);
-    setCaptionMsg(null);
-    try {
-      const run = await launchCaptionJob({ datasetId: dataset.id });
-      setCaptionMsg({
-        ok: true,
-        runId: run.id,
-        text: 'captioning started — it runs on a pod, and the new pass lands on this set when it finishes',
-      });
-    } catch (e) {
-      setCaptionMsg({ ok: false, text: `couldn't start captioning: ${errText(e)}` });
-    } finally {
-      setCaptioning(false);
-    }
-  }
-
-  // Re-read the set. The caption pass writes back out-of-band, so this is how its
-  // captionset (and every pass' recomputed coverage) reaches the screen.
-  async function refreshDatasets() {
-    try {
-      const { datasets: ds } = await api.listDatasetsFull();
-      setDatasets(await api.withDatasetFallback(ds, id));
-    } catch (e) {
-      setCaptionMsg({ ok: false, text: `couldn't re-read the set: ${errText(e)}` });
-    }
-  }
-
   // The dataset-wide garden. Pools every media item's fragments (not one item's — that is
   // Dataset.tsx's job) and builds it in one pass. Recomputed only when the dataset's media
   // actually changes, not on every curation toggle.
@@ -1214,36 +1006,6 @@ export function Muse() {
     setVaryNote(null);
   }
 
-  /** A roll's fragments, each one a lock toggle. Locking IS the dialing-in: a pinned
-   *  fragment survives every subsequent vary and everything else re-samples, so a
-   *  setting and a palette that are working can be held while pose and props keep
-   *  pulling. A lock is per CATEGORY, so pinning a second fragment of a category
-   *  replaces the first rather than putting two of it in one prompt. */
-  function fragmentRow(fragments: readonly Fragment[]) {
-    return (
-      <div className="muse-roll-frags mono">
-        {fragments.map((f, j) => {
-          const on = isLocked(locks, f);
-          return (
-            <button
-              key={`${f.category}-${j}`}
-              type="button"
-              className={`muse-roll-frag${on ? ' locked' : ''}`}
-              style={{ borderColor: categoryColor(f.category) }}
-              aria-pressed={on}
-              title={on
-                ? `[${f.category}] is locked — it survives every vary. Click to unlock.`
-                : `lock [${f.category}] so the next vary keeps it`}
-              onClick={() => lock(f)}
-            >
-              [{f.category}] {f.text}{f.trigger ? ` <- ${f.trigger}` : ''}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
   /** One node of the mining tree, rendered as a roll card. A varied roll is an
    *  ordinary roll — same keep rail, same fire rail, same badge. */
   function miningCard(node: MiningNode, standing: boolean) {
@@ -1262,7 +1024,7 @@ export function Muse() {
           value={prompt}
           onChange={(e) => setEdits((prev) => ({ ...prev, [node.rollIndex]: e.target.value }))}
         />
-        {fragmentRow(node.fragments)}
+        <RollFragments fragments={node.fragments} locks={locks} lock={lock} />
         <div className="muse-roll-foot">
           <button
             className="btn ghost sm"
@@ -1815,90 +1577,12 @@ export function Muse() {
   // inner scroller with its commit actions below it in normal flow puts `use <model>`
   // under the fold and leaves `cancel` as the only reachable exit (noema-264).
   const loraPanel = (
-    <>
-      {loraReason ? (
-        <div className="gt-sub mono">{loraReason}</div>
-      ) : (
-        <ul className="muse-lora-list">
-          {loraOffer.map((card) => (
-            <li key={card.intellaId}>
-              <button
-                type="button"
-                className={`muse-lora-card${draft.some((c) => c.intellaId === card.intellaId) ? ' on' : ''}`}
-                onClick={() => setDraft((d) => chooseLora(d, card, familia))}
-              >
-                <span className="muse-lora-name">{card.nomen}</span>
-                {/* The trigger word is shown on every card and again on the
-                    chosen one: it is the part a user has to see to trust that
-                    the model is reaching the prompt at all. */}
-                <span className="muse-lora-trigger mono">trigger {card.trigger}</span>
-                {card.access === 'private' && <span className="muse-lora-own mono">yours</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {catalogLoading && <div className="gt-sub mono">Reading the catalogue…</div>}
-      {catalogError && <div className="gt-sub mono">{catalogError}</div>}
-
-      {/* THE STACK, in the order it fires, and each entry with its OWN weight field: a
-          control where one number moved another would be spending the user's money on a
-          model they did not mean to change. An empty field is "its own default". */}
-      {draft.length > 0 && (
-        <ul className="muse-lora-stack">
-          {draft.map((entry, i) => (
-            <li key={entry.intellaId} className="muse-lora-stacked">
-              <span className="muse-lora-ord mono">{i + 1}</span>
-              <span className="muse-lora-name">{entry.nomen}</span>
-              <span className="muse-lora-trigger mono">trigger {entry.trigger}</span>
-              <label className="cc-field muse-lora-weight">
-                <span>Weight</span>
-                <input
-                  className="cer-input" type="number" inputMode="decimal"
-                  min={LORA_WEIGHT_MIN} max={LORA_WEIGHT_MAX} step={0.05}
-                  placeholder="its own default"
-                  aria-label={`weight for ${entry.nomen}`}
-                  value={weightText[entry.intellaId] ?? ''}
-                  onChange={(e) => setWeightText((w) => ({ ...w, [entry.intellaId]: e.target.value }))}
-                />
-              </label>
-              <button
-                type="button"
-                className="linkish muse-lora-drop"
-                onClick={() => {
-                  setDraft((d) => d.filter((c) => c.intellaId !== entry.intellaId));
-                }}
-              >
-                remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="gt-sub mono">
-        Stack as many as the workflow's base takes — every one of them is pinned and every trigger word
-        is written into the prompt. What stacking costs is time: a longer weight download before the
-        first piece, and a longer diffusion on each one after it.
-      </div>
-
-      {streamLive && (
-        <div className="gt-sub mono">
-          the stream is holding while you choose — it resumes where it is, with the same count and
-          the same cap.
-        </div>
-      )}
-
-      <div className="muse-lora-actions">
-        <button type="button" className="btn accent sm" onClick={commitLora}>
-          {draft.length === 0
-            ? 'fire without a model'
-            : draft.length === 1 ? `use ${draft[0].nomen}` : `use these ${draft.length} models`}
-        </button>
-        <button type="button" className="btn ghost sm" onClick={cancelLora}>cancel</button>
-      </div>
-    </>
+    <LoraPanel
+      loraReason={loraReason} loraOffer={loraOffer} draft={draft} setDraft={setDraft}
+      familia={familia} catalogLoading={catalogLoading} catalogError={catalogError}
+      weightText={weightText} setWeightText={setWeightText} streamLive={streamLive}
+      commitLora={commitLora} cancelLora={cancelLora}
+    />
   );
 
   const crumb = (
@@ -1942,56 +1626,14 @@ export function Muse() {
     </label>
   );
   const afterAppend = (
-    <div className="muse-add-next">
-      <label className="cc-field"><span>Caption pass</span>
-        <select className="cer-input" value={nextCaptionsetId ?? ''}
-          disabled={d.captionsets.length === 0 || decomposing}
-          onChange={(e) => setDecomposeSet(e.target.value)}>
-          {d.captionsets.length === 0 && <option value="">no caption pass yet</option>}
-          {d.captionsets.map((cs) => (
-            <option key={cs.id} value={cs.id}>{cs.name} · {cs.coverage}</option>
-          ))}
-        </select>
-      </label>
-
-      <div className="muse-add-readout mono">{captionCoverageLine(d, nextCaptionsetId)}</div>
-
-      <div className="muse-add-step">
-        <button type="button" className="btn ghost sm" disabled={captioning} onClick={() => void doCaption(d)}>
-          {captioning ? 'starting…' : captionPassLabel(d)}
-        </button>
-        <span className="gt-sub mono">{captionPassNote(d)}</span>
-      </div>
-      {captionMsg && (
-        <div className="gt-sub mono">
-          {captionMsg.text}
-          {captionMsg.runId && <> · <Link to={`/run?id=${captionMsg.runId}`}>open run view →</Link></>}
-          {captionMsg.ok && <> · <button type="button" className="linkish" onClick={() => void refreshDatasets()}>re-read the set</button></>}
-        </div>
-      )}
-      {/* The pass started here is the same run the caption screen watches, so it gets the same
-          readout rather than a second one: the pod's phases while it provisions and prepares, and
-          its per-image count once it is reading images. */}
-      {captionMsg?.ok && captionMsg.runId && <RunStageline runId={captionMsg.runId} />}
-
-      <label className="cc-field"><span>Trigger word to strip (optional)</span>
-        <input className="cer-input" value={trigger} disabled={decomposing}
-          onChange={(e) => setTrigger(e.target.value)}
-          placeholder="keeps fragments reusable" />
-      </label>
-      <div className="muse-add-step">
-        <button type="button" className="btn accent sm"
-          disabled={!decomposeArmed}
-          onClick={() => void doDecompose(d)}>
-          {decomposing ? 'Decomposing…' : redoAll ? 'Re-decompose this pass →' : 'Decompose this pass →'}
-        </button>
-        <span className="gt-sub mono">
-          {decomposeGate ?? decomposePlanNote(decomposeWork, redoAll)}
-        </span>
-      </div>
-      {redoToggle}
-      {decomposeMsg && <div className="gt-sub mono">{decomposeMsg.text}</div>}
-    </div>
+    <AppendNextSteps
+      d={d} nextCaptionsetId={nextCaptionsetId} decomposing={decomposing}
+      setDecomposeSet={setDecomposeSet} captioning={captioning} doCaption={doCaption}
+      captionMsg={captionMsg} refreshDatasets={refreshDatasets} trigger={trigger}
+      setTrigger={setTrigger} decomposeArmed={decomposeArmed} doDecompose={doDecompose}
+      redoAll={redoAll} decomposeGate={decomposeGate} decomposeWork={decomposeWork}
+      redoToggle={redoToggle} decomposeMsg={decomposeMsg}
+    />
   );
 
   // A dataset nobody has decomposed has no fragments. This is a first-class branch, not an
@@ -2000,60 +1642,15 @@ export function Muse() {
     return (
       <AppShell title={crumb}>
         <div className="page"><div className="pw wide">
-          <div className="empty">
-            <div className="t">Nothing has been decomposed yet</div>
-            {canOfferDecompose(d) ? (
-              <>
-                <div className="s">
-                  Muse rolls prompts from decomposed captions. This dataset has captions — decompose a
-                  captionset to grow the garden.
-                </div>
-                <div className="muse-decompose">
-                  <label className="cc-field"><span>Captionset</span>
-                    <select className="cer-input" value={decomposeCaptionsetId(d, decomposeSet) ?? ''}
-                      disabled={decomposing}
-                      onChange={(e) => setDecomposeSet(e.target.value)}>
-                      {d.captionsets.map((cs) => (
-                        <option key={cs.id} value={cs.id}>{cs.name} · {cs.coverage}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="cc-field"><span>Trigger word to strip (optional)</span>
-                    <input className="cer-input" value={trigger} disabled={decomposing}
-                      onChange={(e) => setTrigger(e.target.value)}
-                      placeholder="keeps fragments reusable" />
-                  </label>
-                  {redoToggle}
-                  <button className="btn accent"
-                    disabled={!decomposeArmed}
-                    onClick={() => void doDecompose(d)}>
-                    {decomposing ? 'Decomposing…' : redoAll ? 'Re-decompose these captions →' : 'Decompose these captions →'}
-                  </button>
-                </div>
-                <div className="muse-decompose-note mono">
-                  {decomposeGate ?? (decomposing
-                    ? `reading every caption left to decompose — one pass per caption, and it keeps going on our side whether or not this page is open${decomposeRun ? ` · run ${decomposeRun.slice(0, 8)}, ${decomposeStream.elapsedSec}s elapsed` : ''}`
-                    : decomposePlanNote(decomposeWork, redoAll))}
-                </div>
-                {decomposeMsg && <div className="muse-decompose-note mono">{decomposeMsg.text}</div>}
-              </>
-            ) : (
-              <div className="s">
-                Muse rolls prompts from decomposed captions — this dataset has none yet. Caption it, then
-                decompose those captions to grow the garden.
-              </div>
-            )}
-            {/* V7's other exit, offered from the coldest start there is: the set itself can
-                be widened from here, not only the floor. */}
-            <AddImages
-              dataset={d}
-              open={addOpen}
-              onOpenChange={setAddOpen}
-              onAppended={(updated) => setDatasets((ds) => replaceDataset(ds, updated))}
-              next={null}
-            />
-            <Link className={canOfferDecompose(d) ? 'btn ghost' : 'btn accent'} to={`/datasets/${d.id}`}>← back to {d.name}</Link>
-          </div>
+          <DecomposeEmptyState
+            d={d} decomposeSet={decomposeSet} setDecomposeSet={setDecomposeSet}
+            decomposing={decomposing} trigger={trigger} setTrigger={setTrigger}
+            redoToggle={redoToggle} decomposeArmed={decomposeArmed} doDecompose={doDecompose}
+            redoAll={redoAll} decomposeGate={decomposeGate} decomposeRun={decomposeRun}
+            decomposeStream={decomposeStream} decomposeWork={decomposeWork}
+            decomposeMsg={decomposeMsg} addOpen={addOpen} setAddOpen={setAddOpen}
+            setDatasets={setDatasets}
+          />
         </div></div>
       </AppShell>
     );
@@ -2490,7 +2087,7 @@ export function Muse() {
                       value={edits[r.index] ?? r.prompt}
                       onChange={(e) => setEdits((prev) => ({ ...prev, [r.index]: e.target.value }))}
                     />
-                    {fragmentRow(r.fragments)}
+                    <RollFragments fragments={r.fragments} locks={locks} lock={lock} />
                     <div className="muse-roll-foot">
                       <button
                         className="btn ghost sm"
@@ -2772,610 +2369,6 @@ export function Muse() {
         <AccountModal open={accountGateOpen} onClose={() => setAccountGateOpen(false)} onSuccess={() => void onAccountCreated()} />
         {accountGateError && <div className="sub mono">{accountGateError}</div>}
         <BuyCreditsModal open={topUpOpen} onClose={() => setTopUpOpen(false)} />
-      </div></div>
-    </AppShell>
-  );
-}
-
-/** Headless: one piece's subscription to its own run. Reports terminal upward once,
- *  where `applyRunResult` folds the produced media into the piece. Split out so a held
- *  piece — one that has no tile on screen yet — is still watched.
- *  The subscription ends at terminal (a watcher per finished piece would be an open
- *  stream per finished piece), so the terminal it reports has to carry the run's
- *  outputs already — see `announceTerminal` in lib/runStream.ts. */
-function RunWatcher({ runId, onResult, onProgress }: {
-  runId: string;
-  onResult: (runId: string, r: RunResult) => void;
-  onProgress: (runId: string, live: PieceProgress) => void;
-}) {
-  const { stageIdx, progressus, terminal, exitus, error } = useRunStream(runId);
-  // Every frame this subscription already receives is reported upward, so the piece's
-  // tile can say what the pod is doing. Reporting stops at terminal — the run's last
-  // word is its result, not a phase.
-  useEffect(() => {
-    if (terminal) return;
-    onProgress(runId, { stageIdx, progressus });
-  }, [runId, stageIdx, progressus, terminal, onProgress]);
-  useEffect(() => {
-    if (!terminal) return;
-    onResult(runId, { terminal, exitus, error });
-  }, [runId, terminal, exitus, error, onResult]);
-  return null;
-}
-
-/** What every rail — the tile's and the expanded view's — does with one gesture: the two
- *  steers and 😂 are reactions on the piece, ✕ is a dismissal, and ↓ puts the piece back
- *  into the set. Save is offered only where its rail carries it — the expanded view — so
- *  the tile passes no handler and the gesture reads as unavailable rather than silent.
- *
- *  Every button carries a `title`, and a refused one carries the REASON it is refused
- *  (`gestureBlock` -> `gestureTitle`) rather than its own label. The gating is unchanged:
- *  `disabled` is true in exactly the cases it was true in before — a refusal gains words
- *  here, it is never relaxed. */
-function railProps(
-  key: string,
-  runId: string,
-  gate: GestureGate,
-  label: string,
-  reaction: MuseReaction | undefined,
-  onReact: (runId: string, reaction: MuseReaction) => void,
-  onDismiss: (runId: string) => void,
-  saved = false,
-  onSave?: (runId: string) => void,
-): { disabled: boolean; className: string; onClick?: () => void; title: string } {
-  const REACTIONS: Record<string, MuseReaction> = { up: 'up', down: 'down', laugh: 'note' };
-  const asReaction = REACTIONS[key];
-  const block = gestureBlock(gate);
-  if (asReaction) {
-    return {
-      disabled: !!block,
-      className: `muse-gesture${reaction === asReaction ? ' on' : ''}`,
-      onClick: () => onReact(runId, asReaction),
-      title: gestureTitle(block, label),
-    };
-  }
-  if (key === 'dismiss') {
-    return {
-      disabled: !!block,
-      className: 'muse-gesture',
-      onClick: () => onDismiss(runId),
-      title: gestureTitle(block, label),
-    };
-  }
-  if (!onSave) {
-    return {
-      disabled: true,
-      className: 'muse-gesture',
-      title: gestureTitle(gestureBlock({ ...gate, offered: false }), label),
-    };
-  }
-  // A piece already in the set is shown as saved and is not offered again: the dataset is
-  // append-only, so a second save would put the same media in twice.
-  const saveBlock = gestureBlock({ ...gate, saved });
-  return {
-    disabled: !!saveBlock,
-    className: `muse-gesture${saved ? ' on' : ''}`,
-    onClick: () => onSave(runId),
-    title: gestureTitle(saveBlock, label),
-  };
-}
-
-/** One tile in the stream. Roughly 145px on a phone, which fits three targets legibly —
- *  the two steers and declutter (V8a). They write to the session; a piece the session
- *  ledger does not hold cannot be reacted to, and its rail is disabled with the reason on
- *  the control rather than left unexplained. The tile has no room for a sentence, so the
- *  reason rides the `title` here and is rendered in full in the expanded view.
- *  The rest of the rail lives in the expanded view. */
-function PieceTile({
-  piece, progress, onExpand, onResult, onProgress, reaction, gate, onReact, onDismiss,
-}: {
-  piece: StreamPiece;
-  progress: PieceProgress | undefined;
-  onExpand: (runId: string) => void;
-  onResult: (runId: string, r: RunResult) => void;
-  onProgress: (runId: string, live: PieceProgress) => void;
-  reaction: MuseReaction | undefined;
-  gate: GestureGate;
-  onReact: (runId: string, reaction: MuseReaction) => void;
-  onDismiss: (runId: string) => void;
-}) {
-  return (
-    <div className={`muse-tile ${piece.status}`}>
-      {piece.status === 'running' && <RunWatcher runId={piece.runId} onResult={onResult} onProgress={onProgress} />}
-      <button
-        type="button"
-        className="muse-tile-shot"
-        onClick={() => onExpand(piece.runId)}
-        title={piece.prompt}
-      >
-        {piece.media ? (
-          piece.media.kind === 'video'
-            ? <video className="muse-tile-media" src={piece.media.url} muted loop playsInline />
-            : <img className="muse-tile-media" src={piece.media.url} alt="" loading="lazy" />
-        ) : (
-          <span className="muse-tile-wait mono">{pieceReadout(piece, progress)}</span>
-        )}
-      </button>
-      <div className="muse-tile-rail">
-        {TILE_GESTURES.map((g) => {
-          const rail = railProps(g.key, piece.runId, gate, g.label, reaction, onReact, onDismiss);
-          return (
-            <button key={g.key} type="button" {...rail} aria-label={rail.title}>
-              {g.glyph}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/** The expanded piece: the full action rail and the lineage — the fragments that
- *  produced it (V8). 😂 lives here rather than on the tile: it is recorded and it steers
- *  nothing (S4/V9), so it is not one of the three gestures made at speed. */
-function ExpandedPiece({
-  piece, progress, onClose, reaction, gate, onReact, onDismiss, saved, onSave,
-}: {
-  piece: StreamPiece;
-  progress: PieceProgress | undefined;
-  onClose: () => void;
-  reaction: MuseReaction | undefined;
-  gate: GestureGate;
-  onReact: (runId: string, reaction: MuseReaction) => void;
-  onDismiss: (runId: string) => void;
-  saved: boolean;
-  onSave: (runId: string) => void;
-}) {
-  const pieceBlock = gestureBlock(gate);
-  return (
-    <div className="muse-expanded" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="muse-expanded-card" onClick={(e) => e.stopPropagation()}>
-        <div className="muse-expanded-shot">
-          {piece.media ? (
-            piece.media.kind === 'video'
-              ? <video src={piece.media.url} controls playsInline />
-              : <img src={piece.media.url} alt="" />
-          ) : (
-            /* The expanded piece has room for the real thing: the same five-stage readout
-               every other watching surface draws, fed from the subscription this piece's
-               tile already holds — expanding a piece opens no second stream. */
-            <div>
-              <Stageline stream={pieceStageline(piece, progress)} />
-              {piece.status === 'failed' && (
-                <span className="muse-tile-wait mono">{pieceReadout(piece, progress)}</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="muse-expanded-rail">
-          {EXPANDED_GESTURES.map((g) => {
-            const rail = railProps(g.key, piece.runId, gate, g.label, reaction, onReact, onDismiss, saved, onSave);
-            return (
-              <button key={g.key} type="button" {...rail} aria-label={rail.title}>
-                {g.glyph}
-              </button>
-            );
-          })}
-          <button type="button" className="btn ghost sm muse-expanded-close" onClick={onClose}>Close</button>
-        </div>
-
-        {/* The expanded view has the room the tile does not, so the reason a rail is
-            refused is a sentence here rather than only a tooltip. It is the PIECE's
-            state — the one every gesture on this rail shares — so it is read from the
-            gate without the per-gesture `saved`, which the save button carries itself. */}
-        {pieceBlock && (
-          <div className="muse-gesture-reason mono" role="status">{gestureBlockLine(pieceBlock)}</div>
-        )}
-
-        <div className="muse-expanded-prompt mono">{piece.prompt}</div>
-
-        <div className="gc-l">lineage</div>
-        <div className="muse-roll-frags mono">
-          {lineageOf(piece).map((f, i) => (
-            <span key={i} className="muse-roll-frag" style={{ borderColor: categoryColor(f.category) }}>
-              [{f.category}] {f.text}{f.trigger ? ` <- ${f.trigger}` : ''}
-            </span>
-          ))}
-        </div>
-
-        <div className="muse-expanded-foot">
-          <Link className="mono" to={`/run?id=${piece.runId}`}>open run view →</Link>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-/**
- * The floor sheet (V1) — pulled up from the dock, the full-fidelity cutting floor.
- *
- * Every fragment the session holds, grouped by category in sampling order, with a
- * live/total count per category. A fragment a steer turned off is DARK AND STILL HERE,
- * and tapping it brings it back: "what did my steer turn off" is the question this sheet
- * exists to answer, and reversibility is why the pull-up sheet won over the cheaper
- * options. Weighted fragments carry their weight.
- *
- * The sheet renders from the session it is handed — the one the server returned — so it
- * shows the same floor after a reload as before it.
- */
-function FloorSheet({
-  session, busyKey, onToggle, onAdd, adding, onClose,
-}: {
-  session: MuseSessionView;
-  busyKey: string | null;
-  onToggle: (pill: FloorPill) => void;
-  onAdd: (category: FragmentCategory, text: string) => Promise<boolean>;
-  adding: boolean;
-  onClose: () => void;
-}) {
-  const rows = floorSheet(session);
-  const { live, total } = floorCounts(session);
-  const [addCategory, setAddCategory] = useState<FragmentCategory | ''>('');
-  const [addText, setAddText] = useState('');
-  const addError = manualAddError(session, addCategory, addText);
-  // Silent until the user has said something — a form that opens already complaining
-  // reads as broken. Once either field is touched, the reason is on screen rather than
-  // hidden behind a disabled button.
-  const showError = addCategory !== '' || addText.trim() !== '';
-
-  async function submitAdd(e: { preventDefault: () => void }) {
-    e.preventDefault();
-    if (addError || addCategory === '' || adding) return;
-    if (await onAdd(addCategory, addText)) setAddText('');
-  }
-  return (
-    <div className="muse-sheet" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="muse-sheet-card" onClick={(e) => e.stopPropagation()}>
-        <div className="muse-sheet-head">
-          <span className="gc-l">cutting floor</span>
-          <span className="gt-sub mono">{live}/{total} in the draw · tap a fragment to turn it off or back on</span>
-          <button type="button" className="btn ghost sm muse-sheet-close" onClick={onClose}>Close</button>
-        </div>
-        {/* The free widening (noema-242): pick a category, write a fragment, and it lands
-            on the floor in the draw. Nothing on this screen composes a phrase that is not
-            already here, so this is the form that answers a floor too narrow to work with —
-            and it costs nothing to use. */}
-        <form className="muse-add" onSubmit={submitAdd}>
-          <div className="muse-add-row">
-            <select
-              className="inp muse-add-cat"
-              aria-label="fragment category"
-              value={addCategory}
-              onChange={(e) => setAddCategory(e.target.value as FragmentCategory | '')}
-            >
-              <option value="">category…</option>
-              {MANUAL_CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <input
-              className="inp muse-add-text"
-              aria-label="fragment text"
-              placeholder="write a fragment — e.g. a short, prompt-ready phrase"
-              value={addText}
-              onChange={(e) => setAddText(e.target.value)}
-            />
-            <button type="submit" className="btn sm" disabled={!!addError || adding}>
-              {adding ? 'adding…' : 'add to the floor'}
-            </button>
-          </div>
-          <div className="gt-sub mono muse-add-note">
-            {showError && addError ? addError : 'free — this reaches no model. it lands in the draw at even odds.'}
-          </div>
-        </form>
-        {rows.length === 0 ? (
-          <div className="gt-sub mono">this session's floor is empty.</div>
-        ) : rows.map((row) => (
-          <div key={row.category} className="muse-sheet-cat">
-            <div className="muse-cat-row">
-              <span className="gc-dot" style={{ background: categoryColor(row.category) }} /> {row.category}
-              <span className="gc-n mono">{row.live}/{row.total}</span>
-            </div>
-            <div className="pref-chips muse-sheet-pills">
-              {row.fragments.map((pill) => {
-                const key = `${pill.category}:${pill.text}`;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={`fchip muse-floor-pill${pill.enabled ? ' on' : ' off'}`}
-                    disabled={busyKey === key}
-                    title={pill.enabled ? 'in the draw — tap to turn it off' : 'turned off — tap to bring it back'}
-                    onClick={() => onToggle(pill)}
-                  >
-                    <span style={{ background: categoryColor(pill.category), width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
-                    {pill.text}
-                    {pill.weight !== 1 && <span className="muse-floor-weight mono"> ×{pill.weight}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The consent sheet (S9) — what a steer proposed, awaiting a ruling.
- *
- * A DIFFERENT SURFACE FROM THE CUTTING FLOOR. The floor sheet is the standing state of the
- * session; this is a proposal about it, and nothing in it has been applied. Every pill is
- * vetoable by tapping, Cancel writes nothing at all, and Confirm is the only thing on this
- * screen that turns a steer into floor writes.
- *
- * Three things it says out loud, each because leaving it unsaid misleads:
- *
- *   HOW MANY SUGGESTIONS WERE DROPPED. The route counts them precisely; swallowing the
- *   count is how a user comes to believe they vetoed something never proposed to them.
- *
- *   THAT THE STREAM IS STILL RUNNING. Pieces already in flight are paid for and the loop
- *   is not held — a piece that lands from the old floor while this is open is correct, and
- *   the next draw after a confirmed write picks the new floor up on its own.
- *
- *   WHAT DID NOT LAND. A confirm that fails part-way keeps what landed and names the rest.
- *
- * It renders no provenance for an addition: a confirmed addition is stored through the
- * floor-fragments route, which files it as a manual fragment, so a "proposed by a steer"
- * label here would claim something the floor does not carry.
- */
-function ConsentSheet({
-  proposal, vetoed, phase, outcome, applying, onVeto, onConfirm, onClose,
-}: {
-  proposal: MuseSteerProposal;
-  vetoed: ReadonlySet<string>;
-  phase: SheetPhase;
-  outcome: string | null;
-  applying: boolean;
-  onVeto: (key: string) => void;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const pills = proposalPills(proposal);
-  const dropped = droppedNote(proposal.dropped);
-  const surviving = writesForConfirm(proposal, vetoed, 'confirmed').length;
-  return (
-    <div className="muse-sheet muse-consent" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="muse-sheet-card" onClick={(e) => e.stopPropagation()}>
-        <div className="muse-sheet-head">
-          <span className="gc-l">proposed changes</span>
-          <span className="gt-sub mono">
-            {phase === 'confirmed'
-              ? 'applied'
-              : 'tap a pill to reject it · nothing moves until you confirm'}
-          </span>
-          <button type="button" className="btn ghost sm muse-sheet-close" onClick={onClose}>Close</button>
-        </div>
-
-        {pills.length === 0 ? (
-          <div className="gt-sub mono">this steer proposed no changes to your floor.</div>
-        ) : (
-          <div className="pref-chips muse-consent-pills">
-            {pills.map((pill) => (
-              <ConsentPill
-                key={`${pill.kind}:${pill.key}`}
-                pill={pill}
-                vetoed={vetoed.has(pill.key)}
-                disabled={phase === 'confirmed' || applying}
-                onVeto={onVeto}
-              />
-            ))}
-          </div>
-        )}
-
-        {dropped && <div className="gt-sub mono muse-consent-dropped">{dropped}</div>}
-
-        {phase === 'confirmed' ? (
-          <div className="gt-sub mono muse-consent-outcome">{outcome}</div>
-        ) : (
-          <>
-            <div className="muse-consent-foot">
-              <button type="button" className="btn ghost sm" disabled={applying} onClick={onClose}>
-                Cancel
-              </button>
-              <button type="button" className="btn accent sm" disabled={applying} onClick={onConfirm}>
-                {applying ? 'applying…' : `Confirm ${surviving} ${surviving === 1 ? 'change' : 'changes'}`}
-              </button>
-            </div>
-            <div className="gt-sub mono">
-              Cancel writes nothing. An elimination turns a fragment off and leaves it on the cutting
-              floor, where tapping it brings it back. The stream keeps running while this is open —
-              pieces already on their way were drawn from the floor as it stands.
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** One proposed change. A vetoed pill is struck through and stays visible: "what did I say
- *  no to" has to be answerable without closing the sheet, and a veto is reversible until
- *  the confirm. */
-function ConsentPill({
-  pill, vetoed, disabled, onVeto,
-}: {
-  pill: SteerPill;
-  vetoed: boolean;
-  disabled: boolean;
-  onVeto: (key: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`fchip muse-consent-pill ${pill.kind}${vetoed ? ' vetoed' : ''}`}
-      disabled={disabled}
-      title={vetoed
-        ? 'rejected — tap to put it back in'
-        : (pill.kind === 'elimination'
-          ? 'turns this fragment off — tap to reject the change'
-          : 'puts this fragment on the floor — tap to reject the change')}
-      onClick={() => onVeto(pill.key)}
-    >
-      <span style={{ background: categoryColor(pill.category), width: 8, height: 8, borderRadius: 2, display: 'inline-block', marginRight: 6 }} />
-      <span className="muse-consent-verb">{pill.kind === 'elimination' ? 'off' : 'add'}</span>
-      {' '}{pill.text}
-    </button>
-  );
-}
-
-/**
- * Whether the viewport is the phone one (noema-264).
- *
- * The picker's CHROME changes with the width — inline panel wide, pull-up sheet narrow —
- * so the script has to switch on the same query the stylesheet does, and has to switch
- * back when the viewport changes under it (a rotation, a resized window). The query
- * string itself lives beside the rule it belongs to, in `lib/muse.ts`.
- */
-function useNarrowViewport(): boolean {
-  const query = () =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(MUSE_NARROW_VIEWPORT)
-      : null;
-  const [narrow, setNarrow] = useState(() => query()?.matches ?? false);
-  useEffect(() => {
-    const mq = query();
-    if (!mq) return;
-    const onChange = () => setNarrow(mq.matches);
-    onChange();
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return narrow;
-}
-
-// ── The session history (noema-274) ─────────────────────────────────────────
-// `/datasets/:id/muse/sessions` — every session broken off this dataset, most recently
-// worked first, with a search over the fragments each piece was drawn from. The dataset
-// screen carries a count and the door; this is what the door opens onto.
-//
-// It lives in this file rather than in a screen of its own because it is the same
-// surface as the muse screen seen from one step back: the row it opens is a session on
-// `Muse` above, reached by the `?session=` name that screen already resolves, and the
-// two share the rules in `lib/muse.ts` that decide order, readout and search.
-//
-// NOTHING HERE WRITES. The list is one read of `listMuseSessions`; the search runs over
-// what that read already returned, so a keystroke fetches nothing. No run is fetched to
-// draw a row either — a recorded piece carries its lineage, and the images are resolved
-// only when a session is actually opened. Opening a row is a read of one session, so
-// browsing the history cannot move which session a bare visit resumes.
-export function MuseSessions() {
-  const { id } = useParams();
-  const [sessions, setSessions] = useState<MuseSessionView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [name, setName] = useState<string | null>(null);
-
-  // Muse sessions belong to an account, so there is nothing to ask for without one. Asking
-  // anyway sent the anonymous commitment header at an owner-scoped route, which answers
-  // auth.missing every time — a 401 the visitor could do nothing about, printed at them, and a
-  // warn in the log for a question that was never answerable.
-  const signedIn = getSession() !== null;
-
-  useEffect(() => {
-    if (!id) return;
-    if (!signedIn) { setSessions([]); return; }
-    let live = true;
-    api.listMuseSessions(id)
-      .then(({ sessions: list }) => { if (live) setSessions(list); })
-      .catch((e) => { if (!live) return; setSessions([]); setError(errText(e)); });
-    return () => { live = false; };
-  }, [id, signedIn]);
-
-  // The dataset's name, for the crumb only — the list above does not wait on it.
-  // `getDatasetFull` covers a public dataset's own name too (noema-dataset-access-field).
-  useEffect(() => {
-    if (!id) return;
-    let live = true;
-    api.getDatasetFull(id)
-      .then((d) => { if (live) setName(d?.name ?? null); })
-      .catch(() => { /* the crumb falls back to the id */ });
-    return () => { live = false; };
-  }, [id]);
-
-  const rows: SessionRow[] = useMemo(() => sessionHistory(sessions ?? []), [sessions]);
-  const shown = useMemo(() => filterSessionHistory(rows, query), [rows, query]);
-  const emptyNote = sessions === null ? null : sessionSearchEmptyNote(shown, query);
-
-  const crumb = (
-    <span className="ph-crumb">
-      <Link to="/datasets">Datasets</Link> <span className="sep">/</span>{' '}
-      <Link to={`/datasets/${id}`}>{name ?? id}</Link> <span className="sep">/</span> <b>Muse sessions</b>
-    </span>
-  );
-
-  return (
-    <AppShell title={crumb}>
-      <div className="page"><div className="pw wide">
-        <div className="pagehead">
-          <div>
-            <h1>Muse sessions</h1>
-            <div className="sub">
-              Every session broken off this dataset, most recently worked first. Opening one is a read —
-              it does not change which session the muse resumes.
-            </div>
-          </div>
-        </div>
-
-        {/* The search appears once there are sessions to search (DESIGN.md P-1a); a field
-            over nothing — no account, no sessions yet — answers no question. It stays while
-            a query narrows the list to nothing, since then it is what the visitor is using. */}
-        {rows.length > 0 && (
-          <div className="muse-hist-search">
-            <input
-              className="cer-input"
-              type="search"
-              placeholder="Search the fragments these sessions were drawn from"
-              aria-label="Search muse sessions"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <span className="gt-sub mono">{`${shown.length} of ${rows.length}`}</span>
-          </div>
-        )}
-
-        {!signedIn && (
-          <div className="empty">
-            <div className="t">Sessions belong to an account</div>
-            <div className="s">
-              <Link to={doorPath(`/datasets/${id}/muse/sessions`)}>Sign in</Link> to see the sessions
-              broken off this dataset. Anonymous work is not kept under a name, so there is nothing
-              here to look up yet.
-            </div>
-          </div>
-        )}
-        {signedIn && error && <div className="sub mono">{error}</div>}
-        {signedIn && sessions === null && <div className="sub">Loading…</div>}
-        {signedIn && emptyNote && <div className="empty"><div className="t">{emptyNote}</div></div>}
-
-        <ul className="muse-hist">
-          {shown.map((row, i) => (
-            <li key={row.id} className={`muse-hist-row${row.empty ? ' empty' : ''}`}>
-              <div className="muse-hist-main">
-                <span className="muse-hist-line">{row.line}</span>
-                <span className="gt-sub mono">
-                  worked {row.mutatum} · started {row.natum}
-                  {i === 0 && query.trim() === '' ? ' · the muse resumes here' : ''}
-                </span>
-              </div>
-              {row.lineage.length > 0 && (
-                <div className="pref-chips muse-hist-lineage">
-                  {row.lineage.slice(0, 8).map((text) => (
-                    <span key={text} className="fchip on">{text}</span>
-                  ))}
-                  {row.lineage.length > 8 && (
-                    <span className="gt-sub mono">+{row.lineage.length - 8} more</span>
-                  )}
-                </div>
-              )}
-              <Link className="btn ghost sm" to={sessionHref(id ?? '', row.id)}>Open →</Link>
-            </li>
-          ))}
-        </ul>
       </div></div>
     </AppShell>
   );
