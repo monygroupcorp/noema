@@ -47,6 +47,37 @@ export const DEFAULT_AITK_REF = 'af594061ab76402eb1261a0450538fba53b41411'
 export const DEFAULT_AITK_IMAGE = 'runpod/pytorch:1.0.7-cu1281-torch291-ubuntu2404'
 
 /**
+ * The CUDA 12.8 runtime wheels torch==2.9.1+cu128 declares as its own exact dependencies
+ * (its wheel METADATA, read off the cu128 index: `Requires-Dist: nvidia-cudnn-cu12==9.10.2.21`
+ * and so on). ai-toolkit's unpinned `pip install -r requirements.txt` (the setup step below)
+ * can displace these — pulling in a generic torchvision/torch resolves a DIFFERENT cuDNN/cuBLAS/…
+ * build alongside it — and the torch/torchvision/torchaudio reinstall that follows uses
+ * `--no-deps` on purpose (so IT doesn't repeat the same disturbance), which means it never
+ * restores these either. Left mismatched, cuDNN's lazy init on the pod's first real op (the
+ * training run's step 0) fails with `CUDNN_STATUS_NOT_INITIALIZED` — not at import time, so the
+ * bootstrap looks clean and the run dies a step later, inside run.py. Reinstalled alongside the
+ * trio, pinned + `--no-deps` for the same reason the trio is: nothing here should be free to
+ * drift. Bump in lockstep with the torch pin in the setup recipe below, never alone.
+ */
+export const POD_CUDA_RUNTIME_PINS = [
+  'nvidia-cuda-nvrtc-cu12==12.8.93',
+  'nvidia-cuda-runtime-cu12==12.8.90',
+  'nvidia-cuda-cupti-cu12==12.8.90',
+  'nvidia-cudnn-cu12==9.10.2.21',
+  'nvidia-cublas-cu12==12.8.4.1',
+  'nvidia-cufft-cu12==11.3.3.83',
+  'nvidia-curand-cu12==10.3.9.90',
+  'nvidia-cusolver-cu12==11.7.3.90',
+  'nvidia-cusparse-cu12==12.5.8.93',
+  'nvidia-cusparselt-cu12==0.7.1',
+  'nvidia-nccl-cu12==2.27.5',
+  'nvidia-nvshmem-cu12==3.3.20',
+  'nvidia-nvtx-cu12==12.8.90',
+  'nvidia-nvjitlink-cu12==12.8.93',
+  'nvidia-cufile-cu12==1.13.1.3',
+]
+
+/**
  * Provision a pod, run `setup` over SSH (bootstrap ai-toolkit onto the stock base), then launch a
  * detached pod script with `env`. `RUNPOD_POD_ID` is injected by the implementation (it knows the
  * pod id), so callers leave it out. Faked in tests; SecurePodClient-backed in prod.
@@ -171,10 +202,15 @@ export class RemoteAitkLauncher implements RemoteAitkLauncherPort {
       `cd ${POD_AITK_DIR} && git checkout ${aitkRef} && git submodule update --init --recursive`,
       `cd ${POD_AITK_DIR} && pip install --break-system-packages -q -r requirements.txt boto3`,
       // ai-toolkit's deps disturb the base's matched torch stack → torchaudio loads against a
-      // mismatched libtorch (undefined-symbol crash at `import torchaudio`). Force the proven
-      // cu128 trio back as the FINAL state (the base already had it; requirements moved it).
+      // mismatched libtorch (undefined-symbol crash at `import torchaudio`), AND the CUDA
+      // runtime wheels torch needs (cuDNN, cuBLAS, …) get displaced the same way (training-dies-
+      // at-step-zero-on-cudnn: a run that bootstraps clean then dies at step 0 with
+      // CUDNN_STATUS_NOT_INITIALIZED). Force the proven cu128 set — torch/torchvision/torchaudio
+      // AND the CUDA runtime wheels they declare — back as the FINAL state (the base already had
+      // them; requirements moved them).
       'pip install --break-system-packages -q --force-reinstall --no-deps ' +
-        'torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128',
+        `torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 ${POD_CUDA_RUNTIME_PINS.join(' ')} ` +
+        '--index-url https://download.pytorch.org/whl/cu128',
     ]
 
     // 5. provision + launch detached; the pod id IS the external run handle. `provision` resolves
