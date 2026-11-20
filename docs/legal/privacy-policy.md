@@ -101,9 +101,13 @@ We are building a hardware-sealed private-compute tier in which a tunnel runs di
 
 If you file a bug report, feature request, or feedback from inside the product, we store what you wrote along with the route you were on, the run it concerned (if any), your browser's user-agent string, and the error your client surfaced. Reports are tied to the account or purse that filed them. They stay in our own database — no report is forwarded to a third-party tracker or issue service. Retention: a report is retained; closing it does not delete it, and erasing your account severs it from you rather than removing it (Section 8).
 
-### 2g. Usage and error logs
+### 2g. Usage and error logs, and the behaviour corpus
 
 We collect server-side diagnostic logs (component, message, error detail, and identifiers such as the account id and run id) for debugging. Prompt and output bodies are not written to these logs. The logs go to the host's container log; they are not stored in the application database.
+
+Separately, we record a small set of visitor behaviour events: that someone viewed the catalog, saw a price quote, signed in, started a credit purchase, or started or finished a generation. This is so we can see where in the product visitors stop, not just what the people who finish end up making — a run you start and abandon leaves a record the same way a run you finish does. Unlike the diagnostic logs above, these events ARE stored in the application database, because the point is to query them.
+
+Each event is keyed on the same pseudonymous identity used everywhere else in the product — your account id if you're signed in, or your anonymous spend commitment if you're not (Section 2a) — together with a coarse device signature: device class (phone, tablet, or desktop), browser family and major version, and OS family. That signature is derived from your browser's user-agent string at the moment the request arrives; the user-agent string itself is discarded immediately and is not stored. No IP address is stored anywhere in this system (Section 2c). We query this corpus internally to answer "where do visitors drop off" in aggregate — it is not used to build a profile of a specific person's path through the product, and it is never shared with a third-party analytics service (Section 2h). If your client fails in a way that never reaches our server — for example because your browser blocks the storage it needs — the client reports that failure to us the same way an in-app bug report does (Section 2f), so that class of failure is visible to us rather than silent.
 
 ### 2h. What we do not collect
 
@@ -111,7 +115,8 @@ We collect server-side diagnostic logs (component, message, error detail, and id
 - Third-party analytics (no Google Analytics, no Mixpanel, no similar services). The optional telemetry forwarder built into the service is not configured in production.
 - Advertising identifiers
 - Cross-site tracking data
-- Device identifiers beyond what's necessary for rate limiting
+- IP addresses, anywhere in this system
+- Your browser's raw user-agent string, outside the one exception already named in Section 2f (a report you file yourself carries it verbatim). Everywhere else that touches your user-agent — the behaviour corpus in Section 2g — only the coarse signature derived from it (device class, browser family and major version, OS family) is stored; the string itself is discarded, not written anywhere.
 
 ---
 
@@ -186,8 +191,9 @@ We screen for child sexual abuse material at the trust boundary. The enforced po
 | In-progress workflow state | 30 days from last update (automatic expiry) |
 | Sign-in links and short-lived secrets | Expire at their own stated expiry (automatic) |
 | Data-export bundles | Private bucket; the download link expires 15 minutes after it is issued |
-| IP addresses | Not stored |
+| IP addresses | Not stored, anywhere in this system |
 | Diagnostic logs | Host container log; not stored in the application database |
+| Behaviour events (catalog views, quotes, sign-ins, funding attempts, run attempts) | Retained; keyed on the same pseudonymous identity as your other records (Section 2a/2c); carries a coarse device signature, never a raw user-agent string (Section 2g) |
 | OFAC screening records | 5 years (legal requirement) |
 | CSAM reporting records | As required by law |
 | Purse ZK proof records | None yet — the purse rail is switched off (Section 2b). When it opens: proof verification timestamp + credit amount |

@@ -160,3 +160,7 @@ tests/unit/arcanum/committedKeyIsTheCeremonys.test.ts
 tests/unit/crystal/intellaSourceGuard.test.ts
 tests/unit/crystal/loraSourceBackfill.test.ts
 tests/unit/scripts/report-addressless-intellae.test.ts
+tests/unit/lib/deviceBucket.test.ts
+tests/unit/analytics/funnel.test.ts
+tests/unit/api/eventsRouter.test.ts
+tests/unit/scripts/funnel-report.test.ts

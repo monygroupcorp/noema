@@ -337,7 +337,12 @@ export function Card() {
     const t = setTimeout(() => {
       setQuoting(true);
       api.quote({ modusId: id, aditus: cleanAditus(aditus) })
-        .then((r) => setQuote({ impetus: r.impetus }))
+        .then((r) => {
+          setQuote({ impetus: r.impetus });
+          // noema/user-behaviour-corpus clause 2 — fires once per resolved quote, the
+          // moment it becomes visible (this is exactly where the JSX reads `quote`).
+          api.recordEvent('quote', { modusId: id });
+        })
         .catch((e) => setQuote({ error: String(e) }))
         .finally(() => setQuoting(false));
     }, 400);

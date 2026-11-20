@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { type FlowSummary } from '../lib/api';
+import { api, type FlowSummary } from '../lib/api';
 import { flowSummaries } from '../lib/flows';
 import { isPinned, togglePin, usePins } from '../lib/pins';
 
@@ -137,7 +137,14 @@ export function Catalog() {
   useEffect(() => {
     let live = true;
     flowSummaries()
-      .then((list) => { if (live) setFlows(list.map(toUI)); })
+      .then((list) => {
+        if (!live) return;
+        setFlows(list.map(toUI));
+        // noema/user-behaviour-corpus clause 2 — one catalog_view per mount, once the
+        // list is actually known (not on every re-render of this effect's deps, which
+        // are empty, so this already fires at most once per mount).
+        api.recordEvent('catalog_view');
+      })
       .catch(() => { if (live) { setErr(true); setFlows([]); } });
     return () => { live = false; };
   }, []);
