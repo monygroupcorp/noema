@@ -795,6 +795,12 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cbtn .orb::after{content:"";position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;background:var(--good);border:2px solid var(--panel)}
 .cbtn .lab{font-size:12.5px;color:var(--text);font-weight:500}
 .cbtn .lab small{display:block;color:var(--faint);font-weight:400;font-size:10.5px}
+/* The notice (clause 3): a transient, non-modal pill beside the launcher — shorter than .cbtn,
+   gone on its own after a few seconds or the moment the panel opens. Never shown together with
+   the panel (see the `open` effect clearing it in Concierge.tsx). */
+.cnotice{display:flex;align-items:center;gap:8px;height:34px;background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:0 13px 0 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:12px;color:var(--text);animation:cpop .18s var(--ease)}
+.cnotice:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.cnotice .orb{width:20px;height:20px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);flex:0 0 auto}
 /* Sized like an actual chat window, not a tooltip — the surface the agent's replies and the
    idle-branch's dock history need to read as more than a corner widget. */
 .cpanel{width:min(var(--concierge-w),calc(100vw - 36px));height:min(70vh,640px);background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;flex-direction:column;transform-origin:bottom left;animation:cpop .18s var(--ease)}
@@ -830,6 +836,15 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .reply-code-block pre code{background:none;border:0;padding:0;font-size:.88em;white-space:pre}
 .reply-code-copy{position:absolute;top:6px;right:6px;font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--hair);background:var(--raised);color:var(--muted);cursor:pointer}
 .reply-code-copy:hover{color:var(--text)}
+/* A concierge reply split into tiles (ReplyTiles.tsx, goal concierge-opens-too-loud clause 2):
+   one bordered card per paragraph/fence rather than one wall of prose, each with its own copy
+   control — most of a reply here is a prefix prompt or similar the model didn't fence, so the
+   tile needs a copy button of its own, not just whatever ReplyMarkdown gives a fenced block. */
+.reply-tiles{display:flex;flex-direction:column;gap:8px}
+.reply-tile{position:relative;background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px;padding-right:56px}
+.reply-tile .reply-md{font-size:12.5px;line-height:1.5;color:var(--text)}
+.reply-tile-copy{position:absolute;top:8px;right:8px;font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--hair);background:var(--panel);color:var(--muted);cursor:pointer}
+.reply-tile-copy:hover{color:var(--text)}
 
 /* ---------- concierge prompt augmentation (focused-field assist) ---------- */
 .chead .ctxtag{margin-left:8px;font-size:10.5px;font-family:var(--font-mono);color:var(--accent-soft);background:var(--accent-bg);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--hair));padding:2px 7px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
