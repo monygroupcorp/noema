@@ -71,6 +71,10 @@ export const API_ERROR_CODES: ErrorCodeSpec[] = [
     { code: 'terms.suspended', httpStatus: 403, retryable: false },
     // The flow names terms this deployment publishes no text for — a configuration fault.
     { code: 'terms.unknown', httpStatus: 503, retryable: false },
+    // The caller's origin falls inside a territory the flow's upstream licence excludes
+    // (MiniMax H3: the EU, UK, Republic of Korea). NOT retryable: the request cannot succeed
+    // from this origin, however many times it is sent.
+    { code: 'territory.excluded', httpStatus: 403, retryable: false },
     { code: 'not_found.terms', httpStatus: 404 },
     { code: 'secret.required', httpStatus: 422 },
     { code: 'deposit.price_unavailable', httpStatus: 422 },

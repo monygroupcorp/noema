@@ -16,7 +16,7 @@ import type { PromptGuard } from '../../../crystal/PromptGuard.js'
 import { permissivePromptGuard } from '../../../crystal/PromptGuard.js'
 import { ownerKeyOf } from '../../../crystal/ownerKey.js'
 import type { GrantSafeguards } from '../../../crystal/modelLicense.js'
-import { useTermsVerdict } from '../../../crystal/useTerms.js'
+import { useTermsVerdict, territoryVerdict } from '../../../crystal/useTerms.js'
 import type { CrystalApiDeps } from '../CrystalApi.js'
 import { PLATFORM_ANIMA_ID, PRIVATE_PRESIGN_TTL_SECONDS, CANCELLED_BY_OWNER } from './support.js'
 
@@ -62,6 +62,22 @@ export abstract class CrystalApiCore {
     // A declaration this deployment has no published text for cannot be accepted, so the flow
     // cannot run.
     throw Errors.termsUnknown(verdict.termsId)
+  }
+
+  /** Refuse a run of a flow whose upstream licence excludes the caller's origin territory
+   *  (MiniMax H3: the EU, UK and Republic of Korea). See the call site in `invokeFlow`; the
+   *  collections writes that dispatch new paid pieces ask the same, same reasons as
+   *  `_assertUseTerms`. `originCountry` absent → nothing to check (see `territoryVerdict`). */
+  protected async _assertTerritory(
+    modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null,
+    originCountry: string | undefined,
+  ): Promise<void> {
+    const verdict = await territoryVerdict({
+      modus,
+      find: (id) => this.deps.modorum.find(id),
+      originCountry,
+    })
+    if (!verdict.ok) throw Errors.territoryExcluded(verdict.country, verdict.terms)
   }
 
   /**

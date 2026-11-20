@@ -290,6 +290,11 @@ export interface CollectOpts {
    * the team's membership at creation.
    */
   teamId?: string
+  /** The caller's origin, ISO 3166-1 alpha-2 (Cloudflare's `cf-ipcountry`) — threaded through so
+   *  a flow carrying territory-restricted licence terms (MiniMax H3) is refused from an
+   *  excluded origin before anything dispatches. Omit where the channel carries no per-request
+   *  geo signal (`_assertTerritory` fails open on an absent value). */
+  originCountry?: string
 }
 
 /** Inputs to publish an artifact (an Actum for #1) to a destination under a policy. */
@@ -384,6 +389,8 @@ export interface InvokeOpts {
    * fired is the one that records the attempt.
    */
   mandatumId?: string
+  /** The caller's origin, ISO 3166-1 alpha-2 (Cloudflare's `cf-ipcountry`) — see `CollectOpts`. */
+  originCountry?: string
 }
 
 /** A compact catalog summary of one runnable flow. */

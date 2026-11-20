@@ -151,18 +151,18 @@ export interface ApiFacade {
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
   fetchTeeWglog(auctor: AuctorKey, sessionId: string, tail?: string): Promise<string | null>
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
-  fireCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  fireCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection>
   patchCollectionTractus(auctor: AuctorKey, id: string, tractus: import('../../types/collectio.js').Tractus[]): Promise<Collection>
-  patchCollectionDraft(auctor: AuctorKey, id: string, patch: { tractus?: import('../../types/collectio.js').Tractus[]; modusId?: string; numerus?: number }): Promise<Collection>
+  patchCollectionDraft(auctor: AuctorKey, id: string, patch: { tractus?: import('../../types/collectio.js').Tractus[]; modusId?: string; numerus?: number }, originCountry?: string): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
-  extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
+  extendCollection(auctor: AuctorKey, id: string, addCount: number, originCountry?: string): Promise<Collection>
   listCollections(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ collections: Collection[]; nextCursor?: string }>
   pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
-  resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  resumeCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection>
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
-  rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string, originCountry?: string): Promise<void>
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   listDatasets(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
@@ -432,6 +432,20 @@ export function createApiRouter(deps: {
   /** The identity-only view of `authCaller`, for every route that does not admit spend. */
   const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
+  /**
+   * The caller's origin, ISO 3166-1 alpha-2, for `InvokeOpts.originCountry` / `CollectOpts.
+   * originCountry` (`minimax-h3-territory-safeguard`). Cloudflare's `cf-ipcountry` is set on
+   * every request once traffic is proxied through it (the cutover this register's `docs/legal/
+   * compliance-landscape.md` records) — undefined for a request that reached this process some
+   * other way, and for Cloudflare's own `'XX'` (not resolvable) and `'T1'` (Tor) sentinels,
+   * which name no territory to check against. `_assertTerritory` fails open on undefined.
+   */
+  const originCountryOf = (req: Request): string | undefined => {
+    const raw = req.headers['cf-ipcountry']
+    const country = (Array.isArray(raw) ? raw[0] : raw)?.trim().toUpperCase()
+    return country && country !== 'XX' && country !== 'T1' ? country : undefined
+  }
+
   /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
    *  spicyMode on (which required a recorded 18+ attestation to persist) may see `contentRating`-adult
    *  models; an anonymous/unauthenticated browse stays SFW — the safe default. NEVER throws — a
@@ -466,6 +480,7 @@ export function createApiRouter(deps: {
           ...(maxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun: maxImpetusPerRun } : {}),
           ...(studioId ? { studioId } : {}),
           ...(by ? { by } : {}),
+          originCountry: originCountryOf(req),
         },
       )
       const webhookUrl = req.body?.options?.webhookUrl
@@ -657,7 +672,7 @@ export function createApiRouter(deps: {
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
     const { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId }) })
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId, originCountry: originCountryOf(req) }) })
   }))
 
   // PATCH /v1/collectiones/:id/tractus — edit a DRAFT's trait axes/values/rules, and (since a
@@ -669,12 +684,12 @@ export function createApiRouter(deps: {
       ...(tractus !== undefined ? { tractus } : {}),
       ...(modusId !== undefined ? { modusId: String(modusId) } : {}),
       ...(numerus !== undefined ? { numerus: Number(numerus) } : {}),
-    }) })
+    }, originCountryOf(req)) })
   }))
 
   // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).
   router.post('/collectiones/:id/fire', wrap(async (req, res) => {
-    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id)) })
+    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped), newest first and
@@ -708,7 +723,7 @@ export function createApiRouter(deps: {
   router.post('/collectiones/:id/extend', wrap(async (req, res) => {
     const auctor = await auth(req)
     const addCount = Number((req.body ?? {}).count)
-    res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount) })
+    res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount, originCountryOf(req)) })
   }))
 
   // POST /v1/collectiones/:id/{pause,resume,cancel}.
@@ -716,7 +731,7 @@ export function createApiRouter(deps: {
     res.json({ collection: await api.pauseCollection(await auth(req), String(req.params.id)) })
   }))
   router.post('/collectiones/:id/resume', wrap(async (req, res) => {
-    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id)) })
+    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
   }))
   router.post('/collectiones/:id/cancel', wrap(async (req, res) => {
     res.json({ collection: await api.cancelCollection(await auth(req), String(req.params.id)) })
@@ -728,7 +743,7 @@ export function createApiRouter(deps: {
     res.status(200).json({ ok: true })
   }))
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
-    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
+    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
     res.status(200).json({ ok: true })
   }))
 

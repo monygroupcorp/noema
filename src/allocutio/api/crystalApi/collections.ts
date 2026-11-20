@@ -59,9 +59,13 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
       // and those dispatches carry the collection's funder, not the caller who wrote this base.
       // Checked once, at the write, rather than on every dispatch tick.
       await this._assertOwnedAditus(auctor, modus, aditusBase)
-      // A collection created live dispatches at once, so its flow's licence terms bind the
-      // creator here; a draft is held to them when it is fired.
-      if (!isDraft) await this._assertUseTerms(auctor, modus)
+      // A collection created live dispatches at once, so its flow's licence terms — and its
+      // territorial restriction (minimax-h3-territory-safeguard) — bind the creator here; a
+      // draft is held to them when it is fired.
+      if (!isDraft) {
+        await this._assertUseTerms(auctor, modus)
+        await this._assertTerritory(modus, opts.originCountry)
+      }
       // Pin the provenance hash to the resolved flow version.
       provenance = provenanceHash({ modusId, modusVersio: modus.versio, tractus, aditusBase })
     }
@@ -94,7 +98,7 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
    * exactly what executes), then dispatches. Owner-scoped + funder-only (it spends).
    * Idempotent-guarded: only a `draft` may be fired.
    */
-  async fireCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+  async fireCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection> {
     // Dispute freeze (noema-082, freeze-boundary v2): firing a draft dispatches the run — a spend.
     await this._assertNotDisputeFrozen(auctor)
     const { collectiones, collectioCursor } = this.deps
@@ -116,8 +120,10 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
     // Re-pin provenance to the flow version at fire time (the config that actually runs).
     const modus = await this.deps.modorum.find(c.modusId)
     // Every piece dispatches under the funder, below the run entry point, so the flow's licence
-    // terms bind the funder here, before the first piece is reserved.
+    // terms — and its territorial restriction — bind the funder here, before the first piece is
+    // reserved.
     await this._assertUseTerms(auctor, modus)
+    await this._assertTerritory(modus, originCountry)
     const provenance = provenanceHash({
       modusId: c.modusId,
       modusVersio: modus?.versio,
@@ -152,6 +158,7 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
     auctor: AuctorKey,
     id: string,
     patch: { tractus?: Tractus[]; modusId?: string; numerus?: number },
+    originCountry?: string,
   ): Promise<Collection> {
     const { collectiones } = this.deps
     if (!collectiones) throw Errors.notFoundCollection('collections')
@@ -190,9 +197,13 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
     // ports, so a value that named nothing under the old flow can become a reference under the
     // new one. Re-checked against the caller making the change, for that reason.
     if (patch.modusId !== undefined) await this._assertOwnedAditus(auctor, modus, c.aditusBase ?? {})
-    // A fired collection's new flow starts dispatching on the next tick, so its terms bind the
-    // funder making the change (the branch above has already required the funder).
-    if (patch.modusId !== undefined && c.status !== 'draft') await this._assertUseTerms(auctor, modus)
+    // A fired collection's new flow starts dispatching on the next tick, so its terms — and its
+    // territorial restriction — bind the funder making the change (the branch above has
+    // already required the funder).
+    if (patch.modusId !== undefined && c.status !== 'draft') {
+      await this._assertUseTerms(auctor, modus)
+      await this._assertTerritory(modus, originCountry)
+    }
     const provenance = modusId
       ? provenanceHash({ modusId, modusVersio: modus?.versio, tractus, aditusBase: c.aditusBase })
       : ''
@@ -348,7 +359,7 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
    * the incremental-batch primitive (fire a batch, review, fire more toward a
    * larger goal over time). Re-opens a completed Collection. Owner-scoped.
    */
-  async extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection> {
+  async extendCollection(auctor: AuctorKey, id: string, addCount: number, originCountry?: string): Promise<Collection> {
     // Dispute freeze (noema-082, freeze-boundary v2): extend raises a collection's funded piece
     // count (numerus + addCount) and dispatches those NEW pieces — new user-initiated outflow, the
     // same collectioCursor-dispatch mechanism resume/fire use. Gated per the ruling's "principle is
@@ -362,8 +373,13 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can extend it (team-pooled funding is not yet available)')
     }
-    // The new pieces are paid runs of the collection's flow, so its licence terms bind the funder.
-    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
+    // The new pieces are paid runs of the collection's flow, so its licence terms and
+    // territorial restriction bind the funder.
+    {
+      const modus = c.modusId ? await this.deps.modorum.find(c.modusId) : null
+      await this._assertUseTerms(auctor, modus)
+      await this._assertTerritory(modus, originCountry)
+    }
     // Checked after the gates, so a malformed count never tells a stranger whether the
     // collection exists. An extend raises the dispatch budget, so the SUM has to stay exact
     // too — a valid `addCount` on an already-large collection is still refused if it would
@@ -403,14 +419,19 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
   }
 
   /** Resume dispatching after a pause. Owner-scoped. */
-  async resumeCollection(auctor: AuctorKey, id: string): Promise<Collection> {
+  async resumeCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection> {
     // Dispute freeze (noema-082, freeze-boundary v2): resume triggers new spends. After a dispute
     // resolves the operator lifts the flag first, then resume works.
     await this._assertNotDisputeFrozen(auctor)
     const c = await this._ownedCollection(auctor, id)
     // Resuming dispatches paid pieces under the collection's funder, so the flow's licence terms
-    // bind the funder — the identity the pieces are charged to, whoever presses resume.
-    await this._assertUseTerms(c.by, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
+    // and territorial restriction bind the funder — the identity the pieces are charged to,
+    // whoever presses resume.
+    {
+      const modus = c.modusId ? await this.deps.modorum.find(c.modusId) : null
+      await this._assertUseTerms(c.by, modus)
+      await this._assertTerritory(modus, originCountry)
+    }
     await this.deps.collectioCursor?.resume(id)
     return toCollection((await this.deps.collectiones!.find(id)) ?? c)
   }
@@ -477,7 +498,7 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
    * could spend the creator's balance a piece at a time. Approval is left to the whole team on
    * purpose: accepting a piece settles work already paid for and dispatches nothing.
    */
-  async rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void> {
+  async rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string, originCountry?: string): Promise<void> {
     // Dispute freeze (noema-082, freeze-boundary v2): a rejection dispatches a replacement piece —
     // user-initiated outflow, gated while the anima is frozen like every other chokepoint.
     await this._assertNotDisputeFrozen(auctor)
@@ -485,8 +506,13 @@ export abstract class CrystalApiCollections extends CrystalApiWorkspace {
     if (!this._isFunder(auctor, c)) {
       throw Errors.authForbidden('only the collection funder can reject a piece (a rejection rerolls it at the funder’s expense)')
     }
-    // The reroll is a new paid run of the collection's flow, held to its licence terms.
-    await this._assertUseTerms(auctor, c.modusId ? await this.deps.modorum.find(c.modusId) : null)
+    // The reroll is a new paid run of the collection's flow, held to its licence terms and
+    // territorial restriction.
+    {
+      const modus = c.modusId ? await this.deps.modorum.find(c.modusId) : null
+      await this._assertUseTerms(auctor, modus)
+      await this._assertTerritory(modus, originCountry)
+    }
     await this.deps.collectioCursor?.rejectAndRevive(id, actumId)
   }
 }

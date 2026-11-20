@@ -15047,6 +15047,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `terms.required` | 403 | no |
 | `terms.suspended` | 403 | no |
 | `terms.unknown` | 503 | no |
+| `territory.excluded` | 403 | no |
 | `not_found.terms` | 404 | no |
 | `secret.required` | 422 | no |
 | `deposit.price_unavailable` | 422 | no |

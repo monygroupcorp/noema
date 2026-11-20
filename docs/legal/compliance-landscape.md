@@ -199,6 +199,28 @@ at top).
   MiniMax's grant email are the actual basis for the register's "✅ licence held" above. The seeds'
   `commercialUse:'yes'` override for canonical H3 in `seeds/intellae.ts` is now factually correct
   but still cites the old fictitious date — update its citation to this grant (gripe g-2b547e39).
+- **The EU/UK/Korea exclusion is NOT lifted by our grant** (that grant covers the US — see
+  "Granted" in `docs/legal/minimax-h3-license-proposal.md`) and is enforced by a control, not just
+  by our own terms' promise of it (Section 11.1 of `docs/legal/terms-and-conditions.md`).
+  `noema/minimax-h3-territory-safeguard`: every entry point that can start a paid H3 run or
+  dispatch new paid H3 collection pieces — `POST /v1/runs`, the MCP `run_flow`/`collect` tools,
+  and the Collectio writes that dispatch (`collect` live, `fireCollection`, `patchCollectionDraft`'s
+  flow change, `extendCollection`, `resumeCollection`, `rejectCollectionPiece`) — reads the
+  caller's origin from Cloudflare's `cf-ipcountry` header (set once a request is proxied through
+  Cloudflare — the cutover this register's audit rows above record) and refuses with
+  `territory.excluded` before anything is reserved when that origin is inside the EU, the UK
+  (`GB`), the Republic of Korea (`KR`), or Cloudflare's own `'EU'` institutional-range value.
+  The signal and the policy both live in `src/crystal/useTerms.ts` (`UseTerms.excludedTerritories`,
+  `territoryVerdict`), enforced at the run/collection entry points through `CrystalApiCore.
+  _assertTerritory` — the same place and the same shape as the acceptance check
+  (`_assertUseTerms`) the flow-down obligation already required.
+  **Known limitation, by design, not an oversight:** a request with no resolvable origin — not
+  proxied through Cloudflare, or carrying Cloudflare's own `'XX'`/`'T1'` (unknown/Tor) sentinel —
+  is NOT refused (fail-open on no signal); refusing every caller we cannot place would be a
+  broader outage than the residual risk it would close, and the control as built catches the
+  case the goal names: a caller we CAN place inside an excluded territory. The chat bot
+  (Telegram webhook) and any other non-Cloudflare-proxied channel carry no per-request geo
+  signal today and are not covered until one is wired for them.
 
 ---
 

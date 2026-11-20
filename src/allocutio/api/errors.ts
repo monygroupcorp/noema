@@ -143,6 +143,17 @@ export const Errors = {
       403,
       { retryable: false, details: { terms: terms.id } },
     ),
+  /** The caller's origin (Cloudflare's `cf-ipcountry`) falls inside a territory the flow's
+   *  upstream licence excludes (`UseTerms.excludedTerritories`) — e.g. MiniMax H3's licence
+   *  does not extend to the EU, UK or Republic of Korea. NOT retryable: the request cannot
+   *  succeed from this origin regardless of how many times it is sent. */
+  territoryExcluded: (country: string, terms: { id: string; nomen: string } = { id: 'unknown', nomen: 'its licence' }) =>
+    new ApiError(
+      'territory.excluded',
+      `This flow runs under the ${terms.nomen}, which does not extend to your origin (${country}).`,
+      403,
+      { retryable: false, details: { terms: terms.id, country } },
+    ),
   /** A gated model import needs a connected BYO secret for `provider` (Civitai/HF). 422 — the request
    *  is well-formed but a precondition (a connected token) is unmet. `details.provider` drives the
    *  frontend deep-link to Profile → Connected accounts (BYO-secrets F2). */
