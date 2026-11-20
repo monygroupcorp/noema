@@ -29,6 +29,14 @@
 //     npx tsx scripts/examples-gallery/fire-example.ts \
 //       --prompt "..." --id make-01 [--size 1024x1024] [--quality high]
 //
+//   Any modus reachable through an openai-ministerium cursor OR a host-side cursor
+//   (ffmpeg, composite — createContainer always registers those, no pod needed)
+//   works the same way: pass --modus and --aditus '<json>' instead of --prompt. e.g.
+//   assembling a "video" example from frames already fired (no RunPod, no GPU):
+//     npx tsx scripts/examples-gallery/fire-example.ts --id video-01 \
+//       --modus modus.frames-to-video \
+//       --aditus '{"frames":["https://.../a.png","https://.../b.png"],"fps":8}'
+//
 // Prints one JSON line to stdout: {id, modusId, aditus, mediaUrl, actumId}.
 // =============================================================================
 
@@ -46,10 +54,12 @@ if (DB === 'noema' || DB === 'noemaplane') {
 }
 if (!URI) { console.error('[fire-example] MONGODB_URI (or MONGO_PASS) is required'); process.exit(1) }
 
+// Only the openai-ministerium path (modus.gpt-image and friends) needs this key — a
+// host-side dispatch (ffmpeg/composite) never touches apiProviders, so it stays optional
+// and the container gets a harmless placeholder instead of refusing to start.
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? process.env.OPENAI_API
-if (!OPENAI_API_KEY) { console.error('[fire-example] OPENAI_API_KEY (or OPENAI_API) is required'); process.exit(1) }
 
-type Args = { id: string; prompt: string; size?: string; quality?: string; modusId: string }
+type Args = { id: string; prompt?: string; size?: string; quality?: string; modusId: string; aditus?: string }
 
 function parseArgs(argv: string[]): Args {
   const a: Partial<Args> = { modusId: 'modus.gpt-image' }
@@ -63,10 +73,15 @@ function parseArgs(argv: string[]): Args {
       case '--size': a.size = need(); break
       case '--quality': a.quality = need(); break
       case '--modus': a.modusId = need(); break
+      case '--aditus': a.aditus = need(); break
       default: throw new Error(`unknown argument '${flag}'`)
     }
   }
-  if (!a.id || !a.prompt) throw new Error('usage: --id <slug> --prompt "<text>" [--size WxH] [--quality q] [--modus modus.gpt-image]')
+  if (!a.id || (!a.prompt && !a.aditus)) {
+    throw new Error(
+      'usage: --id <slug> (--prompt "<text>" [--size WxH] [--quality q] | --aditus \'<json>\') [--modus modus.gpt-image]',
+    )
+  }
   return a as Args
 }
 
@@ -83,15 +98,15 @@ async function main(): Promise<void> {
     dbName: DB,
     // Never reached: 'modus.gpt-image' resolves to ApiCursor (ministerium:'openai'),
     // not RunPodCursor, so `compile` is dead code for this script's only path.
-    compile: async () => { throw new Error('compile not needed — openai ministerium only') },
-    apiProviders: [{ provider: OPENAI_PROVIDER, apiKey: OPENAI_API_KEY! }],
+    compile: async () => { throw new Error('compile not needed — openai/ffmpeg/composite ministeria only') },
+    apiProviders: [{ provider: OPENAI_PROVIDER, apiKey: OPENAI_API_KEY ?? 'unset' }],
   }
   const ring = createContainer(mongo, config)
 
   const anima = await ring.animae.create({ nomen: `showcase:${args.id}` })
   console.error(`[fire-example] anima=${anima.id}`)
 
-  const aditus: Record<string, unknown> = { prompt: args.prompt }
+  const aditus: Record<string, unknown> = args.aditus ? JSON.parse(args.aditus) : { prompt: args.prompt }
   if (args.size) aditus.size = args.size
   if (args.quality) aditus.quality = args.quality
 
@@ -108,12 +123,15 @@ async function main(): Promise<void> {
   )
 
   if (!exitus) throw new Error(`actum ${actum.id} did not complete synchronously — exitus missing`)
-  const rawImage = (exitus as { image?: unknown }).image
-  if (typeof rawImage !== 'string') throw new Error(`exitus.image is not a string: ${JSON.stringify(exitus)}`)
+  // modus.gpt-image's exitus carries `image`; modus.frames-to-video's carries `video` —
+  // whichever the modus declares in its `exitus` schema is the one this picks up.
+  const exitusRecord = exitus as Record<string, unknown>
+  const rawMedia = exitusRecord.image ?? exitusRecord.video
+  if (typeof rawMedia !== 'string') throw new Error(`no string image/video in exitus: ${JSON.stringify(exitus)}`)
 
   let mediaUrl: string
-  if (rawImage.startsWith('data:')) {
-    const match = /^data:([^;]+);base64,(.*)$/s.exec(rawImage)
+  if (rawMedia.startsWith('data:')) {
+    const match = /^data:([^;]+);base64,(.*)$/s.exec(rawMedia)
     if (!match) throw new Error('data: URI did not match the expected base64 shape')
     const [, contentType, b64] = match
     const bytes = Buffer.from(b64, 'base64')
@@ -132,7 +150,7 @@ async function main(): Promise<void> {
     })
     mediaUrl = await uploader.put(`showcase/${args.id}.${ext}`, bytes, contentType)
   } else {
-    mediaUrl = rawImage
+    mediaUrl = rawMedia
   }
 
   console.log(JSON.stringify({ id: args.id, modusId: args.modusId, aditus, mediaUrl, actumId: actum.id }))
