@@ -10,7 +10,7 @@ import { WriteProposalCard } from '../components/WriteProposalCard';
 import { commitMemoryDelta } from '../lib/conciergeMemory';
 import { pickConciergeThread } from '../lib/conciergeThread';
 import { ReportModal } from './ReportModal';
-import { ReplyMarkdown } from '../components/ReplyMarkdown';
+import { ReplyTiles } from '../components/ReplyTiles';
 
 // NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
 // (starts with "/"); the agent-side allowlist is the real gate.
@@ -27,9 +27,12 @@ function DestinationLink({ destination, onGo }: { destination: { path: string; l
   );
 }
 
-// Thread history in the compact dock (noema-111). The dock renders only the LATEST turn (not a
-// full transcript), so "resume" here means: continue the picked thread on the next send, and show
-// its last agent turn as the current result for continuity. Grouping mirrors Chat.tsx.
+// Thread history in the compact dock (noema-111), relabeled Inbox (goal concierge-opens-too-loud,
+// clause 4): a request lands in a colloquium — a chat — and this list is the inbox of them. The
+// dock renders only the LATEST turn (not a full transcript), so "resume" here means: continue the
+// picked thread on the next send, and — when the caller picked it, not when the dock silently
+// reattached to it on mount — show its last agent turn as the current result for continuity.
+// Grouping mirrors Chat.tsx.
 const DOCK_UNCATEGORIZED = '__uncategorized__';
 interface DockGroup { key: string; name: string; threads: ColloquiumSummary[] }
 function groupDockThreads(threads: ColloquiumSummary[], nameOf: (id?: string) => string | undefined): DockGroup[] {
@@ -78,11 +81,27 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   const navigate = useNavigate();
   const { clear } = usePromptAssist();
   const [open, setOpen] = useState(false);
+  // Mirrors `open` for code that reads it inside an async callback's resolution rather than at
+  // the point the callback was fired — the notice below, which judges whether the panel is
+  // currently closed only once the reply it is about has actually arrived.
+  const openRef = useRef(open);
+  useEffect(() => { openRef.current = open; }, [open]);
   // True only while the panel is open because of the arrival greeting (below), never because
   // the user or the focus-assist opened it. Governs the scrim: the greeting must not occlude
   // the page it just announced itself on (D-52).
   const [greeting, setGreeting] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Clause 3: what doesn't need the panel arrives as a notice instead — a one-line, non-modal
+  // pill beside the launcher, never a reason to pop the panel open. Set only when a reply
+  // lands while the panel is already closed (see idleSend); cleared the moment the panel opens
+  // by any route, so it never competes with the panel itself for attention.
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => { if (open) setNotice(null); }, [open]);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
 
   // The open panel's footprint is reserved by narrowing `.main` (D-52, P-2c) — a class on
   // `<body>` because the panel and `.main` are siblings under `.app`, not ancestor/descendant,
@@ -132,11 +151,15 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
       setThreads(colloquia);
     } catch { /* offline / not-yet-authed */ }
   }
-  // Resume a thread in the dock: make it active (next send continues it) and surface its last
-  // agent turn as the current result.
-  async function resumeDock(id: string) {
+  // Resume a thread in the dock: make it active (next send continues it). `surface` governs
+  // whether its last agent turn is also shown as the current result — true for the caller
+  // picking a thread from the inbox (the point of opening it is to see what is there), false
+  // for the dock silently reattaching on mount (clause 1: reopening must not replay the last,
+  // possibly long and stale, answer onto a screen the caller hasn't asked to see it on).
+  async function resumeDock(id: string, surface = true) {
     setHistOpen(false);
     setIdleColloquiumId(id);
+    if (!surface) return;
     try {
       const { dicta } = await api.getColloquium(id);
       const lastAgent = [...dicta].reverse().find((d) => d.genus === 'agent');
@@ -152,10 +175,15 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
   }
 
   // Resume by default (noema-324): on mount, with no active pointer yet, pick the caller's most
-  // recent thread and resume into it. Runs once per mount (guarded by the ref) so it never fights
+  // recent thread and continue it. Runs once per mount (guarded by the ref) so it never fights
   // the explicit "+ New conversation" affordance, which clears the pointer on purpose afterward.
   // Zero existing threads is the one case this leaves the pointer unset — idleSend() below still
   // creates lazily on the first message, same as it always has.
+  //
+  // surface=false (clause 1): the dock is remounted on every navigation, so without this the
+  // caller's last answer — however long, however stale — would reappear the moment the panel
+  // next opens for an unrelated reason (the arrival greeting, a focus-assist target). Only
+  // picking the thread from the inbox below surfaces its last turn.
   useEffect(() => {
     if (autoResumeAttempted.current) return;
     autoResumeAttempted.current = true;
@@ -164,7 +192,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
         const { colloquia } = await api.listColloquia();
         setThreads(colloquia);
         const pick = pickConciergeThread(colloquia);
-        if (pick.action === 'resume') void resumeDock(pick.id);
+        if (pick.action === 'resume') void resumeDock(pick.id, false);
       } catch { /* offline / not-yet-authed — falls back to lazy create on first send */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -259,6 +287,10 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
       setIdleResult(result);
       setIdleTurnKey(turnKey);
       setIdleMsg('');
+      // Clause 3: the reply landed while the panel was closed (the caller sent it, then shut
+      // the panel, or it never opened for this send at all) — don't reopen the panel to show
+      // it; a notice is enough, and the reply is sitting in the inbox either way.
+      if (!openRef.current) setNotice(result.kind === 'reply' ? 'Concierge replied' : 'Concierge has a suggestion');
       // The turn-end memory delta (the author ladder). The dock is the concierge on every screen
       // but the full chat, so a turn taken here has to write what it learned exactly as a turn in
       // /chat does — the client applies it, once, after the turn renders. Fire-and-forget:
@@ -334,7 +366,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                   style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '5px', border: '1px solid var(--line, #2a2f3a)', background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   onClick={() => { const next = !histOpen; setHistOpen(next); if (next) void refreshThreads(); }}
                 >
-                  {histOpen ? 'Close' : '☰ Recent'}
+                  {histOpen ? 'Close' : '☰ Inbox'}
                 </button>
               </div>
 
@@ -344,7 +376,7 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                     style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: '12px', padding: '6px 8px', borderRadius: '6px', border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
                     onClick={startNewDock}
                   >+ New conversation</button>
-                  {threads.length === 0 && <div style={{ opacity: 0.6, fontSize: '12px', padding: '6px 8px' }}>No conversations yet.</div>}
+                  {threads.length === 0 && <div style={{ opacity: 0.6, fontSize: '12px', padding: '6px 8px' }}>Nothing in the inbox yet.</div>}
                   {groupDockThreads(threads, projectNameOf).map((g) => (
                     <div key={g.key}>
                       <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.55, padding: '6px 8px 2px' }}>{g.name}</div>
@@ -364,13 +396,13 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
                 idleResult.kind === 'proposal'
                   ? <ProposalCard proposal={idleResult} onAdjust={idleAdjust} />
                   : (
-                    <div className="ex">
-                      <ReplyMarkdown text={idleResult.text} />
+                    <>
+                      <ReplyTiles text={idleResult.text} />
                       {idleResult.destination && (
                         <DestinationLink destination={idleResult.destination} onGo={navigate} />
                       )}
                       {idleResult.write && <WriteProposalCard write={idleResult.write} confirmKey={idleTurnKey} />}
-                    </div>
+                    </>
                   )
               )}
 
@@ -392,6 +424,15 @@ export function Concierge({ hasContext }: { hasContext: boolean }) {
           </div>
         )}
       </div>
+      {/* Clause 3's notification affordance: a transient pill beside the launcher, never a
+          second persistent surface — D-53's "one affordance at a time" is about the
+          launcher/panel pair, and this never shows while either the panel is open or the
+          launcher is hidden for any other reason (that effect is above, keyed on `open`). */}
+      {notice && (
+        <div className="cnotice" onClick={() => { setNotice(null); setGreeting(false); setOpen(true); }}>
+          <span className="orb" /><span>{notice}</span>
+        </div>
+      )}
       <div className="cbtn" onClick={() => { setGreeting(false); setOpen((o) => !o); }}>
         <span className="orb" />
         <span className="lab">Concierge<small>{target ? `help with the ${target.fieldLabel}` : 'make · adjust · explain'}</small></span>
