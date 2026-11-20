@@ -20,7 +20,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const shotsDir = (run: string) => resolve(HERE, 'shots', run);
 const reportDir = (run: string) => resolve(HERE, 'report', run);
 
-interface Shot { route: string; viewport: string; file: string; bytes: number }
+interface Shot {
+  route: string; viewport: string; file: string; bytes: number;
+  hintTriggerClearance?: { overlapsReportTrigger: boolean } | null;
+}
 interface Manifest {
   run: string; capturedAt: string; revision: string; baseUrl: string;
   authenticated: boolean; routes: number; shots: Shot[];
@@ -54,6 +57,9 @@ const PAGE_CSS = `
   .n{color:#5b8cff}
   .changed{color:#d8a657}
   .gone{color:#e5484d}
+  .collision{border-color:#e5484d}
+  .collision figcaption{color:#e5484d;border-bottom-color:#e5484d}
+  .warn{color:#e5484d;font:12px ui-monospace,monospace;padding:0 32px 14px}
   table{width:100%;border-collapse:collapse;font:12px ui-monospace,monospace}
   td,th{text-align:left;padding:7px 32px;border-bottom:1px solid #15181b}
   th{color:#8b929c;font-weight:400}
@@ -62,15 +68,20 @@ const PAGE_CSS = `
 
 function contactSheet(run: string): string {
   const m = manifest(run);
-  const cards = m.shots.map((s) => `
-    <figure>
-      <figcaption><span>${esc(s.route)}</span><span class="n">${esc(s.viewport)}</span></figcaption>
+  const collided = m.shots.filter((s) => s.hintTriggerClearance?.overlapsReportTrigger);
+  const cards = m.shots.map((s) => {
+    const collides = !!s.hintTriggerClearance?.overlapsReportTrigger;
+    return `
+    <figure class="${collides ? 'collision' : ''}">
+      <figcaption><span>${esc(s.route)}${collides ? ' ⚠ hint row overlaps the report trigger' : ''}</span><span class="n">${esc(s.viewport)}</span></figcaption>
       <div class="scroll"><img loading="lazy" src="../../shots/${esc(run)}/${esc(s.file)}" alt="${esc(s.route)} at ${esc(s.viewport)}"></div>
-    </figure>`).join('');
+    </figure>`;
+  }).join('');
   return `<!doctype html><meta charset="utf-8"><title>walk · ${esc(run)}</title><style>${PAGE_CSS}</style>
 <header><h1>walk · ${esc(run)}</h1>
 <div class="meta">${m.shots.length} shots over ${m.routes} routes · ${esc(m.revision)} · ${esc(m.baseUrl)} · ${m.authenticated ? 'signed in' : 'anonymous'} · ${esc(m.capturedAt)}</div>
 ${(m.failed ?? []).length ? `<div class="meta gone">unreachable: ${(m.failed ?? []).map((f) => esc(f.route)).join(', ')}</div>` : ''}</header>
+${collided.length ? `<div class="warn">⚠ the hint row shares a lane with the report trigger on: ${collided.map((s) => `${esc(s.route)} [${esc(s.viewport)}]`).join(', ')}</div>` : ''}
 <div class="grid">${cards}</div>`;
 }
 
