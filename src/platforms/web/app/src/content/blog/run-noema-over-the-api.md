@@ -33,16 +33,20 @@ it.
 
 ## Credentials
 
-Running a flow needs a caller identity. There are five ways to present one, and you need exactly
+Running a flow needs a caller identity. There are four ways to present one, and you need exactly
 one of them:
 
 - an `X-API-Key` header,
 - an `Authorization: Bearer <jwt>` header,
 - an `x-bursa-token` header carrying a purse code,
-- an anonymous credit commitment — an `x-commitment` header, or a `commitment` field in the body,
-- a signed wallet bundle in the request body.
+- an anonymous credit commitment — an `x-commitment` header, or a `commitment` field in the body.
 
-Two of them come with a trap.
+A signed wallet bundle in the request body is a fifth shape the identity resolver's code already
+parses, but no verifier is wired to it in production yet — send one today and you get `401
+auth.invalid`, not a run. If you want to call as a wallet-linked account, sign in and use the
+`Authorization: Bearer <jwt>` method above instead.
+
+Two of the four come with a trap.
 
 **Send the commitment as a header if you intend to watch the run.** A `GET` carries no body, so an
 anonymous caller who put their commitment in the invoke body and nowhere else can start a run and
