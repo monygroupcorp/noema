@@ -287,10 +287,10 @@ export function EditioExport() {
             <>
               <div className="ex-foot-note mono">nothing leaves NOEMA as public · a private download link</div>
               {dj.s === 'ready'
-                ? <a className="btn good lg" href={dj.url} download>Download collection ↓ <span className="ex-btn-sub">your ZIP is ready</span></a>
+                ? <a className="btn accent lg" href={dj.url} download>Download collection ↓ <span className="ex-btn-sub">your ZIP is ready</span></a>
                 : dj.s === 'busy'
-                ? <button className="btn good lg" disabled>Preparing… <span className="ex-btn-sub">bundling {c.completed.toLocaleString()} pieces</span></button>
-                : <button className="btn good lg" disabled={blocked.you !== ''} onClick={() => run('download')}>Prepare download ↓ <span className="ex-btn-sub">{blocked.you || 'bundle every approved piece + metadata'}</span></button>}
+                ? <button className="btn accent lg" disabled>Preparing… <span className="ex-btn-sub">bundling {c.completed.toLocaleString()} pieces</span></button>
+                : <button className="btn accent lg" disabled={blocked.you !== ''} onClick={() => run('download')}>Prepare download ↓ <span className="ex-btn-sub">{blocked.you || 'bundle every approved piece + metadata'}</span></button>}
             </>
           ) : (
             <>
