@@ -1,8 +1,13 @@
 name: Staging
 
+# Triggers on push to main, not a separate `staging` branch. PRs have targeted main
+# directly since the 2026-08-05 cutover off chainengine-migration; a trigger on a branch
+# nobody pushes to anymore is how staging went three months and 1000+ commits stale
+# before anyone noticed (see docs/ops/staging-deploy.md). Building straight off main
+# means there is no branch left to forget to advance.
 on:
   push:
-    branches: [staging]
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io

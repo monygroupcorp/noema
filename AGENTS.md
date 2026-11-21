@@ -64,13 +64,13 @@ anything needing a real GPU/pod is explicitly out of scope (staging).
 
 ## Deploying to staging (staging.noema.art)
 
-Staging = the `chainengine-migration` branch, deployed to a droplet. **Full runbook:
+Staging = `main`, deployed to a droplet. **Full runbook:
 `docs/ops/staging-deploy.md` — read it before deploying** (there are stale duplicate
 configs in the repo and on the box that WILL mislead you).
 
 TL;DR:
-1. `git push origin HEAD:staging` (staging fast-forwards from `chainengine-migration`) → CI
-   builds `ghcr.io/monygroupcorp/noema:staging`. Wait for green: `gh run list --branch staging -L1`.
+1. Every push to `main` → CI builds `ghcr.io/monygroupcorp/noema:staging`. Wait for green:
+   `gh run list --branch main --workflow staging.yml -L1`.
 2. `ssh noema 'cd /opt/noema && ./deploy-staging.sh'` — pulls the image, recreates the
    `hyperbot-staging` container, health-checks.
 3. Verify: `curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept: text/html' https://staging.noema.art/` → `200`.

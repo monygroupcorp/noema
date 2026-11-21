@@ -30,10 +30,15 @@ One container, one process.
 
 ## Deploy flow (every change)
 
-1. **Build:** push to the `staging` branch → CI (`.github/workflows/staging.yml`) builds and
-   pushes `ghcr.io/monygroupcorp/noema:staging`. (Staging tracks `chainengine-migration`;
-   a push is a clean fast-forward — `git push origin HEAD:staging`.)
-2. **Wait** for the build to go green: `gh run list --branch staging --limit 1`.
+1. **Build:** every push to `main` → CI (`.github/workflows/staging.yml`) builds and pushes
+   `ghcr.io/monygroupcorp/noema:staging`. Nothing to push by hand — merging a PR to `main`
+   is the trigger. (Before 2026-11-21 this watched a separate `staging` branch that was
+   supposed to fast-forward from `chainengine-migration`; PRs cut over to targeting `main`
+   directly on 2026-08-05 and nobody updated the trigger, so `chainengine-migration`/`staging`
+   sat frozen for over three months while `main` moved 1000+ commits ahead — staging was
+   serving an August snapshot. Triggering straight off `main` removes the branch that can
+   go stale: there is nothing left to forget to advance.)
+2. **Wait** for the build to go green: `gh run list --branch main --workflow staging.yml --limit 1`.
 3. **Deploy (manual, on the droplet) — run the `/root` wrapper, NOT the inner script:**
    ```bash
    ssh noema './deploy-staging.sh'
