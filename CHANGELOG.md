@@ -1,5 +1,58 @@
 # Changelog
 
+## [5.35.0](https://github.com/monygroupcorp/noema/compare/v5.34.0...v5.35.0) (2026-11-21)
+
+
+### Features
+
+* **crystal:** refuse MiniMax H3 runs from EU/UK/Korea origins before reservation ([#733](https://github.com/monygroupcorp/noema/issues/733)) ([173e688](https://github.com/monygroupcorp/noema/commit/173e688e8658189381df78aa9d32b310e0677ddd))
+* **crystal:** take a reported run's output down on a confirmed abuse violation ([#734](https://github.com/monygroupcorp/noema/issues/734)) ([37dc200](https://github.com/monygroupcorp/noema/commit/37dc200b85d6da0f9e7a98a9dd08db0c0f9419de))
+* **crystal:** walk the collection screens populated, against a local fixture ([e71898f](https://github.com/monygroupcorp/noema/commit/e71898f915272b3c057da89ab1a015f15ee66300))
+* **crystal:** walk the collection screens populated, against a local fixture ([f19ff81](https://github.com/monygroupcorp/noema/commit/f19ff81c15475afa6a70cff3023221fbb84423e8))
+* let any surface report H3 outputs; accept terms from chat ([#735](https://github.com/monygroupcorp/noema/issues/735)) ([5a492db](https://github.com/monygroupcorp/noema/commit/5a492db267b5836b71255e85a43c6b2e98d8447a))
+* **scripts:** a module census — the ten largest and ten most duplicated modules under src/ ([#710](https://github.com/monygroupcorp/noema/issues/710)) ([68f0d85](https://github.com/monygroupcorp/noema/commit/68f0d8515708cb3c8a6c7dfcb28a774cf5488b76))
+* **telegram:** collect photos into a default dataset ([#717](https://github.com/monygroupcorp/noema/issues/717)) ([cba0ff9](https://github.com/monygroupcorp/noema/commit/cba0ff918999076f26965e014560147eadcfdc4a))
+* **web:** dataset images arrive by drop, paste or a chosen folder ([#716](https://github.com/monygroupcorp/noema/issues/716)) ([d9e7401](https://github.com/monygroupcorp/noema/commit/d9e7401507c65da41d491529a46ea3c5550fc046))
+
+
+### Bug Fixes
+
+* **api:** handle a quote for an unregistered ministerium instead of 500ing ([#713](https://github.com/monygroupcorp/noema/issues/713)) ([2b884ab](https://github.com/monygroupcorp/noema/commit/2b884abd9127472208208eee35f73699d37b6a86))
+* **arcanum:** stop snarkjs leaking a file handle on a bad zkey header ([#739](https://github.com/monygroupcorp/noema/issues/739)) ([f3e34bd](https://github.com/monygroupcorp/noema/commit/f3e34bdcc0c60d07b2323883b78476f79d608896))
+* **crystal:** restore cuDNN's own CUDA runtime wheels after the training pod's torch pin ([#718](https://github.com/monygroupcorp/noema/issues/718)) ([84fa658](https://github.com/monygroupcorp/noema/commit/84fa658be8cafbc8254ff724a68e375b139b56f4))
+* **crystal:** retire runmake.* flow registrations that twin a modern id ([#723](https://github.com/monygroupcorp/noema/issues/723)) ([35dc694](https://github.com/monygroupcorp/noema/commit/35dc69461cc0094f5c6dcf7ef05daaa368202c96))
+* **deps:** pin uuid/qs/lodash and force ethersproject's ws to patched versions ([70f8811](https://github.com/monygroupcorp/noema/commit/70f88118c58a1910cf6ce94182833e3be2bbbe85))
+* **deps:** pin uuid/qs/lodash and force ethersproject's ws to patched versions ([acf3ae5](https://github.com/monygroupcorp/noema/commit/acf3ae5c61b9c9dbecded57f6ec2e27fe9846ff3))
+* land the 2026-11-06 security audit fixes ([#711](https://github.com/monygroupcorp/noema/issues/711)) ([d2326d5](https://github.com/monygroupcorp/noema/commit/d2326d5777b5d076fc865f8972cad9589f659b95))
+* **ops:** mount arcanum ceremony custody on staging deploys ([#740](https://github.com/monygroupcorp/noema/issues/740)) ([f50eba1](https://github.com/monygroupcorp/noema/commit/f50eba17123e6f57b0499463ea891be308f2160b))
+* **runs:** stamp the embed sweep's owner before quoting it ([#737](https://github.com/monygroupcorp/noema/issues/737)) ([80ceb3a](https://github.com/monygroupcorp/noema/commit/80ceb3af3c8ebb06f513f2ee75868de0e47642ad))
+* **space:** inspecting a point no longer forces the gallery drawer open ([#720](https://github.com/monygroupcorp/noema/issues/720)) ([4839e0c](https://github.com/monygroupcorp/noema/commit/4839e0c4079aa2e638ad0934f5dc4d72fe6f16ff))
+* **web:** /collections stops filling four buttons with the one live hue at once ([dcd1d6b](https://github.com/monygroupcorp/noema/commit/dcd1d6b7f1617147df870683be417ee87bd36e82))
+* **web:** /lab/landing fits a 390px viewport ([dcbf721](https://github.com/monygroupcorp/noema/commit/dcbf7212d4ecb0dd46e3b0a7f4a8e8652aed59a7))
+* **web:** /status stops holding "Loading your activity…" past a failed read ([da4ca06](https://github.com/monygroupcorp/noema/commit/da4ca0688a2789cbdad8a73f5dc4a62755007883))
+* **web:** a batch of small UI defects at 390px and across the DESIGN.md standard ([2358047](https://github.com/monygroupcorp/noema/commit/235804737a50944105e6a00b3a125c9734f5dca8))
+* **web:** a dropdown is the app's control, not the operating system's ([ac706a4](https://github.com/monygroupcorp/noema/commit/ac706a41c5f19d23d6b07a4049e2f43dff224c08))
+* **web:** concierge stops replaying a stale answer and tiles its output ([#721](https://github.com/monygroupcorp/noema/issues/721)) ([a9e74e2](https://github.com/monygroupcorp/noema/commit/a9e74e22c2e707563de36e422a8a03bcc51540c0))
+* **web:** curation's K/R hint stops advertising a keyboard a touch viewport has none of ([d121f37](https://github.com/monygroupcorp/noema/commit/d121f37d7ccdc710bf824aea5302b39a73140ef3))
+* **web:** EditioExport names reversibility before publishing to hosting, not after ([9b54a55](https://github.com/monygroupcorp/noema/commit/9b54a551ed27827c881a0922180dfb6b242ca136))
+* **web:** EditioExport's download action stops competing with --accent ([2cefb6b](https://github.com/monygroupcorp/noema/commit/2cefb6bc5bca716dc5e3aff68a28e4731021d407))
+* **web:** EditioHub's about-collection card drops its metaphor and its lowercase labels ([d0afe3a](https://github.com/monygroupcorp/noema/commit/d0afe3a932d9f9d912cdd5e11f14b406ec075d05))
+* **web:** EditioHub's section labels and status chip read in sentence case ([ee78dcb](https://github.com/monygroupcorp/noema/commit/ee78dcbd4d284a91ebc337c756cf5da06dd9e5ef))
+* **web:** one accent action per screen, an honest empty counter, and list screens that say how to narrow ([#709](https://github.com/monygroupcorp/noema/issues/709)) ([8a14245](https://github.com/monygroupcorp/noema/commit/8a14245fbd5193b91d5baf59fbe64719041b9181))
+* **web:** the Buy buttons on the pricing page stop reading as disabled ([7c9717c](https://github.com/monygroupcorp/noema/commit/7c9717c762aa82e4e3c251a44b861cbdbd9db55b))
+* **web:** the concierge's send button tells a screen reader what it does ([41ec8fc](https://github.com/monygroupcorp/noema/commit/41ec8fcf6ab1c46348ded8f45601c7772d4dec76))
+* **web:** the dataset picker stops offering image files storage will 400 on ([7a56a18](https://github.com/monygroupcorp/noema/commit/7a56a186c4bc1766f2478d5440bed1886dcb85b8))
+* **web:** the prose-button colour override references .btn's own colour, not a copy of it ([30db1e5](https://github.com/monygroupcorp/noema/commit/30db1e572d5bdadacce2a86ec894ad711bdd0f92))
+* **web:** the run bar on a phone no longer sits on the form it belongs to ([9b9f53b](https://github.com/monygroupcorp/noema/commit/9b9f53bfa15fb2f92d37b569c586559099f40b56))
+* **web:** the teams sign-in notice wraps as prose at phone width, not ragged columns ([8fcf6a3](https://github.com/monygroupcorp/noema/commit/8fcf6a3b84eb69c48bcf1bf8fc266410792e2a18))
+* **web:** TraitRules' exclude/tag rows stay comparable at phone width ([7ed8d2c](https://github.com/monygroupcorp/noema/commit/7ed8d2c787eaf46d50a2966276350e8a19ecbe3e))
+* **web:** TraitsGarden's weight field is comparable against its siblings without scrolling ([ff4e5e2](https://github.com/monygroupcorp/noema/commit/ff4e5e2437221ca192a0e81756e5c412e073c6c9))
+
+
+### Performance Improvements
+
+* **web:** cap the landing/pricing entry chunk at a size budget ([#712](https://github.com/monygroupcorp/noema/issues/712)) ([0ee55d3](https://github.com/monygroupcorp/noema/commit/0ee55d3b1ab7c3a6258ea821dbf96ec778b83299))
+
 ## [5.34.0](https://github.com/monygroupcorp/noema/compare/v5.33.0...v5.34.0) (2026-11-18)
 
 
