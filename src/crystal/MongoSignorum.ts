@@ -7,6 +7,9 @@ import type {
 import { transferVia } from '../ledger/transfer.js'
 import { RESERVE_CHANGE_AUCTOR } from '../ledger/MemorySignorum.js'
 import { EARNING_AUCTOR_IDS } from '../ledger/earnings.js'
+import { makeLogger } from '../lib/logger.js'
+
+const log = makeLogger('ledger:signorum')
 
 function toDoc(s: Partial<Signum>): Record<string, unknown> {
   const { valor, ...rest } = s
@@ -295,7 +298,21 @@ export class MongoSignorum implements Signorum {
       const held = await this.col.find({ actumId, status: 'locked' }).toArray()
       const heldIds = held.map(d => d.id as string)
       const heldTotal = held.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
-      if (heldTotal >= amount) return { ok: true, signaIds: heldIds, locked: heldTotal }
+      if (heldTotal >= amount) {
+        // The split that would have trimmed this down to `amount` aborted, so the fallback
+        // is whatever whole notes the pre-split pick happened to lock — on a lopsided pool
+        // this can be the identity's ENTIRE balance against a tiny request. That over-lock
+        // is otherwise invisible short of a raw Mongo read, so it must be loud here.
+        log.error('reserve: split transaction aborted, fell back to whole-note lock', {
+          actumId,
+          ...('animaId' in by ? { animaId: by.animaId } : { commitment: by.commitment }),
+          requested: amount.toString(),
+          locked: heldTotal.toString(),
+          overLocked: (heldTotal - amount).toString(),
+          signaCount: heldIds.length,
+        })
+        return { ok: true, signaIds: heldIds, locked: heldTotal }
+      }
       if (heldIds.length > 0) {
         await this.col.updateMany(
           { id: { $in: heldIds }, status: 'locked', actumId },
