@@ -1540,7 +1540,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .rr-name{font-weight:600}
 .rr-field{display:flex;flex-direction:column;gap:3px}
 .rr-field>span{color:var(--faint);font-size:11px}
-@media(max-width:760px){.rr-row{grid-template-columns:1fr}}
+/* Full stack (one column) put each value's name, excludes field and tags field on three
+   separate lines — the earlier value scrolled out of view by the time a later one's tags
+   field was in reach, which is exactly what REF-28 flags. A narrower version of the desktop
+   grid (160px → 64px) keeps every value a single compact row at any width instead. */
+@media(max-width:760px){.rr-row{grid-template-columns:64px 1fr 1fr;gap:6px}}
 .tc-preview{height:96px;display:grid;place-items:center;background-image:repeating-conic-gradient(#0e1013 0% 25%, transparent 0% 50%);background-size:18px 18px}
 .tc-chip{width:42px;height:42px;border-radius:11px}
 .tc-num{font-size:26px;color:var(--muted);font-family:var(--font-mono)}
