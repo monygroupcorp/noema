@@ -887,6 +887,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     modorum,
     editiones,
     hospitia,
+    // Stamps `/me/activity`'s dispatch index terminal on every rail (webhook, sync cursor,
+    // the expiry reaper, the warm-pod line, owner cancel) — not just the webhook, which used
+    // to be the only caller that retired this row.
+    actumIndex,
   })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')

@@ -9,6 +9,7 @@ import type { ModoStore } from '../types/modo.js'
 import type { Modorum } from '../types/modus.js'
 import type { Editionum } from '../types/editio.js'
 import type { HospitiumStore, HostKey } from '../types/hospitium.js'
+import type { ActumIndexStore } from '../types/actumIndex.js'
 import { impetusFor, modoHostFor } from '../ledger/rates.js'
 import { resolveModelRoyaltyPayees } from '../ledger/resolveModelPayees.js'
 import { makeLogger } from '../lib/logger.js'
@@ -58,6 +59,13 @@ interface Deps {
    *  no host-backed pricing tier, → no host payout, which is correct for anything not
    *  running on someone's hardware. */
   hospitia?: Pick<HospitiumStore, 'findByMateriaId'>
+  /** Optional: per-AuctorKey dispatch index (`/me/activity`, `/status`, the web Dashboard's
+   *  RUNNING NOW / AWAITING YOU bands). Stamped terminal here — the one choke point every
+   *  completion rail funnels through — so a run finished by the webhook, a sync cursor, the
+   *  expiry reaper, the warm-pod line, or an owner cancel all retire the SAME index row the
+   *  same way. Absent → indexing left untouched (a caller that keys its own index, e.g. an
+   *  older deployment wiring, still has its own site do it). */
+  actumIndex?: Pick<ActumIndexStore, 'settle' | 'release' | 'remove'>
 }
 
 let warnedMissingVestigiorum = false
@@ -102,7 +110,7 @@ export class ActumCompletor {
   constructor(private readonly deps: Deps) {}
 
   async complete(actum: Actum, result: Exitus, auctor?: Auctor): Promise<Actum> {
-    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum, modos, modorum, editiones, hospitia } = this.deps
+    const { acta, signorum, nexus, terminatePod, vestigiorum, deployments, intellarum, modos, modorum, editiones, hospitia, actumIndex } = this.deps
     const { exitus, impetus: reportedImpetus, duratio, materiamId } = result
     const now = new Date()
 
@@ -163,6 +171,23 @@ export class ActumCompletor {
       executio,
       ...(materiamId ? { materiamId } : {}),
     })
+
+    // Retain-on-settle (noema-026): stamp the dispatch-index row terminal here, at the
+    // single choke point, instead of only on the webhook rail that happened to grow this
+    // first. A run settled by a sync cursor, the warm-pod line, or any other rail retires
+    // the SAME row the webhook would have — without this, `/me/activity`'s `findFor()`
+    // (and the web Dashboard's RUNNING NOW band it feeds) keeps reporting a long-finished
+    // run as in-flight forever, because nothing else ever clears that index entry.
+    if (actumIndex?.settle) {
+      const modus = modorum ? await modorum.find(completed.modusId, completed.modusVersiono).catch(() => null) : null
+      await actumIndex.settle(actum.id, {
+        settledAt: completed.completum ?? now,
+        impetus: impetus.toString(),
+        modusLabel: modus?.nomen ?? actum.modusId,
+      }).catch(() => {})
+    } else if (actumIndex) {
+      await actumIndex.remove(actum.id).catch(() => {})
+    }
 
     // Session spend accrual — the ONE site, for the same reason vestigium indexing
     // is: every rail funnels through complete(), and this is the only point at which
@@ -297,7 +322,7 @@ export class ActumCompletor {
   }
 
   async fail(actum: Actum, error: string): Promise<Actum> {
-    const { acta, signorum, terminatePod } = this.deps
+    const { acta, signorum, terminatePod, modorum, actumIndex } = this.deps
 
     const current = await acta.findById(actum.id)
     if (current?.status === 'completus' || current?.status === 'fractus') {
@@ -326,6 +351,21 @@ export class ActumCompletor {
       error: finalError,
       completum: new Date(),
     })
+
+    // Retain-on-release: mirrors the settle-stamp in `complete()` — stamp the dispatch-index
+    // row released here, at the single choke point every failure rail (webhook, expiry reaper,
+    // warm-pod line, owner cancel) reaches. Without this, a run reaped or cancelled off the
+    // webhook rail stays "running" in `/me/activity` forever even though its signa are already
+    // released above and the actum itself is already `fractus`.
+    if (actumIndex?.release) {
+      const modus = modorum ? await modorum.find(actum.modusId, actum.modusVersiono).catch(() => null) : null
+      await actumIndex.release(actum.id, {
+        releasedAt: failed.completum ?? new Date(),
+        modusLabel: modus?.nomen ?? actum.modusId,
+      }).catch(() => {})
+    } else if (actumIndex) {
+      await actumIndex.remove(actum.id).catch(() => {})
+    }
 
     log.warn('actum failed', {
       actumId:  actum.id,
