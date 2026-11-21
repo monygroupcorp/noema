@@ -111,6 +111,13 @@ export abstract class CrystalApiRuns extends CrystalApiCore {
     // no settings store there is no acceptance on file, so the flow does not run.
     await this._assertUseTerms(auctor, resolvedModus)
 
+    // Territorial licence exclusion (minimax-h3-territory-safeguard): MiniMax H3's licence does
+    // not extend to the EU, UK or Republic of Korea (Section 11.1 of our terms binds the caller
+    // to the same restriction; this is the control that actually enforces it). Refused HERE,
+    // same reasons and same boundary as the acceptance check just above — before anything is
+    // reserved.
+    await this._assertTerritory(resolvedModus, opts.originCountry)
+
     // Undeclared inputs are refused AT THIS BOUNDARY (noema-314). A submitted aditus key the
     // resolved modus does not declare is not carried into the run: the port never reaches a
     // cursor, so a misspelled or invented key would otherwise be accepted, dropped, and billed

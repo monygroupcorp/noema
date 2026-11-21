@@ -32,6 +32,9 @@ export function buildMcpServer(
   /** Per-run spend ceiling carried by the credential this session authenticated with — see
    *  `runFlowTool`. Undefined for every credential that carries none. */
   keyMaxImpetusPerRun?: bigint,
+  /** The caller's origin (`cf-ipcountry`), read by `mcpRouter` from the request — see
+   *  `runFlowTool`/`collectTool` (minimax-h3-territory-safeguard). */
+  originCountry?: string,
 ): McpServer {
   const server = new McpServer({ name: 'noema-crystal', version: 'v1' })
 
@@ -53,7 +56,7 @@ export function buildMcpServer(
         studioId: z.string().optional(),
       },
     },
-    (args) => runFlowTool(api, auctor, args, keyMaxImpetusPerRun),
+    (args) => runFlowTool(api, auctor, args, keyMaxImpetusPerRun, originCountry),
   )
 
   server.registerTool(
@@ -229,7 +232,7 @@ export function buildMcpServer(
         nomen: z.string().optional(),
       },
     },
-    (args) => collectTool(api, auctor, args),
+    (args) => collectTool(api, auctor, args, originCountry),
   )
 
   server.registerTool(

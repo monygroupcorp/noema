@@ -32,7 +32,30 @@ export interface UseTerms {
   licenseHref: string
   /** Confirmed violations under these terms at which a user is suspended from them. */
   strikeLimit: number
+  /**
+   * ISO 3166-1 alpha-2 country codes (as Cloudflare's `cf-ipcountry` reports them, plus its
+   * own `'EU'` value for EU-institutional ranges) that the upstream licence excludes from
+   * self-hosted use — `territoryVerdict` refuses a run whose caller's origin matches one of
+   * these. Absent/empty = the licence carries no territorial restriction.
+   */
+  excludedTerritories?: readonly string[]
 }
+
+/** The 27 EU member states, ISO 3166-1 alpha-2. */
+const EU_MEMBER_STATES = [
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT',
+  'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+] as const
+
+/**
+ * MiniMax H3 Community License §I.5: "Excluded Territories" = the EU, UK, Republic of Korea
+ * and the US. The US exclusion was separately lifted for Mony Group LLC by MiniMax's grant
+ * (2026-11-13, `docs/legal/minimax-h3-license-proposal.md`) — that grant authorizes OUR use,
+ * it does not say the EU/UK/KR exclusion is lifted for traffic from or into them, so those
+ * three stay excluded here. `'EU'` is included alongside the 27 member states because
+ * Cloudflare's `cf-ipcountry` can report it for some EU-institutional IP ranges.
+ */
+const MINIMAX_H3_EXCLUDED_TERRITORIES = [...EU_MEMBER_STATES, 'EU', 'GB', 'KR']
 
 export const USE_TERMS: Record<string, UseTerms> = {
   'minimax-h3': {
@@ -45,6 +68,7 @@ export const USE_TERMS: Record<string, UseTerms> = {
     // the second makes the user a repeat violator. A violation that warrants immediate
     // termination on its own (Section 9 of the terms) is handled by termination, not by strikes.
     strikeLimit: 2,
+    excludedTerritories: MINIMAX_H3_EXCLUDED_TERRITORIES,
   },
 }
 
@@ -137,6 +161,41 @@ export async function useTermsVerdict(args: {
     if (!terms) return { ok: false, reason: 'unknown', termsId: id }
     if (!isAccepted(id, accepted)) return { ok: false, reason: 'required', terms }
     if (args.strikes && (await args.strikes(id)) >= terms.strikeLimit) return { ok: false, reason: 'suspended', terms }
+  }
+  return { ok: true }
+}
+
+/** Why a caller's origin may not run a territory-restricted flow, or that it may. */
+export type TerritoryVerdict =
+  | { ok: true }
+  | { ok: false; country: string; terms: UseTerms }
+
+/**
+ * May a run FROM this origin reach this flow's licence territory? The control half of
+ * territorial compliance — `USE_TERMS[id].excludedTerritories` is the policy (and what the
+ * terms TEXT already promises, Section 11.1); this is what actually enforces it, asked at the
+ * same entry points `useTermsVerdict` is (the run route, a collection create/fire/patch/extend/
+ * resume/reject) and BEFORE anything is reserved.
+ *
+ * FAIL-OPEN on an unresolvable origin: `originCountry` absent/empty means no signal (a request
+ * that reached this deployment outside Cloudflare's proxy, or a channel — the chat bot's
+ * webhook, an MCP client with no forwarded header — that carries no per-request geo signal at
+ * all). Refusing every caller we cannot place would be a broader outage than the risk it
+ * guards against; this control catches the case the clause actually names, a caller we CAN
+ * place inside an excluded territory. A flow carrying no territory-restricted terms is `ok`
+ * before any list is consulted.
+ */
+export async function territoryVerdict(args: {
+  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined
+  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
+  originCountry: string | undefined
+}): Promise<TerritoryVerdict> {
+  const country = args.originCountry?.trim().toUpperCase()
+  if (!country) return { ok: true }
+  const ids = await requiredUseTerms(args.modus, args.find)
+  for (const id of ids) {
+    const terms = USE_TERMS[id]
+    if (terms?.excludedTerritories?.includes(country)) return { ok: false, country, terms }
   }
   return { ok: true }
 }

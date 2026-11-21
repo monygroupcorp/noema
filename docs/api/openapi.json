@@ -19219,6 +19219,11 @@
       "retryable": false
     },
     {
+      "code": "territory.excluded",
+      "httpStatus": 403,
+      "retryable": false
+    },
+    {
       "code": "not_found.terms",
       "httpStatus": 404
     },

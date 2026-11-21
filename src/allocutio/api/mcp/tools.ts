@@ -67,6 +67,9 @@ export async function runFlowTool(
    * by the caller, and a limit the caller can set is not a limit.
    */
   keyMaxImpetusPerRun?: bigint,
+  /** The caller's origin (`cf-ipcountry`), threaded from the request by `mcpRouter` — same
+   *  reason and same non-argument status as `keyMaxImpetusPerRun` (minimax-h3-territory-safeguard). */
+  originCountry?: string,
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
@@ -81,6 +84,7 @@ export async function runFlowTool(
         ...(args.maxImpetus !== undefined ? { maxImpetus: args.maxImpetus } : {}),
         ...(keyMaxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun } : {}),
         ...(args.studioId ? { studioId: args.studioId } : {}),
+        originCountry,
       },
     )
     return ok({ run })
@@ -247,10 +251,13 @@ export async function collectTool(
   api: CrystalApi,
   auctor: AuctorKey | undefined,
   args: CollectOpts,
+  /** The caller's origin (`cf-ipcountry`), threaded from the request by `mcpRouter` — never a
+   *  tool argument, same reasoning as `runFlowTool`'s (minimax-h3-territory-safeguard). */
+  originCountry?: string,
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
-    return ok({ collection: await api.collect(auctor, args) })
+    return ok({ collection: await api.collect(auctor, { ...args, originCountry }) })
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
     return errResult('internal.error', String(e))
