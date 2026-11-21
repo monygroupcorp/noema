@@ -70,6 +70,7 @@ function makeSignorum(signa: Signa = [makeSignum(500n)]) {
     history: async (_by: { animaId: string } | { commitment: string }) => signa,
     earningTotals: async () => [],
     listEarnings: async () => ({ entries: [] }),
+    lockedBalance: unmodelled('Signorum', 'lockedBalance'),
     sessionBudget: unmodelled('Signorum', 'sessionBudget'),
     reserve: unmodelled('Signorum', 'reserve'),
     findByTestis: unmodelled('Signorum', 'findByTestis'),

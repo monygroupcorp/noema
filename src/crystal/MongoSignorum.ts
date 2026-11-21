@@ -111,6 +111,11 @@ export class MongoSignorum implements Signorum {
     return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
   }
 
+  async lockedBalance(by: { animaId: string } | { commitment: string }): Promise<bigint> {
+    const docs = await this.col.find({ ...identityQuery(by), status: 'locked' }).toArray()
+    return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)
+  }
+
   async sessionBudget(modoId: string): Promise<bigint> {
     const docs = await this.col.find({ forma: 'tessera', modoId, status: 'valid' }).toArray()
     return docs.reduce((sum, d) => sum + BigInt(d.valor as string), 0n)

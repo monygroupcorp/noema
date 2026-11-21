@@ -1751,6 +1751,7 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     nexus,
     modos: ring.modos,
+    acta: ring.actorum,
   }, 60_000)
   log.info('census started', { tickMs: 60_000 })
 

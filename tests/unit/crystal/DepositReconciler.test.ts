@@ -110,6 +110,7 @@ function makeSignorum(): Signorum & { issued: Signum[] } {
   return {
     issued,
     async balance() { return 0n },
+    async lockedBalance() { return 0n },
     async issue(input) {
       if (input.auctor === DEPOSIT_AUCTOR && input.testis !== undefined
         && issued.some(s => s.auctor === DEPOSIT_AUCTOR && s.testis === input.testis)) {

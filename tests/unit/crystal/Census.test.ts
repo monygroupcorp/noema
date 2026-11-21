@@ -219,6 +219,98 @@ test('an existing drainUntil is never pushed out by a later tick', async () => {
   assert.equal(m?.drainUntil?.getTime(), deadline.getTime(), 'a draining studio cannot outrun its own deadline')
 })
 
+// ── 3c. Census does not drain-and-reap a host's OWN busy pod ─────────────────
+// noema census-drain-vs-own-busy-pod: reserve() can lock a host's ENTIRE balance against
+// their own in-flight actum. Before this fix, Census then read 0 valid balance for that
+// SAME host's warm-pod billing tick and treated it as real insolvency — draining (and 15
+// minutes later, reaping) the very studio the reservation was paying for.
+test('a shortfall caused ONLY by the host\'s own locked reservation does not engage drainOnly', async () => {
+  const deps = makeDeps({ hostBalance: 1_000n })  // tick will ask 240; host has 1_000 total
+  await new Promise(r => setTimeout(r, 0))
+
+  // The host's own in-flight actum reserves the ENTIRE balance — exactly the reported race.
+  const reservation = await deps.signorum.reserve({ animaId: HOST_ANIMA }, 1_000n, 'actum-own-job')
+  assert.equal(reservation.ok, true)
+  assert.equal(await deps.signorum.balance({ animaId: HOST_ANIMA }), 0n, 'valid balance is now 0 — all of it is locked')
+
+  let drainEmitted = false
+  bus.once('studio.draining', () => { drainEmitted = true })
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+
+  assert.equal(res.requested, 240n)
+  assert.equal(res.charged, 0n, 'still cannot SPEND locked signa — the clamp itself is unchanged')
+  assert.equal(res.drainEngaged, false, 'locked-for-self valor is netted back — this is not real insolvency')
+
+  const m = await deps.materiae.findById(MATERIA_ID)
+  assert.equal(m?.drainOnly, undefined, 'the studio never entered drain mode')
+  assert.equal(drainEmitted, false)
+})
+
+test('a real shortfall (no locked-for-self valor covering it) still engages drainOnly', async () => {
+  // Sanity check on the fix above: a GENUINE shortfall — no reservation hiding it — must
+  // still drain. hostBalance 100 < requested 240, and nothing is locked.
+  const deps = makeDeps({ hostBalance: 100n })
+  await new Promise(r => setTimeout(r, 0))
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const res = await censere(deps, h, new Date(h.inceptum.getTime() + 60_000))
+
+  assert.equal(res.drainEngaged, true, 'with no locked valor to net back, the shortfall is real')
+  assert.equal((await deps.materiae.findById(MATERIA_ID))?.drainOnly, true)
+})
+
+// ── 3d. drainUntil does not go stale under a run that is genuinely still live ────
+// The second half of noema census-drain-vs-own-busy-pod: DRAIN_GRACE_MS (15min) is a fixed
+// deadline, but a real job (e.g. a training run) can legitimately still be `agens` past it.
+// Census must keep such a studio's drainUntil pushed out rather than hand the idle reaper's
+// stranded arm a stale deadline to reap a still-running pod on.
+test('a live (non-terminal) actum paired to the SAME materia pushes a stale drainUntil back out', async () => {
+  const deps = makeDeps({ hostBalance: 10_000n, status: 'active' })  // solvent — isolates the live-actum path
+  await new Promise(r => setTimeout(r, 0))
+  const acta = new MemoryActorum()
+  await acta.create({
+    id: 'actum-training-1', modusId: 'mod-train', modusVersiono: '1.0.0',
+    materiamId: MATERIA_ID, impetus: 0n, signaConsumed: [], aditus: {}, status: 'agens',
+    expirat: new Date(Date.now() + 60_000),
+  })
+
+  // Already draining, deadline already in the past — exactly what the idle reaper's
+  // stranded arm (`drainUntil <= now`) would reap on the very next sweep.
+  const staleDeadline = new Date(Date.now() - 1_000)
+  await deps.materiae.update(MATERIA_ID, { drainOnly: true, drainUntil: staleDeadline })
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  const tickAt = new Date(h.inceptum.getTime() + 60_000)
+  await censere({ ...deps, acta }, h, tickAt)
+
+  const m = await deps.materiae.findById(MATERIA_ID)
+  assert.ok(m?.drainUntil && m.drainUntil.getTime() > staleDeadline.getTime(), 'no longer stale')
+  assert.equal(m?.drainUntil?.getTime(), tickAt.getTime() + DRAIN_GRACE_MS, 'pushed out a full grace window from this tick')
+})
+
+test('no live actum paired to the materia: a stale drainUntil is left alone (acta wired, nothing live)', async () => {
+  const deps = makeDeps({ hostBalance: 10_000n, status: 'active' })
+  await new Promise(r => setTimeout(r, 0))
+  const acta = new MemoryActorum()
+  // The run that WAS on this pod has already finished — terminal status.
+  await acta.create({
+    id: 'actum-done-1', modusId: 'mod-1', modusVersiono: '1.0.0',
+    materiamId: MATERIA_ID, impetus: 10n, signaConsumed: [], aditus: {}, status: 'completus',
+    expirat: new Date(Date.now() + 60_000),
+  })
+
+  const staleDeadline = new Date(Date.now() - 1_000)
+  await deps.materiae.update(MATERIA_ID, { drainOnly: true, drainUntil: staleDeadline })
+
+  const h = (await deps.hospitia.findByMateriaId(MATERIA_ID))!
+  await censere({ ...deps, acta }, h, new Date(h.inceptum.getTime() + 60_000))
+
+  const m = await deps.materiae.findById(MATERIA_ID)
+  assert.equal(m?.drainUntil?.getTime(), staleDeadline.getTime(), 'nothing live here — the idle reaper is still free to reap it')
+})
+
 // ── 4. Anonymous (commitment) host — arcanum debit, no animaId on debit signum
 test('commitment host: arcanum debit signum on host, no animaId leak', async () => {
   const deps = makeDeps({
