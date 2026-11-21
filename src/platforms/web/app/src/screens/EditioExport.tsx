@@ -310,7 +310,7 @@ export function EditioExport() {
                 <div className="warn">This collection wasn’t published to hosting — {hj.msg} Publishing again won’t change the outcome; your export-to-you download is unaffected.</div>
               ) : (
                 <>
-                  <label className="ex-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand this is a public, temporary bridge — I’ll migrate to permanent storage</label>
+                  <label className="ex-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand this is a public, temporary bridge — I can retract it later (the URIs stop resolving, though anyone who already copied one keeps it) — and I’ll migrate to permanent storage</label>
                   <button className="btn accent lg" disabled={!consent || blocked.hosting !== '' || hostingBusy} onClick={() => run('hosting')}>
                     {hostingBusy ? 'Publishing…' : 'Publish to hosting →'} <span className="ex-btn-sub">public tokenURIs</span>
                   </button>
