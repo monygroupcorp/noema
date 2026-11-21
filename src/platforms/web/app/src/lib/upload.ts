@@ -23,6 +23,9 @@ export interface BatchResult<O> {
   ok: O[];
   /** The index of each item that threw, in input order. */
   failedIndexes: number[];
+  /** Why each of `failedIndexes` failed, in the same order — a caller naming a rejected file
+   *  needs a reason beside it, not just the fact that it failed (D-62). */
+  failureReasons: string[];
 }
 
 /**
@@ -42,7 +45,7 @@ export async function runBatch<I, O>(
   opts: { concurrency?: number; onState?: (index: number, state: 'running' | 'done' | 'failed') => void } = {},
 ): Promise<BatchResult<O>> {
   const limit = Math.max(1, Math.trunc(opts.concurrency ?? UPLOAD_CONCURRENCY));
-  const done = new Array<{ ok: true; value: O } | { ok: false }>(items.length);
+  const done = new Array<{ ok: true; value: O } | { ok: false; reason: string }>(items.length);
   let next = 0;
 
   async function worker(): Promise<void> {
@@ -53,10 +56,11 @@ export async function runBatch<I, O>(
       try {
         done[i] = { ok: true, value: await work(items[i], i) };
         opts.onState?.(i, 'done');
-      } catch {
-        // Swallowed on purpose: one item's failure is reported through `failedIndexes` and must
-        // not reject the pool, which would abandon whatever is still in flight beside it.
-        done[i] = { ok: false };
+      } catch (e) {
+        // The rejection itself is kept (not swallowed) so the caller can name WHY, not just
+        // that it failed — but it must not reject the pool, which would abandon whatever is
+        // still in flight beside it, so each item still settles independently.
+        done[i] = { ok: false, reason: e instanceof Error ? e.message : String(e) };
         opts.onState?.(i, 'failed');
       }
     }
@@ -66,6 +70,7 @@ export async function runBatch<I, O>(
 
   const ok: O[] = [];
   const failedIndexes: number[] = [];
-  done.forEach((r, i) => { if (r?.ok) ok.push(r.value); else failedIndexes.push(i); });
-  return { ok, failedIndexes };
+  const failureReasons: string[] = [];
+  done.forEach((r, i) => { if (r?.ok) ok.push(r.value); else { failedIndexes.push(i); failureReasons.push(r.reason); } });
+  return { ok, failedIndexes, failureReasons };
 }

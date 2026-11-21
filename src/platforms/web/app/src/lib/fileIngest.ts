@@ -23,6 +23,31 @@ export function imagesFrom(files: FileList | File[]): File[] {
   return Array.from(files).filter(isImageFile);
 }
 
+/** The content-types `storageRouter`'s `/uploads/sign` actually allows (ALLOWED_CONTENT_TYPES
+ *  there) — kept here too because the picker needs to know it before it ever asks the server. */
+const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const UPLOADABLE_IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
+
+/**
+ * An image file the server will actually accept — narrower than `isImageFile`, which only
+ * tells a real photo apart from folder junk. A GIF, an AVIF, or a HEIC straight off an iPhone
+ * passes `isImageFile` (it IS an image) but fails this: storage signs only png/jpeg/webp, so an
+ * upload of one of these would reach the server and 400 there instead of here, with nothing in
+ * the UI to say why.
+ */
+export function isUploadableImageFile(file: File): boolean {
+  if (file.type) return UPLOADABLE_IMAGE_TYPES.has(file.type);
+  return UPLOADABLE_IMAGE_EXT_RE.test(file.name);
+}
+
+/** Partitions an already-image-filtered list into what storage will accept and what it won't. */
+export function partitionUploadable(files: readonly File[]): { ok: File[]; rejected: File[] } {
+  const ok: File[] = [];
+  const rejected: File[] = [];
+  for (const f of files) (isUploadableImageFile(f) ? ok : rejected).push(f);
+  return { ok, rejected };
+}
+
 /**
  * Image files pasted onto the page. A paste carries `kind: 'file'` items beside (or instead of)
  * any text — a screenshot tool or a copy from another app puts the image there, not on the
