@@ -815,9 +815,19 @@ export abstract class CrystalApiRuns extends CrystalApiCore {
       modusId = (await this.deps.consuetudinum?.resolve(auctor, target.verb)) ?? CANON_VERBS[target.verb]
     }
     if (!modusId) throw Errors.notFoundFlow(target.verb ?? '?')
+    // The embed sweep's reservation is a function of the caller's OWN backlog, which the
+    // cursor refuses to price without an `_owner`/`_sweep` stamp (`EmbedSweepCursor.resolveWork`
+    // throws a plain, unhandled Error otherwise). `invokeFlow` stamps before estimating for the
+    // same reason; `_stampEmbedSweep` only reads the backlog, so doing it here stays side-effect-
+    // free and the quote the client sees is the one `invokeFlow` would actually reserve — with
+    // `recipient` hashed over the SAME aditus the dispatch path commits to, so an arcanum proof
+    // built against this quote still verifies at `ActumInceptor`.
+    const effectiveAditus = modusId === MODUS_EMBED_SWEEP.id
+      ? await this._stampEmbedSweep(auctor, aditus)
+      : aditus
     return {
-      impetus:   (await this._estimate(modusId, aditus)).toString(),
-      recipient: computeRecipient(modusId, aditus),
+      impetus:   (await this._estimate(modusId, effectiveAditus)).toString(),
+      recipient: computeRecipient(modusId, effectiveAditus),
     }
   }
 
