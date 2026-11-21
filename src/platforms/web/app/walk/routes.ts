@@ -46,7 +46,7 @@ function extractFromAppTsx(source: string): { path: string; params: string[] }[]
 // update this set if a route's public/auth posture changes.
 const PUBLIC_PATHS = new Set<string>([
   '/', '/about', '/features', '/pricing', '/blog', '/blog/:slug',
-  '/legal/privacy', '/legal/cookies', '/legal/terms',
+  '/legal/privacy', '/legal/cookies', '/legal/terms', '/legal/minimax-h3-license',
   '/landing', '/onboard', '/partners', '/ceremony', '/lab/landing',
 ]);
 
