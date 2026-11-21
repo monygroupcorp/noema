@@ -69,7 +69,7 @@ export function EditioHub() {
       <div className="page"><div className="pw wide">
         <div className="ph-head">
           <div>
-            <div className="ph-kick">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
+            <div className="ph-kick">Collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
             <h1 className="ph-name">{name}</h1>
             {c.descriptio && <p className="ph-desc">{c.descriptio}</p>}
             <p className="ph-desc">{needsSetup
@@ -87,7 +87,7 @@ export function EditioHub() {
         {needsSetup && (
           <div className="ph-band" style={{ margin: 'var(--s4) 0' }}>
             <div className="ph-about">
-              <div className="ph-l">next step</div>
+              <div className="ph-l">Next step</div>
               <p><b>{name}</b> needs a <b>base flow</b> and a <b>set of traits</b> before it can generate anything. Nothing has been spent — pick them yourself in the garden, or talk it through with the concierge.</p>
               <div className="pub-row">
                 <Link className="btn" to={`/chat?seed=${encodeURIComponent(seed)}`}><Ic name="sparkles" /> Ask the concierge</Link>
