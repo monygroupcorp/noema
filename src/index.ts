@@ -1253,6 +1253,7 @@ async function main(): Promise<void> {
     querelae: ring.querelae,
     identity: apiResolver,
     resolveRun: resolveRunForReport,
+    bursarium: ring.bursarium,
   }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
@@ -1280,7 +1281,7 @@ async function main(): Promise<void> {
 
   // Behaviour corpus intake (noema/user-behaviour-corpus) — non-run visitor events. Mirrors
   // querelaRouter's shape: anon-capable, own rate limit, no CrystalApi facade.
-  app.use('/v1/events', express.json(), createEventsRouter({ events: behaviourStore, identity: apiResolver }))
+  app.use('/v1/events', express.json(), createEventsRouter({ events: behaviourStore, identity: apiResolver, bursarium: ring.bursarium }))
 
   // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
   // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution

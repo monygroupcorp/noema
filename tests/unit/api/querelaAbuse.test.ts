@@ -68,7 +68,12 @@ const RUNS: Record<string, { ownerKey: string; useTerms: string[] }> = {
 async function withServer(store: MemoryQuerela, fn: (url: string) => Promise<void>) {
   const app = express()
   app.use(express.json())
-  app.use('/v1/reports', createQuerelaRouter({ querelae: store, identity: fakeIdentity, resolveRun: async (id) => RUNS[id] ?? null }))
+  app.use('/v1/reports', createQuerelaRouter({
+    querelae: store,
+    identity: fakeIdentity,
+    resolveRun: async (id) => RUNS[id] ?? null,
+    bursarium: { findByToken: async () => null },
+  }))
   app.use('/v1/admin/reports', createQuerelaAdminRouter({ querelae: store, identity: fakeIdentity }))
   const server = await new Promise<http.Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   try {
