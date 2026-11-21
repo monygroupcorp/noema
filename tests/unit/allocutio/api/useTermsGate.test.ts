@@ -21,15 +21,26 @@ import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { CANONICAL_ESSENTIAE } from '../../../../src/crystal/seeds/essentiae.js'
 import { MemoryConsuetudinum } from '../../../../src/crystal/MemoryConsuetudinum.js'
 import { USE_TERMS, UNRESOLVED_LINEAGE, useTermsVerdict, requiredUseTerms, gateDispatch } from '../../../../src/crystal/useTerms.js'
+import { licenseUseTerms } from '../../../../src/crystal/modelLicense.js'
 import { ownerKeyOf } from '../../../../src/crystal/ownerKey.js'
 import { useTermsCopy } from '../../../../src/flow/flows/ExecuteFlow.js'
 import type { Gradus, Modus } from '../../../../src/types/modus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
+import type { Intella } from '../../../../src/types/intelligendi.js'
 
 const CALLER: AuctorKey = { animaId: 'anima-caller' }
 const REACHED_DISPATCH = 'reached-dispatch'
 const H3 = USE_TERMS['minimax-h3']
 const H3_IDS = ['minimax-h3-t2v', 'minimax-h3-fl2v', 'minimax-h3-ref2v']
+/** No weight manifest resolves to any terms — the shape every call not under test here passes. */
+const NO_INTELLA_TERMS = async (): Promise<string | undefined> => undefined
+/** The real H3 weight id the canonical flows carry (`minimax-h3-t2v`'s `intellae[0].id`). */
+const H3_WEIGHT_ID = 'intella.minimax-h3-fl2va-int8'
+/** A minimal registry of one grant-bound weight, resolved the same way every real call site
+ *  resolves one: `Intella.license` through `modelLicense.ts`'s `licenseUseTerms`. */
+function findIntellaUseTerms(intellae: Record<string, Pick<Intella, 'license'>>) {
+  return async (id: string): Promise<string | undefined> => licenseUseTerms(intellae[id]?.license)
+}
 
 function essentia(id: string): Modus {
   const m = CANONICAL_ESSENTIAE.find(e => e.id === id)
@@ -37,20 +48,32 @@ function essentia(id: string): Modus {
   return m as Modus
 }
 
-/** A flow with no licence terms, to show the gate costs nothing where nothing is declared. */
-const PLAIN: Modus = { ...essentia('minimax-h3-t2v'), id: 'plain-flow', useTerms: undefined }
+/** A flow with no licence terms AND no grant-bound weight, to show the gate costs nothing where
+ *  nothing is declared or loaded. (Clears `intellae`, not just `useTerms` — spreading the H3
+ *  essentia would otherwise carry its H3 weights along, and this flow is the sentinel for
+ *  "no obligation at all", not "declared none but still loads H3".) */
+const PLAIN: Modus = { ...essentia('minimax-h3-t2v'), id: 'plain-flow', useTerms: undefined, intellae: [] }
 /** A composite whose only step is an H3 flow. */
 const COMPOSITE: Modus = {
   ...PLAIN, id: 'h3-composite', genus: 'compositus', useTerms: undefined,
   gradus: [{ ordine: 0, modusId: 'minimax-h3-t2v' } as Gradus],
 }
+/** A flow that carries an H3 weight in its manifest but never declares `useTerms` — the shape a
+ *  forgetful future flow-registration route produces. */
+const UNDECLARED_H3: Modus = {
+  ...PLAIN, id: 'undeclared-h3', useTerms: undefined,
+  intellae: [{ id: H3_WEIGHT_ID, role: 'unet' }],
+}
 
 function harness(opts: { consuetudinum?: MemoryConsuetudinum | null; strikes?: number } = {}) {
   let dispatched = false
   const consuetudinum = opts.consuetudinum === undefined ? new MemoryConsuetudinum() : opts.consuetudinum
-  const modi = [...H3_IDS.map(essentia), PLAIN, COMPOSITE]
+  const modi = [...H3_IDS.map(essentia), PLAIN, COMPOSITE, UNDECLARED_H3]
   const deps = {
     modorum: { async find(id: string) { return modi.find(m => m.id === id) ?? null } },
+    // The real resolution path every production call site uses: an Intella's `license`,
+    // mapped through `modelLicense.ts`'s grant registry.
+    intellarum: { async find(id: string) { return id === H3_WEIGHT_ID ? { id, license: 'minimax-h3' } : null } },
     inceptor: { async initiate() { dispatched = true; throw new Error(REACHED_DISPATCH) } },
     cursorum: { resolve() { throw new Error('cursor must not resolve on a refused run') } },
     completor: {},
@@ -64,7 +87,7 @@ function harness(opts: { consuetudinum?: MemoryConsuetudinum | null; strikes?: n
 
 const aditusFor = (id: string): Record<string, unknown> => {
   // Each flow's own defaults, so nothing but the terms can refuse it.
-  const ports = essentia(id === 'plain-flow' || id === 'h3-composite' ? 'minimax-h3-t2v' : id).aditus
+  const ports = essentia(id === 'plain-flow' || id === 'h3-composite' || id === 'undeclared-h3' ? 'minimax-h3-t2v' : id).aditus
   return Object.fromEntries(Object.entries(ports).filter(([, p]) => (p as { default?: unknown }).default !== undefined)
     .map(([k, p]) => [k, (p as { default?: unknown }).default]))
 }
@@ -171,16 +194,41 @@ test('a flow with no terms is untouched by the gate', async () => {
   await reachedDispatch(harness({ strikes: 99 }), 'plain-flow')
 })
 
+// noema/minimax-h3-terms-from-weights: the obligation is the licence's, not the declaration's —
+// a flow whose weight manifest loads an H3-licensed Intella is refused exactly as a flow that
+// declares `useTerms: ['minimax-h3']` would be, even though this one never declares it. This is
+// the gap a future flow-registration route (a forgetful save-as, composite, or admin seed) could
+// otherwise fall through.
+test('a flow that loads an H3 weight but never declares useTerms is still refused with terms.required', async () => {
+  assert.equal(UNDECLARED_H3.useTerms, undefined, 'the fixture really carries no declaration')
+  const err = await refusedWith(harness(), 'undeclared-h3', 'terms.required')
+  assert.equal(err.httpStatus, 403)
+  const details = err.toBody().details as Record<string, unknown>
+  assert.equal(details.terms, 'minimax-h3')
+})
+
+test('once accepted, the undeclared-H3 flow runs — the weight-derived obligation is satisfiable like any other', async () => {
+  const h = harness()
+  await h.api.acceptUseTerms(CALLER, 'minimax-h3')
+  await reachedDispatch(h, 'undeclared-h3')
+})
+
+test('a suspended caller is refused the undeclared-H3 flow too', async () => {
+  const h = harness({ strikes: H3.strikeLimit })
+  await h.api.acceptUseTerms(CALLER, 'minimax-h3')
+  await refusedWith(h, 'undeclared-h3', 'terms.suspended')
+})
+
 test('the chat path says where to accept, and says suspended plainly', async () => {
   const required = await useTermsVerdict({
-    modus: essentia('minimax-h3-t2v'), find: async () => null, accepted: async () => undefined,
+    modus: essentia('minimax-h3-t2v'), find: async () => null, findIntellaUseTerms: NO_INTELLA_TERMS, accepted: async () => undefined,
   })
   assert.equal(required.ok, false)
   if (required.ok) return
   assert.match(useTermsCopy(required, 'https://noema.art'), /https:\/\/noema\.art\/legal\/terms#11-minimax-h3-additional-terms/)
 
   const suspended = await useTermsVerdict({
-    modus: essentia('minimax-h3-t2v'), find: async () => null,
+    modus: essentia('minimax-h3-t2v'), find: async () => null, findIntellaUseTerms: NO_INTELLA_TERMS,
     accepted: async () => ({ 'minimax-h3': { versio: H3.versio, acceptedAt: 0 } }),
     strikes: async () => H3.strikeLimit,
   })
@@ -194,7 +242,15 @@ test('a flow saved from an H3 flow carries the H3 terms, even with no declaratio
   // Saved before the parent declared terms: no `useTerms`, only the `fonte` link.
   const saved = { ...essentia('minimax-h3-t2v'), id: 'my-h3', canonica: false, fonte: 'minimax-h3-t2v', useTerms: undefined }
   const find = async (id: string) => (id === 'minimax-h3-t2v' ? essentia(id) : null)
-  assert.deepEqual(await requiredUseTerms(saved, find), ['minimax-h3'])
+  assert.deepEqual(await requiredUseTerms(saved, find, NO_INTELLA_TERMS), ['minimax-h3'])
+})
+
+test('a flow carrying only an H3 weight (no declaration, no lineage) is bound by the weight alone', async () => {
+  const bare: Modus = { ...PLAIN, id: 'bare-h3', useTerms: undefined, fonte: undefined, intellae: [{ id: H3_WEIGHT_ID, role: 'unet' }] }
+  assert.deepEqual(
+    await requiredUseTerms(bare, async () => null, findIntellaUseTerms({ [H3_WEIGHT_ID]: { license: 'minimax-h3' } })),
+    ['minimax-h3'],
+  )
 })
 
 // ── Collections: every verb that dispatches new paid pieces is held to the flow's terms ──────
@@ -252,6 +308,7 @@ test('a collection piece dispatched by the cursor is held to the funder\'s terms
   const dispatched: string[] = []
   const gated = gateDispatch(async (inc: { modusId: string; by: object }) => { dispatched.push(inc.modusId); return 'ran' }, {
     find: async (id) => H3_IDS.map(essentia).find(m => m.id === id) ?? (id === 'plain-flow' ? PLAIN : null),
+    findIntellaUseTerms: NO_INTELLA_TERMS,
     accepted: async () => accepted,
     strikes: async () => strikes,
   })
@@ -277,15 +334,15 @@ test('a re-save chain of any length still carries the H3 terms', async () => {
     chain.set(`s${i}`, { ...PLAIN, id: `s${i}`, canonica: false, fonte: parent, useTerms: undefined })
     parent = `s${i}`
   }
-  assert.deepEqual(await requiredUseTerms(chain.get('s10'), async (id) => chain.get(id) ?? null), ['minimax-h3'])
+  assert.deepEqual(await requiredUseTerms(chain.get('s10'), async (id) => chain.get(id) ?? null, NO_INTELLA_TERMS), ['minimax-h3'])
 })
 
 test('a lineage too long to read is refused, never taken to carry no terms', async () => {
   // An unbounded chain that never reaches a declaration.
   const find = async (id: string) => ({ ...PLAIN, id, useTerms: undefined, fonte: `${id}x` })
-  const ids = await requiredUseTerms({ ...PLAIN, useTerms: undefined, fonte: 'x' }, find)
+  const ids = await requiredUseTerms({ ...PLAIN, useTerms: undefined, fonte: 'x' }, find, NO_INTELLA_TERMS)
   assert.ok(ids.includes(UNRESOLVED_LINEAGE))
-  const verdict = await useTermsVerdict({ modus: { ...PLAIN, useTerms: undefined, fonte: 'x' }, find, accepted: async () => undefined })
+  const verdict = await useTermsVerdict({ modus: { ...PLAIN, useTerms: undefined, fonte: 'x' }, find, findIntellaUseTerms: NO_INTELLA_TERMS, accepted: async () => undefined })
   assert.equal(verdict.ok, false)
 })
 
