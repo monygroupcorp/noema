@@ -109,6 +109,9 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // vestigia — RAG traces (Atlas Vector Search index managed separately in Atlas UI)
     db.collection('vestigia').createIndex({ 'auctorKey.animaId': 1 }, { sparse: true }),
+    // findByActumId — the admin-takedown seam (minimax-h3-violation-takedown) looks up a
+    // reported run's trace by actumId.
+    db.collection('vestigia').createIndex({ actumId: 1 }, { sparse: true }),
 
     // modos — GPU sessions
     db.collection('modos').createIndex({ id: 1 }, { unique: true }),

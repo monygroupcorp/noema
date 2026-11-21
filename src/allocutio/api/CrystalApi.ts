@@ -331,6 +331,20 @@ export interface EditionPreview {
   items?: EditionPreviewItem[]
 }
 
+/**
+ * What `adminRetractAllEditions` did to one artifact's publications — the admin
+ * abuse-takedown result (minimax-h3-violation-takedown). `retracted` is every live,
+ * non-private Editio the call actually pulled down; `skipped` is every one it could
+ * NOT pull down and why (`'permanent'` — the destination has no `retract`, e.g. a mint;
+ * `'adapter_unavailable'` — the destination key no longer resolves to a registered
+ * adapter) — a confirmed violation never fails silently just because one surface could
+ * not be reached.
+ */
+export interface AdminTakedownResult {
+  retracted: string[]
+  skipped: Array<{ id: string; destination: string; reason: 'permanent' | 'adapter_unavailable' }>
+}
+
 /** Inputs to import a model by URL (Civitai/HF/direct → a private Intella). */
 export interface ImportModelOpts {
   /** Civitai page/`?modelVersionId`, HuggingFace repo, or a direct `.safetensors`/`.ckpt` URL. */

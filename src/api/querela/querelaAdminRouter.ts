@@ -50,9 +50,26 @@ import { lookupUseTerms } from '../../crystal/useTerms.js'
 
 const log = makeLogger('querela:admin-router')
 
+/** What a `takedownRun` call did — mirrors `AdminTakedownResult` (CrystalApi.ts) without
+ *  importing it, the same "small, directly-injected deps" choice this router already makes
+ *  for `identity` (see file header). */
+export interface QuerelaTakedownResult {
+  retracted: string[]
+  skipped: Array<{ id: string; destination: string; reason: string }>
+  /** Vestigium ids flipped from a public-ish visibilitas ('communis'/'publica') to 'privata'. */
+  privatizedVestigia: string[]
+}
+
 export interface QuerelaAdminRouterDeps {
   querelae: QuerelaStore
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
+  /**
+   * Pull down every live, public publication of a run's output (minimax-h3-violation-takedown)
+   * — called when a PATCH confirms an abuse report's verdict as `violation`. Absent on a
+   * deployment with no publication store wired: the verdict/strike still records, but nothing
+   * is taken down (logged loudly below, never silent).
+   */
+  takedownRun?: (auctor: AuctorKey, runId: string) => Promise<QuerelaTakedownResult>
 }
 
 const KINDS = ['bug', 'feature', 'feedback', 'abuse'] as const
@@ -127,7 +144,7 @@ export function createQuerelaAdminRouter(deps: QuerelaAdminRouterDeps): Router {
   // PATCH /reports/:id — triage: set status, and on an abuse report a verdict.
   // Mounted at `/v1/admin/reports/:id`.
   router.patch('/:id', wrap(async (req, res) => {
-    await resolveAdmin(req)
+    const admin = await resolveAdmin(req)
 
     const statusRaw = req.body?.status
     const verdictRaw = req.body?.verdict
@@ -155,16 +172,40 @@ export function createQuerelaAdminRouter(deps: QuerelaAdminRouterDeps): Router {
     if (status !== undefined) patch.status = status
     const updated: Querela = await querelae.update(id, patch)
 
+    // A confirmed violation doesn't just strike the subject — it takes the reported run's
+    // output down (minimax-h3-violation-takedown clause 1). Only fires on THIS call setting
+    // the verdict (not a later status-only PATCH on an already-decided report), and only for
+    // a genuine violation — a dismissal leaves the output exactly where it was.
+    let takedown: QuerelaTakedownResult | { error: string } | undefined
+    if (verdictRaw === 'violation') {
+      const runId = updated.capturedState?.runId
+      if (!deps.takedownRun || !runId) {
+        log.error('abuse verdict confirmed VIOLATION but no takedown ran — output is still live', {
+          reportId: updated.id, runId, takedownConfigured: !!deps.takedownRun,
+        })
+        takedown = { error: runId ? 'takedown is not available on this deployment' : 'report carries no run id' }
+      } else {
+        try {
+          takedown = await deps.takedownRun(admin, runId)
+        } catch (err) {
+          log.error('abuse verdict confirmed VIOLATION but takedown THREW — output may still be live', {
+            reportId: updated.id, runId, error: err instanceof Error ? err.message : String(err),
+          })
+          takedown = { error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    }
+
     if (updated.kind === 'abuse' && updated.subjectOwnerKey) {
       const standing = await Promise.all((updated.useTerms ?? []).map(async (termsId) => {
         const strikes = await querelae.countViolations(updated.subjectOwnerKey!, termsId)
         const limit = lookupUseTerms(termsId)?.strikeLimit
         return { terms: termsId, strikes, suspended: limit !== undefined && strikes >= limit }
       }))
-      res.status(200).json({ report: updated, subject: standing })
+      res.status(200).json({ report: updated, subject: standing, ...(takedown !== undefined ? { takedown } : {}) })
       return
     }
-    res.status(200).json({ report: updated })
+    res.status(200).json({ report: updated, ...(takedown !== undefined ? { takedown } : {}) })
   }))
 
   return router

@@ -166,6 +166,10 @@ export class MemoryVestigiorum implements Vestigiorum {
     return this.store.get(id) ?? null
   }
 
+  async findByActumId(actumId: string): Promise<Vestigia> {
+    return Array.from(this.store.values()).filter(v => v.actumId === actumId)
+  }
+
   async forIdentity(auctorKey: AuctorKey, limit = 100): Promise<Vestigia> {
     return Array.from(this.store.values())
       .filter(v => matchesKey(v.auctorKey, auctorKey))
