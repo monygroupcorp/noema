@@ -13,6 +13,14 @@
 // current version, and refuses a caller suspended under those terms. Both refusals sit above the
 // reservation, so a refused run costs nothing.
 //
+// DERIVED FROM THE WEIGHTS TOO. A declaration can be forgotten — a new flow-registration route
+// (a save-as, a composite, an admin seed) can carry `Modus.intellae` naming an H3 weight without
+// anyone adding `useTerms: ['minimax-h3']`. The obligation is the licence's, not the declaration's,
+// so `requiredUseTerms` ALSO resolves every `intellae` entry's `Intella.license` and, where that
+// licence is held by a conditional grant (`modelLicense.ts`'s `LICENCE_GRANTS`), adds the grant's
+// flow-down terms to the required set — whether or not the flow ever declared them. A flow is
+// refused under weight-derived terms exactly as it would be under a declared one.
+//
 // VERSIONING. Acceptance is recorded against a `versio`. Bumping it here (a material change to
 // the published flow-down section) makes every earlier acceptance stale, so each user accepts the
 // new text before their next run. Do not bump it for a wording fix that changes no obligation.
@@ -126,25 +134,40 @@ const MAX_LINKS = 64
  *  CLOSED: a chain too long to read is never taken to carry no terms. */
 export const UNRESOLVED_LINEAGE = 'unresolved-lineage'
 
+/** The shape `requiredUseTerms` walks: a declaration, a weight manifest, a composite's steps,
+ *  and a saved flow's parent. */
+type TermsBearing = Pick<Modus, 'useTerms' | 'gradus' | 'fonte' | 'intellae'>
+
 /**
- * Every terms id a modus carries: its own declaration, its steps' for a composite, and its
- * parent's for a saved flow (`fonte`), followed all the way up. A composite whose step runs
- * MiniMax H3 binds its caller exactly as running H3 directly does, and the steps dispatch
- * internally, below the run entry point, so they are collected here. A flow a user saved from H3
- * runs H3's weights; following `fonte` holds it — and anything saved from it in turn — to H3's
- * terms even when it was saved before the parent declared them.
+ * Every terms id a modus carries: its own declaration, what its weight manifest (`intellae`)
+ * binds by licence (see the header), its steps' for a composite, and its parent's for a saved
+ * flow (`fonte`), followed all the way up. A composite whose step runs MiniMax H3 binds its
+ * caller exactly as running H3 directly does, and the steps dispatch internally, below the run
+ * entry point, so they are collected here. A flow a user saved from H3 runs H3's weights;
+ * following `fonte` holds it — and anything saved from it in turn — to H3's terms even when it
+ * was saved before the parent declared them, or never declares them at all.
+ *
+ * `findIntellaUseTerms` resolves one `intellae[].id` to the useTerms id its licence binds, or
+ * undefined for a weight under no grant — callers wire it from `Intella.license` through
+ * `modelLicense.ts`'s `licenseUseTerms` (kept out of this module to avoid a crystal-internal
+ * import cycle: `modelLicense.ts` already imports from here).
  */
 export async function requiredUseTerms(
-  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined,
-  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>,
+  modus: TermsBearing | null | undefined,
+  find: (id: string) => Promise<TermsBearing | null>,
+  findIntellaUseTerms: (id: string) => Promise<string | undefined>,
 ): Promise<string[]> {
   const out = new Set<string>()
   const seen = new Set<string>()
-  const queue: Array<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined> = [modus]
+  const queue: Array<TermsBearing | null | undefined> = [modus]
   while (queue.length > 0) {
     const m = queue.shift()
     if (!m) continue
     for (const id of m.useTerms ?? []) out.add(id)
+    for (const weight of m.intellae ?? []) {
+      const terms = await findIntellaUseTerms(weight.id)
+      if (terms) out.add(terms)
+    }
     for (const next of [...(m.fonte ? [m.fonte] : []), ...(m.gradus ?? []).map(g => g.modusId)]) {
       if (seen.has(next)) continue
       if (seen.size >= MAX_LINKS) { out.add(UNRESOLVED_LINEAGE); return [...out] }
@@ -172,13 +195,14 @@ export type UseTermsVerdict =
  * strike count only when a counter is supplied; without one no caller counts as suspended.
  */
 export async function useTermsVerdict(args: {
-  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined
-  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
+  modus: TermsBearing | null | undefined
+  find: (id: string) => Promise<TermsBearing | null>
+  findIntellaUseTerms: (id: string) => Promise<string | undefined>
   accepted: () => Promise<Record<string, TermsAcceptance> | undefined>
   /** Confirmed violations under terms `id` for this caller. */
   strikes?: (id: string) => Promise<number>
 }): Promise<UseTermsVerdict> {
-  const ids = await requiredUseTerms(args.modus, args.find)
+  const ids = await requiredUseTerms(args.modus, args.find, args.findIntellaUseTerms)
   if (ids.length === 0) return { ok: true }
   const accepted = await args.accepted()
   for (const id of ids) {
@@ -211,13 +235,14 @@ export type TerritoryVerdict =
  * before any list is consulted.
  */
 export async function territoryVerdict(args: {
-  modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null | undefined
-  find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
+  modus: TermsBearing | null | undefined
+  find: (id: string) => Promise<TermsBearing | null>
+  findIntellaUseTerms: (id: string) => Promise<string | undefined>
   originCountry: string | undefined
 }): Promise<TerritoryVerdict> {
   const country = args.originCountry?.trim().toUpperCase()
   if (!country) return { ok: true }
-  const ids = await requiredUseTerms(args.modus, args.find)
+  const ids = await requiredUseTerms(args.modus, args.find, args.findIntellaUseTerms)
   for (const id of ids) {
     const terms = USE_TERMS[id]
     if (terms?.excludedTerritories?.includes(country)) return { ok: false, country, terms }
@@ -236,7 +261,8 @@ export async function territoryVerdict(args: {
 export function gateDispatch<I extends { modusId: string; by: object }, R>(
   dispatch: (inc: I) => Promise<R>,
   deps: {
-    find: (id: string) => Promise<Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null>
+    find: (id: string) => Promise<TermsBearing | null>
+    findIntellaUseTerms: (id: string) => Promise<string | undefined>
     accepted: (by: I['by']) => Promise<Record<string, TermsAcceptance> | undefined>
     strikes: (by: I['by'], termsId: string) => Promise<number>
   },
@@ -246,6 +272,7 @@ export function gateDispatch<I extends { modusId: string; by: object }, R>(
     const verdict = await useTermsVerdict({
       modus: await deps.find(inc.modusId),
       find: deps.find,
+      findIntellaUseTerms: deps.findIntellaUseTerms,
       accepted: async () => (anonymousProof ? undefined : deps.accepted(inc.by)),
       ...(anonymousProof ? {} : { strikes: (id: string) => deps.strikes(inc.by, id) }),
     })
