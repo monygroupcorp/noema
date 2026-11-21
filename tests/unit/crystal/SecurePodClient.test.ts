@@ -268,6 +268,30 @@ test('SSH bootstrap: does NOT fire FAILED after comfyrunner accepted (comfyrunne
   assert.equal((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false)
 })
 
+// ── completion from the SSE stream (noema pod-result-never-delivered) ─────────
+// comfyrunner's own completion webhook crosses the pod's egress path, which can fail
+// silently (the pod only logs it locally) and strand the run — the reservation never
+// unlocks and census reaps the pod. The `complete` SSE event carries the same output the
+// webhook would, so SecurePodClient must complete it itself through the same callback URL.
+
+test('submit: completes the actum from the SSE complete event, not just from the pod webhook', async () => {
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeFetchMock('pod-sse-complete', {
+    webhookPayloads,
+    sseEvents: [{ type: 'complete', output: [{ url: 'https://cdn.example.com/out.png' }], executionTimeMs: 4321 }],
+  })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const completed = (webhookPayloads as Array<{ id?: string; status?: string; output?: unknown; executionTime?: number }>)
+    .find(p => p.status === 'COMPLETED')
+  assert.ok(completed, 'expected a COMPLETED webhook posted from the SSE complete event, even though the pod never sent one')
+  assert.equal(completed!.id, 'pod-sse-complete')
+  assert.deepEqual(completed!.output, [{ url: 'https://cdn.example.com/out.png' }])
+  assert.equal(completed!.executionTime, 4321)
+})
+
 test('SSH bootstrap: no re-provision after comfyrunner accepted (no retry cascade)', async () => {
   const { fetch, calls } = makeFetchMock('pod-accepted', { sseEvents: [{ type: 'error', error: 'OOM' }] })
   const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
