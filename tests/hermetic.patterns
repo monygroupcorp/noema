@@ -106,6 +106,7 @@ tests/unit/migrations/legacyToIntella.test.ts
 tests/unit/migrations/backfillIntellaSamples.test.ts
 tests/unit/migrations/repairLoraBaseIntellaId.test.ts
 tests/unit/migrations/repairKleinFamilia.test.ts
+tests/unit/migrations/disableMarketDomina.test.ts
 tests/unit/migrations/publishKleinCollection.test.ts
 tests/unit/migrations/retireRunmakeFlowTwins.test.ts
 tests/unit/crystal/seedCamel.test.ts

@@ -139,7 +139,9 @@ export async function readPublicCatalog(registry: Intellarum, safeguards: GrantS
   const pool = registry.publicCatalog ? await registry.publicCatalog() : await registry.canonical()
   // A model under a licence we hold by conditional grant (MiniMax H3) leaves the public catalog
   // while the grant's conditions are not live: the grant does not cover us then.
-  return pool.filter((i) => grantConditionsLive(i.license, safeguards))
+  // `disabled: true` (admin kill switch) leaves the catalog unconditionally — it is the one lever
+  // that can pull a `canonica: true` record out, since canonica is otherwise public by definition.
+  return pool.filter((i) => !i.disabled && grantConditionsLive(i.license, safeguards))
 }
 
 /** Order a catalog page. Applied BEFORE any `limit` slice, so paging returns the intended page.
