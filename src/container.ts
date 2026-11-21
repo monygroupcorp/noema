@@ -122,6 +122,7 @@ import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoQuerela } from './crystal/MongoQuerela.js'
 import { gateDispatch } from './crystal/useTerms.js'
+import { licenseUseTerms } from './crystal/modelLicense.js'
 import type { AuctorKey } from './flow/types.js'
 import { ownerKeyOf } from './crystal/ownerKey.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
@@ -934,8 +935,12 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // mid-collection gets no further pieces, and a collection fired before the terms existed
   // dispatches none for a funder who has not accepted them. A refused piece throws before it is
   // initiated, so it is booked as a failed piece (not held for later) and charged nothing.
+  // Weight-derived terms (noema/minimax-h3-terms-from-weights): a piece's licence obligation
+  // comes from what its flow's `intellae` binds, same store every other run-entry gate reads.
+  const collectioIntellae = new MongoIntella(db.collection('intellae'))
   const collectioDispatch = gateDispatch(sharedDispatch, {
     find: (id) => modorum.find(id),
+    findIntellaUseTerms: async (id) => licenseUseTerms((await collectioIntellae.find(id))?.license),
     accepted: async (by) => (await config.consuetudinum?.resolveGeneratio(by as AuctorKey))?.termsAccepted,
     strikes: (by, termsId) => querelae.countViolations(ownerKeyOf(by as AuctorKey), termsId),
   })

@@ -10,6 +10,7 @@ import { classifyError } from '../../lib/classifyError.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { isMediaRef } from '../../crystal/MediaFetcher.js'
 import { useTermsVerdict, type TermsAcceptance } from '../../crystal/useTerms.js'
+import { licenseUseTerms } from '../../crystal/modelLicense.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -108,6 +109,11 @@ export interface ExecuteFlowDeps {
     strikes(identity: FlowContext['identity'], termsId: string): Promise<number>
     accept?(identity: FlowContext['identity'], termsId: string): Promise<unknown>
   }
+  /** Resolves a weight's licence, so a flow carrying an H3 (or any other grant-bound) weight in
+   *  its `intellae` is held to that grant's terms even where the flow never declares `useTerms`
+   *  itself — the same weight-derived check the REST run route makes. Absent → that derivation
+   *  is skipped here; a declared `useTerms` is still enforced. */
+  intellarum?: import('../../types/intelligendi.js').Intellarum
   /** The public site origin the terms are published on, for the link in that refusal. */
   siteUrl?: string
   /**
@@ -596,6 +602,7 @@ export class ExecuteFlow implements Flow {
     const terms = await useTermsVerdict({
       modus: casting,
       find: (id) => this.deps.modorum.find(id),
+      findIntellaUseTerms: async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
       accepted: async () => this.deps.useTerms?.accepted(ctx.identity),
       ...(this.deps.useTerms ? { strikes: (id: string) => this.deps.useTerms!.strikes(ctx.identity, id) } : {}),
     })

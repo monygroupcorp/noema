@@ -278,8 +278,11 @@ export interface Modus {
 
   /**
    * Upstream licence terms the caller must have accepted before this flow runs, by id in
-   * `crystal/useTerms.ts` (e.g. `'minimax-h3'`). Declared, not derived from the weights: the
-   * obligation is the licence's, and a flow that carries it says so here. The run entry point
+   * `crystal/useTerms.ts` (e.g. `'minimax-h3'`). A flow that carries a licence obligation says so
+   * here — but this is a RECORD of the obligation, not its only source: `requiredUseTerms`
+   * (`crystal/useTerms.ts`) also derives the same obligation from `intellae`, resolving each
+   * weight's licence through a conditional grant, so a flow bound to run an H3 (or other
+   * grant-bound) weight is refused even where this field was never set. The run entry point
    * refuses a caller who has not accepted the current version, or who is suspended under the
    * terms, before anything is reserved. A composite inherits its steps' declarations.
    */

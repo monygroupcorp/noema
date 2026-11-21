@@ -29,6 +29,7 @@ import type { PromptVerdict } from '../../../crystal/PromptGuard.js'
 import { spicyModelFor } from '../../../crystal/spicyRouting.js'
 import { ownerKeyOf } from '../../../crystal/ownerKey.js'
 import { requiredUseTerms } from '../../../crystal/useTerms.js'
+import { licenseUseTerms } from '../../../crystal/modelLicense.js'
 import type {
   ListRunsOpts, ListEarningsOpts, ListActivityOpts, InvokeTarget, InvokeOpts, FlowSummary,
   SaveFlowOpts,
@@ -872,8 +873,15 @@ export abstract class CrystalApiRuns extends CrystalApiCore {
       ...(pinned ? { pinned } : {}),
     })
     // Stamp the licence terms the base carries through its whole lineage onto the saved flow, so
-    // a save of a save never depends on walking back to a parent that declared them.
-    const terms = await requiredUseTerms(base, (id) => this.deps.modorum.find(id))
+    // a save of a save never depends on walking back to a parent that declared them. Includes
+    // whatever the base's weight manifest binds by licence, not only what it declares — the run
+    // entry point derives the same from `derived.intellae` regardless, but stamping it here keeps
+    // the saved flow's own record honest.
+    const terms = await requiredUseTerms(
+      base,
+      (id) => this.deps.modorum.find(id),
+      async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
+    )
     if (terms.length > 0) derived.useTerms = terms
     await this.deps.modorum.register(derived)
     return { id: derived.id }

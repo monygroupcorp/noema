@@ -16,6 +16,7 @@ import type { PromptGuard } from '../../../crystal/PromptGuard.js'
 import { permissivePromptGuard } from '../../../crystal/PromptGuard.js'
 import { ownerKeyOf } from '../../../crystal/ownerKey.js'
 import type { GrantSafeguards } from '../../../crystal/modelLicense.js'
+import { licenseUseTerms } from '../../../crystal/modelLicense.js'
 import { useTermsVerdict, territoryVerdict } from '../../../crystal/useTerms.js'
 import type { CrystalApiDeps } from '../CrystalApi.js'
 import { PLATFORM_ANIMA_ID, PRIVATE_PRESIGN_TTL_SECONDS, CANCELLED_BY_OWNER } from './support.js'
@@ -47,10 +48,11 @@ export abstract class CrystalApiCore {
 
   /** Refuse a run of a flow whose licence terms the caller has not accepted, or is suspended
    *  under. See the call site in `invokeFlow`; `fireCollection` asks the same of its flow. */
-  protected async _assertUseTerms(auctor: AuctorKey, modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null): Promise<void> {
+  protected async _assertUseTerms(auctor: AuctorKey, modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte' | 'intellae'> | null): Promise<void> {
     const verdict = await useTermsVerdict({
       modus,
       find: (id) => this.deps.modorum.find(id),
+      findIntellaUseTerms: async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
       accepted: async () => (await this.deps.consuetudinum?.resolveGeneratio(auctor))?.termsAccepted,
       ...(this.deps.querelae
         ? { strikes: (id: string) => this.deps.querelae!.countViolations(ownerKeyOf(auctor), id) }
@@ -69,12 +71,13 @@ export abstract class CrystalApiCore {
    *  collections writes that dispatch new paid pieces ask the same, same reasons as
    *  `_assertUseTerms`. `originCountry` absent → nothing to check (see `territoryVerdict`). */
   protected async _assertTerritory(
-    modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte'> | null,
+    modus: Pick<Modus, 'useTerms' | 'gradus' | 'fonte' | 'intellae'> | null,
     originCountry: string | undefined,
   ): Promise<void> {
     const verdict = await territoryVerdict({
       modus,
       find: (id) => this.deps.modorum.find(id),
+      findIntellaUseTerms: async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
       originCountry,
     })
     if (!verdict.ok) throw Errors.territoryExcluded(verdict.country, verdict.terms)

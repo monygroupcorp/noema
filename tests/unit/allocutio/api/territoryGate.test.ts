@@ -150,14 +150,15 @@ test('the acceptance gate still runs first: an unaccepted caller sees terms.requ
 test('territoryVerdict: ok with no origin signal, ok for an unlisted (e.g. US) origin, refused for a listed one', async () => {
   const modus = essentia('minimax-h3-t2v')
   const find = async () => null
+  const findIntellaUseTerms = async () => undefined
 
-  const noSignal = await territoryVerdict({ modus, find, originCountry: undefined })
+  const noSignal = await territoryVerdict({ modus, find, findIntellaUseTerms, originCountry: undefined })
   assert.equal(noSignal.ok, true)
 
-  const us = await territoryVerdict({ modus, find, originCountry: 'US' })
+  const us = await territoryVerdict({ modus, find, findIntellaUseTerms, originCountry: 'US' })
   assert.equal(us.ok, true)
 
-  const kr = await territoryVerdict({ modus, find, originCountry: 'kr' })
+  const kr = await territoryVerdict({ modus, find, findIntellaUseTerms, originCountry: 'kr' })
   assert.equal(kr.ok, false)
   if (kr.ok) return
   assert.equal(kr.country, 'KR')
@@ -167,14 +168,20 @@ test('territoryVerdict: ok with no origin signal, ok for an unlisted (e.g. US) o
 test('territoryVerdict: every EU member state is excluded', async () => {
   const modus = essentia('minimax-h3-t2v')
   const find = async () => null
+  const findIntellaUseTerms = async () => undefined
   for (const country of ['DE', 'FR', 'IT', 'ES', 'PL', 'IE', 'NL', 'SE']) {
-    const verdict = await territoryVerdict({ modus, find, originCountry: country })
+    const verdict = await territoryVerdict({ modus, find, findIntellaUseTerms, originCountry: country })
     assert.equal(verdict.ok, false, country)
   }
 })
 
 test('territoryVerdict: a flow with no licence terms is ok from any origin', async () => {
-  const verdict = await territoryVerdict({ modus: PLAIN, find: async () => null, originCountry: 'KR' })
+  const verdict = await territoryVerdict({
+    modus: PLAIN,
+    find: async () => null,
+    findIntellaUseTerms: async () => undefined,
+    originCountry: 'KR',
+  })
   assert.equal(verdict.ok, true)
 })
 

@@ -25,6 +25,7 @@ import { createQuerelaRouter } from './api/querela/querelaRouter.js'
 import { fileAbuseReport } from './api/querela/fileAbuseReport.js'
 import { ownerKeyOf } from './crystal/ownerKey.js'
 import { requiredUseTerms, acceptUseTerms } from './crystal/useTerms.js'
+import { licenseUseTerms } from './crystal/modelLicense.js'
 import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
@@ -778,7 +779,11 @@ async function main(): Promise<void> {
       : actum.bursaToken ? { bursaToken: actum.bursaToken }
       : null
     if (!owner) return null
-    const useTerms = await requiredUseTerms(await ring.modorum.find(actum.modusId), (id) => ring.modorum.find(id))
+    const useTerms = await requiredUseTerms(
+      await ring.modorum.find(actum.modusId),
+      (id) => ring.modorum.find(id),
+      async (id) => licenseUseTerms((await intellae.find(id))?.license),
+    )
     return { ownerKey: ownerKeyOf(owner), useTerms }
   }
 
@@ -814,6 +819,7 @@ async function main(): Promise<void> {
       strikes: (identity, termsId) => ring.querelae.countViolations(ownerKeyOf(identity), termsId),
       accept: (identity, termsId) => acceptUseTerms(consuetudinum, identity, termsId),
     },
+    intellarum: intellae,
     siteUrl: PUBLIC_BASE,
   })
   router.register(executeFlow)
@@ -1490,6 +1496,7 @@ async function main(): Promise<void> {
   app.use('/api/v1/x402', express.json(), createX402AgentRouter({
     legati: ring.legati,
     modorum: ring.modorum,
+    intellarum: intellae,
     facilitator: cdpFacilitator ?? disabledX402Facilitator,
     log: ring.x402Log,
     config: x402Config,
