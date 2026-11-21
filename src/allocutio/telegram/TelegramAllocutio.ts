@@ -43,6 +43,7 @@ import { DRAIN_GRACE_MS } from '../../crystal/Census.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
 import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
+import { ApiError } from '../api/errors.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
 import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
 import { BulletinModelCatalog } from './BulletinModelCatalog.js'
@@ -107,6 +108,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Cancel an in-flight actum — fails it (releases reserved signa). Returns true if it
      *  actually refunded (false if the actum was already terminal). Backs destroy/retry. */
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** File an abuse report naming an actum — backs the delivery menu's Report button
+     *  (Section V.5 of licences such as MiniMax H3's). Absent → the button silently no-ops,
+     *  same fallback every other optional delivery-menu hook (`save`, …) takes. */
+    reportAbuse?: (auctor: AuctorKey, actumId: string) => Promise<{ id: string }>
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
@@ -204,6 +209,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     installStudioModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
     acta?: { findById(id: string): Promise<Actum | null> }
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** File an abuse report naming an actum — backs the delivery menu's Report button
+     *  (Section V.5 of licences such as MiniMax H3's). Absent → the button silently no-ops,
+     *  same fallback every other optional delivery-menu hook (`save`, …) takes. */
+    reportAbuse?: (auctor: AuctorKey, actumId: string) => Promise<{ id: string }>
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
@@ -326,6 +335,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       acta: deps.acta,
       rerun: (actumId, presserUserId, chatId) => this._rerun(actumId, presserUserId, chatId),
       ...(this.saveAs ? { save: (actumId, presserUserId, chatId) => this._saveAs(actumId, presserUserId, chatId) } : {}),
+      ...(deps.reportAbuse ? { report: (actumId, presserUserId) => this._reportAbuse(actumId, presserUserId) } : {}),
     })
 
     // The 👌/🔥 reaction choreography on the command message.
@@ -506,6 +516,23 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     await this.router.enter('execute', 'telegram', presserUserId, String(chatId), identity, {
       state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
     })
+  }
+
+  /** Report tap on a delivered result → file the abuse report naming this actum, filed by
+   *  whoever tapped (not necessarily who ran it). Only wired into the delivery menu when
+   *  `deps.reportAbuse` is present (see the constructor), so it is always set here. Returns
+   *  the toast text the tap is answered with — success, "already reported" (the write path
+   *  dedups and still answers 200), or why it didn't go through — since this is the one
+   *  delivery-menu action whose outcome the presser needs told. */
+  private async _reportAbuse(actumId: string, presserUserId: string): Promise<string> {
+    try {
+      const identity = await this.identity.resolve(presserUserId)
+      await this.deps.reportAbuse!(identity, actumId)
+      return 'Reported — thanks, we review every flagged run.'
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'rate.limited') return 'Too many reports — try again later.'
+      return 'Could not report — try again.'
+    }
   }
 
   /** Delivery-info entry: open Save-as seeded from the Actum's modus + aditus + pinnedModels. */
@@ -992,8 +1019,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
-      await ack()
       const [, action, actumId, ratedType] = query.data.split(':')
+      // Report is the one action whose outcome the presser needs told, so it answers with
+      // the menu's own toast text instead of the plain ack every other action gets up front
+      // (Telegram shows a spinner until the answer lands — those stay fast, unlike a report
+      // write, by acking first and running after, same as the comment above `ack` explains).
+      if (action === 'report') {
+        const toast = await this.delivery.handle(actumId, action, { presserUserId: String(query.from.id), chatId })
+        await ack(toast || undefined)
+        return
+      }
+      await ack()
       // Pass the callback's own chat so the menu can refuse cross-chat actumIds.
       await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id), chatId })
       return

@@ -3,9 +3,9 @@
 // =============================================================================
 //
 // `abuse` is the reporting mechanism licence terms such as MiniMax H3's require: anyone can
-// report a run whose output they believe breaks the terms. The report names the run; who OWNS
-// it, and which terms its flow carried, are resolved here from the run itself — a reporter
-// cannot point a strike at someone else by naming them. An admin's verdict on the report
+// report a run whose output they believe breaks the terms. The write itself is
+// `fileAbuseReport` (shared with a chat surface's own Report tap); this route resolves the
+// caller and the body shape, then hands off. An admin's verdict on the report
 // (querelaAdminRouter) is what counts toward suspension.
 //
 // Backend half of in-app reporting: persists a rich,
@@ -28,6 +28,7 @@ import { credentialsFromHeaders } from '../../allocutio/api/IdentityResolver.js'
 import { ownerKeyOf } from '../../crystal/ownerKey.js'
 import { ApiError, Errors } from '../../allocutio/api/errors.js'
 import { makeLogger } from '../../lib/logger.js'
+import { fileAbuseReport } from './fileAbuseReport.js'
 
 const log = makeLogger('querela:router')
 
@@ -94,6 +95,20 @@ export function createQuerelaRouter(deps: QuerelaRouterDeps): Router {
     const description = typeof body.description === 'string' ? body.description.trim() : ''
     if (!description) throw Errors.inputMalformed('description is required')
 
+    // Abuse reports are a distinct shape (subject + terms resolved from the run, never the
+    // body) with their own dedup key — filed through the one write path `fileAbuseReport`
+    // shares with a chat surface's own Report tap, rather than threaded through the generic
+    // bug/feature/feedback record below.
+    if (kind === 'abuse') {
+      const cs = (body.capturedState && typeof body.capturedState === 'object') ? body.capturedState as Record<string, unknown> : {}
+      const runId = typeof cs.runId === 'string' ? cs.runId.trim() : ''
+      if (!runId) throw Errors.inputMalformed('an abuse report names the run it is about (capturedState.runId)')
+      const route = typeof cs.route === 'string' ? cs.route : undefined
+      const result = await fileAbuseReport(deps, ownerKey, { runId, description, route })
+      res.status(200).json(result)
+      return
+    }
+
     const feature = kind === 'feature' && typeof body.feature === 'string' && body.feature.trim() ? body.feature.trim() : null
     let capturedState: QuerelaCapturedState | null = null
     if (kind === 'bug' && body.capturedState && typeof body.capturedState === 'object') {
@@ -104,28 +119,13 @@ export function createQuerelaRouter(deps: QuerelaRouterDeps): Router {
         ...(typeof cs.actumId === 'string' ? { actumId: cs.actumId } : {}),
       }
     }
-    // An abuse report is about one run. Its subject and terms come from the run, not the body.
-    let subjectOwnerKey: string | null = null
-    let useTerms: string[] | null = null
-    if (kind === 'abuse') {
-      const cs = (body.capturedState && typeof body.capturedState === 'object') ? body.capturedState as Record<string, unknown> : {}
-      const runId = typeof cs.runId === 'string' && cs.runId.trim() ? cs.runId.trim() : null
-      if (!runId) throw Errors.inputMalformed('an abuse report names the run it is about (capturedState.runId)')
-      if (!deps.resolveRun) throw Errors.internal('abuse reports are not available on this deployment')
-      const run = await deps.resolveRun(runId)
-      if (!run) throw Errors.notFoundRun(runId)
-      subjectOwnerKey = run.ownerKey
-      useTerms = run.useTerms
-      capturedState = { runId, ...(typeof cs.route === 'string' ? { route: cs.route } : {}) }
-    }
     const clientError = typeof body.clientError === 'string' ? body.clientError : null
     const device = typeof body.device === 'string' ? body.device : null
     const userAgent = typeof body.userAgent === 'string' ? body.userAgent : (req.headers['user-agent'] ?? null)
 
-    // Dedup (Q3): identical report from the same owner returns the existing id, 200. An abuse
-    // report dedups on the run, so one reporter repeating themselves files one report.
-    const hashInput = kind === 'abuse' ? (capturedState?.runId ?? '') : (feature ?? capturedState?.route ?? '')
-    const contentHash = computeContentHash(ownerKey, kind, kind === 'abuse' ? '' : description, hashInput)
+    // Dedup (Q3): identical report from the same owner returns the existing id, 200.
+    const hashInput = feature ?? capturedState?.route ?? ''
+    const contentHash = computeContentHash(ownerKey, kind, description, hashInput)
     const existing = await querelae.findByOwnerAndHash(ownerKey, contentHash)
     if (existing) {
       res.status(200).json({ id: existing.id })
@@ -151,7 +151,6 @@ export function createQuerelaRouter(deps: QuerelaRouterDeps): Router {
       device,
       userAgent: userAgent as string | null,
       contentHash,
-      ...(kind === 'abuse' ? { subjectOwnerKey, useTerms, verdict: null } : {}),
     }
     const created = await querelae.create(record)
     res.status(200).json({ id: created.id })

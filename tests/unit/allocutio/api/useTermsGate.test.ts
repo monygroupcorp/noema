@@ -190,6 +190,17 @@ test('the chat path says where to accept, and says suspended plainly', async () 
   assert.match(useTermsCopy(suspended), /suspended/)
 })
 
+test('canAcceptHere=true says to tap Accept instead of sending the caster to the web', async () => {
+  const required = await useTermsVerdict({
+    modus: essentia('minimax-h3-t2v'), find: async () => null, accepted: async () => undefined,
+  })
+  assert.equal(required.ok, false)
+  if (required.ok) return
+  const copy = useTermsCopy(required, 'https://noema.art', true)
+  assert.match(copy, /Tap Accept/)
+  assert.doesNotMatch(copy, /starting this flow once on/)
+})
+
 test('a flow saved from an H3 flow carries the H3 terms, even with no declaration of its own', async () => {
   // Saved before the parent declared terms: no `useTerms`, only the `fonte` link.
   const saved = { ...essentia('minimax-h3-t2v'), id: 'my-h3', canonica: false, fonte: 'minimax-h3-t2v', useTerms: undefined }

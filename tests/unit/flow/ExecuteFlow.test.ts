@@ -1299,6 +1299,64 @@ test('routing: an undeclared decompose key cannot turn an incremental pass into 
   assert.equal('force' in at, false)
 })
 
+// ── Licence-terms acceptance, taken right here in chat (noema/minimax-h3-report-anywhere) ──
+//
+// `deps.useTerms.accept` lets a chat surface (Telegram, Discord, …) record the click-through
+// itself, so a caster with no linked web account can agree and run in one exchange rather than
+// being sent to a web account that may not exist for them. These pin the Detail's Accept
+// action, the resubmit it triggers, and the no-`accept`-wired fallback that still sends people
+// to the web exactly as before.
+
+test('terms required + accept wired: Detail offers Accept; tapping it records acceptance and resubmits', async () => {
+  const accepts: Array<{ identity: unknown; termsId: string }> = []
+  let accepted: Record<string, { versio: string; acceptedAt: number }> | undefined
+  const modus = makeModus({ useTerms: ['minimax-h3'] })
+  const deps = makeDeps({
+    modorum: { find: async () => modus, register: async () => {}, update: async () => { throw new Error('not implemented') }, list: async () => [] },
+    useTerms: {
+      accepted: async () => accepted,
+      strikes: async () => 0,
+      accept: async (identity, termsId) => {
+        accepts.push({ identity, termsId })
+        accepted = { [termsId]: { versio: '2026-11-14', acceptedAt: Date.now() } }
+      },
+    },
+  })
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({ state: { modusId: 'mod-1', step: 'CONFIGURE', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+
+  const step = await flow.enter(ctx)
+  assertStep(step)
+  const detail = step.primitives[0]
+  assert.equal(detail.kind, 'Detail')
+  if (detail.kind !== 'Detail') return
+  assert.ok(detail.actions.some(a => a.id === 'accept_terms'), 'an Accept action is offered')
+  assert.match(detail.content, /Tap Accept/)
+
+  const result = await flow.handle(ctx, { kind: 'action', actionId: 'accept_terms' })
+  assertStep(result)
+  assert.deepEqual(accepts, [{ identity: ctx.identity, termsId: 'minimax-h3' }])
+  assert.equal(result.primitives[0].kind, 'Result', 'the accepted run resubmits and completes')
+})
+
+test('terms required with no accept wired: Detail has no Accept action, and still points to the web', async () => {
+  const modus = makeModus({ useTerms: ['minimax-h3'] })
+  const deps = makeDeps({
+    modorum: { find: async () => modus, register: async () => {}, update: async () => { throw new Error('not implemented') }, list: async () => [] },
+    useTerms: { accepted: async () => undefined, strikes: async () => 0 },
+  })
+  const flow = new ExecuteFlow(deps)
+  const ctx = makeCtx({ state: { modusId: 'mod-1', step: 'CONFIGURE', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+
+  const step = await flow.enter(ctx)
+  assertStep(step)
+  const detail = step.primitives[0]
+  assert.equal(detail.kind, 'Detail')
+  if (detail.kind !== 'Detail') return
+  assert.ok(!detail.actions.some(a => a.id === 'accept_terms'), 'no Accept action with no accept() wired')
+  assert.match(detail.content, /starting this flow once on/)
+})
+
 // A private run's output is a `noema-private://` marker, not a URL. The result step classifies
 // outputs by VALUE, and a marker classed as text is the raw key printed into the chat — which is
 // exactly what a private output must never become.

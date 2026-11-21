@@ -21,7 +21,7 @@ const data = (kb: UiKeyboard) => kb.flat().map(b => b.data)
 test('menuKeyboard morphs default → rate → wrench', () => {
   assert.deepEqual(data(menuKeyboard('a1', 'default')), ['dm:info:a1', 'dm:rate:a1', 'dm:wrench:a1'])
   assert.deepEqual(data(menuKeyboard('a1', 'rate')), ['dm:rated:a1:beautiful', 'dm:rated:a1:funny', 'dm:rated:a1:negative'])
-  assert.deepEqual(data(menuKeyboard('a1', 'wrench')), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1'])
+  assert.deepEqual(data(menuKeyboard('a1', 'wrench')), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1', 'dm:report:a1'])
 })
 
 test('rate/wrench/back morph the row on the tracked message', async () => {
@@ -33,7 +33,7 @@ test('rate/wrench/back morph the row on the tracked message', async () => {
   assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:rated:a1:beautiful', 'dm:rated:a1:funny', 'dm:rated:a1:negative'])
   assert.equal(s.markups.at(-1)!.messageId, 77)
   await m.handle('a1', 'wrench')
-  assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1'])
+  assert.deepEqual(data(s.markups.at(-1)!.kb), ['dm:back:a1', 'dm:tweak:a1', 'dm:rerun:a1', 'dm:save:a1', 'dm:report:a1'])
 })
 
 test('rated reflects the glyph on the default row and persists it for back', async () => {
@@ -123,4 +123,33 @@ test('the gear badge survives an info toggle and a wrench → back hop', async (
 
 test('formatStats is pure and handles a missing actum', () => {
   assert.equal(formatStats(null), 'Stats unavailable.')
+})
+
+test('report invokes the report callback with the presser and returns its toast text', async () => {
+  const calls: Array<{ actumId: string; presser: string }> = []
+  const m = new DeliveryMenu({
+    sink: makeSink().sink,
+    rerun: async () => {},
+    report: async (actumId, presser) => { calls.push({ actumId, presser }); return 'Reported — thanks.' },
+  })
+  m.track('a1', { chatId: 456, messageId: 77, caption: '', isMedia: false })
+  const toast = await m.handle('a1', 'report', { presserUserId: '999', chatId: 456 })
+  assert.deepEqual(calls, [{ actumId: 'a1', presser: '999' }])
+  assert.equal(toast, 'Reported — thanks.')
+})
+
+test('report with no report dep wired, or no presser, is a no-op', async () => {
+  const m = new DeliveryMenu({ sink: makeSink().sink, rerun: async () => {} })
+  m.track('a1', { chatId: 456, messageId: 77, caption: '', isMedia: false })
+  assert.equal(await m.handle('a1', 'report', { presserUserId: '999', chatId: 456 }), undefined)
+
+  const calls: string[] = []
+  const withReport = new DeliveryMenu({
+    sink: makeSink().sink,
+    rerun: async () => {},
+    report: async (actumId) => { calls.push(actumId); return 'Reported.' },
+  })
+  withReport.track('a1', { chatId: 456, messageId: 77, caption: '', isMedia: false })
+  await withReport.handle('a1', 'report', { chatId: 456 })  // no presserUserId
+  assert.deepEqual(calls, [], 'no presser → report is never called')
 })

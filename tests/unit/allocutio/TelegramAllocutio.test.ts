@@ -321,7 +321,7 @@ function makeCollectingDeps(initialCollecting: boolean) {
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean; getFileLink?: (fileId: string) => Promise<string> } = {}) {
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean; getFileLink?: (fileId: string) => Promise<string>; reportAbuse?: (auctor: import('../../../src/flow/types.js').AuctorKey, actumId: string) => Promise<{ id: string }> } = {}) {
   const sender = makeSender({ ...(opts.getFileLink ? { getFileLink: opts.getFileLink } : {}) })
   const identity = makeIdentity()
   const router = makeRouter()
@@ -356,6 +356,7 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     ...(opts.resolvePrivateMedia ? { resolvePrivateMedia: opts.resolvePrivateMedia } : {}),
     acta,
+    ...(opts.reportAbuse ? { reportAbuse: opts.reportAbuse } : {}),
     ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
     ...(opts.modorum ? { modorum: opts.modorum as unknown as import('../../../src/types/modus.js').Modorum } : {}),
     ...(opts.withPodControls ? {
@@ -1291,7 +1292,32 @@ test('dm:wrench morphs the row to Back / Tweak / Rerun', async () => {
   await allocutio.receive(cbTo(201, 'dm:wrench:actum-1'))
   const m = sender.markups.at(-1)!.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }
   assert.deepEqual(m.inline_keyboard.flat().map(b => b.callback_data),
-    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1', 'dm:save:actum-1'])
+    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1', 'dm:save:actum-1', 'dm:report:actum-1'])
+})
+
+test('dm:report files the abuse report under the presser and answers with its toast', async () => {
+  const calls: Array<{ auctor: unknown; actumId: string }> = []
+  const { allocutio, router, sender } = makeAllocutio({
+    reportAbuse: async (auctor, actumId) => { calls.push({ auctor, actumId }); return { id: 'q1' } },
+  })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:report:actum-1'))
+  assert.deepEqual(calls, [{ auctor: { animaId: 'test-anima' }, actumId: 'actum-1' }])
+  assert.equal(sender.toasts.at(-1)!.text, 'Reported — thanks, we review every flagged run.')
+})
+
+test('dm:report with no reportAbuse dep wired is a silent no-op, not a crash', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:report:actum-1'))
+  // Same fallback the wrench row's other optional hooks (e.g. `save`) already take: the tap is
+  // still acked (Telegram's spinner clears), just with no custom text.
+  assert.equal(sender.answered.at(-1), 'cb')
+  assert.equal(sender.toasts.at(-1)!.text, undefined)
 })
 
 test('dm:info edits the caption to DB-sourced stats', async () => {
