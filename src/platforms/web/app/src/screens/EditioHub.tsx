@@ -69,7 +69,7 @@ export function EditioHub() {
       <div className="page"><div className="pw wide">
         <div className="ph-head">
           <div>
-            <div className="ph-kick">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
+            <div className="ph-kick">Collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
             <h1 className="ph-name">{name}</h1>
             {c.descriptio && <p className="ph-desc">{c.descriptio}</p>}
             <p className="ph-desc">{needsSetup
@@ -87,7 +87,7 @@ export function EditioHub() {
         {needsSetup && (
           <div className="ph-band" style={{ margin: 'var(--s4) 0' }}>
             <div className="ph-about">
-              <div className="ph-l">next step</div>
+              <div className="ph-l">Next step</div>
               <p><b>{name}</b> needs a <b>base flow</b> and a <b>set of traits</b> before it can generate anything. Nothing has been spent — pick them yourself in the garden, or talk it through with the concierge.</p>
               <div className="pub-row">
                 <Link className="btn" to={`/chat?seed=${encodeURIComponent(seed)}`}><Ic name="sparkles" /> Ask the concierge</Link>
@@ -129,12 +129,12 @@ export function EditioHub() {
 
         <div className="ph-band">
           <div className="ph-about">
-            <div className="ph-l">about this collection</div>
-            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent. That asymmetry is the spine.</p>
+            <div className="ph-l">About this collection</div>
+            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent — nothing before that step can be seen outside this account.</p>
             <div className="ph-meta mono">{c.modusId ? <>flow {c.modusId} · provenance {c.provenanceHash.slice(0, 18)}…</> : <>no flow · no provenance yet</>} · local until you publish</div>
           </div>
           <div className="ph-activity">
-            <div className="ph-l">activity</div>
+            <div className="ph-l">Activity</div>
             <div className="ph-ev"><span className="av" style={{ background: collTile(c.id) }} /><span className="ev-t"><b>you</b> started the canonic supply <span className="mono ev-meta"><span className="hemi2 dashed" /> local{c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString()}` : ''}</span></span></div>
           </div>
         </div>

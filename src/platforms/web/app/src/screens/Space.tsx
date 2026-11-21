@@ -889,7 +889,7 @@ function CorpusSpace() {
                     <input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="trigger word (required)"
                       style={{ width: '100%', padding: '6px 8px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 12, boxSizing: 'border-box' }} />
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <select value={baseModel} onChange={(e) => setBaseModel(e.target.value)} style={{ flex: 1, padding: '5px 6px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 11.5 }}>
+                      <select className="inp mono" value={baseModel} onChange={(e) => setBaseModel(e.target.value)} style={{ flex: 1, fontSize: 11.5 }}>
                         <option value="klein-4b">klein-4b</option>
                       </select>
                       <label className="mono" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--faint)' }}>

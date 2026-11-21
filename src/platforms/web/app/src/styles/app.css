@@ -13,6 +13,10 @@
   --text:var(--color-text); --muted:var(--color-text-muted); --faint:var(--color-text-subtle);
   --accent:var(--color-accent); --accent-soft:var(--color-accent-hover); --accent-bg:var(--color-accent-subtle);
   --good:var(--color-success); --bad:var(--color-danger);
+  /* .btn's own text colour, named so the one place it must be repeated (doc.css's .prose a.btn
+     override, which exists only because `.prose a` would otherwise win the cascade) references
+     it instead of carrying a second literal copy of the same value. */
+  --btn-text:#0a0a14;
   /* locality (hemisphere) + economy (credits/royalties) — global so the posture cluster,
      dashboard, and per-surface meters all read the same palette (brand.md: one glyph, one meaning). */
   --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f;
@@ -354,6 +358,61 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .inp:focus,.ta2:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .inp::placeholder,.ta2::placeholder{color:var(--faint)}
 
+/* ---------------------------------------------------------------------------
+   Selects — the app's control, not the operating system's.
+
+   Every field class above (.inp, .cer-input, .byo-input) gives a select a
+   background, a border and `font:inherit`, and not one of them ever set
+   `appearance:none`. A <select> therefore kept the browser's own widget drawn
+   on top of that: system sans instead of the app face, a native chevron, and a
+   border that is not --hair. The controls beside it obeyed the theme and it
+   did not.
+
+   `appearance:none` alone is not the fix — it would leave a select with no
+   affordance at all, indistinguishable from a text field. So the chevron is
+   redrawn here out of two gradients rather than an inline SVG, because a
+   gradient takes var(--faint) and a data: URI cannot.
+
+   The bare `select` rule carries the chrome so a select wearing no field class
+   at all (Studio's, which has only .mobile-zoom-safe) stops being a raw OS
+   control. But .inp/.cer-input/.byo-input each set `background` as a SHORTHAND,
+   which resets every background-* longhand and so wipes the chevron for nearly
+   every select in the app — the qualified rule below reinstates it via a custom
+   property (not reset by the shorthand) rather than repeating the gradients. */
+select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  box-sizing:border-box;
+  font:inherit;
+  color:var(--text);
+  background-color:var(--raised);
+  border:1px solid var(--hair);
+  border-radius:9px;
+  padding:9px 30px 9px 11px;
+  cursor:pointer;
+  text-overflow:ellipsis;
+  outline:0;
+  transition:.14s var(--ease);
+  --select-chevron:
+    linear-gradient(45deg,transparent 50%,var(--faint) 50%),
+    linear-gradient(135deg,var(--faint) 50%,transparent 50%);
+  background-image:var(--select-chevron);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}
+select:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
+select:disabled{cursor:default;opacity:.55}
+select.inp,
+select.cer-input,
+.coll-create select.cer-input,
+select.byo-input{
+  padding-right:30px;
+  background-image:var(--select-chevron);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}
+
 /* slider */
 .range{display:flex;align-items:center;gap:12px}
 .range input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:var(--hair);outline:0}
@@ -430,7 +489,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* self-contained input styling (don't depend on ceremony.css load order) */
 .coll-create .cer-input{width:100%;box-sizing:border-box;font-size:13px;padding:9px 11px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
 .coll-create .cer-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
-.coll-create select.cer-input{appearance:none;cursor:pointer}
 .coll-create .cc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:4px}
 .coll-create .cc-note{font-size:12px;color:var(--faint)}
 .coll-create .cc-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--faint);margin-right:auto;cursor:pointer}
@@ -476,7 +534,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .sectionhead .ttdot{width:6px;height:6px}
 
 /* buttons */
-.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:#0a0a14;font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:var(--btn-text);font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
 .btn:hover{filter:brightness(1.08)} .btn:disabled{opacity:.55;cursor:default;filter:none}
 .btn.block{width:100%;justify-content:center;padding:11px}
 .btn .kbd,.btn-run .kbd{font-family:var(--font-mono);font-size:11px;opacity:.7;font-weight:400}
@@ -645,7 +703,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .warn{display:flex;gap:10px;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
 /* A gate: the sentence, then its one action as a button on its own row with the touch hit
    height (D-43), rather than a link wrapping inside the sentence. */
-.warn.gate{flex-direction:column;align-items:flex-start}
+/* align-items:stretch, not flex-start: a column-flex item with flex-start sizes to its own
+   shrink-to-fit width rather than the container's, and a text item without a definite width
+   wraps itself into a narrow, ragged multi-line block instead of flowing edge-to-edge like
+   ordinary prose. Stretch gives both the sentence and the button the full row width — the
+   button already reads fine full-width (it is the one action on its own row by design, see
+   above) and the sentence now wraps the way a stranger expects prose to. */
+.warn.gate{flex-direction:column;align-items:stretch}
 .warn.gate .btn{min-height:44px}
 /* A request that failed is danger tier, not caution (D-10): the same box in the danger hue, so a
    service that did not answer is told apart from a notice about something the reader may still do. */
@@ -910,6 +974,17 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
   .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
+  /* Run bar — a third docked layer (icon bar + concierge pill + this bar) is what put it on top
+     of the form it belongs to. Undock it and it reads as the last block of the form, which is
+     where you press Run anyway. */
+  .runbar{position:static;background:none;padding:var(--s4) 0 0}
+  /* Three items on one 326px row left the quote 108px and broke it into a ragged four-line
+     column. Wrap instead: the quote takes a full line, the two buttons share the next, and
+     each of the quote's two lines has the whole width and stays on one line. */
+  .run-row{flex-wrap:wrap;gap:var(--s3)}
+  .quote{flex:1 0 100%}
+  .btn-run{flex:0 0 auto}
+  .btn-run .kbd{display:none}                                /* no keyboard to press it with */
   #trustpop{width:calc(100vw - 24px)}
 }
 @media (max-width:680px){
@@ -1452,8 +1527,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 /* Garden editor cards (wired draft authoring) — hold inputs, not just display. */
 .gt-grid .traitcard{position:relative;overflow:visible;padding:10px;display:flex;flex-direction:column;gap:8px}
 .gt-grid .traitcard .cer-input{width:100%}
-.gt-grid .tc-feeds{display:flex;flex-direction:column;gap:4px;align-items:stretch}
-.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px}
+/* Label-above-input (one .traitcard per axis value, "value" then "weight" each on their own
+   two lines) cost four lines of height per value — only one or two fit a phone screen at
+   once, and a weight can't be compared against a sibling's without scrolling to it (REF-28).
+   Label-beside-input halves that: both fields read in one line each, so twice as many values'
+   weights stay on screen together. */
+.gt-grid .tc-feeds{display:flex;flex-direction:row;align-items:center;gap:6px}
+.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px;flex:0 0 46px}
+.gt-grid .tc-feeds .cer-input{width:auto;flex:1;min-width:0}
 .tc-del{position:absolute;top:6px;right:6px;width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);cursor:pointer;border-radius:6px}
 .tc-del:hover{background:var(--hair);color:var(--text)}
 /* Trait rules editor rows */
@@ -1463,7 +1544,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .rr-name{font-weight:600}
 .rr-field{display:flex;flex-direction:column;gap:3px}
 .rr-field>span{color:var(--faint);font-size:11px}
-@media(max-width:760px){.rr-row{grid-template-columns:1fr}}
+/* Full stack (one column) put each value's name, excludes field and tags field on three
+   separate lines — the earlier value scrolled out of view by the time a later one's tags
+   field was in reach, which is exactly what REF-28 flags. A narrower version of the desktop
+   grid (160px → 64px) keeps every value a single compact row at any width instead. */
+@media(max-width:760px){.rr-row{grid-template-columns:64px 1fr 1fr;gap:6px}}
 .tc-preview{height:96px;display:grid;place-items:center;background-image:repeating-conic-gradient(#0e1013 0% 25%, transparent 0% 50%);background-size:18px 18px}
 .tc-chip{width:42px;height:42px;border-radius:11px}
 .tc-num{font-size:26px;color:var(--muted);font-family:var(--font-mono)}
@@ -1529,6 +1614,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cu-keep{border:1px solid color-mix(in srgb,var(--good) 40%,var(--hair));color:var(--good)} .cu-keep:hover{background:color-mix(in srgb,var(--good) 8%,transparent)}
 .cu-reject{border:1px solid color-mix(in srgb,#e5746a 40%,var(--hair));color:var(--red-500,#e5746a)} .cu-reject:hover{background:color-mix(in srgb,#e5746a 8%,transparent)}
 .kbd{font-family:var(--font-mono);font-size:10px;border:1px solid currentColor;border-radius:4px;padding:1px 5px;opacity:.7}
+/* K/R are shortcuts for a physical keyboard; a touch-only pointer has none (P-1a), same
+   pattern as the chat composer's own keyboard hints (see .hint .keys above). */
+@media (hover:none) and (pointer:coarse){.cu-keep .kbd,.cu-reject .kbd{display:none}}
 .cu-nav{display:flex;justify-content:space-between;font-size:12px}
 .cu-supply{border-top:1px solid var(--hair-soft);margin-top:24px;padding-top:16px}
 .cu-supply-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px} .cu-order{font-size:11px;color:var(--accent-soft)}

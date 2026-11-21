@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, datasetStatsLine, type Readiness } from '../lib/datasets';
-import { imagesFrom, imagesFromClipboard, imagesFromDrop, mergeFiles } from '../lib/fileIngest';
+import { imagesFrom, imagesFromClipboard, imagesFromDrop, mergeFiles, partitionUploadable } from '../lib/fileIngest';
 import { runBatch, uploadAsset } from '../lib/upload';
 import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
 import { doorPath } from '../lib/entry';
@@ -117,11 +117,23 @@ export function Datasets() {
     setFiles((cur) => mergeFiles(cur, incoming));
   }
 
+  // Storage signs only png/jpeg/webp (storageRouter's ALLOWED_CONTENT_TYPES); a GIF, an AVIF, or
+  // a HEIC straight off an iPhone is an image (isImageFile lets it through) but would reach the
+  // server and 400 there instead of here. Caught here instead, named and with a reason, rather
+  // than silently vanishing or waiting for the upload to fail.
+  function addImageFiles(incoming: File[]) {
+    const { ok, rejected } = partitionUploadable(imagesFrom(incoming));
+    addFiles(ok);
+    if (rejected.length > 0) {
+      setErr(`${rejected.length} file${rejected.length === 1 ? '' : 's'} can’t upload here — this app stores PNG, JPEG or WebP only: ${rejected.map((f) => f.name).join(', ')}`);
+    }
+  }
+
   useEffect(() => {
     if (!open || source !== 'upload' || modality !== 'image' || busy) return;
     function onPaste(e: ClipboardEvent) {
       const images = imagesFromClipboard(e);
-      if (images.length > 0) addFiles(images);
+      if (images.length > 0) addImageFiles(images);
     }
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
@@ -153,7 +165,8 @@ export function Datasets() {
         if (batch.ok.length === 0) throw new Error('nothing uploaded');
         await api.createDataset({ source: 'upload', name: name.trim(), modality, mediaUrls: batch.ok });
         if (batch.failedIndexes.length > 0) {
-          setErr(`${batch.failedIndexes.length} of ${files.length} did not upload and are not in the set: ${batch.failedIndexes.map((i) => files[i].name).join(', ')}`);
+          const named = batch.failedIndexes.map((i, j) => `${files[i].name} (${batch.failureReasons[j]})`);
+          setErr(`${batch.failedIndexes.length} of ${files.length} did not upload and are not in the set: ${named.join(', ')}`);
         }
       } else {
         const actumIds = Array.from(pickedActa);
@@ -327,14 +340,14 @@ export function Datasets() {
                   onDrop={modality !== 'image' ? undefined : (e) => {
                     e.preventDefault();
                     setDragOver(false);
-                    if (!busy) addFiles(imagesFromDrop(e.nativeEvent));
+                    if (!busy) addImageFiles(imagesFromDrop(e.nativeEvent));
                   }}
                 >
                   <input
-                    type="file" multiple accept="image/*,video/*,audio/*" disabled={busy}
+                    type="file" multiple accept={modality === 'image' ? 'image/png,image/jpeg,image/webp' : 'video/*,audio/*'} disabled={busy}
                     onChange={(e) => {
                       const picked = Array.from(e.target.files ?? []);
-                      if (modality === 'image') { addFiles(imagesFrom(picked)); e.target.value = ''; } else setFiles(picked);
+                      if (modality === 'image') { addImageFiles(picked); e.target.value = ''; } else setFiles(picked);
                     }}
                   />
                   {modality === 'image' && (
@@ -349,7 +362,7 @@ export function Datasets() {
                         // @ts-expect-error — `webkitdirectory` has no type in React's DOM typings but every
                         // evergreen browser honors it; it flattens subfolders into one FileList.
                         webkitdirectory=""
-                        onChange={(e) => { addFiles(imagesFrom(e.target.files ?? [])); e.target.value = ''; }}
+                        onChange={(e) => { addImageFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
                       />
                       <div className="sub mono" style={{ marginTop: 8, opacity: 0.7 }}>or drag images here, or paste one</div>
                     </>

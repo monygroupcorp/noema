@@ -359,6 +359,24 @@ export function Card() {
     }
   }
 
+  // The Run button's ⌘⏎ chip named a shortcut nothing listened for — no keydown handler
+  // existed anywhere in the app. Bind it, guarded the same way the button is (a quote in
+  // hand) plus a dispatching check the button itself gets for free from `disabled`: a ref
+  // carries the current closure so the listener is attached once and still reads live state.
+  const runHotkey = useRef<() => void>(() => {});
+  useEffect(() => {
+    runHotkey.current = () => { if (quote?.impetus && !dispatching) void doRun(); };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      runHotkey.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   async function doRun() {
     setPub({ s: 'idle' });
     setDispatchErr(undefined);

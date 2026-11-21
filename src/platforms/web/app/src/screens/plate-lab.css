@@ -4,7 +4,7 @@
   background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px)}
 .lab-bar .lab-tag{color:var(--accent-soft);font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase}
 .lab-bar .lab-meta{color:var(--faint);font-size:var(--fs-xs)}
-.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1)}
+.lab-bar .lab-ctl{display:inline-flex;align-items:center;gap:var(--s1);flex-wrap:wrap}
 .lab-bar .lab-ctl > .mono{color:var(--faint);font-size:var(--fs-xs);letter-spacing:.06em}
 .lab-bar button{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);
   background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-sm);
