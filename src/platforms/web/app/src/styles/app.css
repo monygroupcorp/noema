@@ -1523,8 +1523,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 /* Garden editor cards (wired draft authoring) — hold inputs, not just display. */
 .gt-grid .traitcard{position:relative;overflow:visible;padding:10px;display:flex;flex-direction:column;gap:8px}
 .gt-grid .traitcard .cer-input{width:100%}
-.gt-grid .tc-feeds{display:flex;flex-direction:column;gap:4px;align-items:stretch}
-.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px}
+/* Label-above-input (one .traitcard per axis value, "value" then "weight" each on their own
+   two lines) cost four lines of height per value — only one or two fit a phone screen at
+   once, and a weight can't be compared against a sibling's without scrolling to it (REF-28).
+   Label-beside-input halves that: both fields read in one line each, so twice as many values'
+   weights stay on screen together. */
+.gt-grid .tc-feeds{display:flex;flex-direction:row;align-items:center;gap:6px}
+.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px;flex:0 0 46px}
+.gt-grid .tc-feeds .cer-input{width:auto;flex:1;min-width:0}
 .tc-del{position:absolute;top:6px;right:6px;width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);cursor:pointer;border-radius:6px}
 .tc-del:hover{background:var(--hair);color:var(--text)}
 /* Trait rules editor rows */
