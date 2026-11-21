@@ -16,7 +16,7 @@ import { band, bindingCapMicroUsd } from '../../../crystal/licenseTripwire.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../../api/webhooks/stripeWebhook.js'
 import { stripeConfigFromEnv, makeStripeGateway } from '../../../api/webhooks/stripeGateway.js'
 import { packViews, type PackView } from '../../../ledger/stripePacks.js'
-import { lookupUseTerms } from '../../../crystal/useTerms.js'
+import { lookupUseTerms, acceptUseTerms as recordUseTermsAcceptance } from '../../../crystal/useTerms.js'
 import { normalizeAddress } from '../../../crystal/walletAuth.js'
 import type {
   ImportModelOpts, SetModelLicenseOpts, StatusView, DepositConfig, DepositQuote, MyDeposit,
@@ -676,15 +676,8 @@ export abstract class CrystalApiAccount extends CrystalApiEditions {
    *  An unknown terms id is refused: there is no published text it could stand for. */
   async acceptUseTerms(auctor: AuctorKey, termsId: string): Promise<{ terms: string; versio: string; acceptedAt: number }> {
     if (!this.deps.consuetudinum) throw Errors.internal('account settings not configured')
-    const terms = lookupUseTerms(termsId)
-    if (!terms) throw new ApiError('not_found.terms', `No terms '${termsId}'`, 404)
-    const existing = (await this.deps.consuetudinum.resolveGeneratio(auctor)) ?? {}
-    const entry = { versio: terms.versio, acceptedAt: Date.now() }
-    await this.deps.consuetudinum.setGeneratio(auctor, {
-      ...existing,
-      termsAccepted: { ...(existing.termsAccepted ?? {}), [terms.id]: entry },
-    })
-    return { terms: terms.id, ...entry }
+    if (!lookupUseTerms(termsId)) throw new ApiError('not_found.terms', `No terms '${termsId}'`, 404)
+    return recordUseTermsAcceptance(this.deps.consuetudinum, auctor, termsId)
   }
 
   /** The caller's per-modus input defaults (affines) for one flow. */

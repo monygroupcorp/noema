@@ -22,8 +22,9 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { fileAbuseReport } from './api/querela/fileAbuseReport.js'
 import { ownerKeyOf } from './crystal/ownerKey.js'
-import { requiredUseTerms } from './crystal/useTerms.js'
+import { requiredUseTerms, acceptUseTerms } from './crystal/useTerms.js'
 import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
@@ -764,6 +765,23 @@ async function main(): Promise<void> {
     onResolution: (cb) => { resCb = cb },
   }
 
+  // An abuse report names a run; its owner and its flow's licence terms are read from the run
+  // itself, never from the reporter. Shared by the REST reports route and the Telegram
+  // delivery menu's own Report tap — one answer to "who owns this run, under what terms"
+  // regardless of which surface the report came from.
+  const resolveRunForReport = async (runId: string): Promise<{ ownerKey: string; useTerms: string[] } | null> => {
+    const actum = await ring.actorum.findById(runId)
+    if (!actum) return null
+    const entry = await ring.actumIndex?.findByActumId?.(runId)
+    const owner = entry?.animaId ? { animaId: entry.animaId }
+      : entry?.commitment ? { commitment: entry.commitment }
+      : actum.bursaToken ? { bursaToken: actum.bursaToken }
+      : null
+    if (!owner) return null
+    const useTerms = await requiredUseTerms(await ring.modorum.find(actum.modusId), (id) => ring.modorum.find(id))
+    return { ownerKey: ownerKeyOf(owner), useTerms }
+  }
+
   // 6. Register ExecuteFlow
   const executeFlow = new ExecuteFlow({
     modorum: ring.modorum,
@@ -786,11 +804,15 @@ async function main(): Promise<void> {
       inline: raw => parseManifest(raw) !== null,
     },
     fundingUrl: FUNDING_URL,
-    // A flow under licence terms (MiniMax H3) runs only for a caster who accepted them on the
-    // web and is not suspended; the same records the REST run route reads.
+    // A flow under licence terms (MiniMax H3) runs only for a caster who accepted them and is
+    // not suspended; the same records the REST run route reads. `accept` lets the chat surface
+    // (Telegram, Discord, …) take the click-through itself — a Telegram-only caster with no
+    // linked web account can tap Accept here and run, rather than being sent to a web account
+    // that does not exist for them.
     useTerms: {
       accepted: async (identity) => (await consuetudinum.resolveGeneratio(identity))?.termsAccepted,
       strikes: (identity, termsId) => ring.querelae.countViolations(ownerKeyOf(identity), termsId),
+      accept: (identity, termsId) => acceptUseTerms(consuetudinum, identity, termsId),
     },
     siteUrl: PUBLIC_BASE,
   })
@@ -893,6 +915,16 @@ async function main(): Promise<void> {
     } : {}),
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
+    // The delivery menu's Report button (Section V.5 of licences such as MiniMax H3's) —
+    // one write path shared with the web's own report control (POST /v1/reports), so a
+    // reported run is deduped/rate-limited/strike-counted the same way regardless of surface.
+    // A fixed description: a chat tap carries no free text, and the store's dedup key is the
+    // (reporter, run) pair, not the wording (same as a worded web report repeating itself).
+    reportAbuse: (auctor, actumId) => fileAbuseReport(
+      { querelae: ring.querelae, resolveRun: resolveRunForReport },
+      ownerKeyOf(auctor),
+      { runId: actumId, description: 'Flagged via Telegram.' },
+    ),
     cancelActum: async (actumId, reason) => {
       const a = await ring.actorum.findById(actumId)
       if (a && a.status !== 'completus' && a.status !== 'fractus') {
@@ -1207,21 +1239,7 @@ async function main(): Promise<void> {
   app.use('/v1/reports', express.json(), createQuerelaRouter({
     querelae: ring.querelae,
     identity: apiResolver,
-    // An abuse report names a run; its owner and its flow's licence terms are read from the run.
-    // The owner comes from the actum index (identified and commitment runs) or, for a run paid by
-    // an anonymous purse, from the purse token the actum carries.
-    resolveRun: async (runId) => {
-      const actum = await ring.actorum.findById(runId)
-      if (!actum) return null
-      const entry = await ring.actumIndex?.findByActumId?.(runId)
-      const owner = entry?.animaId ? { animaId: entry.animaId }
-        : entry?.commitment ? { commitment: entry.commitment }
-        : actum.bursaToken ? { bursaToken: actum.bursaToken }
-        : null
-      if (!owner) return null
-      const useTerms = await requiredUseTerms(await ring.modorum.find(actum.modusId), (id) => ring.modorum.find(id))
-      return { ownerKey: ownerKeyOf(owner), useTerms }
-    },
+    resolveRun: resolveRunForReport,
   }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather

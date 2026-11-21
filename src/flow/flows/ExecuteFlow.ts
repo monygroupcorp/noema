@@ -57,6 +57,9 @@ interface ExecuteFlowState {
    * overrides from the resolved Intella.
    */
   pinnedModels?: ModelRef[]
+  /** The terms id an Accept tap on the current Detail would accept — set only while that Detail
+   *  is live, so the tap knows which id to record without the actionId having to carry it. */
+  pendingTermsId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -93,14 +96,17 @@ export interface ExecuteFlowDeps {
   ownedResources?: OwnedResourceStores
   /**
    * Licence-terms state for the caster (`Modus.useTerms`): what they have accepted, and their
-   * confirmed violations under a terms id. A chat surface cannot show the terms or take the
-   * acceptance, so a caster who has not accepted is sent to the web to do it. Absent → nothing
-   * is on file, so a terms-bearing flow is refused, the same fail-closed rule the REST run
-   * route follows.
+   * confirmed violations under a terms id. `accept` takes the click-through right here in chat —
+   * the same write `POST /v1/me/terms/:id` makes, keyed by the same anon-capable `AuctorKey`, so
+   * a Telegram-only caster (no linked web account) can agree and run in one exchange. Absent
+   * `accept` → the refusal falls back to sending the caster to the web. Absent the whole
+   * `useTerms` dep → nothing is on file, so a terms-bearing flow is refused, the same fail-closed
+   * rule the REST run route follows.
    */
   useTerms?: {
     accepted(identity: FlowContext['identity']): Promise<Record<string, TermsAcceptance> | undefined>
     strikes(identity: FlowContext['identity'], termsId: string): Promise<number>
+    accept?(identity: FlowContext['identity'], termsId: string): Promise<unknown>
   }
   /** The public site origin the terms are published on, for the link in that refusal. */
   siteUrl?: string
@@ -135,10 +141,13 @@ const EFFECT_CATEGORIES = [
  * The insufficient-balance step's text. Credits are bought on the web, signed in as the
  * same account this chat resolves to — `/recover` is how a Telegram identity gets there.
  */
-/** What the chat says when a flow's licence terms stop a run. Exported for the test. */
+/** What the chat says when a flow's licence terms stop a run. Exported for the test.
+ *  `canAcceptHere` reflects whether `deps.useTerms.accept` is wired — when it is, the Detail
+ *  carries an Accept action and the copy says so instead of sending the caster to the web. */
 export function useTermsCopy(
   verdict: Exclude<Awaited<ReturnType<typeof useTermsVerdict>>, { ok: true }>,
   siteUrl?: string,
+  canAcceptHere?: boolean,
 ): string {
   if (verdict.reason === 'unknown') return 'This flow cannot run here right now.'
   const terms = siteUrl ? `${siteUrl}${verdict.terms.href}` : 'on the web, under Terms'
@@ -146,7 +155,10 @@ export function useTermsCopy(
   if (verdict.reason === 'suspended') {
     return `Your access to flows under the ${verdict.terms.nomen} is suspended after repeated violations of them.`
   }
-  // The terms page itself is read-only: acceptance is taken when a run is started on the web,
+  if (canAcceptHere) {
+    return `This flow runs under the ${verdict.terms.nomen} (${terms}). Tap Accept to agree to them and run it.`
+  }
+  // No accept wired on this surface: acceptance is taken when a run is started on the web,
   // under the account this chat is linked to. Say that, rather than send people to a page with
   // nothing to press.
   return `This flow runs under the ${verdict.terms.nomen} (${terms}). Accept them by starting this flow once on ${web}, signed in to the account linked here (you will be asked there), then run it here again.`
@@ -407,6 +419,19 @@ export class ExecuteFlow implements Flow {
         return this._runBalanceGateAndSubmit(ctx, state, modus)
       }
 
+      // Accept tap on the terms Detail → record the acceptance right here (works for any
+      // AuctorKey, including a Telegram-only commitment with no linked web account), then
+      // resubmit exactly as "Try again" does. `pendingTermsId` names which terms id this
+      // particular Detail was offering — cleared either way so a stale tap after it no
+      // longer applies can't accept the wrong id.
+      if (event.actionId === 'accept_terms') {
+        const termsId = state.pendingTermsId
+        state.pendingTermsId = undefined
+        if (!termsId || !this.deps.useTerms?.accept) return this._buildConfigureStep(state)
+        await this.deps.useTerms.accept(ctx.identity, termsId)
+        return this._runBalanceGateAndSubmit(ctx, state, modus)
+      }
+
       // ✕ on a card → the flow ends, and says so. A silent abandon would leave the card's
       // buttons live with nothing behind them.
       if (event.actionId === 'cancel') {
@@ -575,12 +600,21 @@ export class ExecuteFlow implements Flow {
       ...(this.deps.useTerms ? { strikes: (id: string) => this.deps.useTerms!.strikes(ctx.identity, id) } : {}),
     })
     if (!terms.ok) {
+      // Set CONFIGURE regardless of which step called `_submit` (the conversational
+      // reply shortcut and RESULT's "continue the chat" path both land here too), so the
+      // Accept/✕ tap is routed to `_handleConfigure`, which still has `state.modusId`.
+      state.step = 'CONFIGURE'
+      const canAcceptHere = terms.reason === 'required' && Boolean(this.deps.useTerms?.accept)
+      if (canAcceptHere) state.pendingTermsId = terms.terms.id
       return {
         primitives: [{
           kind: 'Detail',
           label: terms.reason === 'suspended' ? 'Access suspended' : 'Terms to accept first',
-          content: useTermsCopy(terms, this.deps.siteUrl),
-          actions: [{ id: 'cancel', label: '✕' }],
+          content: useTermsCopy(terms, this.deps.siteUrl, canAcceptHere),
+          actions: [
+            ...(canAcceptHere ? [{ id: 'accept_terms', label: 'Accept' }] : []),
+            { id: 'cancel', label: '✕' },
+          ],
         }],
       }
     }

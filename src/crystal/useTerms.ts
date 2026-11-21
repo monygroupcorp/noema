@@ -19,6 +19,8 @@
 // =============================================================================
 
 import type { Modus } from '../types/modus.js'
+import type { Consuetudinum } from '../types/consuetudo.js'
+import type { AuctorKey } from '../flow/types.js'
 
 export interface UseTerms {
   id: string
@@ -89,6 +91,29 @@ export function isAccepted(id: string, accepted: Record<string, TermsAcceptance>
   const terms = USE_TERMS[id]
   if (!terms) return false
   return accepted?.[id]?.versio === terms.versio
+}
+
+/**
+ * Record that `auctor` accepts the CURRENT version of terms `termsId`, preserving every other
+ * `Generatio` field. Accepting again refreshes the timestamp; accepting a newer version replaces
+ * the old. Shared by the REST accept route and a chat surface's own Accept tap (ExecuteFlow) —
+ * one write path for the one store field either takes. An unknown terms id throws: there is no
+ * published text it could stand for.
+ */
+export async function acceptUseTerms(
+  consuetudinum: Pick<Consuetudinum, 'resolveGeneratio' | 'setGeneratio'>,
+  auctor: AuctorKey,
+  termsId: string,
+): Promise<{ terms: string; versio: string; acceptedAt: number }> {
+  const terms = USE_TERMS[termsId]
+  if (!terms) throw new Error(`No terms '${termsId}'`)
+  const existing = (await consuetudinum.resolveGeneratio(auctor)) ?? {}
+  const entry = { versio: terms.versio, acceptedAt: Date.now() }
+  await consuetudinum.setGeneratio(auctor, {
+    ...existing,
+    termsAccepted: { ...(existing.termsAccepted ?? {}), [terms.id]: entry },
+  })
+  return { terms: terms.id, ...entry }
 }
 
 /** How many linked flows (steps and saved-from parents) are read when collecting terms. Real

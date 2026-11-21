@@ -7,6 +7,7 @@ import { useSession } from '../state/session';
 import type { Editio, FeedItem } from '../lib/editio';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { ReviewQueueSection } from './Review';
+import { ReportOutput } from '../shell/ReportOutput';
 import './feed.css';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -98,6 +99,10 @@ function Lightbox({ item, onClose }: { item: FeedItem; onClose: () => void }) {
           <button className="btn ghost" onClick={copyLink}>
             <Ic name="rss" /> {copied ? 'Link copied ✓' : 'Copy link'}
           </button>
+          {/* A published run (not an Intella listing or a collection) can be reported —
+              the terms a flow carries (e.g. MiniMax H3's) require this everywhere its
+              output is seen, not just on the maker's own /run page. */}
+          {item.artifact.kind === 'actum' && <ReportOutput runId={item.artifact.id} />}
         </div>
       </div>
     </div>

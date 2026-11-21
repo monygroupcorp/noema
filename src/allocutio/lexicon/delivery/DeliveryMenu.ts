@@ -16,6 +16,13 @@ export interface DeliveryDeps {
   rerun: (actumId: string, presserUserId: string, chatId: number) => Promise<void>
   /** Save the actum's configuration as a derived, user-owned Modus. Adapter wires SaveAsMenu. */
   save?: (actumId: string, presserUserId: string, chatId: number) => Promise<void>
+  /**
+   * File an abuse report naming the actum — the reporting mechanism licence terms such as
+   * MiniMax H3's require (Section V.5), reachable right from the delivered result, not just
+   * the feed/web. Returns the toast text to answer the tap with (success or a reason it
+   * didn't go through); absent → no Report button on the wrench row.
+   */
+  report?: (actumId: string, presserUserId: string) => Promise<string>
 }
 
 interface ResultMeta {
@@ -55,8 +62,12 @@ export class DeliveryMenu {
    * match the chat the result was delivered to, or the action is refused. Without
    * this, `actumId` (attacker-controllable callback data) keyed into a process-global
    * map would let a member of one chat morph/rerun/inspect another chat's result.
+   *
+   * Returns the toast text to answer the tap with, for the one action (`report`) whose
+   * outcome the presser needs told — every other action morphs the keyboard in place and
+   * answers with a plain ack, same as before.
    */
-  async handle(actumId: string, action: string, opts: { ratedType?: string; presserUserId?: string; chatId?: number } = {}): Promise<void> {
+  async handle(actumId: string, action: string, opts: { ratedType?: string; presserUserId?: string; chatId?: number } = {}): Promise<string | void> {
     const meta = this.meta.get(actumId)
     // Authorize: only act on a result we delivered, and only from its own chat.
     if (!meta || (opts.chatId !== undefined && meta.chatId !== opts.chatId)) return
@@ -91,6 +102,9 @@ export class DeliveryMenu {
       case 'save':
         if (opts.presserUserId) await this.deps.save?.(actumId, opts.presserUserId, meta.chatId)
         return
+      case 'report':
+        if (!opts.presserUserId || !this.deps.report) return
+        return this.deps.report(actumId, opts.presserUserId)
     }
   }
 

@@ -21,6 +21,7 @@ export const GLYPH = {
   tweak:   '✎',
   rerun:   '↻',
   save:    '💾',    // save the result's config as a derived, user-owned flow
+  report:  '⚑',     // file an abuse report naming this result (U+2691 — monochrome flag)
   add:     '+',     // add a model directly from a list row
   start:   '▸',     // launch an armed studio (U+25B8 — text triangle, no emoji variant unlike ▶)
   search:  '⌕',     // open the search prompt (U+2315 — monochrome, not the emoji 🔍)
