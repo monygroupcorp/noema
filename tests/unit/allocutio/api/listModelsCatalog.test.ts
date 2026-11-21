@@ -129,6 +129,28 @@ test('listModels sort:name is case-insensitive and is applied before the limit s
   assert.equal(fallback.length, 3)
 })
 
+test('listModels never returns a disabled record, even a platform-canonical one', async () => {
+  // canonica:true is public by definition (MongoIntella's publicCatalog query has no other
+  // lever to exclude it) — disabled is the one flag that must still pull it from the catalog.
+  const disabledCanonical = makeIntella({
+    id: 'disabled-canonical',
+    nomen: 'Disabled canonical',
+    canonica: true,
+    disabled: true,
+  })
+  const disabledPublished = makeIntella({
+    id: 'disabled-published',
+    nomen: 'Disabled published',
+    canonica: false,
+    access: 'public',
+    disabled: true,
+  })
+  const api = apiWith(catalogRegistry([seeded, published, disabledCanonical, disabledPublished]))
+
+  const models = await api.listModels()
+  assert.deepEqual(ids(models).sort(), ['published-model', 'seeded-model'])
+})
+
 test('listModels keeps excluding adult-rated entries from the widened public set', async () => {
   const suggestive = makeIntella({
     id: 'published-suggestive',
