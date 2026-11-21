@@ -79,6 +79,7 @@ function makeSignorum() {
     earningTotals: async () => [],
     listEarnings: async () => ({ entries: [] }),
     settle: async (ids: string[], actualImpetus: bigint, actumId: string) => { settled.push({ ids, actualImpetus, actumId }) },
+    lockedBalance: unmodelled('Signorum', 'lockedBalance'),
     sessionBudget: unmodelled('Signorum', 'sessionBudget'),
     reserve: unmodelled('Signorum', 'reserve'),
     findByTestis: unmodelled('Signorum', 'findByTestis'),

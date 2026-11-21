@@ -135,6 +135,7 @@ function makeSignorum() {
   const signorum: Signorum & { issued: Signum[] } = {
     issued,
     async balance() { return 0n },
+    async lockedBalance() { return 0n },
     async issue(input) {
       const s: Signum = { ...input, id: nextId('sig'), status: 'valid', natum: new Date() }
       issued.push(s)
