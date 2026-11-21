@@ -315,6 +315,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           deleteMessage: (chatId, messageId) => this.sender.deleteMessage?.(chatId, messageId) ?? Promise.resolve(),
         },
         modorum: deps.modorum,
+        intellarum: deps.intellarum,
         resolveOwner: (userId) => this.identity.resolve(userId),
       })
     }

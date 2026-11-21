@@ -139,6 +139,17 @@ export interface GrantSafeguards {
 export const NO_SAFEGUARDS: GrantSafeguards = Object.freeze({ strikes: false, termsGate: false })
 
 /**
+ * The flow-down useTerms id a licence's conditional grant requires, or undefined when `license`
+ * carries no grant — nothing to bind. The single mapping `requiredUseTerms`'s weight-derived path
+ * (`useTerms.ts`) resolves an `Intella.license` through, so a weight loaded under a grant-bound
+ * licence binds its caller to the grant's terms wherever that weight is found in a flow's
+ * `intellae`, not only where a flow remembers to declare `useTerms` itself.
+ */
+export function licenseUseTerms(license: string | undefined): string | undefined {
+  return license ? LICENCE_GRANTS[license]?.useTerms : undefined
+}
+
+/**
  * True unless `license` is held by a conditional grant whose conditions are not live. A licence
  * with no grant entry has no grant conditions, so this is true for it. Fail-closed for a granted
  * licence: terms that are missing or carry no strike limit, or a process that has not wired both

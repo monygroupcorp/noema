@@ -14,7 +14,9 @@
 // Telegram-specific beyond the PromptSender slice.
 
 import type { Modorum, Modus, AuctorKey } from '../../types/modus.js'
+import type { Intellarum } from '../../types/intelligendi.js'
 import { requiredUseTerms } from '../../crystal/useTerms.js'
+import { licenseUseTerms } from '../../crystal/modelLicense.js'
 import { deriveSavedModus, type PromptMode } from '../../crystal/deriveSavedModus.js'
 import { COPY } from '../lexicon/copy.js'
 
@@ -78,6 +80,10 @@ export interface SaveAsDeps {
   modorum: Modorum
   /** Resolve the presser → owner AuctorKey (the save-flow's auctor). */
   resolveOwner(userId: string): Promise<AuctorKey>
+  /** Resolves a weight's licence, so a saved flow's `useTerms` stamp carries what its weight
+   *  manifest binds, not only what the base declared. Absent → that stamp falls back to the
+   *  declaration/lineage walk alone; the run entry point still derives from the weights itself. */
+  intellarum?: Intellarum
 }
 
 /** Turn a human name into a slug; returns null when nothing usable remains. */
@@ -239,8 +245,13 @@ export class SaveAsMenu {
       ...(draft.suffixum !== undefined ? { promptSuffixum: draft.suffixum } : {}),
       pinned: draft.seed.pinned,
     })
-    // The base's licence terms, through its whole lineage, travel with the saved flow.
-    const terms = await requiredUseTerms(draft.base, (id) => this.deps.modorum.find(id))
+    // The base's licence terms, through its whole lineage, travel with the saved flow — and so
+    // does whatever its weight manifest binds by licence, whether the base ever declared it.
+    const terms = await requiredUseTerms(
+      draft.base,
+      (id) => this.deps.modorum.find(id),
+      async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
+    )
     if (terms.length > 0) modus.useTerms = terms
     await this.deps.modorum.register(modus)
     await this.deps.sink.editMessageText?.(draft.chatId, messageId, COPY.saveAs.saved(draft.slug)).catch(() => {})
