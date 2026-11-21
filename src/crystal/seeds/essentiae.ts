@@ -519,6 +519,89 @@ export const ESSENTIA_KLEIN: Essentia = {
   mutatum: new Date('2026-07-06'),
 }
 
+// MOSS-Image — TEXT TO IMAGE. The 5B OpenMOSS DiT (familia 'moss-image'), strong bilingual
+// (English/Chinese) text rendering and long-prompt adherence; pick it as the local Apache-2.0
+// alternative to a closed text-renders-well model. Sampler/scheduler (er_sde/simple) follow the
+// official Comfy-Org workflow template's faster settings (vs OpenMOSS's own 50-step/euler/cfg 3)
+// — a speed tradeoff, not a correctness one; `steps`/`guidance` let a caller dial back toward the
+// slower official defaults. categoria 'image'.
+export const ESSENTIA_MOSS_IMAGE: Essentia = {
+  id: 'moss-image',
+  nomen: 'MOSS-Image — text to image',
+  descriptio: 'MOSS-Image text-to-image (familia \'moss-image\') — a 5B Apache-2.0 model with strong bilingual text rendering and long-prompt adherence. Pick it for in-image text/signage or when a fully open-weight generator is required.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'moss-image-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:          { type: 'text',  required: true,  description: 'Text prompt for image generation — describe the scene, including any in-image text verbatim in quotes.' },
+    negative_prompt: { type: 'text',  required: false, default: 'nsfw, worst quality, bad anatomy, watermark, jpeg artifact', description: 'What to avoid in the generated image' },
+    width:           { type: 'int',   required: false, default: 1024, description: 'Output width in pixels (multiples of 16)' },
+    height:          { type: 'int',   required: false, default: 1024, description: 'Output height in pixels (multiples of 16)' },
+    steps:           { type: 'int',   required: false, default: 25,   description: 'Sampling steps' },
+    guidance:        { type: 'float', required: false, default: 2.5,  description: 'KSampler cfg — how strongly the image follows the prompt' },
+    input_seed:      { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Generated image' } },
+
+  workflowTemplate: 'moss-image',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-11-21'),
+  mutatum: new Date('2026-11-21'),
+}
+
+// MOSS-Image — INSTRUCTION EDIT. Same substrate as ESSENTIA_MOSS_IMAGE, with the rank-64 edit
+// LoRA (comfyanonymous/ComfyUI#17296) stacked on top via `intellae` (same weight-split pattern
+// as the minimax-h3 flows — the base DiT lives on the fundament, the flow-specific adapter is
+// declared here). The edit LoRA's own license is unverified (see INTELLA_MOSS_IMAGE_EDIT_LORA) —
+// that gates commercial-catalog promotion, not running the flow. v1 supports a single reference
+// image; the LoRA supports up to four, left for a later iteration. categoria 'image'.
+export const ESSENTIA_MOSS_IMAGE_EDIT: Essentia = {
+  id: 'moss-image-edit',
+  nomen: 'MOSS-Image — instruction edit',
+  descriptio: 'MOSS-Image instruction edit (familia \'moss-image\') — describe the change you want and it is applied to the reference image. Pick it for a fully open-weight local edit; use moss-image for plain text-to-image.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'moss-image-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  intellae: [
+    { id: 'intella.moss-image-edit-lora', role: 'lora' },
+  ],
+
+  aditus: {
+    prompt:          { type: 'text',  required: true,  description: 'Edit instruction — describe the change you want applied to the reference image.' },
+    image:           { type: 'image', required: true,  description: 'Reference image to edit' },
+    negative_prompt: { type: 'text',  required: false, default: 'nsfw, worst quality, bad anatomy, watermark, jpeg artifact', description: 'What to avoid in the edited image' },
+    steps:           { type: 'int',   required: false, default: 25,   description: 'Sampling steps' },
+    guidance:        { type: 'float', required: false, default: 2.5,  description: 'KSampler cfg — how strongly the edit follows the instruction' },
+    input_seed:      { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Edited image' } },
+
+  workflowTemplate: 'moss-image-edit',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-11-21'),
+  mutatum: new Date('2026-11-21'),
+}
+
 // Background removal — i2i (enhance). InspyrenetRembg pack (self-downloads its ckpt) on the weightless
 // comfyui-base substrate. The `image` aditus rides the i2i primitive into a LoadImage feeding the rembg
 // node; output is the cut-out (transparent PNG). categoria 'image'.
@@ -1347,6 +1430,8 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   // source as sources[0] — the definition is untouched below, and so is the fundamentum.
   ESSENTIA_KLEINEDIT_4B,
   ESSENTIA_KLEIN,
+  ESSENTIA_MOSS_IMAGE_EDIT,
+  ESSENTIA_MOSS_IMAGE,
   ESSENTIA_RMBG,
   ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,
