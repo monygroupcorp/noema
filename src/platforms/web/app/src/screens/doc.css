@@ -56,7 +56,7 @@
    link resolves against every other rule that touches one. The colours are the ones app.css
    sets on .btn, .btn.ghost / .btn-ghost and .btn.accent; they are stated and not inherited
    because the cascade is exactly what went wrong here. */
-.prose a.btn { color: #0a0a14; }
+.prose a.btn { color: var(--btn-text); }
 .prose a.btn.ghost,
 .prose a.btn-ghost { color: var(--text); }
 .prose a.btn.accent { color: var(--accent-onaccent, #fff); }

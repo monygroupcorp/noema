@@ -13,6 +13,10 @@
   --text:var(--color-text); --muted:var(--color-text-muted); --faint:var(--color-text-subtle);
   --accent:var(--color-accent); --accent-soft:var(--color-accent-hover); --accent-bg:var(--color-accent-subtle);
   --good:var(--color-success); --bad:var(--color-danger);
+  /* .btn's own text colour, named so the one place it must be repeated (doc.css's .prose a.btn
+     override, which exists only because `.prose a` would otherwise win the cascade) references
+     it instead of carrying a second literal copy of the same value. */
+  --btn-text:#0a0a14;
   /* locality (hemisphere) + economy (credits/royalties) — global so the posture cluster,
      dashboard, and per-surface meters all read the same palette (brand.md: one glyph, one meaning). */
   --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f;
@@ -530,7 +534,7 @@ select.byo-input{
 .sectionhead .ttdot{width:6px;height:6px}
 
 /* buttons */
-.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:#0a0a14;font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:var(--btn-text);font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
 .btn:hover{filter:brightness(1.08)} .btn:disabled{opacity:.55;cursor:default;filter:none}
 .btn.block{width:100%;justify-content:center;padding:11px}
 .btn .kbd,.btn-run .kbd{font-family:var(--font-mono);font-size:11px;opacity:.7;font-weight:400}
