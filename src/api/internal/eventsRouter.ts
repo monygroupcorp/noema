@@ -5,7 +5,9 @@
 //
 // Mirrors querelaRouter's shape: anon-capable via all identity classes
 // (bursaToken short-circuits, everything else falls through to identity.resolve),
-// own hand-rolled per-owner rate limit, no CrystalApi facade.
+// own hand-rolled per-owner rate limit, no CrystalApi facade. INCLUDING its
+// terminal-purse rule (widget-security guard): a revoked or redeemed purse refuses
+// its own token here too, before it can key an event or spend a rate-limit window.
 //
 // PRIVACY: the device bucket is derived from `req.headers['user-agent']` and
 // ONLY the bucket is ever passed to buildBehaviourEvent — the raw header value
@@ -22,13 +24,19 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { Credentials } from '../../allocutio/api/IdentityResolver.js'
 import { credentialsFromHeaders } from '../../allocutio/api/IdentityResolver.js'
 import { ApiError, Errors } from '../../allocutio/api/errors.js'
+import { refuseTerminalPurse, TerminalPurseError } from '../../allocutio/api/bursaGate.js'
 import { makeLogger } from '../../lib/logger.js'
+import type { Bursarum } from '../../types/bursa.js'
 
 const log = makeLogger('events:router')
 
 export interface EventsRouterDeps {
   events: BehaviourEventStore
   identity: { resolve(creds: Credentials): Promise<AuctorKey> }
+  /** Reads the purse behind a presented token, so a terminal one can be refused. Required
+   *  rather than optional: an absent store would admit every revoked code silently, which
+   *  is the failure this exists to close (mirrors querelaRouter). */
+  bursarium: Pick<Bursarum, 'findByToken'>
 }
 
 // Generous counted-window per-owner limit — this guards against a runaway client loop,
@@ -65,12 +73,18 @@ function sanitizeMeta(body: Record<string, unknown>): BehaviourEventMeta | undef
 }
 
 export function createEventsRouter(deps: EventsRouterDeps): Router {
-  const { events, identity } = deps
+  const { events, identity, bursarium } = deps
   const router = express.Router()
 
+  // bursaToken short-circuits to anon bursa identity, but only for a purse that is still
+  // live: a revoked or redeemed one refuses its own token here, before it can key an
+  // event or spend a rate-limit window (mirrors querelaRouter.resolveCaller).
   async function resolveCaller(req: Request): Promise<AuctorKey> {
     const bursaToken = req.body?.bursaToken ?? (req.headers['x-bursa-token'] as string | undefined)
-    if (bursaToken) return { bursaToken }
+    if (bursaToken) {
+      refuseTerminalPurse(await bursarium.findByToken(bursaToken))
+      return { bursaToken }
+    }
     return identity.resolve(credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body))
   }
 
@@ -79,7 +93,11 @@ export function createEventsRouter(deps: EventsRouterDeps): Router {
       let auctor: AuctorKey
       try {
         auctor = await resolveCaller(req)
-      } catch {
+      } catch (err) {
+        // A terminal purse is a DECIDED answer about a credential the caller definitely
+        // holds, not a failure to read one, so it may not be flattened into the generic
+        // auth refusal below (mirrors querelaRouter.resolveCaller's catch).
+        if (err instanceof TerminalPurseError) throw err
         // Clause 3: every event is keyed on identity already in hand. No identity in
         // hand → nothing is recorded, and no fallback (e.g. an IP) ever stands in for one.
         throw Errors.authInvalid('could not resolve caller identity')

@@ -9,6 +9,7 @@ import { createEventsRouter } from '../../../src/api/internal/eventsRouter.js'
 import type { BehaviourEventStore, BehaviourEventDoc } from '../../../src/analytics/BehaviourEventStore.js'
 import type { AuctorKey } from '../../../src/flow/types.js'
 import type { Credentials } from '../../../src/allocutio/api/IdentityResolver.js'
+import type { Bursa } from '../../../src/types/bursa.js'
 
 class MemoryEvents {
   saved: BehaviourEventDoc[] = []
@@ -25,10 +26,20 @@ const fakeIdentity = {
   },
 }
 
+/** The purse rows the terminal-purse rule is read against. An 'active' purse and one with no
+ *  status at all both spend as before; only an explicit terminal status refuses. */
+const PURSES: Record<string, Bursa> = {
+  'live-tok': { id: 'live-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'active' },
+  'legacy-tok': { id: 'legacy-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' } },
+  'revoked-tok': { id: 'revoked-tok', credits: 500n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'revoked' },
+  'redeemed-tok': { id: 'redeemed-tok', credits: 0n, createdAt: new Date(), owner: { animaId: 'a1' }, status: 'redeemed', redeemedAt: new Date() },
+}
+const fakeBursarium = { async findByToken(token: string): Promise<Bursa | null> { return PURSES[token] ?? null } }
+
 function makeServer(events: MemoryEvents) {
   const app = express()
   app.use(express.json())
-  app.use('/v1/events', createEventsRouter({ events: events as unknown as BehaviourEventStore, identity: fakeIdentity }))
+  app.use('/v1/events', createEventsRouter({ events: events as unknown as BehaviourEventStore, identity: fakeIdentity, bursarium: fakeBursarium }))
   return app
 }
 
@@ -104,4 +115,40 @@ test('per-owner rate limit: the request past the window max is refused with 429'
     lastStatus = res.status
   }
   assert.equal(lastStatus, 429)
+})
+
+// ── Revoked/redeemed purse (widget-security) ─────────────────────────────────
+// bursaToken mirrors querelaRouter's terminal-purse rule: a revoked or redeemed
+// code is refused here too, before it can key an event or spend a rate-limit window.
+
+test('a REVOKED purse cannot record an event — 403 purse.revoked, nothing persisted', async () => {
+  const events = new MemoryEvents()
+  const res = await request(makeServer(events)).post('/v1/events').set('x-bursa-token', 'revoked-tok').send({ kind: 'catalog_view' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(events.saved.length, 0)
+})
+
+test('a REDEEMED purse cannot record an event — 403 purse.revoked', async () => {
+  const events = new MemoryEvents()
+  const res = await request(makeServer(events)).post('/v1/events').set('x-bursa-token', 'redeemed-tok').send({ kind: 'catalog_view' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error.code, 'purse.revoked')
+  assert.equal(events.saved.length, 0)
+})
+
+test('a revoked purse is refused as a decided answer, not flattened into auth.invalid', async () => {
+  const events = new MemoryEvents()
+  const res = await request(makeServer(events)).post('/v1/events').set('x-bursa-token', 'revoked-tok').send({ kind: 'catalog_view' })
+  assert.match(res.body.error.message, /revoked by its owner/)
+})
+
+test('a live or legacy (no status) purse still records, exactly as before', async () => {
+  const events = new MemoryEvents()
+  const server = makeServer(events)
+  const live = await request(server).post('/v1/events').set('x-bursa-token', 'live-tok').send({ kind: 'catalog_view' })
+  const legacy = await request(server).post('/v1/events').set('x-bursa-token', 'legacy-tok').send({ kind: 'catalog_view' })
+  assert.equal(live.status, 204)
+  assert.equal(legacy.status, 204)
+  assert.equal(events.saved.length, 2)
 })
