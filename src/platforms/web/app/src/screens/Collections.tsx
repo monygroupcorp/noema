@@ -134,10 +134,10 @@ function Card({ c, projectId }: { c: Collection; projectId: string }) {
         <div className="coll-actions">
           <Link className="btn ghost" to={`/collections/${c.id}`}>Open hub</Link>
           {draft
-            ? <Link className="btn accent" to={`/collections/${c.id}/garden`}>Author draft →</Link>
+            ? <Link className="btn ghost" to={`/collections/${c.id}/garden`}>Author draft →</Link>
             : active
-            ? <Link className="btn accent" to={`/collections/${c.id}/run`}>View run →</Link>
-            : <Link className="btn accent" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
+            ? <Link className="btn ghost" to={`/collections/${c.id}/run`}>View run →</Link>
+            : <Link className="btn ghost" to={`/collections/${c.id}/export`}>Export &amp; publish →</Link>}
           <HoldingToggle kind="collection" assetId={c.id} projectId={projectId} />
         </div>
       </div>
