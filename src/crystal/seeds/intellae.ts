@@ -672,6 +672,117 @@ export const INTELLA_MOSS_MUSIC_8B: Intella = {
   natum: new Date('2026-06-11'),
 }
 
+// ── MOSS-Image (OpenMOSS-Team, Apache-2.0) ───────────────────────────────────
+// 5B single-stream flow-matching DiT + Qwen3.5-9B text encoder + a small FLUX.2 VAE. Native
+// ComfyUI support (comfyanonymous/ComfyUI#17095); the SFT checkpoint is the instruction-tuned
+// variant the official Comfy-Org workflow template defaults to. Both weights and the repo's
+// top-level license are confirmed Apache-2.0 via the HuggingFace API (license:apache-2.0 on
+// both Comfy-Org/MOSS-Image and OpenMOSS-Team/MOSS-Image-SFT) — a clean commercial base per
+// ADR-0012. The int8/w4a8 quantized files are the Comfy-Org defaults (smaller, same graph).
+export const INTELLA_MOSS_IMAGE_SFT: Intella = {
+  id: 'intella.moss-image-sft',
+  nomen: 'MOSS-Image SFT 5B (int8)',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'dit',
+  familia: 'moss-image',
+  parametri: 5_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/diffusion_models/moss_image_sft_int8_convrot.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MOSS-Image', branch: 'main', filename: 'diffusion_models/moss_image_sft_int8_convrot.safetensors' },
+    },
+  ],
+  dest: 'diffusion_models/moss_image_sft_int8_convrot.safetensors',
+  sizeGb: 5.4,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-11-21'),
+}
+
+export const INTELLA_MOSS_IMAGE_TEXT_ENCODER: Intella = {
+  id: 'intella.qwen3-9b-moss-image',
+  nomen: 'Qwen3.5 9B (MOSS-Image text encoder, w4a8)',
+  license: 'apache-2.0',           // Qwen3.5 (Apache 2.0)
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'transformer',
+  parametri: 9_000_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MOSS-Image', branch: 'main', filename: 'text_encoders/qwen3.5_9b_w4a8_gptq.safetensors' },
+    },
+  ],
+  dest: 'text_encoders/qwen3.5_9b_w4a8_gptq.safetensors',
+  sizeGb: 7.3,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-11-21'),
+}
+
+export const INTELLA_MOSS_IMAGE_VAE: Intella = {
+  id: 'intella.moss-image-vae',
+  nomen: 'FLUX.2 VAE small (MOSS-Image)',
+  license: 'apache-2.0',           // ships inside Comfy-Org/MOSS-Image (Apache 2.0)
+  commercialUse: 'yes',
+  genus: 'embedding',
+  architectura: 'vae',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/vae/flux2-vae_small.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MOSS-Image', branch: 'main', filename: 'vae/flux2-vae_small.safetensors' },
+    },
+  ],
+  dest: 'vae/flux2-vae_small.safetensors',
+  sizeGb: 0.25,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-11-21'),
+}
+
+// Rank-64 edit adapter (community-trained by chinoll, repacked into Comfy-Org/MOSS-Image
+// alongside the base weights; loads through the standard LoRA loader per
+// comfyanonymous/ComfyUI#17296). The origin repo (chinoll/Moss-Image-Edit) declares no license
+// of its own — fail-closed pending clearance (ADR-0012), same posture as MOSS-Music/ShotVL
+// below. This does not block running the edit flow; it blocks commercial-catalog promotion.
+export const INTELLA_MOSS_IMAGE_EDIT_LORA: Intella = {
+  id: 'intella.moss-image-edit-lora',
+  nomen: 'MOSS-Image Edit LoRA (rank 64)',
+  license: 'unknown',              // chinoll/Moss-Image-Edit — own terms unverified — fail-closed
+  commercialUse: 'unknown',
+  genus: 'lora',
+  architectura: 'lora',
+  familia: 'moss-image',
+  baseIntellaId: 'intella.moss-image-sft',
+  parametri: 0,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/loras/moss_image_edit_lora_rank_64_bf16.safetensors',
+      format: 'safetensors',
+      meta: { repo: 'Comfy-Org/MOSS-Image', branch: 'main', filename: 'loras/moss_image_edit_lora_rank_64_bf16.safetensors' },
+    },
+  ],
+  dest: 'loras/moss_image_edit_lora_rank_64_bf16.safetensors',
+  sizeGb: 0.3,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-11-21'),
+}
+
 export const INTELLA_SHOTVL_7B: Intella = {
   id: 'intella.shotvl-7b',
   nomen: 'ShotVL 7B (cinematography)',
@@ -1320,6 +1431,10 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_LORA_ARMORED_DRESS,
   INTELLA_QWEN3_VL_8B,
   INTELLA_MOSS_MUSIC_8B,
+  INTELLA_MOSS_IMAGE_SFT,
+  INTELLA_MOSS_IMAGE_TEXT_ENCODER,
+  INTELLA_MOSS_IMAGE_VAE,
+  INTELLA_MOSS_IMAGE_EDIT_LORA,
   INTELLA_SHOTVL_7B,
   INTELLA_HEARTMULA_GEN,
   INTELLA_HEARTMULA_3B,

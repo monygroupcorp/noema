@@ -257,6 +257,39 @@ export const FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI: Fundamentum = {
 }
 
 /**
+ * MOSS-Image · ComfyUI — the 5B MOSS-Image DiT stack (Apache-2.0): diffusion model + Qwen3.5-9B
+ * text encoder + a small FLUX.2 VAE, all shared between the t2i and edit flows (the edit flow
+ * adds its own LoRA via `Essentia.intellae`, same split as the minimax-h3 fundament above).
+ *
+ * `comfyRef` IS LOAD-BEARING, same caveat as every other ComfyUI fundament here: MOSS-Image's
+ * loaders only exist from comfyanonymous/ComfyUI#17095 (merged 2026-10-16) and the edit LoRA's
+ * `TextEncodeMOSSImageEdit` node from #17296 (merged 2026-10-22) onward. v0.46.0 is the newest
+ * tagged release at the time this was added and contains both (verified by commit ancestry);
+ * drop it and the pod boots healthy with no MOSS-Image nodes in it. UNVERIFIED on a real pod —
+ * no GPU run has exercised this fundament yet (AGENTS.md: real gen correctness is a staging
+ * concern, never claimed from a hermetic run).
+ */
+export const FUNDAMENTUM_MOSS_IMAGE_COMFYUI: Fundamentum = {
+  id: 'moss-image-comfyui',
+  nomen: 'MOSS-Image · ComfyUI',
+  versio: '1.0.0',
+  contentHash: '',
+  imageId: 'runpod/pytorch',
+  imageVersion: '2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
+  runtime: 'ComfyUI',
+  comfyRef: 'v0.46.0',
+  intellae: [
+    { id: 'intella.moss-image-sft',          role: 'unet' },
+    { id: 'intella.qwen3-9b-moss-image',     role: 'clip' },
+    { id: 'intella.moss-image-vae',          role: 'vae' },
+  ],
+  vramGb: 24,
+  canonica: true,
+  natum: new Date('2026-11-21'),
+  mutatum: new Date('2026-11-21'),
+}
+
+/**
  * Upscale · ComfyUI — the lightest image substrate: an ESRGAN upscaler only, no checkpoint. The
  * model-only upscale flow (UpscaleModelLoader + ImageUpscaleWithModel) needs no diffusion model, so
  * this fundament carries just the 4x-UltraSharp weight and runs on a small pod.
@@ -600,6 +633,7 @@ export const CANONICAL_FUNDAMENTA: Fundamentum[] = [
   FUNDAMENTUM_FLUX2_KLEIN_4B_COMFYUI,
   FUNDAMENTUM_ZIMAGE_TURBO_COMFYUI,
   FUNDAMENTUM_KREA2_TURBO_COMFYUI,
+  FUNDAMENTUM_MOSS_IMAGE_COMFYUI,
   FUNDAMENTUM_COMFYUI_BASE,
   FUNDAMENTUM_UPSCALE_COMFYUI,
   FUNDAMENTUM_QWEN_VL_VLLM,
