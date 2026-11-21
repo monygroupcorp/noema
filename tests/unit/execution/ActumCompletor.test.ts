@@ -612,6 +612,97 @@ test('fail emits its wide event with no trace context — a swept run still reac
   assert.equal(seen[0].refund, '1800')
 })
 
+// ---------------------------------------------------------------------------
+// ActumIndex stamping (single choke point — mirrors vestigium indexing above)
+//
+// `/me/activity`'s in-flight list (and the web Dashboard's RUNNING NOW / AWAITING YOU
+// bands it feeds) reads straight off the dispatch index's membership, with no
+// cross-check against the actum's own live status. Only the RunPod webhook used to
+// retire that index row (settle/release); every other completion rail — a sync
+// cursor, the expiry reaper, the warm-pod line, an owner cancel — called
+// `complete()`/`fail()` directly and left the row in-flight forever, even though the
+// underlying actum was already safely terminal and its signa already settled or
+// released. These tests prove `complete()`/`fail()` retire the row themselves, so a
+// run finished off the webhook rail stops looking stuck.
+// ---------------------------------------------------------------------------
+
+function makeActumIndex() {
+  const settled: Array<{ actumId: string; patch: { settledAt: Date; impetus: string; modusLabel: string } }> = []
+  const released: Array<{ actumId: string; patch: { releasedAt: Date; modusLabel: string } }> = []
+  const removed: string[] = []
+  return {
+    record: async () => {},
+    findFor: async () => [],
+    remove: async (actumId: string) => { removed.push(actumId) },
+    settle: async (actumId: string, patch: { settledAt: Date; impetus: string; modusLabel: string }) => {
+      settled.push({ actumId, patch })
+    },
+    release: async (actumId: string, patch: { releasedAt: Date; modusLabel: string }) => {
+      released.push({ actumId, patch })
+    },
+    _settled: settled,
+    _released: released,
+    _removed: removed,
+  }
+}
+
+test('complete() stamps the activity index settled, exactly as the webhook used to', async () => {
+  const actum = makeActum({ id: 'act-sync', impetus: 100n })
+  const acta = makeActa(actum)
+  const actumIndex = makeActumIndex()
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), actumIndex })
+
+  // No webhook anywhere in this call — this is the sync-cursor / reaper situation.
+  const completed = await completor.complete(actum, makeRunResult({ impetus: 80n }))
+
+  assert.equal(actumIndex._settled.length, 1)
+  assert.equal(actumIndex._settled[0].actumId, 'act-sync')
+  assert.equal(actumIndex._settled[0].patch.impetus, '80')
+  assert.deepEqual(actumIndex._settled[0].patch.settledAt, completed.completum)
+  assert.equal(actumIndex._released.length, 0)
+})
+
+test('fail() stamps the activity index released — the expiry reaper never touches the webhook', async () => {
+  const actum = makeActum({ id: 'act-reaped', status: 'agens' })
+  const acta = makeActa(actum)
+  const actumIndex = makeActumIndex()
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum(), actumIndex })
+
+  const failed = await completor.fail(actum, 'Actum expired — pod never reported back')
+
+  assert.equal(actumIndex._released.length, 1)
+  assert.equal(actumIndex._released[0].actumId, 'act-reaped')
+  assert.deepEqual(actumIndex._released[0].patch.releasedAt, failed.completum)
+  assert.equal(actumIndex._settled.length, 0)
+})
+
+test('a store with no settle/release (dev double) falls back to removing the row, on both rails', async () => {
+  const completeActum = makeActum({ id: 'act-a' })
+  const failActum = makeActum({ id: 'act-b', status: 'agens' })
+  const bareIndex = {
+    record: async () => {},
+    findFor: async () => [],
+    remove: async (actumId: string) => { removed.push(actumId) },
+  }
+  const removed: string[] = []
+
+  const completor1 = new ActumCompletor({ acta: makeActa(completeActum), signorum: makeSignorum(), actumIndex: bareIndex })
+  await completor1.complete(completeActum, makeRunResult())
+  const completor2 = new ActumCompletor({ acta: makeActa(failActum), signorum: makeSignorum(), actumIndex: bareIndex })
+  await completor2.fail(failActum, 'timeout')
+
+  assert.deepEqual(removed.sort(), ['act-a', 'act-b'])
+})
+
+test('no actumIndex wired → completion and failure still succeed untouched', async () => {
+  const actum = makeActum()
+  const acta = makeActa(actum)
+  const completor = new ActumCompletor({ acta, signorum: makeSignorum() })
+
+  const completed = await completor.complete(actum, makeRunResult())
+  assert.equal(completed.status, 'completus')
+})
+
 // ── Royalty, host cut and platform skim ──────────────────────────────────────
 //
 // `complete()` is the ONE `execution_spend` emitter in the codebase, so this is

@@ -77,9 +77,14 @@ export interface ActumIndex {
 /**
  * ActumIndexStore — persistence for the per-AuctorKey aggregation.
  *
- * Append-on-dispatch + remove-on-terminal. The `remove` site is the completion
- * webhook (success and failure both clear). A drift-recovery sweep can prune
- * stale entries by joining against Actorum.findById — out of scope for v1.
+ * Append-on-dispatch + settle/release-on-terminal (or remove, on a store that predates
+ * those). The stamping site is `ActumCompletor.complete()`/`fail()` — the one choke point
+ * every completion rail (the RunPod webhook, a sync cursor, the expiry reaper, the
+ * warm-pod line, an owner cancel) reaches, so none of them can leave a row stuck
+ * in-flight the way only the webhook used to clear it. A drift-recovery sweep that prunes
+ * stale entries by joining against Actorum.findById would still catch a row from a
+ * deployment predating this (or a write that threw past its `.catch`) — not built, since
+ * the choke point above already closes the gap it would otherwise exist to cover.
  */
 export interface ActumIndexStore {
   /** Record a new dispatched actum for this AuctorKey. Idempotent on actumId. */
