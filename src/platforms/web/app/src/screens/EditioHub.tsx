@@ -129,12 +129,12 @@ export function EditioHub() {
 
         <div className="ph-band">
           <div className="ph-about">
-            <div className="ph-l">about this collection</div>
-            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent. That asymmetry is the spine.</p>
+            <div className="ph-l">About this collection</div>
+            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent — nothing before that step can be seen outside this account.</p>
             <div className="ph-meta mono">{c.modusId ? <>flow {c.modusId} · provenance {c.provenanceHash.slice(0, 18)}…</> : <>no flow · no provenance yet</>} · local until you publish</div>
           </div>
           <div className="ph-activity">
-            <div className="ph-l">activity</div>
+            <div className="ph-l">Activity</div>
             <div className="ph-ev"><span className="av" style={{ background: collTile(c.id) }} /><span className="ev-t"><b>you</b> started the canonic supply <span className="mono ev-meta"><span className="hemi2 dashed" /> local{c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString()}` : ''}</span></span></div>
           </div>
         </div>
