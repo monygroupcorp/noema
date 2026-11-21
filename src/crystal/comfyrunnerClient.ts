@@ -309,6 +309,16 @@ export interface RunMetrics {
   executionMs?:      number
 }
 
+/**
+ * What a completed job resolves with — the SAME `output` the pod's own completion webhook
+ * carries (noema pod-result-never-delivered), so a caller can complete the actum from it
+ * without waiting on the pod's outbound POST.
+ */
+export interface StreamCompletion {
+  output?: unknown[]
+  executionTimeMs?: number
+}
+
 export async function awaitViaStream(
   fetchFn: typeof fetch,
   runnerBase: string,
@@ -318,7 +328,7 @@ export async function awaitViaStream(
   onMetrics?: (m: RunMetrics) => void,
   /** How long the stream may go quiet before we ask the runner whether the job is alive. */
   silenceMs = 60_000,
-): Promise<void> {
+): Promise<StreamCompletion> {
   let lastSeq = -1
   let inferringEmitted = false
   let installingRecorded = false
@@ -399,7 +409,8 @@ export async function awaitViaStream(
               log.info('stream quiet, runner reports job complete', { jobId })
               void reader.cancel().catch(() => {})
               await record({ phase: 'done' })
-              return
+              const body = liveness.body as { output?: unknown[]; executionTime?: number } | undefined
+              return { output: body?.output, executionTimeMs: body?.executionTime }
             }
             const errMsg = runnerFailureMessage(liveness.body)
             log.warn('stream quiet, runner reports job failed', { jobId, error: errMsg })
@@ -557,11 +568,21 @@ export async function awaitViaStream(
                 await record({ phase: 'uploading', target: 'output' })
                 break
               case 'complete': {
-                const { executionTimeMs } = event as { executionTimeMs?: number }
+                const { executionTimeMs, output, webhookError } = event as {
+                  executionTimeMs?: number
+                  output?: unknown[]
+                  /** Set when the pod's own completion webhook failed on its first attempt
+                   *  (noema pod-result-never-delivered) — surfaced here because the pod's own
+                   *  log is otherwise the only place that failure is visible. */
+                  webhookError?: string
+                }
                 log.info('job complete', { jobId, executionTimeMs })
+                if (webhookError) {
+                  log.warn('comfyrunner completion webhook failed on its first attempt', { jobId, webhookError })
+                }
                 if (typeof executionTimeMs === 'number') onMetrics?.({ executionMs: executionTimeMs })
                 await record({ phase: 'done' })   // terminal → rolls up phaseDurations
-                return
+                return { output, executionTimeMs }
               }
               case 'error': {
                 const errMsg = (event.error as string) || 'comfyrunner job failed'

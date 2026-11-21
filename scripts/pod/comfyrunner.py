@@ -567,6 +567,33 @@ def _send_webhook(url: str, payload: dict) -> None:
             log.warning(f"webhook attempt {attempt + 1}/3 failed: {e}")
     log.error("webhook delivery failed after 3 attempts")
 
+
+def _send_webhook_fast(url: str, payload: dict) -> str | None:
+    """One quick webhook attempt, for the completion path only. Returns None on success, else
+    the error string — carried onto the `complete` SSE event (noema pod-result-never-delivered)
+    so a failed delivery is visible server-side instead of only in this pod's own log. The
+    remaining retries still run, just off this thread, so a transient blip can still self-heal
+    without delaying the terminal event the server is waiting on."""
+    try:
+        _http_post(url, payload, timeout=15)
+        return None
+    except Exception as e:
+        error = str(e)
+        log.warning(f"webhook attempt 1/3 failed: {error}")
+
+        def _retry() -> None:
+            for attempt in range(1, 3):
+                time.sleep(5 * attempt)
+                try:
+                    _http_post(url, payload, timeout=15)
+                    return
+                except Exception as retry_err:
+                    log.warning(f"webhook attempt {attempt + 1}/3 failed: {retry_err}")
+            log.error("webhook delivery failed after 3 attempts")
+
+        threading.Thread(target=_retry, daemon=True).start()
+        return error
+
 # ── Output path collection ─────────────────────────────────────────────────────
 
 def _output_paths(outputs: dict) -> list[str]:
@@ -708,20 +735,28 @@ def _process_job(job_spec: dict) -> None:
             proxy_base = f"https://{POD_ID}-8188.proxy.runpod.net" if POD_ID else COMFYUI_URL
             output_items = [{"path": p, "proxyUrl": f"{proxy_base}/view?filename={os.path.basename(p)}&type=output"} for p in paths]
 
-        # 7. Terminal event — status and event appended atomically so SSE handler
+        # 7. Webhook — ONE fast attempt before the terminal event below, so a failure rides
+        #    onto that event's `webhookError` field and is visible server-side via the SSE
+        #    stream the server already holds open, instead of only in this pod's own log
+        #    (noema pod-result-never-delivered). Remaining retries continue in the background;
+        #    they are no longer the only delivery path — see SecurePodClient.awaitViaStream.
+        webhook_error: str | None = None
+        if webhook:
+            webhook_error = _send_webhook_fast(webhook, {
+                "id": job_id, "status": "COMPLETED",
+                "output": output_items, "executionTime": execution_time,
+            })
+
+        # 8. Terminal event — status and event appended atomically so SSE handler
         #    cannot see is_terminal=True before the "complete" event is in the list.
         with _lock:
             job = _jobs[job_id]
             job["status"] = "completed"
             job["result"] = {"status": "completed", "output": output_items, "executionTime": execution_time}
             evt = {"type": "complete", "output": output_items, "executionTimeMs": execution_time, "seq": len(job["events"])}
+            if webhook_error:
+                evt["webhookError"] = webhook_error
             job["events"].append(evt)
-
-        if webhook:
-            _send_webhook(webhook, {
-                "id": job_id, "status": "COMPLETED",
-                "output": output_items, "executionTime": execution_time,
-            })
 
     except Exception as e:
         log.error(f"job {job_id} failed: {e}")

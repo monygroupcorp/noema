@@ -1251,14 +1251,29 @@ export class SecurePodClient implements RunPodClient, Procurator {
       const submitCtx = getTrace()
       if (submitCtx) submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
 
-      // comfyrunner fires the webhook; we subscribe to SSE only to know when done
-      // (so we can terminate/warm the pod). comfyrunner records its own Progressus timeline
-      // through the in-process recorder seam — no stage callback needed (#6e).
-      await awaitViaStream(
+      // comfyrunner fires its own completion webhook; we subscribe to SSE to know when done
+      // (so we can terminate/warm the pod) AND as the completion path itself. comfyrunner
+      // records its own Progressus timeline through the in-process recorder seam — no stage
+      // callback needed (#6e).
+      const streamResult = await awaitViaStream(
         this.fetchFn, runnerBase, jobId, this._streamTimeoutMs(budgets),
         (m) => { Object.assign(executio, m); reportMetrics() },
       )
       jobSucceeded = true
+      if (webhook) {
+        // comfyrunner's own completion POST crosses the pod's egress path, which can fail
+        // silently — the pod only logs the failure to its own local log, invisible to us —
+        // and strand the run: the reservation never unlocks and census eventually reaps the
+        // pod out from under it (noema pod-result-never-delivered). The `complete` SSE event
+        // we just observed carries the same `output` the webhook would have, so complete the
+        // actum ourselves through the SAME callback URL/nonce. `handleExecutionWebhook`'s
+        // terminal-status idempotency check makes this safe no matter which of the two —
+        // ours or the pod's own — lands first.
+        await this._postWebhook(webhook, {
+          id: jobId, status: 'COMPLETED',
+          output: streamResult.output, executionTime: streamResult.executionTimeMs,
+        }).catch(err => log.warn('SSE-driven completion POST failed', { jobId, error: (err as Error).message }))
+      }
       return { kind: 'ok' }
     } catch (err) {
       return classifyJobAttemptFailure(err, accepted)
