@@ -15,10 +15,15 @@ export function startIdleReaper(
   materiae: MateriaStore,
   terminatePod: (externusId: string) => Promise<void>,
   intervalMs = 30_000,
+  /** Is a non-terminal actum still bound to this Materia? Threaded into `reapIdle`
+   *  so an idle+draining pod whose warm-pod release ran ahead of its completion
+   *  webhook isn't reaped out from under the still-unsettled result. Omitted →
+   *  reapIdle's default (reap an idle draining pod on sight). */
+  hasLiveActum?: (materiaId: string) => Promise<boolean>,
 ): () => void {
   const sweep = async (): Promise<void> => {
     try {
-      const reaped = await materiae.reapIdle(new Date())
+      const reaped = await materiae.reapIdle(new Date(), hasLiveActum)
       for (const m of reaped) {
         await terminatePod(m.externusId).catch(e =>
           log.warn('reap terminate failed', { externusId: m.externusId, error: String(e) }))

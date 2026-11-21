@@ -1684,13 +1684,21 @@ async function main(): Promise<void> {
   // Idle-pod reaper — terminate warm pods that sat idle past their warmUntil
   // deadline (default 1 min past delivery). Prevents keep-warm pods from billing
   // indefinitely when no follow-up job reuses them.
+  // A draining pod's release can flip it back to 'idle' before the completion
+  // webhook that same job is waiting on has settled the actum (see reapIdle's
+  // `hasLiveActum` doc comment) — check the one store every rail already uses
+  // for this (Census wires the same method for the mirror case on `active`).
+  const findLiveByMateriamId = ring.actorum.findLiveByMateriamId?.bind(ring.actorum)
+  const hasLiveActum = findLiveByMateriamId
+    ? async (materiaId: string) => (await findLiveByMateriamId(materiaId)).length > 0
+    : undefined
   if (RUNPOD_API_KEY) {
-    startIdleReaper(materiae, (externusId) => terminatePod(RUNPOD_API_KEY, externusId), 30_000)
+    startIdleReaper(materiae, (externusId) => terminatePod(RUNPOD_API_KEY, externusId), 30_000, hasLiveActum)
     log.info('idle-pod reaper started', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   } else if (process.env.DEV_FAKE_POD) {
     // Fake mode has no real pods to kill; reapIdle still flips the Materia to
     // terminated and emits pod.reaped so the bulletin freezes to a receipt.
-    startIdleReaper(materiae, async () => {}, 10_000)
+    startIdleReaper(materiae, async () => {}, 10_000, hasLiveActum)
     log.warn('idle-pod reaper started (fake mode)', { warmTtlMs: RUNPOD_WARM_TTL_MS })
   }
 
