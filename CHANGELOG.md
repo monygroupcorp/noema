@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.36.0](https://github.com/monygroupcorp/noema/compare/v5.35.0...v5.36.0) (2026-11-21)
+
+
+### Features
+
+* **analytics:** a pseudonymous behaviour corpus that says where visitors stop ([2ea4fd5](https://github.com/monygroupcorp/noema/commit/2ea4fd57801798311bdaba3d5ba509d0058c2d28))
+* **analytics:** a pseudonymous behaviour corpus that says where visitors stop ([80b2c10](https://github.com/monygroupcorp/noema/commit/80b2c101a60f24fe3b363d61c292e12fc1ad60b1))
+
+
+### Bug Fixes
+
+* **blog:** make the canvas and api guides match what actually ships ([#747](https://github.com/monygroupcorp/noema/issues/747)) ([b3c4554](https://github.com/monygroupcorp/noema/commit/b3c4554b05e52aaaa53e216427105d7bdc2a8644))
+* **crystal:** bind licence terms by a flow's weights, not only its declaration ([d826a2c](https://github.com/monygroupcorp/noema/commit/d826a2c9218606eebe9e98044c4c554dfdc915c3))
+* **crystal:** complete the actum from the pod's SSE stream, not just its webhook ([#744](https://github.com/monygroupcorp/noema/issues/744)) ([d280707](https://github.com/monygroupcorp/noema/commit/d28070768e6e5bef008a19f1a0be5830bb8a51ab))
+* **crystal:** let an admin kill switch pull a model out of the public catalogue ([7f889fa](https://github.com/monygroupcorp/noema/commit/7f889fa676b1285d6b3ae306b24651dab51482bf))
+* **crystal:** retire the activity index on every completion rail, not just the webhook ([0b9ea82](https://github.com/monygroupcorp/noema/commit/0b9ea82664275362d84336795f31dc274824e2df))
+* **crystal:** retire the activity index on every completion rail, not just the webhook ([cfd68b1](https://github.com/monygroupcorp/noema/commit/cfd68b10b48284d58d8bdbf7b2a8a5eb392a2205))
+* **crystal:** stop Census draining a studio over its own locked reservation ([5549572](https://github.com/monygroupcorp/noema/commit/55495723d07d3b603b9f13163ea826544c7a2c7a))
+* **crystal:** stop Census draining a studio over its own locked reservation ([5d78b1e](https://github.com/monygroupcorp/noema/commit/5d78b1ef0d0d59c72200faf46a6d4f6201f6f4e7))
+* **crystal:** stub lockedBalance on every fake Signorum in tests/ ([7857600](https://github.com/monygroupcorp/noema/commit/785760046a4b4f6b96f210ba705546f75f415be4))
+* **crystal:** wire Actorum into the production Census call ([f4205ad](https://github.com/monygroupcorp/noema/commit/f4205add0f4eb57df741c867d9144deed4201f3e))
+* **ledger:** log reserve's split-transaction abort over-lock ([#742](https://github.com/monygroupcorp/noema/issues/742)) ([0c40963](https://github.com/monygroupcorp/noema/commit/0c4096354fef94f0a308acdc61af876ffa6d993e))
+* **web:** the route census labels every public page public ([#745](https://github.com/monygroupcorp/noema/issues/745)) ([972848c](https://github.com/monygroupcorp/noema/commit/972848c3cb92a20a940d5aaafbc78767ee56c4fc))
+
 ## [5.35.0](https://github.com/monygroupcorp/noema/compare/v5.34.0...v5.35.0) (2026-11-21)
 
 
