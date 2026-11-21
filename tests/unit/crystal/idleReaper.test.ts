@@ -45,7 +45,10 @@ test('startIdleReaper does nothing when no pods are reapable', async () => {
 test('startIdleReaper forwards hasLiveActum through to the store on every sweep', async () => {
   const seen: unknown[] = []
   const store: MateriaStore = {
-    async reapIdle(_now, hasLiveActum) { seen.push(hasLiveActum); return [] },
+    async reapIdle(_now: Date, hasLiveActum?: (materiaId: string) => Promise<boolean>) {
+      seen.push(hasLiveActum)
+      return []
+    },
   } as unknown as MateriaStore
   const hasLiveActum = async (_id: string) => false
   const stop = startIdleReaper(store, async () => {}, 40, hasLiveActum)
