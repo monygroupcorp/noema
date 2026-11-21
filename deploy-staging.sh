@@ -32,10 +32,30 @@ CONTAINER_ALIAS="hyperbot-staging"
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-30}"
 HEALTH_CHECK_DELAY="${HEALTH_CHECK_DELAY:-3}"
 
+# Arcanum ceremony custody — the trusted-setup chain's .zkey files (host state, deliberately
+# NOT in the image; see docs/arcanum-ceremony.md). Staging gets its OWN custody dir, not
+# production's /opt/noema/ceremony: staging runs against its own MONGODB_URI (.env.staging),
+# so it has its own ceremony transcript, and pointing it at prod's custody would let a staging
+# CEREMONY_OPEN/CEREMONY_REOPEN write into the live ceremony's keys. Read-write: the sequencer
+# stores each verified contribution here as it lands. Empty is correct before a ceremony opens.
+CEREMONY_DIR="${CEREMONY_DIR:-/opt/noema/ceremony-staging}"
+CEREMONY_DIR_IN_CONTAINER="/var/lib/noema/ceremony"
+
+# Arcanum circuit setup artifacts (host state, NOT in the image: arcanum_0000.zkey and
+# arcanum.r1cs are gitignored — too large to commit, per docs/arcanum-ceremony.md). Read-only
+# and identical for every environment (same circuit), so staging defaults to production's copy
+# rather than requiring a second one on disk; override with ARCANUM_ARTIFACTS_DIR if that ever
+# changes. The app only reads arcanum_0000.zkey from here, and only at boot, and only on the
+# one deploy that sets CEREMONY_OPEN or CEREMONY_REOPEN.
+ARCANUM_ARTIFACTS_DIR="${ARCANUM_ARTIFACTS_DIR:-/opt/noema/arcanum-artifacts}"
+ARCANUM_ARTIFACTS_DIR_IN_CONTAINER="/var/lib/noema/arcanum-artifacts"
+
 # Logging
 LOG_DIR="/var/log/hyperbot"
 LOG_FILE="${LOG_DIR}/hyperbot-staging.log"
 mkdir -p "${LOG_DIR}"
+# Empty is the correct state before a ceremony opens; it fills as contributions land.
+mkdir -p "${CEREMONY_DIR}"
 
 log() { echo "[staging-deploy] $1" | tee -a "${LOG_FILE}"; }
 
@@ -117,7 +137,11 @@ fi
 log "Starting staging container..."
 docker run -d \
   --env-file "${ENV_FILE}" \
+  --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
+  --env ARCANUM_ROOT_ZKEY_PATH="${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}/arcanum_0000.zkey" \
   -v "${RUNPOD_SSH_KEY_SRC}:/home/node/.ssh/runpod:ro" \
+  -v "${CEREMONY_DIR}:${CEREMONY_DIR_IN_CONTAINER}" \
+  -v "${ARCANUM_ARTIFACTS_DIR}:${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}:ro" \
   --network "${NETWORK_NAME}" \
   --network-alias "${CONTAINER_ALIAS}" \
   --name "${STAGING_CONTAINER}" \
