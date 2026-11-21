@@ -73,3 +73,30 @@ test('update throws for unknown id', async () => {
     /not found/i
   )
 })
+
+// Clause 1 (noema/user-behaviour-corpus): an attempt leaves a record at creation
+// (status: 'nascens'), independent of whether it ever completes — statusCountsSince
+// is how attempts and completions get counted separately from that one record.
+test('statusCountsSince counts created-since acta by current status', async () => {
+  const store = new MemoryActorum()
+  const since = new Date(Date.now() - 60_000)
+  await store.create(makeActum({ id: 'a1', status: 'nascens' }))
+  await store.create(makeActum({ id: 'a2', status: 'nascens' }))
+  await store.update('a2', { status: 'completus' })
+  await store.create(makeActum({ id: 'a3', status: 'nascens' }))
+  await store.update('a3', { status: 'fractus' })
+
+  const counts = await store.statusCountsSince(since)
+  assert.equal(counts.nascens, 1)
+  assert.equal(counts.completus, 1)
+  assert.equal(counts.fractus, 1)
+})
+
+test('statusCountsSince excludes acta created before the cutoff', async () => {
+  const store = new MemoryActorum()
+  await store.create(makeActum({ id: 'old' }))
+
+  const future = new Date(Date.now() + 60_000)
+  const counts = await store.statusCountsSince(future)
+  assert.equal(Object.keys(counts).length, 0)
+})

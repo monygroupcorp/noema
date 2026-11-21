@@ -17,7 +17,7 @@ export {
   ApiRequestError,
 } from './api/core';
 
-export type { StoredAccount, SessionStore } from './api/session';
+export type { StoredAccount, SessionStore, BehaviourEventKind } from './api/session';
 export {
   commitment,
   setActivePurse,
@@ -31,6 +31,8 @@ export {
   dropActiveAccount,
   clearAllAccounts,
   takeLegacySession,
+  recordEvent,
+  reportClientError,
 } from './api/session';
 
 export * from './api/querela';

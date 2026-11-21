@@ -13,6 +13,9 @@ export interface QuerelaContext {
   runId?: string;
   actumId?: string;
   userAgent?: string;
+  /** Best-effort error text surfaced by the ErrorBoundary or a global error handler —
+   *  not typed by the user. See reportClientError() in ./session. */
+  clientError?: string;
 }
 
 // The admin triage surface (GET/PATCH /v1/admin/reports, querelaAdminRouter.ts) —
@@ -67,6 +70,7 @@ const querelaApi = {
         description,
         capturedState: { route: context.route, runId: context.runId, actumId: context.actumId },
         userAgent: context.userAgent,
+        ...(context.clientError ? { clientError: context.clientError } : {}),
       }),
     }).then(j<{ id: string }>),
 

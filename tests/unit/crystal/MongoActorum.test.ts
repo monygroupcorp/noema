@@ -220,3 +220,26 @@ test('findByExternusJobId finds actum whose externusJobId was set via update', a
   assert.ok(found)
   assert.equal(found.id, a.id)
 })
+
+// ── statusCountsSince (clause 1, noema/user-behaviour-corpus) ──────────────────
+
+test('statusCountsSince groups created-since acta by current status', async () => {
+  const since = new Date(Date.now() - 60_000)
+  await acta.create(makeActum({ status: 'nascens' }))
+  const toComplete = await acta.create(makeActum({ status: 'nascens' }))
+  await acta.update(toComplete.id, { status: 'completus' })
+  const toFail = await acta.create(makeActum({ status: 'nascens' }))
+  await acta.update(toFail.id, { status: 'fractus' })
+
+  const counts = await acta.statusCountsSince(since)
+  assert.equal(counts.nascens, 1)
+  assert.equal(counts.completus, 1)
+  assert.equal(counts.fractus, 1)
+})
+
+test('statusCountsSince excludes acta created before the cutoff', async () => {
+  await acta.create(makeActum())
+  const future = new Date(Date.now() + 60_000)
+  const counts = await acta.statusCountsSince(future)
+  assert.equal(Object.keys(counts).length, 0)
+})

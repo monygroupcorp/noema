@@ -21,6 +21,7 @@ import projectsApi from './projects';
 import publishingApi from './publishing';
 import pursesApi from './purses';
 import querelaApi from './querela';
+import { recordEvent, reportClientError } from './session';
 import secretsApi from './secrets';
 import sponsorshipsApi from './sponsorships';
 import statusApi from './status';
@@ -59,4 +60,7 @@ export const api = {
   auth: authApi,
   ...tabulaApi,
   ...querelaApi,
+  // noema/user-behaviour-corpus — see the module-level functions in ./session.
+  recordEvent,
+  reportClientError,
 };

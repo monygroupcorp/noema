@@ -209,6 +209,10 @@ const KNOWN_UNDECLARED = [
   '/v1/admin/reports',
   '/v1/auth',
   '/v1/colloquia',
+  // Behaviour-corpus intake (catalog view / quote / sign-in / funding attempt) — a small
+  // hand-rolled router, not built on the CrystalApi facade, same precedent as '/v1/reports'
+  // below: internal telemetry, not a surface an agent calls.
+  '/v1/events',
   // Partner program intake — a small hand-rolled router, not built on the CrystalApi
   // facade, same precedent as '/v1/reports' below.
   '/v1/partner-requests',
