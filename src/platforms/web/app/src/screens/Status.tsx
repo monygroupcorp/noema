@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
+import { api, getActivitySnapshot, retryActivity, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
 import { activityDoorHref, activityDoorLabel, activityKindLabel, queueLabel } from '../lib/muse';
 
 // A released run is the OTHER terminal outcome besides a charge: the reservation was
@@ -97,7 +97,7 @@ export function Status() {
   // in-flight and settled rows (CrystalApi#listActivity sorts on createdAt before doors
   // are attached), so rendering it in order is the one list REF-9 asks for — no
   // re-partition into separate running/finished bands.
-  const { rows: activityRows, loaded: activityLoaded } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
+  const { rows: activityRows, loaded: activityLoaded, error: activityError } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
 
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -177,6 +177,11 @@ export function Status() {
         <div className="sectionhead">Activity</div>
         {!activityLoaded ? (
           <div className="empty"><div className="t">Loading your activity…</div></div>
+        ) : activityError && activityRows.length === 0 ? (
+          <div className="empty">
+            <div className="t">Couldn’t load your activity.</div>
+            <button className="btn ghost" onClick={retryActivity}>Try again</button>
+          </div>
         ) : activityRows.length === 0 ? (
           <div className="empty">
             {/* One line that says what will appear here, and the one action that fills it: the

@@ -97,19 +97,33 @@ export default activityApi;
 // callers wrap these two functions in their own `useSyncExternalStore`. This is the
 // app's ONE recurring poll — deliberately slow (60s-class) and paused while hidden.
 const ACTIVITY_POLL_MS = 60_000;
-let activitySnapshot: { rows: ActivityRow[]; loaded: boolean } = { rows: [], loaded: false };
+let activitySnapshot: { rows: ActivityRow[]; loaded: boolean; error: boolean } = { rows: [], loaded: false, error: false };
 let activityListeners = new Set<() => void>();
 let activityTimer: ReturnType<typeof setInterval> | null = null;
 
 function setActivitySnapshot(rows: ActivityRow[]) {
-  activitySnapshot = { rows, loaded: true };
+  activitySnapshot = { rows, loaded: true, error: false };
   activityListeners.forEach((fn) => fn());
 }
 
 function fetchActivityOnce() {
   activityApi.activity({ limit: 20 })
     .then((p) => setActivitySnapshot(p.activity))
-    .catch(() => { /* keep last-known rows; the next tick tries again */ });
+    .catch(() => {
+      // A later tick keeps whatever rows the last success left — a failed refresh is no
+      // reason to blank good data, and nothing here needs to change. But the FIRST fetch has
+      // no rows to keep, and leaving `loaded` false forever is what let /status hold
+      // "Loading…" past the point where the server had already answered, badly: the caller
+      // needs a way to tell "still waiting" from "asked, and it failed" (D-62).
+      if (activitySnapshot.loaded) return;
+      activitySnapshot = { rows: [], loaded: true, error: true };
+      activityListeners.forEach((fn) => fn());
+    });
+}
+
+/** Forces an immediate re-read, for a caller offering the visitor a way to retry (D-62). */
+export function retryActivity() {
+  fetchActivityOnce();
 }
 
 function ensureActivityPolling() {
@@ -136,6 +150,6 @@ export function subscribeActivity(fn: () => void): () => void {
 /** The shared activity store's current snapshot — for `useSyncExternalStore`'s 2nd/3rd arg.
  *  `loaded` distinguishes "not fetched yet" from "fetched, zero rows" so a caller doesn't
  *  flash an empty state before the first response lands. */
-export function getActivitySnapshot(): { rows: ActivityRow[]; loaded: boolean } {
+export function getActivitySnapshot(): { rows: ActivityRow[]; loaded: boolean; error: boolean } {
   return activitySnapshot;
 }
