@@ -213,6 +213,17 @@ export interface Actorum {
    */
   findByCompositum(parentId: string): Promise<Actum[]>
   /**
+   * Non-terminal (nascens/agens) acta currently paired to this Materia — stamped at dispatch
+   * (`Cursor.run` binds `materiamId` before the job starts, not just at completion). `Census`
+   * reads this to keep a studio's `drainUntil` from going stale under a run that is genuinely
+   * still going: the deadline exists for a pod that never makes it back to idle, not for one
+   * actively finishing a real job, so each tick a live actum is found here pushes it back out.
+   *
+   * Optional, the same way `countByIdsWithStatus` is: a store that omits it gets today's
+   * behavior unchanged — `drainUntil` is a fixed deadline with no run-aware extension.
+   */
+  findLiveByMateriamId?(materiamId: string): Promise<Actum[]>
+  /**
    * How many of `ids` currently hold one of `statuses` — answered by the store in ONE query
    * rather than a `findById` per id. The caller names the predicate so this method carries no
    * status opinion of its own (unlike `findInFlight`, which also requires an `externusJobId`).

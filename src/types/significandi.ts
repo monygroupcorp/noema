@@ -189,6 +189,14 @@ export interface Signorum {
    */
   balance(by: { animaId: string } | { commitment: string }): Promise<bigint>
   /**
+   * Currently-locked valor for an identity — signa this identity reserved against its OWN
+   * open actum(s) (`status: 'locked'`), not yet settled or released. `Census` nets this back
+   * onto `balance()` when deciding whether a warm-pod billing shortfall is real: a host's own
+   * in-flight reservation locks its own signa out of `balance()`, and without this, Census
+   * reads that as insolvency and drains the very studio the reservation is paying for.
+   */
+  lockedBalance(by: { animaId: string } | { commitment: string }): Promise<bigint>
+  /**
    * The authorized budget for a Modo session — the sum of VALID `tessera` valor
    * scoped to `modoId` (0n if none). The tessera is the anonymous bearer budget a
    * studio opens with (no animaId/commitment, so it's invisible to `balance`);

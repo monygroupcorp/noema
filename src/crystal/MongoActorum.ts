@@ -116,6 +116,13 @@ export class MongoActorum implements Actorum {
     return docs.map(fromDoc)
   }
 
+  async findLiveByMateriamId(materiamId: string): Promise<Actum[]> {
+    const docs = await this.col
+      .find({ materiamId, status: { $in: ['nascens', 'agens'] } })
+      .toArray()
+    return docs.map(fromDoc)
+  }
+
   // One counting query for the whole id set, and no documents come back: the caller wants a
   // number, and its id sets are whole collections (a 10k-piece run is 10k ids). `id` is the
   // lookup key every other read here uses, so the `$in` rides the same index.

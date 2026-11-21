@@ -63,6 +63,12 @@ export class MemoryActorum implements Actorum {
     return Array.from(this.store.values()).filter(a => a.compositum?.parentId === parentId)
   }
 
+  async findLiveByMateriamId(materiamId: string): Promise<Actum[]> {
+    return Array.from(this.store.values()).filter(
+      a => a.materiamId === materiamId && (a.status === 'nascens' || a.status === 'agens')
+    )
+  }
+
   async countByIdsWithStatus(ids: string[], statuses: ActumStatus[]): Promise<number> {
     const wanted = new Set<string>(statuses)
     let n = 0

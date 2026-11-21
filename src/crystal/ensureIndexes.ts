@@ -10,6 +10,9 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('acta').createIndex({ id: 1 }, { unique: true }),
     db.collection('acta').createIndex({ externusJobId: 1 }, { sparse: true }),
     db.collection('acta').createIndex({ status: 1, expirat: 1 }),
+    // Census's drain-deadline arm: is a live (nascens/agens) actum paired to this pod
+    // right now? Queried once per billable Hospitium per tick.
+    db.collection('acta').createIndex({ materiamId: 1, status: 1 }, { sparse: true }),
 
     // loci — the warm-pod line. `actumId` unique: a run holds one place, which is what
     // makes `enqueue` idempotent. The compound key is what `claim` sorts on — the oldest

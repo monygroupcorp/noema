@@ -2,6 +2,7 @@ import type { MateriaStore, Materia } from '../types/materia.js'
 import type { HospitiumStore, Hospitium } from '../types/hospitium.js'
 import type { Signorum } from '../types/significandi.js'
 import type { ModoStore } from '../types/modo.js'
+import type { Actorum } from '../types/cursus.js'
 import type { Nexus } from '../types/nexus.js'
 import { impetusForPodMs } from '../ledger/rates.js'
 import { bus } from '../lib/bus.js'
@@ -19,9 +20,11 @@ const BILLABLE_STATUSES = new Set(['idle', 'active', 'provisioning', 'bootstrapp
  * deadline is needed at all.
  *
  * 15 minutes is not a new policy — it is the actum expiry the platform already
- * enforces (`DEFAULT_EXPIRAT_MS` in ActumInceptor). A gen still running past its own
- * expiry is one the expiry reaper has already failed, so a studio still draining past
- * that window is holding nothing this deadline could cut short.
+ * enforces (`DEFAULT_EXPIRAT_MS` in ActumInceptor) for a run with no `Cursor.terminus()`
+ * of its own. That is NOT every run, though (a training job's terminus can run far
+ * longer and is still legitimately `agens`), so this deadline alone is not reliable: see
+ * `findLiveByMateriamId` below, which keeps pushing it out for as long as a real actum is
+ * still live on the pod, rather than letting it cut a genuinely still-running job short.
  */
 export const DRAIN_GRACE_MS = 15 * 60 * 1000
 
@@ -34,6 +37,10 @@ export interface CensusDeps {
    *  (`maxImpetus` watchdog): a studio whose accrued spend crosses its authorized
    *  `sessionBudget` drains, independent of the host's balance. Absent → balance-only. */
   modos?: ModoStore
+  /** Actum store — when present, Census keeps a draining studio's `drainUntil` from going
+   *  stale under a run that is genuinely still going (`findLiveByMateriamId`). Absent →
+   *  `drainUntil` is a fixed deadline, same as before this dep existed. */
+  acta?: Pick<Actorum, 'findLiveByMateriamId'>
 }
 
 /**
@@ -114,8 +121,11 @@ export async function censere(
     return { requested: 0n, charged: 0n, drainEngaged: false }
   }
 
-  // Clamp to available balance — the hook is pure and cannot read balance, so
-  // clamping happens here in the side-effect layer.
+  // Clamp to available (valid) balance — the hook is pure and cannot read balance, so
+  // clamping happens here in the side-effect layer. Actual spend can only draw on VALID
+  // signa; a signum the host has locked against their own open actum is still committed
+  // to that actum (and may need to go back to them if it fails) — unchanged by the
+  // shortfall netting below.
   const balance = await deps.signorum.balance(hospitium.hostKey)
   const charged = balance < requested ? (balance > 0n ? balance : 0n) : requested
 
@@ -146,8 +156,15 @@ export async function censere(
   //      spend (warm-time `costAccrued` + run `impetusAccrued`) crossed the
   //      authorized session budget (the tessera valor). Only when a `modos` store
   //      is wired; absent → balance-only behavior (unchanged).
-  const balanceShortfall = charged < requested
+  // A clamp is NOT automatically a real shortfall: if the host's own open reservation(s)
+  // (e.g. the SAME run this studio is warming for) have locked the rest of their balance,
+  // that valor is still theirs — just briefly unavailable pending that actum's own
+  // settle/release. Net it back before calling this insolvency, or Census drains a studio
+  // over money its own host hasn't actually lost (noema census-drain-vs-own-busy-pod).
+  const lockedBalance = charged < requested ? await deps.signorum.lockedBalance(hospitium.hostKey) : 0n
+  const balanceShortfall = charged < requested && (balance + lockedBalance) < requested
   const budgetExhausted = await isOverBudget(deps, materia, newCost)
+
   let drainEngaged = false
   if ((balanceShortfall || budgetExhausted) && !materia.drainOnly) {
     await deps.materiae.update(materia.id, {
@@ -168,6 +185,20 @@ export async function censere(
     await deps.materiae.update(materia.id, {
       drainUntil: new Date(now.getTime() + DRAIN_GRACE_MS),
     }).catch(() => {})
+  } else if (materia.drainOnly && materia.drainUntil) {
+    // Already draining with a deadline already on it: is a run genuinely still going on
+    // THIS exact pod right now? The deadline exists to bound a studio that NEVER makes it
+    // back to idle (stuck, abandoned, runner gone) — not to cut a real job short, so as
+    // long as one is live here, push it back out each tick rather than let the idle
+    // reaper's stranded arm win a race against it finishing.
+    const liveActum = deps.acta?.findLiveByMateriamId
+      ? (await deps.acta.findLiveByMateriamId(materia.id).catch(() => [])).length > 0
+      : false
+    if (liveActum) {
+      await deps.materiae.update(materia.id, {
+        drainUntil: new Date(now.getTime() + DRAIN_GRACE_MS),
+      }).catch(() => {})
+    }
   }
 
   return { requested, charged, drainEngaged }
