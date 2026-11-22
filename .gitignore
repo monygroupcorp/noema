@@ -74,6 +74,7 @@ docs/reference/old-workflows/
 docs/ops/*
 !docs/ops/production-deploy.md
 !docs/ops/staging-deploy.md
+!docs/ops/origin-firewall-cloudflare.md
 !docs/benchmarks/
 docs/benchmarks/*
 !docs/benchmarks/2026-05-06-runpod-vs-vastai-shootout.md
