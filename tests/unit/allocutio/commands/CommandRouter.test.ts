@@ -70,6 +70,13 @@ test('/chat and /flows enter execute and ack', async () => {
   assert.equal(calls.ack.length, 2)
 })
 
+test('/train enters execute straight at the training modus, and acks', async () => {
+  const { router, calls } = make()
+  await router.dispatch('u1', 456, '/train', 50)
+  assert.deepEqual(calls.enter, [{ userId: 'u1', state: { modusId: 'modus.aitoolkit-training', aditus: {}, browsePageIndex: 0 } }])
+  assert.deepEqual(calls.ack, [{ chatId: 456, messageId: 50 }])
+})
+
 test('/start sends the start screen and acks', async () => {
   const { router, calls } = make()
   await router.dispatch('u1', 456, '/start', 50)

@@ -3,6 +3,7 @@ import type { EnvelopeMediaType } from '../envelopeMedia.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
 import { CANON_VERBS } from '../../../crystal/canonVerbs.js'
+import { TRAINING_MODUS_ID } from '../../../crystal/MandatumRunner.js'
 
 export { HELP_TEXT }
 
@@ -98,7 +99,7 @@ const LINK_PAYLOAD_RE = /^link_([A-Za-z0-9_-]+)$/
 
 /** Every command this router answers. Kept beside the switch it mirrors. */
 const KNOWN_COMMANDS = new Set([
-  '/start', '/make', '/run', '/bind', '/chat', '/flows', '/arm',
+  '/start', '/make', '/run', '/bind', '/chat', '/flows', '/train', '/arm',
   '/cancel', '/stop', '/status', '/wallet', '/recover', '/help',
   '/collect', '/dataset',
 ])
@@ -279,6 +280,19 @@ export class CommandRouter {
 
       case '/flows':
         await this.deps.enterExecute(userId)
+        ack()
+        return
+
+      case '/train':
+        // No canon verb covers "trains a LoRA" (modi.ts), so this goes straight at the
+        // one training modus rather than through CANON_VERBS — unlike /make and /chat,
+        // which resolve a verb that could be rebound.
+        await this.deps.enterExecute(userId, {
+          modusId: TRAINING_MODUS_ID,
+          aditus: {},
+          browsePageIndex: 0,
+          ...entry,
+        })
         ack()
         return
 

@@ -24,6 +24,7 @@ noema
   /bind <verb> <flow>   — rebind a command to a flow
   /chat                 — chat with an AI model
   /flows                — browse all available tools
+  /train                — train a LoRA on a dataset
   /arm                  — set up a warm studio
 
   Collecting
