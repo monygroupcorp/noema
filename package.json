@@ -5,7 +5,7 @@
     "dev": "bash scripts/run-crystal.sh",
     "test": "npm run test:hermetic",
     "test:unit": "npx tsx --test tests/unit/**/*.test.ts tests/unit/**/**/*.test.ts",
-    "test:crystal": "./scripts/run-with-env.sh ./scripts/run-tests.sh 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts' 'tests/unit/flow/MongoFlowContextStore.test.ts'",
+    "test:crystal": "./scripts/test-crystal.sh 'tests/unit/crystal/*.test.ts' 'tests/unit/crystal/**/*.test.ts' 'tests/unit/lib/**/*.test.ts' 'tests/unit/api/**/*.test.ts' 'tests/unit/analytics/**/*.test.ts' 'tests/unit/flow/MongoFlowContextStore.test.ts'",
     "dashboard": "node scripts/dashboard.js",
     "guard:claims": "node scripts/guard-claims.mjs",
     "guard:browser-storage": "node scripts/guard-browser-storage.mjs",
