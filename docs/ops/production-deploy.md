@@ -28,6 +28,13 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
 - **Health endpoint:** `GET /api/health` → `{ ok: true, v: <BUILD_VERSION> }`
   (`src/index.ts:774`). Both the legacy and new app serve this identically; `deploy.sh`'s
   own health-check loop depends on it.
+- **Live database: `noemaplane`.** The crystal app reads `process.env.DB_NAME`
+  (`src/index.ts:165`), defaulting to `noema` if unset. `noema` is NOT the live database —
+  it holds only stale fake-mode seed data from 2026-06-03. The real prod data is in
+  `noemaplane`. `/opt/noema/.env` on the droplet must set `DB_NAME=noemaplane` explicitly;
+  a leftover `MONGO_DB_NAME` var there (the legacy app's name for this value) is not read
+  by this app and setting only that one is silent breakage. See `.env-example`'s `§2
+  SILENT-WRONG` entry for the full explanation.
 
 ## Deploy flow (legacy pipeline, as it exists today)
 
