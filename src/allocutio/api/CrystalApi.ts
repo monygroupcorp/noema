@@ -60,6 +60,7 @@ import type { CommercialVerdict } from '../../crystal/modelLicense.js'
 import type { ThresholdBand, TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
 import type { StripeGateway } from '../../api/webhooks/stripeWebhook.js'
+import type { ProMonthlyGateway, ProMonthlySubscriptionStore } from '../../api/webhooks/stripeProMonthlyWebhook.js'
 import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
 import type { Tabularum } from '../../types/tabula.js'
@@ -253,6 +254,13 @@ export interface CrystalApiDeps {
    *  Idempotency needs no injected store: it is the DURABLE unique partial indexes on
    *  `Signum.testis` (auctor:'stripe:purchase') + `Reditus.chargeRef` (origo:'fiat'). */
   stripe?: StripeGateway
+  /** Pro Monthly (Option B) subscription rail. `stripeProMonthly` mirrors `stripe` (test
+   *  override, else built from the SAME env config); `proMonthlySubscriptions` is the durable
+   *  Stripe-subscription→anima map (`ensureIndexes` + the `checkout.session.completed` /
+   *  `invoice.paid` / `customer.subscription.deleted` handlers need it). Absent
+   *  `proMonthlySubscriptions` → the rail reports 503, same as an absent `redituum`. */
+  stripeProMonthly?: ProMonthlyGateway
+  proMonthlySubscriptions?: Pick<ProMonthlySubscriptionStore, 'activate' | 'findBySubscriptionId' | 'cancel'>
 }
 
 /** Inputs to start a Collection (a Collectio): a base modus expanded over a Tractus[] grid.

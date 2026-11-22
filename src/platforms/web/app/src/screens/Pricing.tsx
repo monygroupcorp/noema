@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
 import { entryPath } from '../lib/entry';
-import { api, type ArcanumConfig, type Pack } from '../lib/api';
+import { api, type ArcanumConfig, type Pack, type ProMonthlyPlan } from '../lib/api';
 import { purseIsOff } from '../lib/purseSwitch';
+import { canCheckout, buildProMonthlySubscribeRequest, signInThenSubscribe } from '../lib/checkout';
+import { useSession } from '../state/session';
 import './landing.css'; // reuse .topnav / .btn chrome
 import './doc.css';
 
@@ -43,6 +45,17 @@ export function Pricing() {
   const [purse, setPurse] = useState<ArcanumConfig | null>(null);
   const purseOff = purseIsOff(purse);
 
+  // Pro Monthly (Option B) — the plan renders from the single server source
+  // (GET /v1/payments/promonthly), the same stripePacks catalog the pack rail reads.
+  const { session, ready } = useSession();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [plan, setPlan] = useState<ProMonthlyPlan | null>(null);
+  const [subscribeBusy, setSubscribeBusy] = useState(false);
+  const [subscribeErr, setSubscribeErr] = useState<string | null>(null);
+  const promonthlyStatus = searchParams.get('promonthly');
+  const autoSubscribeFired = useRef(false);
+
   useEffect(() => {
     let live = true;
     api.listPacks()
@@ -51,8 +64,45 @@ export function Pricing() {
     api.arcanum.config()
       .then((c) => { if (live) setPurse(c); })
       .catch(() => {});
+    api.getProMonthlyPlan()
+      .then((p) => { if (live) setPlan(p); })
+      .catch(() => {});
     return () => { live = false; };
   }, []);
+
+  async function subscribe() {
+    if (!canCheckout(session) || subscribeBusy) return;
+    setSubscribeBusy(true); setSubscribeErr(null);
+    try {
+      const { url } = await api.createProMonthlyCheckoutSession(buildProMonthlySubscribeRequest(window.location.origin));
+      window.location.href = url;
+    } catch (e) {
+      setSubscribeErr(e instanceof Error ? e.message : String(e));
+      setSubscribeBusy(false);
+    }
+  }
+
+  // The button's own click: an identified caller starts checkout directly; an anon/purse
+  // caller is sent to the door and handed straight back here to finish (same shape as a pack's
+  // signInThenBuy) rather than failing silently on a 401 it never had the identity to avoid.
+  function onSubscribeClick() {
+    if (!canCheckout(session)) { navigate(signInThenSubscribe()); return; }
+    subscribe();
+  }
+
+  // Arriving back from sign-in with ?promonthly=1 means the visitor already pressed Subscribe
+  // once and was sent to the door for lack of a session — now that one exists, finish the job
+  // instead of making them press it again (same pattern as Funding's pack auto-buy).
+  useEffect(() => {
+    if (!ready || autoSubscribeFired.current || promonthlyStatus !== '1') return;
+    if (!canCheckout(session)) return;
+    autoSubscribeFired.current = true;
+    // Drop the flag from the URL before leaving — otherwise coming BACK from the door (or from
+    // Stripe) lands on this URL again and re-fires the same subscribe.
+    window.history.replaceState({}, '', window.location.pathname);
+    subscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, session, promonthlyStatus]);
 
   return (
     <div className="doc-page">
@@ -70,11 +120,11 @@ export function Pricing() {
       <article className="prose">
         <h1>Simple pricing. Spend credits anywhere.</h1>
         <p>
-          Credits are your compute currency. Spend them on any modality. No subscription — buy a
-          pack, spend it whenever.
+          Credits are your compute currency. Spend them on any modality. Buy a pack and spend it
+          whenever, or subscribe to Pro Monthly for a standing balance that renews itself.
         </p>
 
-        <h2>Buy a credit pack. No subscription.</h2>
+        <h2>Buy a credit pack, or subscribe monthly.</h2>
         <p>
           Credits work across every modality — text generation, image generation, video, and audio.
           You buy once, spend anywhere. Credits don't expire. Bigger packs give you a better rate —
@@ -151,6 +201,49 @@ export function Pricing() {
           ))}
         </div>
 
+        <h2>Pro Monthly</h2>
+        <p>
+          Prefer not to buy packs one at a time? Pro Monthly is a recurring plan: one card charge
+          a month, a fixed credit grant each cycle, unused credits roll over for up to two months.
+        </p>
+        {plan && (
+          <div
+            style={{
+              border: '1px solid var(--line, rgba(128,128,128,.25))',
+              borderRadius: '12px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              maxWidth: '320px',
+            }}
+          >
+            <h3 style={{ margin: 0 }}>{plan.label}</h3>
+            <div style={{ fontSize: '18px', fontWeight: 600 }}>
+              ${plan.usd}/mo — {fmt(plan.creditsPerMonth)} credits/cycle
+            </div>
+            <p style={{ margin: 0, color: 'var(--muted)' }}>
+              Rolls over for up to {plan.rolloverCycles - 1} extra month{plan.rolloverCycles - 1 === 1 ? '' : 's'}: a
+              renewal is throttled only once your standing balance would exceed {plan.rolloverCycles} cycles'
+              worth.
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+              <li>Renews automatically each cycle</li>
+              <li>Spend across every modality</li>
+            </ul>
+            <button
+              type="button"
+              className="btn"
+              onClick={onSubscribeClick}
+              disabled={subscribeBusy}
+              style={{ marginTop: 'auto' }}
+            >
+              {subscribeBusy ? 'Taking you to Stripe…' : `Subscribe to ${plan.label}`}
+            </button>
+            {subscribeErr && <p style={{ margin: 0, color: 'var(--danger, #c33)' }}>{subscribeErr}</p>}
+          </div>
+        )}
+
         <h2>Private spending</h2>
         <p>
           Anonymity depends on how you fund. A fresh or shielded on-chain wallet puts no identity
@@ -192,6 +285,12 @@ export function Pricing() {
           have been spent, in whole or in part, the spent portion is non-refundable — they're a
           prepaid compute balance, not a subscription. If you have an issue, contact us and we'll
           work it out.
+        </p>
+
+        <h3>Can I cancel Pro Monthly?</h3>
+        <p>
+          Yes — contact us and we'll cancel it. Credits already granted are yours to spend; the
+          subscription simply stops renewing, the same way canceling any Stripe subscription does.
         </p>
 
         <h3>What's the difference between a purse credit and a regular credit?</h3>

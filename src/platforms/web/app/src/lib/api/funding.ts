@@ -27,6 +27,16 @@ export interface CheckoutSession {
   sessionId: string;
 }
 
+// The public Pro Monthly plan (GET /v1/payments/promonthly) — mirrors the backend ProMonthlyView.
+// Display only: the monthly charge + grant stay server-authoritative, keyed off this one plan id.
+export interface ProMonthlyPlan {
+  id: string;
+  usd: number;
+  creditsPerMonth: number;
+  rolloverCycles: number;
+  label: string;
+}
+
 // A deposit quote (POST /v1/deposit/quote) — informational; the webhook credit is authoritative.
 export interface DepositQuote {
   chainId: number | string;
@@ -81,6 +91,18 @@ const fundingApi = {
   // payments.identity_required for an anon/purse caller (a fiat pack can't fund a purse).
   createCheckoutSession: (body: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: 'telegram' }) =>
     fetch('/v1/payments/checkout', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      .then(j<CheckoutSession>),
+
+  // ── Pro Monthly subscription (Option B) — public plan, identified checkout ──
+  // GET /v1/payments/promonthly — the ratified Pro Monthly plan for DISPLAY, sourced from the
+  // same server stripePacks catalog the pack rail reads.
+  getProMonthlyPlan: () => fetch('/v1/payments/promonthly').then(j<{ plan: ProMonthlyPlan }>).then((r) => r.plan),
+  // POST /v1/payments/promonthly/checkout — create a hosted Stripe Checkout session (mode:
+  // subscription). Server-priced; 401 payments.identity_required for an anon/purse caller (a
+  // subscription can't fund a purse). Impetus is granted each cycle only by the signature-verified
+  // webhook, never here.
+  createProMonthlyCheckoutSession: (body: { successUrl?: string; cancelUrl?: string } = {}) =>
+    fetch('/v1/payments/promonthly/checkout', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       .then(j<CheckoutSession>),
 };
 
