@@ -28,6 +28,22 @@ function cleanAditus(a: Aditus): Aditus {
   return out;
 }
 
+/** A query-string value is always a string; cast it to match the field's declared JSON-Schema
+ *  type so a launch link can seed a numeric/boolean aditus field, not just text ones. An
+ *  unparseable number/boolean falls back to the raw string rather than dropping the value. */
+export function coerceQueryValue(raw: string, type: string | undefined): string | number | boolean {
+  if (type === 'integer' || type === 'number') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  }
+  if (type === 'boolean') {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return raw;
+  }
+  return raw;
+}
+
 // ── Live LoRA trigger-word highlight (composer courtesy — see noema-061) ────────
 // The concierge's prompt string can carry `<lora:name:weight>` syntax, but nobody
 // asks the USER to type that — they just type the trigger word, and the serving
@@ -281,8 +297,14 @@ export function Card() {
       setFlow(f);
       const init: Aditus = {};
       for (const [k, p] of Object.entries(f.input?.properties ?? {})) {
-        if (p.default !== undefined) init[k] = p.default;
-        else if (k === 'prompt') init[k] = preloadPrompt || 'a low-poly n64-style dragon perched on a neon temple, dusk';
+        // A gallery example (or any other launch link) seeds a field by name in the query
+        // string — the general form of what `prompt` alone used to carry (this also covers
+        // `preloadPrompt`, since that is itself just `params.get('prompt')`). `prompt` keeps
+        // its own fallback below so a bare /card still opens with something to look at.
+        const fromQuery = params.get(k);
+        if (fromQuery !== null) init[k] = coerceQueryValue(fromQuery, p.type);
+        else if (p.default !== undefined) init[k] = p.default;
+        else if (k === 'prompt') init[k] = 'a low-poly n64-style dragon perched on a neon temple, dusk';
         else init[k] = '';
       }
       // Overlay the caller's saved defaults for this flow — the autosaved in-progress
