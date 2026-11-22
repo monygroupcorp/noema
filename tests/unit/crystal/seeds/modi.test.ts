@@ -138,13 +138,14 @@ test('chatgpt / dalle declare their ApiCursor capability via __capability', () =
   assert.equal(MODUS_DALLE_III.aditus.__capability?.default, 'image')
 })
 
-test('gpt-image modus is the canon openai image lane (prompt in, image out, flat 50n)', () => {
+test('gpt-image modus is the canon openai image lane (prompt in, image out, usage-metered up to a reserve)', () => {
   assert.equal(MODUS_GPT_IMAGE.id, 'modus.gpt-image')
   assert.equal(MODUS_GPT_IMAGE.ministerium, 'openai')
   assert.equal(MODUS_GPT_IMAGE.genus, 'atomicus')
   assert.equal(MODUS_GPT_IMAGE.deliveryMode, 'sync')
   assert.equal(MODUS_GPT_IMAGE.canonica, true)
-  assert.equal(MODUS_GPT_IMAGE.impetusFixum, 50n)
+  // The reserve ceiling, not the charge: ApiCursor meters the real cost off response usage.
+  assert.equal(MODUS_GPT_IMAGE.impetusFixum, 1200n)
   assert.equal(MODUS_GPT_IMAGE.aditus.__capability?.default, 'image')
   assert.equal(MODUS_GPT_IMAGE.aditus.prompt?.required, true)
   assert.equal(MODUS_GPT_IMAGE.exitus.image?.type, 'image')
@@ -179,6 +180,11 @@ test('gpt-image-edit modus is openai imageEdit with image+prompt in, image out',
   assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.image?.required, true)
   assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.prompt?.required, true)
   assert.equal(MODUS_GPT_IMAGE_EDIT.exitus.image?.type, 'image')
+  // Current OpenAI image-edit model (gpt-image-1 is a generation behind) — the quality/consistency
+  // lane, since an edit is reworking a specific existing image rather than drawing from scratch.
+  assert.equal(MODUS_GPT_IMAGE_EDIT.aditus.model?.default, 'gpt-image-2.6-sunburst')
+  // The reserve ceiling, not the charge: ApiCursor meters the real cost off response usage.
+  assert.equal(MODUS_GPT_IMAGE_EDIT.impetusFixum, 600n)
 })
 
 test('openrouter chat modus proves the descriptor generalizes (new ministerium, chat capability)', () => {

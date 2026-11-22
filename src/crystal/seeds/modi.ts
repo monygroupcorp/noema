@@ -88,16 +88,22 @@ export const MODUS_DALLE_III: Modus = make({
 // the option that runs for any account with no pod and no setup. No `model` port: the model
 // comes from the provider's image-capability `defaultModel`, so the lane moves with the provider
 // rather than with a seeded string.
+//
+// `impetusFixum` is a RESERVE ceiling, not the charge: ApiCursor meters the real cost off the
+// response's own token usage (`imageTokenImpetus`), then clamps to this reserve. 1200n (~$0.40)
+// covers OpenAI's published gpt-image-2.6 1024x1024 costs through `high` quality (~$0.21) with
+// headroom for `xhigh` and the larger declared sizes, without holding an unreasonably large
+// balance against a request that may turn out to be a cheap `low`-quality one.
 export const MODUS_GPT_IMAGE: Modus = make({
   id: 'modus.gpt-image',
   nomen: 'GPT Image — image generation',
-  descriptio: 'GPT Image text-to-image via OpenAI — a hosted API image generator (no GPU, fixed cost). Pick it for quick hosted image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
+  descriptio: 'GPT Image text-to-image via OpenAI — a hosted API image generator (no GPU, no pod setup; billed per the tokens the image actually used). Pick it for quick hosted image gen; use the pod flows (FLUX/SDXL) for LoRAs and local control.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
   deliveryMode: 'sync',
   canonica: true,
-  impetusFixum: 50n,
+  impetusFixum: 1200n,
 
   aditus: {
     prompt:  { type: 'text', required: true,  description: 'Image description' },
@@ -111,27 +117,31 @@ export const MODUS_GPT_IMAGE: Modus = make({
   },
 
   natum:   new Date('2026-08-25'),
-  mutatum: new Date('2026-08-25'),
+  mutatum: new Date('2026-11-19'),
 })
 
 // OpenAI image editing (gpt-image edit): input image (+ optional mask) + prompt → edited image.
 // Closes the imageEdit / gpt-image-compose VERIFY seam. Same `ministerium: 'openai'`, capability 'imageEdit'.
+//
+// No `quality`/`size` port — OpenAI's server-side default governs an edit, so its token spend
+// (and therefore its reserve) does not have to cover the generation lane's full low..xhigh
+// range. 600n (~$0.20) leaves headroom over a typical default-quality edit's cost.
 export const MODUS_GPT_IMAGE_EDIT: Modus = make({
   id: 'modus.gpt-image-edit',
   nomen: 'GPT Image — image editing',
-  descriptio: 'GPT Image editing via OpenAI — edits a source image from a text instruction, with an optional mask for local edits. Pick it for hosted OpenAI edits; use FLUX Kontext/Klein for pod-side, LoRA-capable edits.',
+  descriptio: 'GPT Image editing via OpenAI — edits a source image from a text instruction, with an optional mask for local edits, billed per the tokens the edit actually used. Pick it for hosted OpenAI edits; use FLUX Kontext/Klein for pod-side, LoRA-capable edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   ministerium: 'openai',
   deliveryMode: 'sync',
   canonica: true,
-  impetusFixum: 50n,
+  impetusFixum: 600n,
 
   aditus: {
     image:  { type: 'image', required: true,  description: 'The source image to edit' },
     prompt: { type: 'text',  required: true,  description: 'What to change / the edit instruction' },
     mask:   { type: 'image', required: false, description: 'Optional mask — transparent areas are edited' },
-    model:  { type: 'text',  required: false, default: 'gpt-image-1', description: 'OpenAI image model ID' },
+    model:  { type: 'text',  required: false, default: 'gpt-image-2.6-sunburst', description: 'OpenAI image model ID' },
     __capability: { type: 'text', required: false, default: 'imageEdit', description: 'ApiCursor capability (internal)' },
   },
 
@@ -140,7 +150,7 @@ export const MODUS_GPT_IMAGE_EDIT: Modus = make({
   },
 
   natum:   new Date('2026-07-02'),
-  mutatum: new Date('2026-07-02'),
+  mutatum: new Date('2026-11-19'),
 })
 
 // OpenRouter chat — proves the descriptor generalizes: a new provider is a

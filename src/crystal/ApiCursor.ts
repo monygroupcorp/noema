@@ -3,8 +3,8 @@ import type { Actum } from '../types/actum.js'
 import type { Modo } from '../types/modo.js'
 import type { Cursor, CursorResult } from '../types/cursus.js'
 import type { MediaFetcher } from './MediaFetcher.js'
-import type { ApiProvider, ApiCapability, ApiCapabilitySpec } from './apiProviders.js'
-import { chatImpetus } from './apiProviders.js'
+import type { ApiProvider, ApiCapability, ApiCapabilitySpec, ImageTokenUsage } from './apiProviders.js'
+import { chatImpetus, imageTokenImpetus } from './apiProviders.js'
 
 // =============================================================================
 // ApiCursor — ONE cursor, driven by a provider descriptor (data)
@@ -109,9 +109,10 @@ export class ApiCursor implements Cursor {
 
     // The generation rail reads only DECLARED ports. No modus declares `n` or `model` on this
     // rail, so neither is read from the aditus: the request is pinned to one image at the
-    // capability's default model, and metering charges exactly that one image. Both levers are
-    // driven by the provider spec rather than by caller input; declaring either as a real
-    // priced port is a separate decision. (`runImageEdit` keeps its DECLARED `model` port.)
+    // capability's default model. Both levers are driven by the provider spec rather than by
+    // caller input; declaring either as a real priced port is a separate decision.
+    // (`runImageEdit` keeps its DECLARED `model` port. Metering itself reads the response's
+    // own token usage — `meterImageUsage` — so it is correct regardless of `n`/model.)
     const body: Record<string, unknown> = {
       model: spec.defaultModel,
       prompt: String(aditus.prompt ?? ''),
@@ -121,7 +122,7 @@ export class ApiCursor implements Cursor {
     if (aditus.quality !== undefined) body.quality = String(aditus.quality)
 
     const res = await this.deps.http.postJson(this.url(spec), this.deps.apiKey, body)
-    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImages(1), reserved))
+    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImageUsage(res), reserved))
   }
 
   // ── image editing (OpenAI images.edit — multipart) ───────────────────────
@@ -144,7 +145,7 @@ export class ApiCursor implements Cursor {
     }
 
     const res = await this.deps.http.postForm(this.url(spec), this.deps.apiKey, form)
-    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImages(1), reserved))
+    return this.sync({ image: this.imageFrom(res) }, this.clamp(this.meterImageUsage(res), reserved))
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -183,9 +184,26 @@ export class ApiCursor implements Cursor {
     return chatImpetus(tokens, this.provider.pricing.chatImpetusPer1kTokens)
   }
 
-  private meterImages(n: number): bigint {
-    const perImage = this.provider.pricing.imageImpetusPerImage ?? 0n
-    return perImage * BigInt(Math.max(0, n))
+  /**
+   * Meters an image/imageEdit response off its real `usage` — OpenAI's gpt-image family bills
+   * per token (text prompt in, source image in on an edit, output image out), not per image,
+   * and the three vary independently with `quality`/`size`. `usage` absent (a provider or
+   * model that doesn't report it) metes 0n: silently charging a guessed flat amount instead of
+   * a stated gap would be worse than visibly under-billing a response that gave no basis to bill.
+   */
+  private meterImageUsage(res: unknown): bigint {
+    const usage = (res as { usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      input_tokens_details?: { text_tokens?: number; image_tokens?: number }
+    } }).usage
+    if (!usage) return 0n
+    const tokenUsage: ImageTokenUsage = {
+      textInputTokens: usage.input_tokens_details?.text_tokens,
+      imageInputTokens: usage.input_tokens_details?.image_tokens,
+      outputTokens: usage.output_tokens,
+    }
+    return imageTokenImpetus(tokenUsage, this.provider.pricing)
   }
 
   /** Enforce the two-phase cost invariant: run().impetus ≤ reserve(). */

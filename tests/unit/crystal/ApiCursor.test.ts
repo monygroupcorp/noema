@@ -56,7 +56,12 @@ function cursor(provider: ApiProvider, http: ApiHttp) {
 }
 
 const CHAT_RES = { choices: [{ message: { content: 'Hello!' } }], usage: { total_tokens: 500 } }
-const IMAGE_RES = { data: [{ url: 'https://cdn.openai.com/gen.png' }] }
+// output_tokens × imageOutputMicroUsdPerToken (30n) = 337 × 30 = 10_110 micro-USD, which divides
+// MICRO_USD_PER_IMPETUS (337) exactly → 30n impetus, with no text/image input tokens muddying it.
+const IMAGE_RES = {
+  data: [{ url: 'https://cdn.openai.com/gen.png' }],
+  usage: { input_tokens: 0, output_tokens: 337, input_tokens_details: { text_tokens: 0, image_tokens: 0 } },
+}
 
 // ── reserve() ─────────────────────────────────────────────────────────────────
 
@@ -106,7 +111,7 @@ test('image generation without a model port posts the provider default model', a
   // The canon image modus declares no `model` port, so the model on the wire is whatever the
   // provider descriptor names — this is the only place that binding is asserted.
   await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }))
-  assert.equal((http.lastJson?.body as { model?: string }).model, 'gpt-image-1')
+  assert.equal((http.lastJson?.body as { model?: string }).model, OPENAI_PROVIDER.capabilities.image!.defaultModel)
 })
 
 test('image b64_json response becomes a data URI', async () => {
@@ -170,25 +175,52 @@ test('chat impetus is clamped to the reservation', async () => {
   assert.equal(exitus.impetus, 1n)
 })
 
-test('image impetus is one image, clamped to reservation', async () => {
-  // OpenAI imageImpetusPerImage = 40n; the rail charges one image → 40n; reservation 25n → clamp to 25n.
+test('image impetus is metered from usage.output_tokens, clamped to reservation', async () => {
+  // IMAGE_RES metres to 30n (see its comment); reservation 25n → clamp to 25n.
   const c = cursor(OPENAI_PROVIDER, fakeHttp(IMAGE_RES))
   const res = await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }, 25n))
   const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
   assert.equal(exitus.impetus, 25n)
 })
 
+test('image impetus is metered from usage.output_tokens, unclamped under a generous reservation', async () => {
+  const c = cursor(OPENAI_PROVIDER, fakeHttp(IMAGE_RES))
+  const res = await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }, 1200n))
+  const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
+  assert.equal(exitus.impetus, 30n)
+})
+
+test('image impetus sums text input, image input, and output tokens', async () => {
+  // text 100 × 5 = 500 µUSD → ceil(500/337) = 2n; image 1_000 × 8 = 8_000 µUSD → ceil(8_000/337) = 24n;
+  // output 337 × 30 = 10_110 µUSD → 30n exactly. Total 2 + 24 + 30 = 56n.
+  const res3Part = {
+    data: [{ url: 'https://cdn.openai.com/gen.png' }],
+    usage: { input_tokens_details: { text_tokens: 100, image_tokens: 1_000 }, output_tokens: 337 },
+  }
+  const c = cursor(OPENAI_PROVIDER, fakeHttp(res3Part))
+  const res = await c.run(makeActum({ image: 'https://x/in.png', prompt: 'add a hat', __capability: 'imageEdit' }, 1000n))
+  const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
+  assert.equal(exitus.impetus, 56n)
+})
+
+test('image impetus is 0 when the response carries no usage', async () => {
+  // A provider/model that reports no usage metes nothing, rather than guessing a flat charge.
+  const c = cursor(OPENAI_PROVIDER, fakeHttp({ data: [{ url: 'https://cdn.openai.com/gen.png' }] }))
+  const res = await c.run(makeActum({ prompt: 'a cat', __capability: 'image' }, 1200n))
+  const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
+  assert.equal(exitus.impetus, 0n)
+})
+
 // ── generation rail reads only declared ports (noema-317) ───────────────────────
 
-test('image generation pins n to 1 — an undeclared n neither reaches the provider nor the meter', async () => {
-  // imageImpetusPerImage = 40n. Undeclared `n: 3` must not become 3 provider images, and must
-  // not become 120n of metering; the rail requests one image and charges one image.
+test('image generation pins n to 1 — an undeclared n does not reach the provider', async () => {
+  // Metering reads the response's own usage regardless of `n`, so this only pins the request shape.
   const http = fakeHttp(IMAGE_RES)
   const c = cursor(OPENAI_PROVIDER, http)
   const res = await c.run(makeActum({ prompt: 'a cat', n: 3, __capability: 'image' }, 100n))
   assert.equal((http.lastJson?.body as { n: number }).n, 1)
   const { exitus } = res as Extract<typeof res, { kind: 'sync' }>
-  assert.equal(exitus.impetus, 40n)
+  assert.equal(exitus.impetus, 30n)
 })
 
 test('image generation pins the model to the capability default — an undeclared model is not sent', async () => {
