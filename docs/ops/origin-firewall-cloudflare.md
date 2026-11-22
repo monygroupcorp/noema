@@ -18,6 +18,19 @@ operators to filter forwarded/published-port traffic before Docker's own wide-op
 it — which is the layer that actually gates this. See the script's own header comment for the
 full mechanism. Both goal clauses stay open until a direct-origin curl genuinely fails.
 
+**2026-11-22: first DOCKER-USER cut was itself wrong, caught in review before landing.**
+`--ctorigdstport` matches a connection's *original* destination port no matter which direction
+the current packet is travelling. A reply packet answering the app container's own **outbound**
+call to some external `:443` service (the RunPod API, Stripe, Mongo Atlas, ...) still carries
+`ctorigdstport=443`, and that reply lands on the public interface — it would have matched the
+DROP meant only for inbound traffic, breaking every outbound HTTPS call the app makes. Fixed two
+ways, per Docker's own documented `DOCKER-USER` pattern: every chain now gets an unscoped `-m
+conntrack --ctstate ESTABLISHED,RELATED -j RETURN` first (so already-tracked traffic, including
+replies to connections the container itself opened, short-circuits past the Cloudflare check
+entirely), and the Cloudflare ACCEPT/DROP rules also add `--ctdir ORIGINAL` as a second,
+independent guard. `scripts/firewall-cloudflare-only.selftest.sh` regression-tests both — no root,
+no live firewall, no network.
+
 **Not executed by this item.** This repo's realm rule is that a seat does not apply firewall/
 deploy changes to production — only the operator does. Everything below is ready to apply; the
 operator runs the "Apply" section.
@@ -34,9 +47,17 @@ operator runs the "Apply" section.
   via the bridge interface, not the public NIC — never matches). Idempotent — re-running it
   refreshes both allow-lists to whatever Cloudflare currently publishes. Aborts without changing
   anything if a range fetch fails, is empty, or doesn't parse as CIDRs. Supports `--dry-run`
-  (prints the commands it would run, changes nothing). If `DOCKER-USER` doesn't exist in either
-  `iptables` or `ip6tables` (Docker not installed, or its iptables integration disabled), it warns
-  and skips that layer rather than failing — the ufw layer still applies.
+  (prints the commands it would run, changes nothing, and does **not** require root — reading the
+  live `DOCKER-USER` chain to preview what stale rules would be removed does need root, so a
+  non-root `--dry-run` shows only the insert plan, not the removal half; run it with `sudo` to see
+  both). If `DOCKER-USER` doesn't exist in either `iptables` or `ip6tables` (Docker not installed,
+  or its iptables integration disabled), it warns and skips that layer rather than failing — the
+  ufw layer still applies. The IPv6 rules use the host's IPv6 default-route interface if one
+  exists (`ip -6 route show default`), falling back to the IPv4 interface with a warning if not.
+- `scripts/firewall-cloudflare-only.selftest.sh` — no-root, no-network regression test for the
+  `DOCKER-USER` rule generation (ordering, the `ESTABLISHED,RELATED`/`--ctdir ORIGINAL` fix,
+  idempotency) against a simulated chain. Run it directly; nothing wires it into `npm run
+  test:hermetic` (it's a standalone shell script, not part of the TS suite).
 - `ops/systemd/noema-firewall-cloudflare.{service,timer}` — runs the script daily (03:41 UTC +
   jitter), since Cloudflare's ranges change occasionally and a stale allow-list would eventually
   either reject real Cloudflare traffic or leave a range Cloudflare no longer uses still open.
@@ -114,6 +135,20 @@ done
 ```
 
 Both loops should print nothing.
+
+**3. No regression — the app's own outbound calls still work** (this is exactly what the
+2026-11-22 DOCKER-USER bug would have broken — see the fix note above). Run on the droplet right
+after applying:
+
+```bash
+curl -sS -m 10 https://noema.art/api/health   # app's own health check
+docker logs --since 5m hyperbotcontained 2>&1 | grep -iE 'ECONNREFUSED|ETIMEDOUT|RunPod|Mongo' | tail -20
+```
+
+`/api/health` should still return `{ ok: true, ... }`, and the log tail should show no new
+connection-refused/timeout errors for RunPod, Mongo Atlas, R2, or any other outbound dependency
+immediately after applying — those calls leave via the bridge interface and were never meant to
+cross the Cloudflare-only rules, but this is the live check that they actually didn't.
 
 ## Rollback
 
