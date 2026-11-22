@@ -19,6 +19,17 @@ export interface ApiErrorBody {
 }
 
 export interface ApiErrorOpts {
+  /**
+   * This refusal is an ordinary answer, not an operator concern: the caller asked a reasonable
+   * question and "no" is simply what is true. Read only by the router's logging, never
+   * serialized — a caller has no use for it and it is not part of the published surface.
+   *
+   * Every 4xx is otherwise logged at `warn`, which is right for a refusal that might mean
+   * something is wrong and wrong for one that is just traffic. `GET /v1/me/partner` answers 404
+   * to every user who is not a partner — the dashboard asks on every load and branches on the
+   * code — and those sixty a day were the single largest source of warns in the log.
+   */
+  expected?: boolean
   retryable?: boolean
   retryAfter?: number
   details?: Record<string, unknown>
@@ -107,6 +118,42 @@ export const Errors = {
   licenseRestricted: (message: string) => new ApiError('license.restricted', message, 403),
   /** A prompt was refused by the input CSAM guard. 403 — a policy refusal, not a malformed request. */
   contentRefused: (message: string) => new ApiError('content.refused', message, 403),
+  /**
+   * The flow carries upstream licence terms (`Modus.useTerms`) the caller has not accepted at
+   * the current version. 403 with everything a client needs to show the terms and record the
+   * acceptance in place: the terms id, the version, and where the published text is. NOT
+   * retryable as-is — the same request succeeds once the caller accepts.
+   */
+  termsRequired: (terms: { id: string; versio: string; nomen: string; href: string; licenseHref: string }) =>
+    new ApiError(
+      'terms.required',
+      `This flow runs under the ${terms.nomen}. Read and accept them at ${terms.href} before running it.`,
+      403,
+      { retryable: false, details: { terms: terms.id, versio: terms.versio, nomen: terms.nomen, href: terms.href, licenseHref: terms.licenseHref } },
+    ),
+  /** The flow declares licence terms this deployment publishes no text for — nothing the caller
+   *  could accept, so nothing that can run. A server-side configuration fault, named as such. */
+  termsUnknown: (id: string) =>
+    new ApiError('terms.unknown', `This flow names terms '${id}' that are not published here, so it cannot run.`, 503, { retryable: false, details: { terms: id } }),
+  /** The caller is suspended under a flow's licence terms after repeated confirmed violations. */
+  termsSuspended: (terms: { id: string; nomen: string }) =>
+    new ApiError(
+      'terms.suspended',
+      `Your access to flows under the ${terms.nomen} is suspended after repeated violations of them.`,
+      403,
+      { retryable: false, details: { terms: terms.id } },
+    ),
+  /** The caller's origin (Cloudflare's `cf-ipcountry`) falls inside a territory the flow's
+   *  upstream licence excludes (`UseTerms.excludedTerritories`) — e.g. MiniMax H3's licence
+   *  does not extend to the EU, UK or Republic of Korea. NOT retryable: the request cannot
+   *  succeed from this origin regardless of how many times it is sent. */
+  territoryExcluded: (country: string, terms: { id: string; nomen: string } = { id: 'unknown', nomen: 'its licence' }) =>
+    new ApiError(
+      'territory.excluded',
+      `This flow runs under the ${terms.nomen}, which does not extend to your origin (${country}).`,
+      403,
+      { retryable: false, details: { terms: terms.id, country } },
+    ),
   /** A gated model import needs a connected BYO secret for `provider` (Civitai/HF). 422 — the request
    *  is well-formed but a precondition (a connected token) is unmet. `details.provider` drives the
    *  frontend deep-link to Profile → Connected accounts (BYO-secrets F2). */
@@ -125,13 +172,20 @@ export const Errors = {
    *  `not_found.partner_request` code with the by-id variant above — same resource, and the
    *  dashboard branches on the code, not on which lookup missed. */
   notFoundOwnPartnerRequest: () =>
-    new ApiError('not_found.partner_request', 'No partner request found for this account', 404),
+    new ApiError('not_found.partner_request', 'No partner request found for this account', 404, { expected: true }),
   /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
    *  both look identical from the caller's side: "you don't have partner access". */
-  notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404),
+  notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404, { expected: true }),
   notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
+  /**
+   * NOT retryable, said out loud. A balance that cannot cover a reservation is a terminal
+   * answer to THIS request: nothing the caller can do by asking again changes it, only funding
+   * the account does. Left unsaid, the field is simply absent from the body and an automated
+   * caller has nothing to read — which is how one zero-balance client produced 58 refused runs
+   * in ten seconds. `retryable: false` is the contract telling it to stop.
+   */
   insufficientSigna: (details?: Record<string, unknown>) =>
-    new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { details }),
+    new ApiError('economy.insufficient_signa', 'Balance cannot cover the reservation', 402, { retryable: false, details }),
   capTooLow: (details?: Record<string, unknown>) =>
     new ApiError('economy.cap_too_low', 'maxImpetus is below the estimated reservation', 422, { details }),
   /** No GPU capacity could be procured for a studio (provision failed / no pods). Retryable. */
@@ -146,6 +200,10 @@ export const Errors = {
   /** No `PartnerStore` wired into this deployment's router — distinct from `notFoundPartner`
    *  (the store IS wired and simply has no record for this caller). */
   partnerDirectoryUnavailable: () => new ApiError('internal.unavailable', 'The partner directory is not available on this deployment', 503, { retryable: true }),
+  /** A modus's `ministerium` has no `Cursor` registered for it — a deployment-configuration
+   *  gap (e.g. no API key configured for that provider), not a caller mistake. */
+  ministeriumUnavailable: (ministerium: string | undefined) =>
+    new ApiError('internal.unavailable', `No execution backend is configured for ministerium '${ministerium}' on this deployment`, 503, { retryable: true, details: { ministerium } }),
   priceUnavailable: (message = 'Could not price this asset — it is not supported or has no available price') => new ApiError('deposit.price_unavailable', message, 422),
   /** Account erasure is globally disabled on this deployment (feature flag off). Only reachable
    *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */

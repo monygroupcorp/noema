@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure } from '../components/LoadFailure';
 import { custodyGlyph } from '../lib/datasets';
 import { api, type Dataset } from '../lib/api';
 import { captionsToTrainingImages } from '../lib/captionsets';
@@ -106,14 +107,10 @@ export function Derive() {
   );
 
   if (datasets === null) {
-    return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Derive"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!d) {
-    return (
-      <AppShell title="Derive">
-        <div className="page"><div className="pw wide"><div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div></div></div>
-      </AppShell>
-    );
+    return <AppShell title="Derive"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
   }
   const version = d.versions[d.versions.length - 1]?.v ?? '—';
   const cap = d.captionsets.find((cs) => cs.id === chosenSet) ?? null;
@@ -141,7 +138,7 @@ export function Derive() {
     }
   };
 
-  const crumb = <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>train</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> <Link to={`/datasets/${d.id}`}>{d.name}</Link> <span className="sep">/</span> <b>Train</b></span>;
 
   return (
     <AppShell title={crumb}>

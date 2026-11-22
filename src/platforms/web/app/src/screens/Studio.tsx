@@ -119,13 +119,13 @@ export function Studio() {
   );
 
   const badge = !loaded ? null
-    : !studio ? <span className="badge">no lease</span>
-    : studio.status === 'provisioning' ? <span className="badge">provisioning</span>
-    : studio.status === 'draining' ? <span className="badge">draining</span>
-    : <span className="badge accent">ready</span>;
+    : !studio ? <span className="badge">No lease</span>
+    : studio.status === 'provisioning' ? <span className="badge">Provisioning</span>
+    : studio.status === 'draining' ? <span className="badge">Draining</span>
+    : <span className="badge accent">Ready</span>;
 
   return (
-    <AppShell crumb="studio" context={context}>
+    <AppShell crumb="Studio" context={context}>
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div>
@@ -144,9 +144,9 @@ export function Studio() {
             <div className="sectionhead">Lease a studio</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)', maxWidth: 480 }}>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-                substrate
+                Substrate
                 <select className="mobile-zoom-safe" value={fundamentumId} onChange={(e) => setFundamentumId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4 }}>
-                  {fundamenta.length === 0 && <option value="">loading substrates…</option>}
+                  {fundamenta.length === 0 && <option value="">Loading substrates…</option>}
                   {fundamenta.map((f) => (
                     <option key={f.id} value={f.id}>
                       {(f.nomen ?? f.id) + (f.vramGb ? ` · ${f.vramGb}GB` : '')}
@@ -155,7 +155,7 @@ export function Studio() {
                 </select>
               </label>
               <label className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
-                session budget (credits, optional — defaults to your full balance)
+                Session budget (credits, optional — defaults to your full balance)
                 <input className="mobile-zoom-safe" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 5000" inputMode="numeric" style={{ display: 'block', width: '100%', marginTop: 4 }} />
               </label>
               <div>
@@ -163,8 +163,8 @@ export function Studio() {
                   {arming ? 'leasing…' : 'Lease studio'}
                 </button>
               </div>
-              <div className="mono" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-                the pod boots in the background — this page follows it live. The budget is a hard cap: the studio drains and terminates when it's spent.
+              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-s)' }}>
+                The pod boots in the background — this page follows it live. The budget is a hard cap: the studio drains and terminates when it's spent.
               </div>
             </div>
           </>

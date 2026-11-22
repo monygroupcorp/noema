@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ServedProvingKey } from './ProvingKeySource.js'
@@ -53,14 +53,45 @@ function canonical(v: unknown): unknown {
   return typeof v === 'bigint' || typeof v === 'number' ? String(v) : v
 }
 
+const ZKEY_MAGIC = Buffer.from('zkey', 'ascii')
+
+/**
+ * snarkjs's own zkey reader opens the file, then throws on a bad header before the
+ * handle it opened is ever returned to a caller who could close it — every other read
+ * in there closes on the way out, this one doesn't. The abandoned handle gets closed by
+ * V8's garbage collector at some later, unpredictable point, and Node treats that as an
+ * uncaught exception rather than a warning. Check the magic ourselves first, with a
+ * handle we open and close in the same breath, so snarkjs only ever opens a file whose
+ * header it will accept.
+ */
+async function assertZkeyMagic(file: string): Promise<void> {
+  const fd = await open(file, 'r')
+  try {
+    const header = Buffer.alloc(4)
+    const { bytesRead } = await fd.read(header, 0, 4, 0)
+    if (bytesRead < 4 || !header.equals(ZKEY_MAGIC)) {
+      throw new Error(`${file}: not a zkey (bad header)`)
+    }
+  } finally {
+    await fd.close()
+  }
+}
+
 /** snarkjs reads a zkey from a path; a key held as bytes gets one for the length of the call. */
 async function exportVerificationKey(key: ServedProvingKey): Promise<unknown> {
   const snarkjs = await import('snarkjs')
-  if (key.path) return snarkjs.zKey.exportVerificationKey(key.path)
+  if (key.path) {
+    await assertZkeyMagic(key.path)
+    return snarkjs.zKey.exportVerificationKey(key.path)
+  }
+  const bytes = key.bytes as Buffer
+  if (bytes.length < 4 || !bytes.subarray(0, 4).equals(ZKEY_MAGIC)) {
+    throw new Error('served proving key: not a zkey (bad header)')
+  }
   const dir = await mkdtemp(path.join(tmpdir(), 'arcanum-pairing-'))
   const file = path.join(dir, 'served.zkey')
   try {
-    await writeFile(file, key.bytes as Buffer)
+    await writeFile(file, bytes)
     return await snarkjs.zKey.exportVerificationKey(file)
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})

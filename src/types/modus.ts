@@ -152,7 +152,9 @@ export interface Gradus {
   modusId: string
   /**
    * "condicio" = condition — an optional expression string that must evaluate
-   * to true for this step to run. Uses the expression system (expr-eval).
+   * to true for this step to run. Not yet implemented; CompositusCursor rejects
+   * any step that sets it (see ADR-0008). A future expression engine must be a
+   * vetted, sandboxed evaluator — not expr-eval, removed for GHSA-q9v2-7m5w-4693.
    * Example: "input.width > 512"
    */
   condicio?: string
@@ -273,6 +275,18 @@ export interface Modus {
    * Compiler's family-derivation step.)
    */
   intellae?: Array<{ id: string; role: string }>
+
+  /**
+   * Upstream licence terms the caller must have accepted before this flow runs, by id in
+   * `crystal/useTerms.ts` (e.g. `'minimax-h3'`). A flow that carries a licence obligation says so
+   * here — but this is a RECORD of the obligation, not its only source: `requiredUseTerms`
+   * (`crystal/useTerms.ts`) also derives the same obligation from `intellae`, resolving each
+   * weight's licence through a conditional grant, so a flow bound to run an H3 (or other
+   * grant-bound) weight is refused even where this field was never set. The run entry point
+   * refuses a caller who has not accepted the current version, or who is suspended under the
+   * terms, before anything is reserved. A composite inherits its steps' declarations.
+   */
+  useTerms?: string[]
 
   /**
    * Which execution service (cursor) handles this modus.

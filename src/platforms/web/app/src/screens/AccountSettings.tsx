@@ -1,34 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { Ic } from '../lib/icons';
-import { api, getSession, commitment, type MeStatus, type StudioEntry } from '../lib/api';
+import { api, getSession, commitment, type MeStatus } from '../lib/api';
+import { SECTIONS, AVAIL, resolveSection, readAvailability, SectionPane } from './accountSections';
 
 // Account / settings (account-spec.md, renders noema-account.png + noema-account-compute.png).
 // The control panel for the privacy machine — posture + sovereignty up front, then a card per
-// account concern, each opening a sub-nav detail page. Two corrections baked in:
+// account concern, each opening the screen or pane that owns it, and the destructive control
+// last (REF-34). Two corrections baked in:
 //  · the account compute default is AVAILABILITY (cost/speed: Economy/Balanced/Fastest); every
 //    run executes on our compute (there is no on-device or per-run custody choice).
 //  · NOEMA is multi-interface (web · Telegram · API) — the posture names this "reach".
+//
+// The section list, the sub-nav and the /account/:section router all read `accountSections`.
 
-// Preferences is folded in here (UX handoff 2, Decision 2) — it's its own screen, so its sub-nav
-// entry links out to /preferences via `to` rather than an /account/:section pane.
-const SECTIONS: { key: string; label: string; ico: string; to?: string }[] = [
-  { key: 'account', label: 'Account', ico: 'circle-user' },
-  { key: 'billing', label: 'Billing & credits', ico: 'wallet' },
-  { key: 'compute', label: 'Compute', ico: 'server' },
-  { key: 'preferences', label: 'Preferences', ico: 'sparkles', to: '/preferences' },
-  { key: 'api', label: 'API keys', ico: 'key-round' },
-];
-
-type Availability = 'economy' | 'balanced' | 'fastest';
-const AVAIL: { key: Availability; glyph: string; t: string; s: string }[] = [
-  { key: 'economy', glyph: '◔', t: 'Economy', s: 'Wait for spot / cheaper GPUs. Lowest credits.' },
-  { key: 'balanced', glyph: '◑', t: 'Balanced', s: 'Wait briefly for a cheaper slot, then proceed.' },
-  { key: 'fastest', glyph: '●', t: 'Fastest', s: 'Always grab the fastest available. Higher credits.' },
-];
+// What the posture instrument says beside "the meter". A count of nothing is not printed
+// (DESIGN.md D-58): with no studio warm, the line says so in words.
+export function liveLine(liveStudios: number): string {
+  if (liveStudios === 0) return 'the meter · nothing running';
+  return `the meter · ${liveStudios} live ${liveStudios === 1 ? 'session' : 'sessions'}`;
+}
 
 /**
  * Which sovereignty rights this visitor actually holds.
@@ -59,7 +53,7 @@ export function holdsRight(anon: boolean, right: SovereignRight): boolean {
 
 export function AccountSettings() {
   const { section } = useParams();
-  const { ident } = useIdentity();
+  const { ident, idents } = useIdentity();
   const { goAnonymous } = useSession();
   const navigate = useNavigate();
   const anon = ident.funding === 'bearer';
@@ -137,31 +131,37 @@ export function AccountSettings() {
   // Real balance (impetus credits) + live studio count from the account snapshot.
   const credits = me ? Number(me.balanceImpetus).toLocaleString() : '…';
   const liveStudios = me?.studios.filter((s) => s.status === 'idle' || s.status === 'running').length ?? 0;
-  // The availability preference is a real (local) setting — read it, don't invent it.
-  const availPref = (localStorage.getItem('noema-availability') as Availability) || 'balanced';
+  const availPref = readAvailability();
+  // Saved logins this browser holds, besides the anonymous slot.
+  const savedLogins = idents.filter((d) => d.funding !== 'bearer').length;
+
+  const route = resolveSection(section);
+  if (route.kind === 'redirect') return <Navigate to={route.to} replace />;
 
   // ── account home ──────────────────────────────────────────────────────────
-  if (!section) {
+  if (route.kind === 'home') {
     return (
       <AppShell title="Settings">
         <div className="page"><div className="pw wide">
           <div className="pagehead"><div>
-            <h1>Account</h1>
+            <h1>Settings</h1>
             <div className="sub">Your account across every interface — web · Telegram · API. Tune what we see; your work stays yours.</div>
           </div></div>
 
-          {/* posture instrument — the dashboard device, reused */}
+          {/* posture instrument — the dashboard device, reused. Status only: the one control that
+              changes identity is the "Go anonymous" button below (P-1d), shown while there is an
+              account to step off — pressed from the anonymous slot it would do nothing. */}
           <div className="noema-frame ac-posture">
             <div className="ac-pcell">
               <div className="ac-l">identity</div>
               <div className="ac-v"><span className={`hemi2 ${anon ? 'dashed' : 'lit'}`} /> {anon ? 'anonymous' : 'you · signed in'}</div>
             </div>
             <div className="ac-pcell">
-              <div className="ac-l">live · what we can see</div>
-              <div className="ac-v">the meter · {liveStudios} live {liveStudios === 1 ? 'session' : 'sessions'}</div>
+              <div className="ac-l">Live · what we can see</div>
+              <div className="ac-v">{liveLine(liveStudios)}</div>
             </div>
             <div className="ac-pcell">
-              <div className="ac-l">reach</div>
+              <div className="ac-l">Reach</div>
               <div className="ac-v">web · Telegram · API</div>
             </div>
           </div>
@@ -228,27 +228,32 @@ export function AccountSettings() {
           </div>
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
-              live studios) show real data; everything not wired yet (card billing, API keys,
-              devices, local runner) is gated "soon", same as Export/Delete above. */}
+              live studios, saved logins) show real data. Each card's manage link goes where the
+              section's nav entry goes (accountSections). There is no plan row: credits are bought
+              as packs and nothing is billed on a schedule, so a row would only read "none" (P-1c);
+              the card's note names both ways to add credits instead. */}
           <div className="ac-cards">
-            <SectionCard to="/account/billing" ico="wallet" name="Billing &amp; credits">
-              <Row k="credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
-              <Row k="plan · card" v={<span className="muted">coming soon — no subscriptions or card billing yet</span>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> credits fund on-chain today — <Link className="accent" to="/funding">deposit from a wallet ▸</Link></div>
-            </SectionCard>
-            <SectionCard to="/account/api" ico="key-round" name="API keys">
-              <Row k="keys" v={<span className="muted">coming soon</span>} />
-              <div className="ac-note mono"><span className="hemi2 dashed" /> the /v1 API is live; personal key management isn’t wired here yet.</div>
+            <SectionCard to="/funding" ico="wallet" name="Billing &amp; credits">
+              <Row k="Credits" v={<span className="gold"><span className="gem">◈</span> {credits}{me ? <> credits · ≈ ${me.balanceUsd.toFixed(2)}</> : ''}</span>} />
+              <div className="ac-note mono"><span className="hemi2 dashed" /> buy a pack by card or deposit from a wallet — <Link className="accent" to="/funding">add credits ▸</Link></div>
             </SectionCard>
             <SectionCard to="/account/compute" ico="server" name="Compute &amp; sessions">
-              <Row k="availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
-              <Row k="live sessions" v={<><span className="rdot good" /> {liveStudios} live</>} />
+              <Row k="Availability" v={<><span className="fillg">{AVAIL.find((a) => a.key === availPref)?.glyph}</span> <b>{availPref}</b> · cost vs speed</>} />
+              {/* The credits row above is the one balance this page prints, zero or not — it is
+                  the figure "add credits" acts on (P-1c). A live-session count of nothing is not
+                  printed; the row offers what fills it instead (D-58, D-60). */}
+              <Row k="Live sessions" v={liveStudios ? <><span className="rdot good" /> {liveStudios} live</> : <Link className="accent" to="/catalog">none yet — run something ▸</Link>} />
               <div className="ac-note mono">every run executes on our compute — we can see the work.</div>
             </SectionCard>
             <SectionCard to="/preferences" ico="sparkles" name="Preferences &amp; defaults">
-              <Row k="scope" v={<>portable across web · Telegram · API</>} />
-              <Row k="applies to" v={<span className="mono">/make · style · output · delivery</span>} />
+              <Row k="Scope" v={<>portable across web · Telegram · API</>} />
+              <Row k="Applies to" v={<span className="mono">/make · style · output · delivery</span>} />
               <div className="ac-note mono">generation defaults that travel with you — override inline anytime.</div>
+            </SectionCard>
+            <SectionCard to="/keyring" ico="key-round" name="Keyring">
+              <Row k="Active" v={anon ? 'anonymous' : ident.name} />
+              <Row k="Saved logins" v={savedLogins ? <>{savedLogins} in this browser</> : <Link className="accent" to="/onboard?add=1">none yet — add one ▸</Link>} />
+              <div className="ac-note mono">switch between saved logins or add one — each keeps its own projects, history and settings.</div>
             </SectionCard>
           </div>
         </div></div>
@@ -257,83 +262,29 @@ export function AccountSettings() {
   }
 
   // ── detail page (sub-nav + pane) ──────────────────────────────────────────
-  const active = SECTIONS.find((s) => s.key === section) ?? SECTIONS[0];
+  const active = route.section;
   const crumb = <span className="ph-crumb"><Link to="/account">Settings</Link> <span className="sep">/</span> <b>{active.label}</b></span>;
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="settings-layout">
-          <aside className="settings-nav">
+          <aside className="settings-nav" aria-label="Settings sections">
             <div className="sn-l">settings</div>
-            {SECTIONS.map((s) => (
-              <Link key={s.key} to={s.to ?? `/account/${s.key}`} className={`sn-item${s.key === section ? ' on' : ''}`}>
-                <Ic name={s.ico} /> {s.label}
-              </Link>
-            ))}
+            {SECTIONS.map((s) => {
+              const current = s.key === active.key;
+              return (
+                <Link key={s.key} to={s.to ?? `/account/${s.key}`} className={`sn-item${current ? ' on' : ''}`} aria-current={current ? 'page' : undefined}>
+                  <Ic name={s.ico} /> {s.label}
+                </Link>
+              );
+            })}
           </aside>
           <div className="settings-pane">
-            {section === 'compute' ? <ComputeDetail studios={me?.studios ?? null} /> : (
-              <>
-                <h1>{active.label}</h1>
-                <div className="sub">This section opens here from the account home’s <b>manage ▸</b>.</div>
-                <div className="empty" style={{ marginTop: 'var(--s5)' }}><div className="t">{active.label} detail — building this pane in a later pass.</div></div>
-              </>
-            )}
+            <SectionPane section={active} studios={me?.studios ?? null} initialAvailability={availPref} />
           </div>
         </div>
       </div></div>
     </AppShell>
-  );
-}
-
-const fmtWarm = (ms?: number) => (ms == null ? 'idle' : ms <= 0 ? 'draining' : `~${Math.round(ms / 60000)}m left`);
-
-function ComputeDetail({ studios }: { studios: StudioEntry[] | null }) {
-  const [avail, setAvail] = useState<Availability>(() => (localStorage.getItem('noema-availability') as Availability) || 'balanced');
-  const set = (a: Availability) => { setAvail(a); localStorage.setItem('noema-availability', a); };
-  return (
-    <>
-      <h1>Compute</h1>
-      <div className="sub">Your cost-vs-speed preference, private-tunnel sessions, and your own machine.</div>
-
-      <div className="ac-panel">
-        <div className="ac-panel-l">availability · cost vs speed for remote runs</div>
-        <div className="avail-grid">
-          {AVAIL.map((a) => (
-            <button key={a.key} className={`availcard${avail === a.key ? ' on' : ''}`} onClick={() => set(a.key)}>
-              <div className="av-t"><span className="fillg">{a.glyph}</span> {a.t}</div>
-              <div className="av-s">{a.s}</div>
-            </button>
-          ))}
-        </div>
-        <div className="ac-note mono">↳ every run executes on our compute — this sets cost vs speed, not custody.</div>
-      </div>
-
-      <div className="ac-panel">
-        <div className="ac-panel-l">active sessions · your studios <Link to="/studio" className="accent" style={{ float: 'right', fontWeight: 400 }}>open studio ▸</Link></div>
-        {studios === null ? (
-          <div className="ac-note mono">loading your sessions…</div>
-        ) : studios.length === 0 ? (
-          <div className="ac-note mono">no live studios — <Link to="/studio" className="accent">lease one</Link> to warm a GPU.</div>
-        ) : (
-          studios.map((s) => (
-            <SessionRow key={s.studioId} name={s.label} detail={`${s.status} · ${s.guestsToday} guest gens · net ≈ $${s.netUsd.toFixed(2)}`} state={fmtWarm(s.warmRemainingMs)} />
-          ))
-        )}
-      </div>
-
-    </>
-  );
-}
-
-function SessionRow({ name, detail, state }: { name: string; detail: string; state: string }) {
-  return (
-    <div className="ac-session">
-      <span className="hemi2 ring" />
-      <div className="ac-sess-main"><b>{name}</b><span className="mono">{detail}</span></div>
-      <span className="ac-sess-state"><span className="rdot good" /> {state}</span>
-      <button className="btn ghost danger sm">■ stop</button>
-    </div>
   );
 }
 

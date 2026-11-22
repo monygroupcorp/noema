@@ -203,7 +203,7 @@ export function WriteProposalCard({ write, confirmKey, onDone }: {
       {done ? (
         <div className="wc-done">
           <span>✓ {done}</span>
-          {write.action === 'set_preference' && <Link to="/preferences">open preferences →</Link>}
+          {write.action === 'set_preference' && <Link to="/preferences">Open preferences →</Link>}
         </div>
       ) : (
         <div className="wc-foot">

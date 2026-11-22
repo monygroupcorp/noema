@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   aditusFor, applyPublishError, buildPalette, clearPublishError, connectedEdges, dedupeFlows, edgesToTabula,
-  FlowNode, hasEditablePorts, nodesToTabula, portType, publishErrorState, resolveTabulaForModus, restoreEdges,
-  restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes,
+  filterPalette, FlowNode, hasEditablePorts, loadCanvas, nodesToTabula, portType, publishErrorState, resolveTabulaForModus,
+  restoreEdges, restoreNode, schemaToPorts, setNodeAditus, tabulaToEdges, tabulaToNodes, ToolsSheet, toolsCount, type PaletteEntry,
 } from './Canvas';
-import type { ApiRequestError, JsonSchema } from '../lib/api';
+import { loadFailureKind } from '../components/LoadFailure';
+import { ApiRequestError, type JsonSchema } from '../lib/api';
 import type { Node, Edge } from '@xyflow/react';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
@@ -65,13 +66,59 @@ describe('buildPalette — node palette from real flow schemas (no hardcoded dem
   });
 });
 
-describe('dedupeFlows', () => {
+describe('dedupeFlows — one palette row per flow', () => {
   it('unions canonical + owner\'s-own flows by id', () => {
     const out = dedupeFlows(
       [{ id: 'a' }, { id: 'b' }],
       [{ id: 'b' }, { id: 'c' }],
     );
     expect(out.map((f) => f.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  // The case seen on the live registry: an older registration of a flow listed beside the
+  // current one, under another id, with the same name and version. Only the described
+  // (current) one reaches the palette, and the rest of the list is untouched.
+  it('folds two registrations of the same flow under different ids into the described one', () => {
+    const out = dedupeFlows(
+      [
+        { id: 'modus.joycaption', nomen: 'JoyCaption — image captioning', versio: '1.0.0' },
+        { id: 'runmake.flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0' },
+        { id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'Fast 4-step FLUX text-to-image' },
+        { id: 'sd1-5', nomen: 'Stable Diffusion 1.5 — text to image', versio: '1.0.0' },
+      ],
+      [],
+    );
+    expect(out.map((f) => f.id)).toEqual(['modus.joycaption', 'flux-schnell', 'sd1-5']);
+  });
+
+  it('keeps the first listed when neither twin describes itself', () => {
+    const out = dedupeFlows(
+      [{ id: 'runmake.flux-schnell', nomen: 'FLUX Schnell' }, { id: 'flux-schnell', nomen: 'FLUX Schnell' }],
+      [],
+    );
+    expect(out.map((f) => f.id)).toEqual(['runmake.flux-schnell']);
+  });
+
+  it('shows the newest of two versions of one flow, whichever list carries it', () => {
+    const out = dedupeFlows(
+      [{ id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'canonical' }],
+      [{ id: 'flux-schnell-v2', nomen: 'FLUX Schnell — text to image', versio: '1.2.0' }],
+    );
+    expect(out.map((f) => f.id)).toEqual(['flux-schnell-v2']);
+  });
+
+  it('folds an owner\'s copy of a canonical flow into one row', () => {
+    const out = dedupeFlows(
+      [{ id: 'flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0', descriptio: 'canonical' }],
+      [{ id: 'mine.flux-schnell', nomen: 'FLUX Schnell — text to image', versio: '1.0.0' }],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('flux-schnell');
+  });
+
+  it('keeps flows that only lack a name apart, by id', () => {
+    const out = dedupeFlows([{ id: 'a' }, { id: 'b' }], []);
+    expect(out.map((f) => f.id)).toEqual(['a', 'b']);
   });
 });
 
@@ -242,5 +289,153 @@ describe('node parameter panel — per-node aditus editing (noema-217)', () => {
   it('editing node A leaves node B\'s values untouched — clicking node B does not show node A\'s values', () => {
     const updated = setNodeAditus([nodeA, nodeB], 'n1', 'prompt', 'a new dragon');
     expect(aditusFor(updated, 'n2')).toEqual({ prompt: 'a phoenix' });
+  });
+});
+
+// ── loadCanvas — the screen's one load, and what a visitor sees when it fails ──────────
+// The canvas used to await its reads in an effect with no catch: a visitor whose load failed
+// — a refused caller, a 5xx, a dropped connection — stayed on "Loading canvas…" for good.
+// The load now rejects to the screen, which maps the rejection to a LoadFailure kind. No
+// jsdom here (see above): an in-memory localStorage stands in for the anonymous commitment
+// store and a fetch stub for the server.
+describe('loadCanvas — the rejection reaches the screen, with the kind it shows', () => {
+  const store = new Map<string, string>();
+  const localStorageStub = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const flows = [{ id: 'f1', nomen: 'Flow one', versio: '1.0.0' }];
+  const described = { id: 'f1', nomen: 'Flow one', versio: '1.0.0', input: { type: 'object', properties: {} }, output: { type: 'object', properties: {} } };
+  const draft = { id: 't1', nomen: 'Untitled canvas', nodi: [], vincula: [] };
+
+  // The server as an anonymous visitor meets it, with one path's answer overridden.
+  function serve(overrides: Record<string, () => Response> = {}) {
+    return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const key = `${method} ${url}`;
+      if (overrides[key]) return overrides[key]();
+      if (key === 'GET /v1/flows') return json({ flows });
+      if (key === 'GET /v1/me/flows') return json({ flows: [] });
+      if (key === 'GET /v1/flows/f1') return json(described);
+      if (key === 'GET /v1/tabulae') return json({ tabulae: [] });
+      if (key === 'POST /v1/tabulae') return json({ tabula: draft }, 201);
+      return json({ error: { code: 'not_found', message: `no route ${key}` } }, 404);
+    });
+  }
+
+  beforeEach(() => {
+    store.clear();
+    vi.stubGlobal('localStorage', localStorageStub);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('a visitor with no session gets the palette and a draft of their own — no gate', async () => {
+    const fetchSpy = serve();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { palette, tabula } = await loadCanvas(undefined);
+    expect(palette.map((p) => p.modusId)).toEqual(['f1']);
+    expect(tabula.id).toBe('t1');
+    // Every owner-scoped read carried the anonymous commitment; nothing was refused.
+    const ownerScoped = fetchSpy.mock.calls.filter(([u]) => /\/v1\/(me\/flows|tabulae)$/.test(String(u)));
+    expect(ownerScoped).toHaveLength(3);
+    for (const [, init] of ownerScoped) expect((init?.headers as Record<string, string>)['x-commitment']).toMatch(/^0x/);
+  });
+
+  it('a server that refuses the caller rejects with its 403, which the screen shows as the door', async () => {
+    vi.stubGlobal('fetch', serve({ 'GET /v1/tabulae': () => json({ error: { code: 'auth.forbidden', message: 'tabulae require an identified account' } }, 403) }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiRequestError);
+    expect(err).toMatchObject({ status: 403 });
+    expect(loadFailureKind(err)).toBe('signin');
+  });
+
+  it('a 5xx on any read rejects, which the screen shows with a retry', async () => {
+    vi.stubGlobal('fetch', serve({ 'GET /v1/me/flows': () => json({ error: { code: 'internal', message: 'upstream unavailable' } }, 503) }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiRequestError);
+    expect(err).toMatchObject({ status: 503 });
+    expect(loadFailureKind(err)).toBe('transient');
+  });
+
+  it('a connection that drops rejects too — the loader is never terminal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const err = await loadCanvas(undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TypeError);
+    expect(loadFailureKind(err)).toBe('transient');
+  });
+
+  it('a load the screen has left creates no draft on its behalf', async () => {
+    const fetchSpy = serve();
+    vi.stubGlobal('fetch', fetchSpy);
+    const controller = new AbortController();
+    controller.abort();
+    const err = await loadCanvas(undefined, controller.signal).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(fetchSpy.mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
+  });
+
+  it('?modusId= reopens that flow\'s own tabula without creating a draft', async () => {
+    const mine = { id: 't9', nomen: 'Mine', modusId: 'f1', nodi: [], vincula: [] };
+    const fetchSpy = serve({ 'GET /v1/tabulae': () => json({ tabulae: [draft, mine] }) });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { tabula } = await loadCanvas('f1');
+    expect(tabula.id).toBe('t9');
+    expect(fetchSpy.mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
+  });
+});
+
+// ── The phone's tools sheet ───────────────────────────────────────────────────────
+// At 390px the palette panel stood the full height of the page and the stage was behind it.
+// The sheet replaces it there: the count first, a filter that narrows by name, one row per
+// tool. Rendered statically (no DOM events in this toolchain, see the note at the top).
+const tool = (modusId: string, nomen: string): PaletteEntry =>
+  ({ modusId, nomen, versio: '1.0.0', inputs: [], outputs: [], inputSchema: { type: 'object' } });
+const TOOLS = [tool('a', 'FLUX Schnell — text to image'), tool('b', 'FLUX.1 Kontext — instruction edit'), tool('c', 'Remove background')];
+
+describe('filterPalette — narrows the tools by name as the visitor types', () => {
+  it('an empty or blank query shows every tool', () => {
+    expect(filterPalette(TOOLS, '')).toEqual(TOOLS);
+    expect(filterPalette(TOOLS, '   ')).toEqual(TOOLS);
+  });
+  it('matches case-blind, anywhere in the name', () => {
+    expect(filterPalette(TOOLS, 'flux').map((t) => t.modusId)).toEqual(['a', 'b']);
+    expect(filterPalette(TOOLS, 'BACKGROUND').map((t) => t.modusId)).toEqual(['c']);
+  });
+  it('every word must appear, in any order', () => {
+    expect(filterPalette(TOOLS, 'edit flux').map((t) => t.modusId)).toEqual(['b']);
+    expect(filterPalette(TOOLS, 'flux video')).toEqual([]);
+  });
+});
+
+describe('ToolsSheet — states its shape before its contents (D-55)', () => {
+  const noop = () => {};
+  it('heads with the count, holds the filter, lists one 44px-class row per tool', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: '', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('3 tools');
+    expect(html).toContain('aria-label="Filter tools by name"');
+    expect(html).toContain('aria-label="Close"');
+    expect(html).toContain('role="dialog"');
+    expect(html.match(/class="cp-item"/g)?.length).toBe(3);
+  });
+  it('the count is the whole palette even while the filter narrows the rows', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: 'remove', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('3 tools');
+    expect(html.match(/class="cp-item"/g)?.length).toBe(1);
+  });
+  it('a filter nothing matches says so and how to see all again', () => {
+    const html = renderToStaticMarkup(createElement(ToolsSheet, { palette: TOOLS, query: 'zzz', onQuery: noop, onPick: noop, onClose: noop }));
+    expect(html).toContain('No tool is named like');
+    expect(html).toContain('Clear the filter to see all 3');
+  });
+  it('toolsCount reads in the singular for one', () => {
+    expect(toolsCount(1)).toBe('1 tool');
+    expect(toolsCount(36)).toBe('36 tools');
   });
 });

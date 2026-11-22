@@ -1,31 +1,18 @@
 import { makeLogger } from '../lib/logger.js'
+import { deleteRunPodPod } from './runpodRest.js'
 
 const log = makeLogger('pod:terminate')
 
-function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
-}
-
 /**
- * Terminate a RunPod pod — stop then delete.
+ * Terminate a RunPod pod. One DELETE permanently terminates it (REST v2); a pod already gone
+ * counts as terminated.
  * Errors are caught and logged; callers can rely on this being a best-effort fire-and-forget.
  */
 export async function terminatePod(apiKey: string, podId: string): Promise<void> {
-  const headers = { Authorization: `Bearer ${apiKey}` }
   try {
-    await fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
-      method: 'POST', headers,
-    }, 15_000).catch(() => {})
-
-    const res = await fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
-      method: 'DELETE', headers,
-    }, 15_000)
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      log.warn('pod delete failed', { podId, status: res.status, body: text })
+    const { ok, reason } = await deleteRunPodPod(fetch, apiKey, podId, 15_000)
+    if (!ok) {
+      log.warn('pod delete failed', { podId, reason })
     } else {
       log.info('pod terminated', { podId })
     }

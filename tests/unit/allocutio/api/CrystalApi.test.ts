@@ -678,6 +678,27 @@ test('quote with an unknown verb throws not_found.flow', async () => {
   )
 })
 
+test('quote for a modus whose ministerium has no registered cursor throws a handled 503, never an unhandled 500', async () => {
+  const { deps, modi } = makeDeps()
+  modi['openai-bound'] = makeModus('openai-bound', { ministerium: 'openai' })
+  const api = new CrystalApi({
+    ...deps,
+    cursorum: {
+      register: () => {},
+      resolve: (m) => { throw new Error(`No cursor registered for ministerium '${m.ministerium}'`) },
+    },
+  })
+
+  await assert.rejects(
+    () => api.quote(auctor, { modusId: 'openai-bound' }, { prompt: 'hi' }),
+    (e: unknown) =>
+      e instanceof ApiError &&
+      e.code === 'internal.unavailable' &&
+      e.httpStatus === 503 &&
+      e.opts.details?.ministerium === 'openai',
+  )
+})
+
 // ── listFundamenta ───────────────────────────────────────────────────────────
 
 test('listFundamenta maps fields correctly', async () => {

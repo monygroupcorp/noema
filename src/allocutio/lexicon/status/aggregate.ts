@@ -22,7 +22,7 @@ import type { Modorum } from '../../../types/modus.js'
 import type { ActumIndexStore } from '../../../types/actumIndex.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import { IMPETUS_USD_RATE } from '../../../ledger/rates.js'
-import type { StatusSnapshot, GenEntry, StudioEntry } from './types.js'
+import type { StatusSnapshot, GenEntry, StudioEntry, RecentSettlement } from './types.js'
 
 export interface StatusAggregateDeps {
   signorum: Signorum
@@ -75,18 +75,24 @@ export async function aggregateStatus(
   }
 
   // Run independent queries in parallel — they share no state.
-  const [balanceImpetus, hospitia, gens] = await Promise.all([
+  const [balanceImpetus, hospitia, gens, recentSettlement] = await Promise.all([
     deps.signorum.balance(input.auctorKey),
     deps.hospitia.findActive(),
     buildGens(deps, actumIds),
+    findRecentSettlement(deps, input.auctorKey),
   ])
 
   const studios = await buildStudios(deps, hospitia, input.auctorKey, now)
+
+  const heldImpetus = gens.reduce((sum, g) => sum + g.heldImpetus, 0n)
 
   return {
     auctorKey: input.auctorKey,
     balanceImpetus,
     balanceUsd: Number(balanceImpetus) * IMPETUS_USD_RATE,
+    heldImpetus,
+    heldUsd: Number(heldImpetus) * IMPETUS_USD_RATE,
+    ...(recentSettlement ? { recentSettlement } : {}),
     gens,
     studios,
     joinable: [],     // v1: empty — admission policy spec is a separate sprint
@@ -99,9 +105,61 @@ function emptySnapshot(now: Date): StatusSnapshot {
     auctorKey: null,
     balanceImpetus: 0n,
     balanceUsd: 0,
+    heldImpetus: 0n,
+    heldUsd: 0,
     gens: [], studios: [], joinable: [],
     takenAt: now,
   }
+}
+
+// ── recent settlement (noema reservation-reads-as-credits-gone) ────────────────
+
+/**
+ * The single most-recently-terminated run — the newer of the latest settled (charge) and
+ * latest released (release) row — so the same screen that shows a hold also shows what
+ * became of it. Absent when the index (or its optional settled/released-history methods)
+ * isn't wired, or the user has no terminal history yet.
+ */
+async function findRecentSettlement(
+  deps: StatusAggregateDeps,
+  auctorKey: AuctorKey,
+): Promise<RecentSettlement | undefined> {
+  const index = deps.actumIndex
+  if (!index?.listSettled && !index?.listReleased) return undefined
+
+  const [settled, released] = await Promise.all([
+    index.listSettled?.(auctorKey, { limit: 1 }).catch(() => ({ entries: [] })) ?? { entries: [] },
+    index.listReleased?.(auctorKey, { limit: 1 }).catch(() => ({ entries: [] })) ?? { entries: [] },
+  ])
+
+  const charge = settled.entries[0]
+  const release = released.entries[0]
+  const chargeAt = charge?.settledAt ? new Date(charge.settledAt).getTime() : -Infinity
+  const releaseAt = release?.releasedAt ? new Date(release.releasedAt).getTime() : -Infinity
+  if (chargeAt < 0 && releaseAt < 0) return undefined
+
+  if (chargeAt >= releaseAt && charge?.settledAt) {
+    const impetus = BigInt(charge.impetus ?? '0')
+    return {
+      actumId: charge.actumId,
+      modusLabel: charge.modusLabel ?? charge.modusId,
+      kind: 'charge',
+      impetus,
+      usd: Number(impetus) * IMPETUS_USD_RATE,
+      at: new Date(charge.settledAt),
+    }
+  }
+  if (release?.releasedAt) {
+    return {
+      actumId: release.actumId,
+      modusLabel: release.modusLabel ?? release.modusId,
+      kind: 'release',
+      impetus: 0n,
+      usd: 0,
+      at: new Date(release.releasedAt),
+    }
+  }
+  return undefined
 }
 
 // ── gen rows ─────────────────────────────────────────────────────────────────
@@ -136,6 +194,10 @@ async function buildGens(deps: StatusAggregateDeps, actumIds: string[]): Promise
     rows.push({
       actumId: a.id,
       modusLabel,
+      // Actum.impetus is the upper-bound reservation while nascens/agens — the amount locked
+      // against this run (ActumInceptor stamps it at creation; ActumCompletor overwrites it
+      // with the settled cost only once the run is terminal, which buildGens already excludes).
+      heldImpetus: a.impetus,
       studio,
       status: a.status,
       ...(elapsedMs !== undefined ? { elapsedMs } : {}),

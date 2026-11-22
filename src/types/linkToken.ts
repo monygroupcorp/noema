@@ -9,15 +9,19 @@
 //   • 'tg-link'    — WEB (authed) mints → BOT redeems on `/start link_<code>`, re-pointing
 //                    the Telegram persona at the web account's soul.
 //   • 'tg-recover' — BOT mints (on /recover) → WEB redeems, minting a session (forgot-password).
+//   • 'tg-webapp'  — no code at all: the hash of a Telegram-signed Mini App launch, CLAIMED when
+//                    the web redeems it, so one launch signs in once (see telegramWebAppAuth.ts).
 //
 // Only the hash is stored (a dump never yields a usable code); redemption deletes the row.
 // =============================================================================
 
-export type LinkTokenKind = 'tg-link' | 'tg-recover'
+export type LinkTokenKind = 'tg-link' | 'tg-recover' | 'tg-webapp'
 
 export interface LinkTokenStore {
   /** Mint a one-time code bound to `animaId`; returns the plaintext code (store keeps only its hash). */
   issue(animaId: string, kind: LinkTokenKind, ttlSeconds: number): Promise<string>
   /** Redeem a code (single-use) → the bound `animaId`, or `null` if unknown/expired/wrong-kind. */
   consume(code: string, kind: LinkTokenKind): Promise<string | null>
+  /** Record `key` as used for `ttlSeconds`. `true` the first time; `false` if it was already claimed. */
+  claim(key: string, kind: LinkTokenKind, ttlSeconds: number): Promise<boolean>
 }

@@ -227,7 +227,16 @@ gen uses that model (the ChainEngine royalty surface). So:
      placeholder above; the our-bucket leg is done. **Weights STREAM end-to-end** (2026-06-22): `_hostModel`
      uses `MediaFetcher.fetchStream` → `ObjectStore.putStream` (lib-storage multipart) when both are present,
      so a multi-GB checkpoint never buffers whole in memory; it falls back to the buffered path for
-     LoRA-sized files / test fakes.
+     LoRA-sized files / test fakes. **Civitai-origin weights need a Bearer token (2026-11-13):** Civitai
+     gates its download endpoint even for ordinary public LoRAs now, so `_hostModel` sends
+     `CIVITAI_API_TOKEN` as `Authorization: Bearer` to civitai.com only (`civitaiAwareFetcher`,
+     `src/crystal/civitaiAuth.ts`) — dropped on any redirect off that host, never logged. Missing/rejected
+     → a typed `CivitaiDownloadError` instead of a bare 401; the buffered path also verifies the downloaded
+     bytes are a real safetensors file before upload (`isValidSafetensorsHeader`) — not done on the
+     streaming path (a multi-GB checkpoint can't be peeked without buffering it). An adapter throw of any
+     kind is no longer silent: it is logged and recorded on the Editio (`Editio.failure`,
+     `Edition.failureNote` — `CrystalApi._settlePublication`). A PRIVATE import stays origin-only
+     (unaffected — `docs/spec/model-import.md`'s custody decision; only a PUBLIC promotion mirrors into R2).
    - ✅ **3c — one-call finality (`custody:'both'`) + auto-trigger (SHIPPED 2026-06-22).** A single `publish`
      of a model with `custody:'both'` creates TWO durable publications: the EXTERNAL registry copy (custody
      `theirs` when the caller has a BYO account for that registry, else our org) AND an R2 bucket MIRROR
@@ -353,6 +362,25 @@ Inert stand-ins shipped to stand up the spine. Each is wired and exercised by th
 | `HfHttpTransport` — real HF HTTP, **LIVE-UNVERIFIED** (`src/crystal/HfUploader.ts`) | The HF **LFS uploader IS built** (2026-06-22): `HuggingFaceUploader` streams a model's weights to HF via the 3-step Git-LFS protocol (batch → presigned PUT → verify) + repo-create + commit, running inside the durable `PublicationWorker`. Its ORCHESTRATION is hermetically tested (fake transport); but `HfHttpTransport` — the real HF HTTP — **cannot be exercised without `HF_TOKEN` + network**, so the wire-level protocol (endpoint shapes, LFS batch/commit NDJSON, presigned PUT headers) is unverified against real HF. | A live test against real HF: publish a small LoRA end-to-end, confirm the repo + LFS object + commit land and the weights re-download. Fix protocol drift. **Civitai upload is precluded** (no public write API — GUI-locked; `civitaiRegistry` links existing models only, never uploads); real `retract` = repo deletion. | Before EXTERNAL model publishing is offered to users (HF path is code-complete but unproven). |
 | `FeedAdapter.externalRef` (`src/crystal/FeedAdapter.ts`) | Mints a cosmetic `feed:<uuid>` handle; the feed is actually served from `Editionum.listFeed`. No dedicated feed backend (no fan-out / cache / ranking). | A real feed service if/when scale needs one — the adapter is the seam. | Not blocking; only if the store-backed read stops sufficing. |
 | `MintAdapter` / `MarketplaceAdapter` (`src/crystal/MintAdapter.ts`) | **Freeze is real**: content-addresses `provenanceHash + owners[] + size` into a deterministic `mint:<chain>:<sha256>` / marketplace listing handle (the immutable drop identifier). But it submits **no on-chain transaction** (no Catena/CreditVault mint, no contract, no chain-issued tokenId, no per-token `tokenURI`) and makes **no real marketplace API call** — the returned handle is a projection, not an on-chain/venue artifact. | A real on-chain minter (Catena/CreditVault rails: deploy/mint, capture the tx + tokenId; assemble `tokenURI`s — the mutable hosted layer is the living-NFT work #6) and a real marketplace client (list/delist via the venue API). | Before minting/listing is offered to users (the handle is a deterministic-but-off-chain reference until then). |
+
+**Signer custody for build-order #6:** the real on-chain minter is expected to act as NOEMA's
+registered delegated agent on the noesis (ms2fun) launchpad (its `MasterRegistryV1.isAgent` /
+per-instance `agentDelegationEnabled` mechanism) — not a one-off NOEMA-owned contract. That agent
+EOA's key must never again reach an app container as a raw env var (the threat model that cost
+`audit-high-eth-signer-key-plaintext-env` its finding): design #6's signing path — a local signer
+process reached over a unix socket, or a KMS-backed signer — before wiring the first real call, and
+provision the key through that boundary from the start. The key is freshly generated for this
+purpose and holds only working gas — never the retired STATIONTHIS keystore, and never treasury
+funds — so a leak costs gas money and an agent revoke, not the vault.
+
+**Agent-key misuse monitoring for build-order #6:** from the day the noema agent address is first
+registered on `MasterRegistryV1`, watch that address on-chain: alert on every `AgentUpdated` event
+naming it, and on any `addEdition` / `setEditionSchedule` / `setEditionFreeMintAllocation` /
+`updateEditionMetadata` / `setStyle` call it makes that the ops channel did not expect. Those are
+exactly the calls `MasterRegistryV1.emergencyRevoker.revokeAgent()` exists to cut off (it bypasses
+the timelock); the alert has no value unless it reaches someone who can pull that switch before an
+unexpected batch of calls compounds. Wire the watcher and the alert route as part of #6 itself —
+there is no agent address to watch before one is registered.
 
 **Discovery:** `grep -rn "PLACEHOLDER(publishing" src/` lists every inert site. Keep this table in sync when
 adding or removing one.

@@ -95,6 +95,15 @@ interface ChatBulletin {
   messageId: number | null
   lastShown?: string          // text + keyboard signature, for dedupe
   timers: TimerRegistry
+  /** Mod • → Add picker's cached candidate list (+ resolved base families/filter for a LoRA
+   *  mount), so page turns don't refetch. Absent = no open/cached picker. */
+  pickerCache?: { all: PendingModel[]; base?: { families: Array<{ id: string; label: string }>; filter: string } }
+  /** Monotonic fetch generation — guards against out-of-order catalog results when two loads
+   *  race (e.g. a search reply interleaving a filter tap). Only the latest applies. */
+  pickerFetchGen: number
+  /** Chains renders so a slow edit can't be overtaken by a later one (the provisioning
+   *  play-by-play lands in stage order under real API latency). Absent = chain idle. */
+  renderTail?: Promise<void>
 }
 
 /**
@@ -112,14 +121,9 @@ export class BulletinManager {
   // A Progressus can arrive before register() (the gen path records 'provisioning' the instant
   // cursor.run detaches, before the Stream primitive renders + registers). Buffered here and
   // replayed in order on register — without this the first report drops and the session misreads
-  // the cold start as a warm reuse. Capped per actum; cleared on register.
+  // the cold start as a warm reuse. Capped per actum; cleared on register. Keyed by actumId, not
+  // chatId: that's the one thing known at this point — no chat record exists yet to hold it.
   private readonly _pendingProgressus = new Map<string, Progressus[]>()
-  /** Full candidate list (+ resolved base families/filter for a LoRA mount) backing the open
-   *  picker list, per chat — so page turns don't refetch. */
-  private readonly pickerCache = new Map<number, { all: PendingModel[]; base?: { families: Array<{ id: string; label: string }>; filter: string } }>()
-  /** Monotonic fetch generation per chat — guards against out-of-order catalog results when
-   *  two loads race (e.g. a search reply interleaving a filter tap). Only the latest applies. */
-  private readonly pickerFetchGen = new Map<number, number>()
 
   constructor(private readonly deps: BulletinDeps) {}
 
@@ -130,12 +134,10 @@ export class BulletinManager {
     this.actumChat.set(actumId, chatId)
     let cb = this.chats.get(chatId)
     if (!cb || cb.session.ended) {
-      // A receipted bulletin is final history — start fresh (new message at the bottom).
+      // A receipted bulletin is final history — start fresh (new message at the bottom). A fresh
+      // record carries none of the outgoing one's picker cache / render chain — nothing to clear.
       cb?.timers.cancelAll()
-      this.pickerCache.delete(chatId)
-      this.pickerFetchGen.delete(chatId)
-      this._renderTail.delete(chatId)   // fresh session → fresh render chain
-      cb = { session: new PodSession(hostUserId, audience), messageId: null, timers: new TimerRegistry() }
+      cb = { session: new PodSession(hostUserId, audience), messageId: null, timers: new TimerRegistry(), pickerFetchGen: 0 }
       this.chats.set(chatId, cb)
       this._armAutoSettle(chatId)
     }
@@ -160,11 +162,8 @@ export class BulletinManager {
    */
   async arm(chatId: number, hostUserId: string): Promise<void> {
     this.chats.get(chatId)?.timers.cancelAll()
-    this.pickerCache.delete(chatId)
-    this.pickerFetchGen.delete(chatId)
-    this._renderTail.delete(chatId)   // fresh session → fresh render chain
     const session = new PodSession(hostUserId)
-    this.chats.set(chatId, { session, messageId: null, timers: new TimerRegistry() })
+    this.chats.set(chatId, { session, messageId: null, timers: new TimerRegistry(), pickerFetchGen: 0 })
     // Begin at the preset step (curated flows; Custom → image → config → then the model menu).
     // No auto-settle / reap armed → persists until the host walks through or dismisses it.
     await this._beginArm(session)
@@ -256,10 +255,10 @@ export class BulletinManager {
     for (const [chatId, cb] of this.chats) {
       if (cb.session.podId === externusId && !cb.session.ended) {
         cb.timers.cancelAll()
-        this.pickerCache.delete(chatId)
-        this.pickerFetchGen.delete(chatId)
+        cb.pickerCache = undefined
+        cb.pickerFetchGen = 0
         cb.session.end()
-        void this._render(chatId).then(() => { this._renderTail.delete(chatId) })
+        void this._render(chatId).then(() => { cb.renderTail = undefined })
       }
     }
   }
@@ -332,7 +331,7 @@ export class BulletinManager {
       cb.timers.cancelAll()
       s.cancel()
       await this._render(chatId)
-      this._renderTail.delete(chatId)   // dismissed → drop the chain
+      cb.renderTail = undefined   // dismissed → drop the chain
       return
     }
     // /arm wizard: image chosen → advance to the config step with that image's runtimes.
@@ -442,7 +441,7 @@ export class BulletinManager {
           s.armBack()                  // config → image / flowdetail → preset
         }
         await this._render(chatId)
-        if (s.ended) this._renderTail.delete(chatId)   // dismissed → drop the chain
+        if (s.ended) cb.renderTail = undefined   // dismissed → drop the chain
         return
 
       case 'submenu.back':
@@ -453,8 +452,8 @@ export class BulletinManager {
           s.backToList()                       // card → the list it was opened from (list state preserved)
         } else if (s.picker?.stage === 'list') {
           s.backToCategories()
-          this.pickerCache.delete(chatId)
-          this.pickerFetchGen.delete(chatId)
+          cb.pickerCache = undefined
+          cb.pickerFetchGen = 0
         } else if (s.picker) {
           this._closePicker(chatId)
         } else if (s.isArmedIdle) {
@@ -533,12 +532,12 @@ export class BulletinManager {
           }
         }
         cb.timers.cancelAll()
-        this.pickerCache.delete(chatId)
-        this.pickerFetchGen.delete(chatId)
+        cb.pickerCache = undefined
+        cb.pickerFetchGen = 0
         s.openSubmenu(null)
         s.end()
         await this._render(chatId)
-        this._renderTail.delete(chatId)   // terminal receipt landed → drop the chain
+        cb.renderTail = undefined   // terminal receipt landed → drop the chain
         return
 
       case 'destroy.drain':
@@ -691,9 +690,9 @@ export class BulletinManager {
 
   /** Close the picker and drop its cached list + fetch generation (stays in the `mod` submenu). */
   private _closePicker(chatId: number): void {
-    this.chats.get(chatId)?.session.closePicker()
-    this.pickerCache.delete(chatId)
-    this.pickerFetchGen.delete(chatId)
+    const cb = this.chats.get(chatId)
+    cb?.session.closePicker()
+    if (cb) { cb.pickerCache = undefined; cb.pickerFetchGen = 0 }
   }
 
   /** Fetch the full candidate list for the session's current picker intent (browse genus or
@@ -702,8 +701,8 @@ export class BulletinManager {
     const cb = this.chats.get(chatId)
     const p = cb?.session.picker
     if (!cb || !p || p.stage !== 'list') return
-    const gen = (this.pickerFetchGen.get(chatId) ?? 0) + 1
-    this.pickerFetchGen.set(chatId, gen)
+    const gen = cb.pickerFetchGen + 1
+    cb.pickerFetchGen = gen
     let all: PendingModel[] = []
     let base: { families: Array<{ id: string; label: string }>; filter: string } | undefined
     if (p.query !== undefined) {
@@ -714,8 +713,8 @@ export class BulletinManager {
       if ('baseFamilies' in res && res.baseFamilies) base = { families: res.baseFamilies, filter: res.baseFilter ?? '' }
     }
     // Drop these results if a newer fetch superseded this one or the picker closed mid-fetch.
-    if (this.pickerFetchGen.get(chatId) !== gen || !cb.session.picker) return
-    this.pickerCache.set(chatId, { all, ...(base ? { base } : {}) })
+    if (cb.pickerFetchGen !== gen || !cb.session.picker) return
+    cb.pickerCache = { all, ...(base ? { base } : {}) }
     cb.session.setPickerPage(0)
     this._paginate(chatId)
     await this._render(chatId)
@@ -726,7 +725,7 @@ export class BulletinManager {
     const cb = this.chats.get(chatId)
     const p = cb?.session.picker
     if (!cb || !p) return
-    const cache = this.pickerCache.get(chatId) ?? { all: [] }
+    const cache = cb.pickerCache ?? { all: [] }
     const size = this._pageSize()
     const pageCount = cache.all.length === 0 ? 0 : Math.ceil(cache.all.length / size)
     const page = pageCount === 0 ? 0 : Math.min(p.page, pageCount - 1)
@@ -751,10 +750,6 @@ export class BulletinManager {
     cb.timers.arm('renew', RENEW_MS, () => { void this._render(chatId, { renew: true }) })
   }
 
-  /** Per-chat render tail — chains renders so a slow edit can't be overtaken by a later one
-   *  (the provisioning play-by-play lands in stage order under real API latency). */
-  private readonly _renderTail = new Map<number, Promise<void>>()
-
   /**
    * Serialize renders per chat so a slow edit can't be overtaken by a later one. When the chain
    * is idle the render starts synchronously (the sink call is issued before this returns, as the
@@ -762,11 +757,13 @@ export class BulletinManager {
    * it. `await`-ing this resolves when THIS render's edit completes.
    */
   private _render(chatId: number, opts: { renew?: boolean } = {}): Promise<void> {
-    const tail = this._renderTail.get(chatId)
+    const cb = this.chats.get(chatId)
+    if (!cb) return Promise.resolve()
+    const tail = cb.renderTail
     const run = (tail ?? this._renderNow(chatId, opts))   // idle → start now; busy → chain
       .then(tail ? () => this._renderNow(chatId, opts) : undefined)
       .catch(() => {})   // a failed render must NOT wedge the chain
-    this._renderTail.set(chatId, run)
+    cb.renderTail = run
     return run
   }
 

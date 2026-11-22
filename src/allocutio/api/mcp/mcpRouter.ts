@@ -25,6 +25,16 @@ export interface McpRouterDeps {
   }
 }
 
+/** The caller's origin, ISO 3166-1 alpha-2 (Cloudflare's `cf-ipcountry`) — see `apiRouter.ts`'s
+ *  `originCountryOf` (same header, same undefined-on-unresolvable handling). Duplicated rather
+ *  than imported: this is Express-request parsing, not crystal-API substance, and the two
+ *  routers are deliberately independent surfaces. */
+function originCountryOf(req: express.Request): string | undefined {
+  const raw = req.headers['cf-ipcountry']
+  const country = (Array.isArray(raw) ? raw[0] : raw)?.trim().toUpperCase()
+  return country && country !== 'XX' && country !== 'T1' ? country : undefined
+}
+
 export function createMcpRouter(deps: McpRouterDeps): Router {
   const router = express.Router()
 
@@ -43,7 +53,7 @@ export function createMcpRouter(deps: McpRouterDeps): Router {
       keyMaxImpetusPerRun = undefined
     }
 
-    const server = buildMcpServer(deps.api, auctor, keyMaxImpetusPerRun)
+    const server = buildMcpServer(deps.api, auctor, keyMaxImpetusPerRun, originCountryOf(req))
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

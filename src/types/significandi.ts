@@ -116,6 +116,23 @@ export interface Signum {
    * future hooks may use it for other resource ids (modusId, intellaId, etc.).
    */
   contextId?: string
+
+  /**
+   * The platform surface a purchased credit was bought through — 'telegram' when the buyer
+   * came from the bot's Buy credits, 'web' otherwise. Set on fiat credits only, from a fixed
+   * set (`SIGNUM_ALLOCUTIONES`). Attribution, never authority: nothing reads it for an amount
+   * or a permission. Absent on every signum written before it existed.
+   */
+  allocutio?: SignumAllocutio
+}
+
+/** The surfaces a purchase can be attributed to. */
+export const SIGNUM_ALLOCUTIONES = ['telegram', 'web'] as const
+export type SignumAllocutio = typeof SIGNUM_ALLOCUTIONES[number]
+
+/** A client- or metadata-supplied surface, kept only when it is one we know. */
+export function asSignumAllocutio(value: unknown): SignumAllocutio | undefined {
+  return (SIGNUM_ALLOCUTIONES as readonly unknown[]).includes(value) ? value as SignumAllocutio : undefined
 }
 
 /** "Signa" — nominative/accusative plural. Your credits. */
@@ -171,6 +188,14 @@ export interface Signorum {
    * Returns sum of all valid Signum.valor for the given identity.
    */
   balance(by: { animaId: string } | { commitment: string }): Promise<bigint>
+  /**
+   * Currently-locked valor for an identity — signa this identity reserved against its OWN
+   * open actum(s) (`status: 'locked'`), not yet settled or released. `Census` nets this back
+   * onto `balance()` when deciding whether a warm-pod billing shortfall is real: a host's own
+   * in-flight reservation locks its own signa out of `balance()`, and without this, Census
+   * reads that as insolvency and drains the very studio the reservation is paying for.
+   */
+  lockedBalance(by: { animaId: string } | { commitment: string }): Promise<bigint>
   /**
    * The authorized budget for a Modo session — the sum of VALID `tessera` valor
    * scoped to `modoId` (0n if none). The tessera is the anonymous bearer budget a

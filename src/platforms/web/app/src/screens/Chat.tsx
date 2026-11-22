@@ -7,6 +7,7 @@ import { api, newTurnKey, type ConciergeProposal, type ConciergeReply, type Coll
 import { useProject } from '../state/project';
 import { ProposalCard } from '../components/ProposalCard';
 import { WriteProposalCard } from '../components/WriteProposalCard';
+import { ReplyMarkdown } from '../components/ReplyMarkdown';
 import { commitMemoryDelta } from '../lib/conciergeMemory';
 
 // NAVIGATE (noema-367). Belt-and-suspenders: render only when the path is in-app
@@ -92,7 +93,7 @@ function ProvMeter({ p, onCanvas }: { p: Prov; onCanvas: (p: Prov) => void }) {
           ? <span className="prov-egress">↗ left noema → {p.egress.to}</span>
           : <span className="prov-sealed">{p.egress.note}</span>}
       </span>
-      {p.canvas && <button className="canvas-btn" onClick={() => onCanvas(p)}>→ canvas</button>}
+      {p.canvas && <button className="canvas-btn" onClick={() => onCanvas(p)}>→ Canvas</button>}
     </div>
   );
 }
@@ -142,7 +143,7 @@ function hydrateAgentBody(
       return replyBody({ ...parsed, tokenUsage: { totalTokens: 0 } } as unknown as ConciergeReply, onGo, turnKey);
     }
   } catch { /* not JSON — a plain text reply */ }
-  return corpus;
+  return <ReplyMarkdown text={corpus} />;
 }
 
 // A reply's rendered body: the text, then whatever the agent attached to it — a destination the
@@ -153,7 +154,7 @@ function hydrateAgentBody(
 function replyBody(reply: ConciergeReply, onGo: (path: string) => void, turnKey?: string): ReactNode {
   return (
     <>
-      {reply.text}
+      <ReplyMarkdown text={reply.text} />
       {reply.destination && <DestinationLink destination={reply.destination} onGo={onGo} />}
       {reply.write && <WriteProposalCard write={reply.write} confirmKey={turnKey} />}
     </>
@@ -339,7 +340,7 @@ export function Chat() {
   const groups = groupThreads(threads, projectNameOf);
 
   return (
-    <AppShell crumb="chat" concierge={false}>
+    <AppShell crumb="Chat" concierge={false}>
       {/* Thread history (noema-111) — a project-grouped drawer of the caller's past threads. */}
       {listOpen && <div style={H.backdrop} onClick={() => setListOpen(false)} />}
       {listOpen && (

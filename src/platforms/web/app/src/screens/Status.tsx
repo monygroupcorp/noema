@@ -1,15 +1,49 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { useIdentity } from '../state/identity';
 import { Ic } from '../lib/icons';
-import { api, getActivitySnapshot, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
-import { activityDoorHref, activityDoorLabel, activityKindLabel, partitionActivity, queueLabel } from '../lib/muse';
+import { api, getActivitySnapshot, retryActivity, subscribeActivity, type ActivityRow, type MeStatus, type SettledRun } from '../lib/api';
+import { activityDoorHref, activityDoorLabel, activityKindLabel, queueLabel } from '../lib/muse';
+
+// A released run is the OTHER terminal outcome besides a charge: the reservation was
+// released, nothing was charged. Named explicitly rather than folded into "Done" so a
+// failed/cancelled run never reads as if it simply vanished (same reason it stays in
+// this list at all, instead of being pruned).
+function activityStatusLabel(status: ActivityRow['status']): string {
+  return status === 'running' ? 'Running' : status === 'released' ? 'Released' : 'Done';
+}
 
 const IMPETUS_USD = 0.000337;
 
+// The stat cards under the page head. The balance is drawn whatever it reads: next to "Add
+// credits" a zero balance is the fact the button acts on, the one case P-1c admits. Runs and
+// studios are counts, and a count of nothing is not printed (DESIGN.md D-58) — the Activity
+// list below already says what fills them. Before the read lands every card holds its place
+// with an ellipsis (D-61).
+export interface StatCard { l: string; n: string; d: string }
+export function statCards(me: MeStatus | null, usdPerCredit = IMPETUS_USD): StatCard[] {
+  if (!me) return [
+    { l: 'Balance', n: '…', d: 'credits' },
+    { l: 'Runs', n: '…', d: 'all time' },
+    { l: 'Studios', n: '…', d: 'warm sessions' },
+  ];
+  const credits = Number(me.balanceImpetus);
+  const usd = me.balanceUsd || credits * usdPerCredit;
+  const cards: StatCard[] = [{ l: 'Balance', n: credits.toLocaleString(), d: `credits · ≈ $${usd.toFixed(2)}` }];
+  // A reservation is a HOLD, not a charge: shown as its own card next to Balance so it never
+  // reads as credits that simply vanished (the balance number alone already dropped by this).
+  const held = Number(me.heldImpetus);
+  if (held > 0) {
+    const heldUsdAmount = me.heldUsd || held * usdPerCredit;
+    const runs = me.gens.length === 1 ? '1 run' : `${me.gens.length} runs`;
+    cards.push({ l: 'Held', n: held.toLocaleString(), d: `reserved for ${runs} · ≈ $${heldUsdAmount.toFixed(2)}` });
+  }
+  if (me.gens.length > 0) cards.push({ l: 'Runs', n: String(me.gens.length), d: 'all time' });
+  if (me.studios.length > 0) cards.push({ l: 'Studios', n: String(me.studios.length), d: 'warm sessions' });
+  return cards;
+}
+
 export function Status() {
-  const { ident } = useIdentity();
   const [me, setMe] = useState<MeStatus | null>(null);
   const [err, setErr] = useState(false);
 
@@ -58,15 +92,13 @@ export function Status() {
       .finally(() => setSpendLoading(false));
   };
 
-  // Running-now / recently-finished bands (GET /v1/me/activity) — the SAME poll the
-  // rail's badge reads (noema-326), not a second request.
-  const { rows: activityRows, loaded: activityLoaded } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
-  const { running, finished } = partitionActivity(activityRows);
+  // One activity list (GET /v1/me/activity) — the SAME poll the rail's badge reads
+  // (noema-326), not a second request. The read is already newest-first across BOTH
+  // in-flight and settled rows (CrystalApi#listActivity sorts on createdAt before doors
+  // are attached), so rendering it in order is the one list REF-9 asks for — no
+  // re-partition into separate running/finished bands.
+  const { rows: activityRows, loaded: activityLoaded, error: activityError } = useSyncExternalStore(subscribeActivity, getActivitySnapshot, getActivitySnapshot);
 
-  const credits = me ? Number(me.balanceImpetus) : 0;
-  const usd = me ? (me.balanceUsd || credits * IMPETUS_USD) : 0;
-  const runs = me?.gens.length ?? 0;
-  const studios = me?.studios.length ?? 0;
   const fmtElapsed = (ms?: number) => (ms == null ? '' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`);
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
@@ -105,7 +137,8 @@ export function Status() {
 
   // One row's link: a generation's door is a raw media URL (a plain external anchor,
   // never a router Link), training/caption/decompose door through the source dataset
-  // (a real in-app route), and a door-less row renders without a link at all.
+  // (a real in-app route), and a door-less row renders without a link at all. The
+  // running/finished split that used to be two panels is now this one badge (F-40).
   const activityRow = (row: ActivityRow, right: ReactNode) => {
     const href = activityDoorHref(row);
     const body = (
@@ -114,7 +147,10 @@ export function Status() {
           <div className="t">{row.modusLabel ?? activityKindLabel(row.kind)}</div>
           <div className="s">{activityKindLabel(row.kind)}{href ? ` · ${activityDoorLabel(row.kind)}` : ''}</div>
         </div>
-        <div className="li-right">{right}</div>
+        <div className="li-right" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+          <span className={`badge${row.status === 'running' ? ' accent' : ''}`}>{activityStatusLabel(row.status)}</span>
+          {right}
+        </div>
       </>
     );
     if (!href) return <div className="lrow" key={row.actumId}>{body}</div>;
@@ -123,7 +159,7 @@ export function Status() {
   };
 
   return (
-    <AppShell crumb="activity">
+    <AppShell crumb="Activity">
       <div className="page"><div className="pw">
         <div className="pagehead">
           <div><h1>Activity</h1><div className="sub">Your balance, what’s running now, and where your credits go.</div></div>
@@ -133,36 +169,29 @@ export function Status() {
         {err && <div className="warn">Couldn’t reach your account on staging.</div>}
 
         <div className="stats">
-          <div className="stat"><div className="l">Balance</div><div className="n">{me ? credits.toLocaleString() : '…'}</div><div className="d">credits · ≈ ${usd.toFixed(2)}</div></div>
-          <div className="stat"><div className="l">Runs</div><div className="n">{me ? runs : '…'}</div><div className="d">all time</div></div>
-          <div className="stat"><div className="l">Studios</div><div className="n">{me ? studios : '…'}</div><div className="d">warm sessions</div></div>
+          {statCards(me).map((c) => (
+            <div className="stat" key={c.l}><div className="l">{c.l}</div><div className="n">{c.n}</div><div className="d">{c.d}</div></div>
+          ))}
         </div>
 
-        <div className="sectionhead">Running now</div>
+        <div className="sectionhead">Activity</div>
         {!activityLoaded ? (
-          <div className="empty"><div className="t">Loading what’s running…</div></div>
-        ) : running.length === 0 ? (
+          <div className="empty"><div className="t">Loading your activity…</div></div>
+        ) : activityError && activityRows.length === 0 ? (
           <div className="empty">
-            <div className="ico"><Ic name="sparkles" /></div>
-            <div className="t">Nothing running right now — queued &amp; in-flight runs show here the moment you fire one.</div>
+            <div className="t">Couldn’t load your activity.</div>
+            <button className="btn ghost" onClick={retryActivity}>Try again</button>
+          </div>
+        ) : activityRows.length === 0 ? (
+          <div className="empty">
+            {/* One line that says what will appear here, and the one action that fills it: the
+                same start path the home's empty bands take, to the catalogue (DESIGN.md D-60). */}
+            <div className="t">Nothing running or finished yet — every run lands here the moment you start one.</div>
+            <Link className="btn ghost" to="/catalog"><Ic name="sparkles" /> Create something</Link>
           </div>
         ) : (
           <div className="list">
-            {running.slice(0, 8).map((row) => activityRow(row, runningRight(row)))}
-          </div>
-        )}
-
-        <div className="sectionhead">Recently finished</div>
-        {!activityLoaded ? (
-          <div className="empty"><div className="t">Loading recent activity…</div></div>
-        ) : finished.length === 0 ? (
-          <div className="empty">
-            <div className="ico"><Ic name="footprints" /></div>
-            <div className="t">Nothing finished yet — a completed run lands here, and stays in your <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link> after.</div>
-          </div>
-        ) : (
-          <div className="list">
-            {finished.slice(0, 8).map((row) => activityRow(row, fmtDate(row.settledAt)))}
+            {activityRows.slice(0, 8).map((row) => activityRow(row, row.status === 'running' ? runningRight(row) : fmtDate(row.settledAt ?? row.releasedAt)))}
           </div>
         )}
 
@@ -178,11 +207,11 @@ export function Status() {
           <div className="empty"><div className="t">Loading your spend history…</div></div>
         ) : spend.length === 0 ? (
           <div className="empty">
-            <div className="ico"><Ic name="receipt-text" /></div>
-            <div className="t">
-              No settled runs yet — once a generation finishes, what it cost shows here. Finished work lives in your{' '}
-              <Link to="/space" style={{ color: 'var(--accent-soft)' }}>space</Link>.
-            </div>
+            {/* The same action fills this card. It is offered here only when the Activity card
+                above is not already offering it, so the screen never shows the control twice
+                (P-1d); with nothing running at all, the one button above is the one to press. */}
+            <div className="t">No settled runs yet — what each run cost shows here once it finishes.</div>
+            {activityRows.length > 0 && <Link className="btn ghost" to="/catalog"><Ic name="sparkles" /> Create something</Link>}
           </div>
         ) : (
           <>
@@ -205,10 +234,6 @@ export function Status() {
             )}
           </>
         )}
-
-        <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-          Live from staging · {ident.funding === 'named' ? 'signed-in account' : 'anonymous session'}.
-        </div>
       </div></div>
     </AppShell>
   );

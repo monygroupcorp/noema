@@ -278,6 +278,15 @@ export interface Intella {
    */
   contentRating?: IntellaContentRating
 
+  /**
+   * Admin kill switch: hides the record from every public catalog read (`listModels`,
+   * `readPublicCatalog`) while leaving it, and its `usageCount`/history, in place — the
+   * record is never hard-deleted. Distinct from `access`: a `canonica: true` record is
+   * public by definition regardless of `access`, so `disabled` is the one lever that can
+   * pull a canonical record out of the catalog without touching that invariant.
+   */
+  disabled?: boolean
+
   /** Discovery/classification tags (e.g. base family 'flux'/'sd15', 'trained'). The catalog derives
    *  a model's base family from these (the import sets them; canonical seeds set them directly). */
   tags?: Array<{ tag: string; source?: string }>

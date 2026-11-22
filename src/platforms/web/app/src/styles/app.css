@@ -12,15 +12,27 @@
   --hair:var(--color-border); --hair-soft:#15181b;
   --text:var(--color-text); --muted:var(--color-text-muted); --faint:var(--color-text-subtle);
   --accent:var(--color-accent); --accent-soft:var(--color-accent-hover); --accent-bg:var(--color-accent-subtle);
-  --good:var(--color-success);
+  --good:var(--color-success); --bad:var(--color-danger);
+  /* .btn's own text colour, named so the one place it must be repeated (doc.css's .prose a.btn
+     override, which exists only because `.prose a` would otherwise win the cascade) references
+     it instead of carrying a second literal copy of the same value. */
+  --btn-text:#0a0a14;
   /* locality (hemisphere) + economy (credits/royalties) — global so the posture cluster,
      dashboard, and per-surface meters all read the same palette (brand.md: one glyph, one meaning). */
   --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f;
   --amber:#d8a657; --amber-bg:rgba(216,166,87,.10);
   --egress:#c98f6a; --noesis:#b98fe0;   /* egress disclosure · the NOESIS publishing brand */
-  /* modality swatches — one palette shared by canvas ports, catalogue, datasets */
-  --m-text:#8fb0ff; --m-image:#5b8cff; --m-video:#d66f9a; --m-audio:#5fd0a8; --m-3d:#c79a4e;
+  /* modality swatches — one palette shared by canvas ports, catalogue, datasets (D-11).
+     Each is its own hue: text is lime, not the soft accent, which read as a second image blue. */
+  --m-text:#b4cf5a; --m-image:#5b8cff; --m-video:#d66f9a; --m-audio:#5fd0a8; --m-3d:#c79a4e;
   --radius:10px; --rail:236px; --context:328px;
+  /* The docked concierge launcher (P-2c, D-52): the shell reserves the launcher's whole footprint
+     at the foot of .main, so the scroll area ends above it at every scroll position. --dock-h is
+     the launcher's box (set on .cbtn, so the reserve and the pill cannot drift apart); --dock-off
+     is its distance from the viewport bottom (the bar height joins it on a phone, below). */
+  --bar-h:58px; --dock-h:52px; --dock-off:var(--s4);
+  --dock-reserve:calc(var(--dock-off) + var(--dock-h) + var(--s2));
+  --concierge-w:440px;  /* .cpanel's cap — shared so the open-state reserve below cannot drift from it */
   --ease:cubic-bezier(.22,.61,.36,1); --dur-fast:120ms; --dur:160ms; --dur-slow:300ms;
   /* SPACING scale (4px base) — compose from these, never magic numbers */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:48px; --s10:64px;
@@ -106,12 +118,18 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .ttdot{width:5px;height:5px;border-radius:50%; background:var(--accent)}
 
 /* ---------- main + topbar ---------- */
-/* padding-bottom reserves a safe strip for the fixed Concierge bubble — the scroll area (.page)
-   ends above it, so footer CTAs/last rows never render under the bubble at any scroll position. */
-/* padding-bottom reserves a safe strip for the fixed Concierge bubble; .page (below) gets
+/* padding-bottom reserves the concierge launcher's footprint (--dock-reserve); .page (below) gets
    min-height:0 so it actually shrinks to leave it — the scroll area then ENDS above the
-   bubble and no footer/last-row can ever render under it. The systemic overhang fix. */
-.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:72px}
+   launcher and no footer/last-row can ever render under it (P-2c, D-52). */
+.main{display:flex; flex-direction:column; min-width:0; background:var(--bg); padding-bottom:var(--dock-reserve); transition:padding-right var(--dur) var(--ease)}
+/* The open concierge panel reserves its own footprint too (D-52, P-2c), the same office
+   padding-bottom performs for the collapsed launcher above. `.concierge` is a sibling of `.main`
+   under `.app`, not a descendant, so the hook is a class Concierge.tsx sets on <body> while open
+   rather than a nested selector. Matches the panel's own open-breakpoint guard (Concierge.tsx
+   NARROW_VIEWPORT): a phone never auto-opens the panel and must never reserve for it. */
+@media (min-width:761px){
+  body.concierge-open .main{padding-right:calc(var(--concierge-w) + var(--s7))}
+}
 .topbar{display:flex; align-items:center; gap:12px; padding:14px 30px; border-bottom:1px solid var(--hair); min-height:62px}
 /* identity + trust as ONE control (the single trust source) */
 .me{display:flex; align-items:center}
@@ -140,12 +158,16 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 
 /* ── projects workspace screen ──────────────────────────────────────────────── */
 .projgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);transition:.14s var(--ease)}
+.projcard{text-align:left;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:14px;cursor:pointer;font:inherit;color:var(--text);text-decoration:none;transition:.14s var(--ease)}
 .projcard:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .projcard.on{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .pc-head{display:flex;align-items:center;gap:9px;margin-bottom:8px}
-.pc-head b{font-weight:600} .pc-head .psh{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--faint)} .pc-head .psh svg.lucide{width:12px;height:12px}
-.pc-head .badge{margin-left:auto}
+/* The title is the card's name, not its action: it reads in --text, and only the hover
+   carries the accent (DESIGN.md D-9). */
+.pc-head b{font-weight:600;color:var(--text);transition:color .14s var(--ease)}
+.projcard:hover .pc-head b{color:var(--accent-soft)}
+/* every card's state, as chips (REF-11): active, and who can see it */
+.pc-head .pc-state{margin-left:auto;display:inline-flex;gap:var(--s1);flex-wrap:wrap;justify-content:flex-end}
 .pc-desc{color:var(--muted);font-size:12.5px;line-height:1.5;margin-bottom:11px;min-height:38px}
 .pc-counts{font-size:10.5px;color:var(--faint)} .pc-counts .upd{margin-left:4px}
 .sectionhead .pg{display:inline-grid;vertical-align:-4px;margin-right:7px}
@@ -244,6 +266,14 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .hint .dest{display:flex;align-items:center;gap:6px;color:var(--muted)}
 .hint .dest .ttdot{width:6px;height:6px}
 .hint .keys{margin-left:auto;display:flex;gap:14px}
+/* A phone has no Enter-to-send convention, so the keyboard hints are noise there; the flow
+   name beside them stays (REFERENCES.md REF-14). Below 1080px the right context column is
+   already gone (app.css's own lg breakpoint) and chat has nowhere wider to go, so `.hint`
+   stretches to fill `.main` and its right-aligned `.keys` lands under the fixed report-trigger
+   bubble (`.report-trigger.floating`, right:18px;bottom:78px) — confirmed by walk's
+   hintTriggerClearance measurement across the whole 761-1080 band. Hidden through that band too,
+   same as on a phone, rather than overlapping a clickable control. */
+@media (max-width:1080px),(hover:none) and (pointer:coarse){.hint .keys{display:none}}
 .hint .mono{color:var(--faint)}
 .hint .dest b{color:var(--text);font-weight:500}
 
@@ -286,6 +316,13 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .cardscroll{flex:1; overflow:auto; padding:38px 0 46px}
 .card{max-width:680px; margin:0 auto; padding:0 32px}
 .flow-head{display:flex; align-items:flex-start; gap:14px; padding-bottom:20px; border-bottom:1px solid var(--hair); margin-bottom:22px}
+/* the run panel's place while the schema loads, and when it did not (D-61, D-62): the same
+   box either way, so the form lands where the reader is already looking */
+.flow-wait{min-height:calc(var(--s10) * 5);display:flex;flex-direction:column;justify-content:center;gap:var(--s2);padding:var(--s7);border:1px dashed var(--hair);border-radius:var(--radius);color:var(--faint)}
+.flow-wait .t{color:var(--muted);font-size:var(--fs-s)}
+.flow-wait .r{font-size:var(--fs-sm)}
+.flow-wait.failed{border-style:solid}
+.flow-wait .actions{display:flex;gap:var(--s2);flex-wrap:wrap;margin-top:var(--s3)}
 .flow-head .fav{width:42px;height:42px;border-radius:11px;flex:0 0 auto;background:linear-gradient(160deg,var(--accent),#23264f);box-shadow:0 0 0 1px rgba(255,255,255,.04) inset; transition:background .45s var(--ease)}
 .flow-head h1{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:1px 0 4px;display:flex;align-items:center;gap:9px}
 .flow-head .verbtag{font-family:var(--font-mono);font-size:11px;color:var(--accent-soft);background:var(--accent-bg);border:1px solid color-mix(in srgb,var(--accent) 30%,var(--hair));padding:2px 7px;border-radius:6px}
@@ -321,6 +358,61 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .inp:focus,.ta2:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .inp::placeholder,.ta2::placeholder{color:var(--faint)}
 
+/* ---------------------------------------------------------------------------
+   Selects — the app's control, not the operating system's.
+
+   Every field class above (.inp, .cer-input, .byo-input) gives a select a
+   background, a border and `font:inherit`, and not one of them ever set
+   `appearance:none`. A <select> therefore kept the browser's own widget drawn
+   on top of that: system sans instead of the app face, a native chevron, and a
+   border that is not --hair. The controls beside it obeyed the theme and it
+   did not.
+
+   `appearance:none` alone is not the fix — it would leave a select with no
+   affordance at all, indistinguishable from a text field. So the chevron is
+   redrawn here out of two gradients rather than an inline SVG, because a
+   gradient takes var(--faint) and a data: URI cannot.
+
+   The bare `select` rule carries the chrome so a select wearing no field class
+   at all (Studio's, which has only .mobile-zoom-safe) stops being a raw OS
+   control. But .inp/.cer-input/.byo-input each set `background` as a SHORTHAND,
+   which resets every background-* longhand and so wipes the chevron for nearly
+   every select in the app — the qualified rule below reinstates it via a custom
+   property (not reset by the shorthand) rather than repeating the gradients. */
+select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  box-sizing:border-box;
+  font:inherit;
+  color:var(--text);
+  background-color:var(--raised);
+  border:1px solid var(--hair);
+  border-radius:9px;
+  padding:9px 30px 9px 11px;
+  cursor:pointer;
+  text-overflow:ellipsis;
+  outline:0;
+  transition:.14s var(--ease);
+  --select-chevron:
+    linear-gradient(45deg,transparent 50%,var(--faint) 50%),
+    linear-gradient(135deg,var(--faint) 50%,transparent 50%);
+  background-image:var(--select-chevron);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}
+select:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
+select:disabled{cursor:default;opacity:.55}
+select.inp,
+select.cer-input,
+.coll-create select.cer-input,
+select.byo-input{
+  padding-right:30px;
+  background-image:var(--select-chevron);
+  background-position:right 15px center,right 11px center;
+  background-size:4.5px 4.5px;
+  background-repeat:no-repeat;
+}
+
 /* slider */
 .range{display:flex;align-items:center;gap:12px}
 .range input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:var(--hair);outline:0}
@@ -348,7 +440,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .seg-hemi{width:13px;height:13px;flex:none}
 
 /* run row */
-.run-row{display:flex;align-items:center;gap:14px}
+.run-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px}
 .quote{display:flex;flex-direction:column;gap:2px}
 .quote .q{font-family:var(--font-mono);font-size:16px;color:var(--text);font-weight:500}
 .quote .qh{font-size:11px;color:var(--faint);font-family:var(--font-mono);letter-spacing:.02em}
@@ -397,7 +489,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 /* self-contained input styling (don't depend on ceremony.css load order) */
 .coll-create .cer-input{width:100%;box-sizing:border-box;font-size:13px;padding:9px 11px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
 .coll-create .cer-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
-.coll-create select.cer-input{appearance:none;cursor:pointer}
 .coll-create .cc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:4px}
 .coll-create .cc-note{font-size:12px;color:var(--faint)}
 .coll-create .cc-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--faint);margin-right:auto;cursor:pointer}
@@ -434,13 +525,16 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .pw.narrow{max-width:680px} .pw.wide{max-width:1160px}
 .pagehead{display:flex; align-items:flex-end; gap:14px; margin-bottom:34px}
 .pagehead h1{font-size:22px; font-weight:600; letter-spacing:-.022em; margin:0}
+/* A section head inside a page: one step below the screen's h1 (D-24), never the
+   browser's default 1.5em bold, which lands within a pixel of the h1 above it. */
+.pagehead h2{font-size:var(--fs-lg); font-weight:600; letter-spacing:-.018em; margin:0}
 .pagehead .sub{color:var(--muted); font-size:13px; margin-top:6px}
 .pagehead .right{margin-left:auto; display:flex; gap:8px; align-items:center}
 .sectionhead{font-size:13px;font-weight:600;color:var(--muted);margin:38px 0 18px;display:flex;align-items:center;gap:8px}
 .sectionhead .ttdot{width:6px;height:6px}
 
 /* buttons */
-.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:#0a0a14;font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;background:var(--accent);color:var(--btn-text);font:inherit;font-weight:600;font-size:13px;padding:9px 15px;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
 .btn:hover{filter:brightness(1.08)} .btn:disabled{opacity:.55;cursor:default;filter:none}
 .btn.block{width:100%;justify-content:center;padding:11px}
 .btn .kbd,.btn-run .kbd{font-family:var(--font-mono);font-size:11px;opacity:.7;font-weight:400}
@@ -456,6 +550,18 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .filters{display:flex;gap:6px}
 .fchip{border:1px solid var(--hair);background:var(--panel);color:var(--muted);font:inherit;font-size:12px;padding:7px 12px;border-radius:999px;cursor:pointer;transition:.14s var(--ease)}
 .fchip:hover{color:var(--text)} .fchip.on{background:var(--accent-bg);color:var(--text);border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))}
+
+/* settings screens (profile, preferences): in-page section jump row (REF-34) — each link is an
+   anchor onto a section's id, so every section is individually reachable without a desktop
+   sidebar on these mobile-first screens. One rule for every screen that has sections. */
+.section-jump{display:flex;flex-wrap:wrap;gap:0 var(--s4);margin-bottom:28px;border-bottom:1px solid var(--hair)}
+/* Section links in the tab idiom (D-33: a pill is a filter or a chip; these jump): text on a
+   hairline, each with the touch hit height (D-43) and the shared focus ring (D-44). They are set
+   in the actionable tier (D-7), not muted, so they read as navigation rather than as the static
+   copy around them; hover brightens the link and underlines it on the hairline. */
+.section-jump a{display:inline-flex;align-items:center;min-height:44px;margin-bottom:-1px;padding:0 2px;border-bottom:2px solid transparent;color:var(--accent-soft);font-size:var(--fs-s);font-weight:500;text-decoration:none;transition:.14s var(--ease)}
+.section-jump a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.section-jump a:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
 
 /* badges / pills */
 .badge{font-family:var(--font-mono);font-size:10.5px;padding:2px 7px;border-radius:5px;border:1px solid var(--hair);color:var(--muted)}
@@ -473,7 +579,6 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    sovereignty claim in one line; N/M counts are the single accent flourish. */
 .registry .corpus{margin-bottom:30px}
 .corpus-big{font-size:30px;font-weight:600;letter-spacing:-.022em;line-height:1.1;margin:0;color:var(--text)}
-.corpus-big .n{color:var(--accent-soft)}
 .corpus-meta{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);margin-top:11px;letter-spacing:.01em}
 
 /* toolbar: search pill + modality chips + sort (catalogue-scoped) */
@@ -490,6 +595,17 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .cat-chip .mg{width:8px;height:8px;border-radius:2px;flex:none}
 .cat-sort{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.04em;color:var(--faint);white-space:nowrap}
 .cat-sort b{color:var(--muted);font-weight:500}
+/* the one row that narrows the catalogue (D-31, D-56): task chips, then the modality and
+   sort selects — each showing its value closed — and the live result count (REF-17) */
+.cat-narrow{align-items:flex-start;margin-bottom:var(--s2)}
+.cat-controls{margin-left:auto;display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.cat-select{display:inline-flex;align-items:center;gap:var(--s2);font-family:var(--font-mono);font-size:var(--fs-xs);letter-spacing:.04em;color:var(--faint);white-space:nowrap}
+.cat-select select{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--muted);background:var(--raised);border:1px solid var(--hair);border-radius:var(--radius-full);padding:var(--s1) var(--s3);min-height:var(--s7);cursor:pointer}
+.cat-select select:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+.cat-count{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.empty .btn{margin-top:var(--s3)}
+/* The one action that fills an empty state (D-60) is a touch target (D-43). */
+.empty .btn{min-height:44px}
 
 /* the registry table: column-header row + data rows */
 .reg-bar{display:flex;align-items:center;gap:7px;padding:14px 6px 9px;border-bottom:1px solid var(--hair);font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted)}
@@ -516,6 +632,23 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .lrow .li-ic{width:30px;height:30px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;background:var(--raised);border:1px solid var(--hair);color:var(--muted)}
 .lrow .li-main{flex:1;min-width:0} .lrow .li-main .t{font-size:13.5px;font-weight:500} .lrow .li-main .s{color:var(--faint);font-size:11.5px;margin-top:1px}
 .lrow .li-right{color:var(--muted);font-size:12px;font-family:var(--font-mono);text-align:right}
+/* Keyring rows (REF-33): the row itself is not pressable — its controls are, so there is no
+   nested click and no pointer hand on the row. Actions sit at the right and wrap under the
+   name at phone width; every control is a 44px hit (D-43) and shows the focus ring (D-44). */
+.lrow.kr{cursor:default;flex-wrap:wrap;row-gap:var(--s2)}
+.lrow.kr:hover{background:transparent}
+/* The name column keeps a floor; below it the actions wrap onto their own line rather than
+   squeezing the caption into a column of single words. */
+.lrow.kr .li-main{flex:1 1 200px}
+.kr-acts{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:var(--s2);margin-left:auto}
+.kr-acts .btn{min-height:44px;white-space:nowrap}
+.kr-acts .btn:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* Where a remove control would be on the anonymous slot: why there is none. */
+.kr-note{color:var(--faint);font-size:var(--fs-xs);font-family:var(--font-mono);text-align:right;min-height:44px;display:inline-flex;align-items:center}
+/* The second step of a remove, inline on the row: what is lost, then yes / keep. */
+.kr-confirm{flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);padding:10px 12px;border:1px solid color-mix(in srgb,var(--color-danger) 35%,var(--hair));border-radius:9px;background:color-mix(in srgb,var(--color-danger) 6%,transparent);font-size:var(--fs-sm);line-height:1.45}
+.kr-confirm-text{flex:1 1 260px;min-width:0}
+.kr-confirm .kr-acts{margin-left:auto}
 
 /* table */
 .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -552,8 +685,12 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .swatches{display:flex;gap:9px;flex-wrap:wrap}
 .sw{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.12s var(--ease)}
 .sw:hover{transform:scale(1.08)} .sw.on{border-color:var(--text);box-shadow:0 0 0 2px var(--bg) inset}
-.assetslot{aspect-ratio:16/6;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--faint);font-size:12.5px;cursor:pointer}
-.assetslot.pfp{aspect-ratio:1;max-width:96px;border-radius:50%}
+.assetslot{aspect-ratio:16/6;width:100%;margin:0;padding:0;border:1px dashed var(--hair);border-radius:10px;background:var(--raised);display:grid;place-items:center;align-content:center;gap:2px;text-align:center;color:var(--faint);font:inherit;font-size:12.5px;line-height:1.3;cursor:pointer}
+.assetslot:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* an empty tile names the asset and says what a tap does; the avatar tile keeps a fixed width so the
+   round target does not shrink to the width of its own label */
+.assetslot-l{color:var(--muted)} .assetslot-h{font-size:var(--fs-xs)}
+.assetslot.pfp{aspect-ratio:1;width:96px;flex:none;border-radius:50%;padding:0 var(--s2)}
 .assetslot:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));color:var(--muted)}
 
 /* secret / phrase (vault) */
@@ -564,6 +701,19 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
 .phrase span{background:var(--raised);border:1px solid var(--hair);border-radius:7px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--text)}
 .phrase span i{color:var(--faint);font-style:normal;margin-right:7px}
 .warn{display:flex;gap:10px;border:1px solid color-mix(in srgb,#e0b15f 30%,var(--hair));background:rgba(224,177,95,.06);border-radius:9px;padding:11px 13px;color:#d9be8f;font-size:12.5px;line-height:1.45}
+/* A gate: the sentence, then its one action as a button on its own row with the touch hit
+   height (D-43), rather than a link wrapping inside the sentence. */
+/* align-items:stretch, not flex-start: a column-flex item with flex-start sizes to its own
+   shrink-to-fit width rather than the container's, and a text item without a definite width
+   wraps itself into a narrow, ragged multi-line block instead of flowing edge-to-edge like
+   ordinary prose. Stretch gives both the sentence and the button the full row width — the
+   button already reads fine full-width (it is the one action on its own row by design, see
+   above) and the sentence now wraps the way a stranger expects prose to. */
+.warn.gate{flex-direction:column;align-items:stretch}
+.warn.gate .btn{min-height:44px}
+/* A request that failed is danger tier, not caution (D-10): the same box in the danger hue, so a
+   service that did not answer is told apart from a notice about something the reader may still do. */
+.warn.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--hair));background:color-mix(in srgb,var(--bad) 6%,transparent);color:var(--red-500,#e5746a)}
 
 /* connected accounts (BYO gated-origin secrets) */
 .byo-row{border:1px solid var(--hair);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:10px}
@@ -589,12 +739,7 @@ button.navitem{border:0;background:none;font:inherit;width:100%;text-align:left}
    Local palette tokens live here (NOT in noema-theme.css — avoiding a parallel-agent collision). */
 .fund{ --slate:#7d8aa6; --grey:#6a7079; --gold:#d9be8f; --warn:#d8a657; --warn-bg:rgba(216,166,87,.08); }
 
-.fund-head{margin-bottom:8px}
-.fund-head h1{font-size:28px;font-weight:600;letter-spacing:-.024em;line-height:1.16;margin:12px 0 0}
-.fund-head .sub{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:12px;max-width:62ch}
-.fund-head .sub b{color:var(--text);font-weight:500}
-
-.fund-rows{display:flex;flex-direction:column;margin-top:26px}
+.fund-rows{display:flex;flex-direction:column}
 .fund-row{border-top:1px solid var(--hair);padding:26px 0}
 .fund-row:last-child{border-bottom:1px solid var(--hair)}
 
@@ -700,27 +845,47 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .exitus .acts .btn-ghost svg.lucide,.result .acts .btn-ghost svg.lucide{width:14px;height:14px}
 
 /* ---------- concierge bubble (chat collapses into this as you go deeper) ---------- */
-/* This fixed bottom-right bubble no longer overhangs footer CTAs: the scroll area (.page) is
-   bounded ABOVE it via .app grid-template-rows:minmax(0,1fr) + .page min-height:0 + .main
-   padding-bottom (the reserve). Keep those three together if you touch the shell layout. */
-.concierge{position:fixed;right:18px;bottom:16px;z-index:48;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+/* This fixed bottom-right bubble never overhangs content: the scroll area (.page) is bounded
+   ABOVE it via .app grid-template-rows:minmax(0,1fr) + .page min-height:0 + .main
+   padding-bottom:var(--dock-reserve). Keep those three together if you touch the shell layout.
+   The OPEN panel is modal instead of reserved: its height depends on the thread, so .cscrim
+   covers the page beneath it and a tap there dismisses the panel (P-2c's second clause). */
+.concierge{position:fixed;right:18px;bottom:var(--dock-off);z-index:48;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.cscrim{display:none;position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 45%,transparent)}
+.concierge.open .cscrim{display:block}
+.concierge .cpanel,.concierge .cbtn{position:relative;z-index:1}   /* above .cscrim inside the dock's own stacking context */
 /* when the page has a right context sidebar, float left of it (over the middle content) */
 .concierge.has-context{right:calc(var(--context) + 18px)}
 @media (max-width:1080px){ .concierge.has-context{right:18px} }  /* sidebar hidden → back to corner */
 .cpanel{transform-origin:bottom right}
-.cbtn{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:6px 14px 6px 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:.16s var(--ease)}
+.cbtn{display:flex;align-items:center;gap:10px;height:var(--dock-h);background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:6px 14px 6px 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:.16s var(--ease)}
 .cbtn:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .cbtn .orb{width:30px;height:30px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;transition:background .45s var(--ease);flex:0 0 auto;position:relative}
 .cbtn .orb::after{content:"";position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;background:var(--good);border:2px solid var(--panel)}
 .cbtn .lab{font-size:12.5px;color:var(--text);font-weight:500}
 .cbtn .lab small{display:block;color:var(--faint);font-weight:400;font-size:10.5px}
-.cpanel{width:312px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;transform-origin:bottom left;animation:cpop .18s var(--ease)}
-.concierge.open .cpanel{display:block}
+/* The notice (clause 3): a transient, non-modal pill beside the launcher — shorter than .cbtn,
+   gone on its own after a few seconds or the moment the panel opens. Never shown together with
+   the panel (see the `open` effect clearing it in Concierge.tsx). */
+.cnotice{display:flex;align-items:center;gap:8px;height:34px;background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:0 13px 0 6px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:12px;color:var(--text);animation:cpop .18s var(--ease)}
+.cnotice:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
+.cnotice .orb{width:20px;height:20px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);flex:0 0 auto}
+/* Sized like an actual chat window, not a tooltip — the surface the agent's replies and the
+   idle-branch's dock history need to read as more than a corner widget. */
+.cpanel{width:min(var(--concierge-w),calc(100vw - 36px));height:min(70vh,640px);background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;display:none;flex-direction:column;transform-origin:bottom left;animation:cpop .18s var(--ease)}
+.concierge.open .cpanel{display:flex}
+.concierge.open .cbtn{display:none}   /* one affordance at a time (D-53): the open panel replaces its launcher */
+.cpanel .chead{flex:0 0 auto}
+/* The scrollable middle, between the fixed head and the fixed input bar — the "whole chat"
+   surface. Both branches (assist / idle) wrap their body content in this; the input stays
+   docked at the foot exactly as it did in the smaller panel. */
+.cpanel .cbody-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.cpanel .cinput{flex:0 0 auto}
 @keyframes cpop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 .cpanel .chead{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hair-soft)}
 .cpanel .chead .orb{width:22px;height:22px;border-radius:50%;background:linear-gradient(160deg,var(--accent),#23264f);flex:0 0 auto}
 .cpanel .chead b{font-size:13px;font-weight:600}
-.cpanel .chead .x{margin-left:auto;color:var(--faint);cursor:pointer;font-size:15px;line-height:1}
+.cpanel .chead .x{color:var(--faint);cursor:pointer;font-size:15px;line-height:1}   /* the docked report trigger before it carries the margin-left:auto */
 .cpanel .cbody{padding:14px;color:var(--muted);font-size:12.5px;line-height:1.5}
 .cpanel .cbody .verb{color:var(--accent-soft)}
 .cpanel .cinput{display:flex;gap:8px;padding:10px;border-top:1px solid var(--hair-soft)}
@@ -728,15 +893,40 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cpanel .cinput input:focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--hair));box-shadow:0 0 0 3px var(--accent-bg)}
 .cpanel .cinput button{border:0;border-radius:8px;background:var(--accent);color:#0a0a14;width:32px;cursor:pointer;font-size:14px}
 
+/* A concierge/chat reply's markdown (ReplyMarkdown.tsx): the agent fences anything copyable
+   (D-16: data is mono), and this is what makes a fence an actual block with its own copy
+   control instead of literal backtick characters. */
+.reply-md{font-size:inherit;line-height:inherit}
+.reply-md .reply-p{margin:0 0 8px}
+.reply-md .reply-p:last-child{margin-bottom:0}
+.reply-md code{font-family:var(--font-mono);font-size:.92em;background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1px 5px;color:var(--text)}
+.reply-code-block{position:relative;display:block;margin:0 0 8px}
+.reply-code-block pre{background:var(--panel);border:1px solid var(--hair);border-radius:9px;padding:10px 12px;padding-top:30px;overflow:auto;margin:0}
+.reply-code-block pre code{background:none;border:0;padding:0;font-size:.88em;white-space:pre}
+.reply-code-copy{position:absolute;top:6px;right:6px;font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--hair);background:var(--raised);color:var(--muted);cursor:pointer}
+.reply-code-copy:hover{color:var(--text)}
+/* A concierge reply split into tiles (ReplyTiles.tsx, goal concierge-opens-too-loud clause 2):
+   one bordered card per paragraph/fence rather than one wall of prose, each with its own copy
+   control — most of a reply here is a prefix prompt or similar the model didn't fence, so the
+   tile needs a copy button of its own, not just whatever ReplyMarkdown gives a fenced block. */
+.reply-tiles{display:flex;flex-direction:column;gap:8px}
+.reply-tile{position:relative;background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px;padding-right:56px}
+.reply-tile .reply-md{font-size:12.5px;line-height:1.5;color:var(--text)}
+.reply-tile-copy{position:absolute;top:8px;right:8px;font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--hair);background:var(--panel);color:var(--muted);cursor:pointer}
+.reply-tile-copy:hover{color:var(--text)}
+
 /* ---------- concierge prompt augmentation (focused-field assist) ---------- */
 .chead .ctxtag{margin-left:8px;font-size:10.5px;font-family:var(--font-mono);color:var(--accent-soft);background:var(--accent-bg);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--hair));padding:2px 7px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
 .chead .ctxtag + .x{margin-left:6px}
-.cassist{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+/* .cidle is the idle (non-assist) branch's equivalent of .cassist: the same flex-column slot
+   filling the panel below .chead, so its result card and the input bar share the assist
+   branch's sizing and the .ex/.extext card styling below. */
+.cassist,.cidle{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
 .cassist .chint{font-size:11.5px;line-height:1.45;color:var(--muted);padding:0 1px}
-.cassist .extext{white-space:pre-wrap}
-.cassist .ex{background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px}
+.cassist .extext,.cidle .extext{white-space:pre-wrap}
+.cassist .ex,.cidle .ex{background:var(--raised);border:1px solid var(--hair);border-radius:11px;padding:10px 11px}
 .cassist .ex.draft{border-color:color-mix(in srgb,var(--accent) 40%,var(--hair));background:var(--accent-bg)}
-.cassist .extext{font-size:12.5px;line-height:1.5;color:var(--text)}
+.cassist .extext,.cidle .extext{font-size:12.5px;line-height:1.5;color:var(--text)}
 .cassist .exact{display:flex;gap:7px;margin-top:9px}
 .cassist .exact button{border:0;border-radius:7px;background:var(--accent);color:#0a0a14;font:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;cursor:pointer;transition:.14s var(--ease)}
 .cassist .exact button.ghost{background:transparent;color:var(--muted);border:1px solid var(--hair)}
@@ -759,7 +949,8 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 @media (max-width:760px){
   /* shell → single column; left rail becomes a fixed bottom icon bar */
   .app,.app.two{grid-template-columns:1fr}
-  .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:58px;flex-direction:row;align-items:stretch;
+  :root{--dock-off:calc(var(--bar-h) + var(--s3))}             /* the launcher sits above the bottom bar; --dock-reserve follows */
+  .rail{position:fixed;left:0;right:0;bottom:0;top:auto;height:var(--bar-h);flex-direction:row;align-items:stretch;
         border-right:0;border-top:1px solid var(--hair);z-index:var(--z-nav);padding:0;overflow:visible;background:var(--panel)}
   .rail .brand,.rail .keyring,.rail .railpriv,.projwrap{display:none}   /* identity + project + privacy live in the topbar / rail-desktop only */
   .rail .nav{display:none}                                   /* flat 13-leaf row replaced by the grouped mobilenav below */
@@ -777,14 +968,23 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .railgroup-backdrop{display:block;position:fixed;inset:0;z-index:var(--z-pop)}
   .railgroup-pop{display:flex;position:fixed;transform:translateX(-50%);width:200px;max-width:60vw;background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden;z-index:var(--z-pop);flex-direction:column;padding:6px}
   .railgroup-pop .navitem{flex-direction:row;justify-content:flex-start;padding:8px 10px;font-size:var(--fs-sm)}
-  .main{padding-bottom:58px}                                 /* clear the bottom bar */
   .topbar{padding:var(--s3) var(--s4);min-height:54px;gap:var(--s2)}
   .crumb{display:none}                                       /* identity + webring carry it */
   .fonttoggle{display:none}                                  /* dev-only */
   .pw,.card,.wrap{padding-left:var(--s4);padding-right:var(--s4)}                           /* stacked form fields */
   .chat-example-clear{right:var(--s4)}                       /* match .wrap's shrunk mobile padding so the dismiss target stays flush with content edge, not buried under it */
   .twocol{grid-template-columns:1fr}     /* wide tables scroll */
-  .concierge{bottom:70px}                                    /* sit above the bottom bar */
+  /* Run bar — a third docked layer (icon bar + concierge pill + this bar) is what put it on top
+     of the form it belongs to. Undock it and it reads as the last block of the form, which is
+     where you press Run anyway. */
+  .runbar{position:static;background:none;padding:var(--s4) 0 0}
+  /* Three items on one 326px row left the quote 108px and broke it into a ragged four-line
+     column. Wrap instead: the quote takes a full line, the two buttons share the next, and
+     each of the quote's two lines has the whole width and stays on one line. */
+  .run-row{flex-wrap:wrap;gap:var(--s3)}
+  .quote{flex:1 0 100%}
+  .btn-run{flex:0 0 auto}
+  .btn-run .kbd{display:none}                                /* no keyboard to press it with */
   #trustpop{width:calc(100vw - 24px)}
 }
 @media (max-width:680px){
@@ -806,7 +1006,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .gold,.gem{color:var(--gold,#d9b25f)}
 
 /* topbar: surface title left, posture cluster right */
-.surface-title{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);margin-right:auto}
+/* The title box is bounded at every width, so a long crumb shrinks (parents first, see
+   .ph-crumb) instead of pushing the posture cluster out of the bar. */
+.surface-title{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* rail foot — funding · settings · account avatar */
 .railfoot{margin-top:auto;border-top:1px solid var(--hair-soft);padding:8px 10px 10px;display:flex;flex-direction:column;gap:2px}
@@ -819,14 +1021,28 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 
 /* posture cluster */
 .posture{display:flex;align-items:center;gap:8px}
-.pc-pill{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--hair);border-radius:999px;background:var(--panel);font:inherit;font-size:12.5px;color:var(--text);text-decoration:none;cursor:pointer;transition:.14s var(--ease)}
+.pc-pill{position:relative;display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--hair);border-radius:999px;background:var(--panel);font:inherit;font-size:12.5px;color:var(--text);text-decoration:none;cursor:pointer;transition:.14s var(--ease)}
 .pc-pill:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--hair))}
 .pc-pill.credits{font-family:var(--font-mono);color:var(--gold,#d9b25f)} .pc-pill.credits .u{color:var(--faint)}
 .pc-pill.compute{font-family:var(--font-mono);color:var(--muted)}
 .pc-pill.id-chip{padding-left:6px} .pc-pill.id-chip .chip{width:20px;height:20px;font-size:10px}
 .pc-pill.id-chip .nm{font-weight:500} .pc-pill.id-chip .cv svg.lucide{width:13px;height:13px;color:var(--faint)}
-.pc-start{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border:1px solid var(--accent);border-radius:999px;background:var(--accent);color:#0b1020;font-size:12.5px;font-weight:600;text-decoration:none}
+/* Composes with its sibling pills in every respect, weight included (D-42): the screen's own
+   action is the one filled button, and nothing in the topbar outranks it. */
+.pc-start{font-weight:500}
 .pc-start svg.lucide{width:14px;height:14px}
+/* The ring follows the visible pill, not the hit extension below (D-44). */
+.pc-pill:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* On a phone or any coarse pointer the three pressable pills (credits, identity, start) keep
+   their 32px visible height but tap as 44px (D-43): a transparent pseudo extends the hit box
+   above and below. It is placed against the padding box, 30px inside the 1px border, so -7px
+   each way makes 44. Padding would have grown the bar from 57px to 69px; the extension lives in
+   the bar's own 12px vertical padding, so the bar, the crumb and the row stay as they are.
+   Horizontal reach is unchanged so the pills' 7px gap never overlaps. The compute readout is a
+   span, not a control, and gets none. */
+@media (max-width:760px),(hover:none) and (pointer:coarse){
+  .pc-pill.credits::before, .pc-pill.id-chip::before, .pc-pill.pc-start::before{content:"";position:absolute;inset:-7px 0}
+}
 
 /* account dropdown — restrained, posture-rich (noema-account-dropdown.png) */
 .acctmenu{position:fixed;z-index:var(--z-pop,60);min-width:300px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);padding:12px;animation:cpop .16s var(--ease)}
@@ -888,8 +1104,16 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .dbrec-row .rd{color:var(--text)} .dbrec-row .rp{margin-left:auto;color:var(--muted);font-size:11.5px}
 
 /* ── project hub (project-hub-spec.md) ─────────────────────────────────────── */
-.ph-crumb a{color:var(--muted);text-decoration:none} .ph-crumb a:hover{color:var(--text)}
-.ph-crumb .sep{color:var(--faint);margin:0 7px} .ph-crumb b{color:var(--text);font-weight:600}
+/* The crumb gives up its parent segments before the current screen's name (D-50 — the crumb
+   says where you are). Parents carry a shrink factor three orders above the leaf's, so the
+   flex algorithm takes all the shortfall from them first; each stops at the width of one
+   ellipsis, so a collapsed parent still reads as "…" and stays a link. Only once every parent
+   is down to "…" does the leaf shrink, and it ends in an ellipsis of its own rather than a cut
+   word (a `flex:none` leaf overflowed the title box, which clips mid-word with no ellipsis). */
+.ph-crumb{display:inline-flex;align-items:baseline;max-width:100%;min-width:0;white-space:nowrap}
+.ph-crumb a{color:var(--muted);text-decoration:none;flex:0 1000 auto;min-width:1em;overflow:hidden;text-overflow:ellipsis} .ph-crumb a:hover{color:var(--text)}
+.ph-crumb .sep{color:var(--faint);margin:0 7px;flex:none}
+.ph-crumb b{color:var(--text);font-weight:600;flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis}
 .ph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .ph-kick{display:block;margin-bottom:8px}
 .ph-name{font-size:clamp(24px,3vw,32px);font-weight:600;letter-spacing:-.02em;margin:0}
@@ -970,8 +1194,6 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .rdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .rdot.good{background:var(--good)} .rdot.amber{background:var(--amber)}
 .ds-action{font-size:12px;color:var(--accent-soft)}
-.dscard.new{align-items:center;justify-content:center;gap:7px;border-style:dashed;background:none;color:var(--muted);cursor:pointer;min-height:200px;font:inherit}
-.dscard.new svg.lucide{width:18px;height:18px} .dscard.new .t{font-size:13px} .dscard.new .s{font-size:11px;color:var(--faint)}
 
 /* ── dataset detail (train-dataset-spec.md) ────────────────────────────────── */
 .ds-d-name{display:flex;align-items:center;gap:11px}
@@ -1086,6 +1308,16 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .ac-card-h b{font-size:14px;font-weight:600} .ac-manage{margin-left:auto;font-size:12px;color:var(--accent-soft);text-decoration:none}
 .ac-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;font-size:12.5px}
 .ac-rk{color:var(--faint)} .ac-rv{color:var(--text);display:flex;align-items:center;gap:6px} .ac-rv .muted{color:var(--faint)}
+/* a checkbox row: the whole label is the 44px hit target (D-43), the box itself is sized to be seen */
+.ac-row.ac-check{min-height:44px;cursor:pointer}
+/* The box is drawn, not native: the platform checkbox renders at roughly one text line, which a
+   reader takes for the whole target. 24px on the hairline, filled with the accent when checked, the
+   mark drawn in the page background so it needs no second colour, and the shared focus ring (D-44). */
+.ac-check input[type=checkbox]{appearance:none;width:24px;height:24px;margin:0;flex:none;position:relative;border:1px solid var(--hair);border-radius:var(--r-sm);background:var(--bg);cursor:pointer;transition:.14s var(--ease)}
+.ac-check input[type=checkbox]:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--hair))}
+.ac-check input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+.ac-check input[type=checkbox]:checked::after{content:"";position:absolute;left:8px;top:4px;width:6px;height:11px;border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.ac-check input[type=checkbox]:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .ac-note{font-size:11px;color:var(--faint);border-top:1px solid var(--hair-soft);margin-top:10px;padding-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ac-prefptr{display:flex;align-items:center;gap:9px;flex-wrap:wrap;border:1px dashed var(--hair);border-radius:11px;padding:13px 16px;font-size:13px;color:var(--muted)}
 .ac-prefptr svg.lucide{width:15px;height:15px;color:var(--accent-soft)} .ac-prefptr a{color:var(--accent-soft);text-decoration:none}
@@ -1101,6 +1333,10 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .sn-item svg.lucide{width:15px;height:15px;color:var(--faint)} .sn-item.on svg.lucide{color:var(--accent-soft)}
 .ac-panel{border:1px solid var(--hair);border-radius:13px;background:var(--panel);padding:18px;margin-top:18px}
 .ac-panel-l{font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--muted);margin-bottom:14px}
+/* the destructive section sits last on the account home (REF-34); its confirmation is an .ac-panel in the danger colour */
+.ac-danger{margin-top:var(--s6)}
+.ac-danger .ac-sov{margin-top:var(--s3);margin-bottom:0}
+.ac-danger-confirm{border-color:color-mix(in srgb,var(--color-danger) 35%,var(--hair))}
 .avail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 @media(max-width:680px){.avail-grid{grid-template-columns:1fr}}
 .availcard{text-align:left;border:1px solid var(--hair);border-radius:11px;background:var(--bg);padding:14px;cursor:pointer;font:inherit;color:var(--text);transition:.14s var(--ease)}
@@ -1143,6 +1379,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .toggle{width:38px;height:22px;border-radius:999px;border:1px solid var(--hair);background:var(--bg);cursor:pointer;padding:0;position:relative;transition:.14s var(--ease)}
 .toggle span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--faint);transition:.14s var(--ease)}
 .toggle.on{background:var(--accent);border-color:var(--accent)} .toggle.on span{left:18px;background:#fff}
+/* the one age-gated, policy-sensitive toggle sits last on the page, apart from the routine cards
+   above (REF-34, mirrors .ac-danger) */
+.pref-restricted{margin-top:var(--s6)}
+.pref-restricted-l{font-size:var(--fs-xs);font-weight:500;color:var(--muted);margin-bottom:10px}
+.pref-card-restricted{border-color:color-mix(in srgb,var(--color-danger) 35%,var(--hair))}
 
 /* ── collections (editio) ──────────────────────────────────────────────────── */
 .noesis-wm{color:var(--noesis);font-weight:600} .noesis-tag{color:var(--noesis)}
@@ -1286,8 +1527,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 /* Garden editor cards (wired draft authoring) — hold inputs, not just display. */
 .gt-grid .traitcard{position:relative;overflow:visible;padding:10px;display:flex;flex-direction:column;gap:8px}
 .gt-grid .traitcard .cer-input{width:100%}
-.gt-grid .tc-feeds{display:flex;flex-direction:column;gap:4px;align-items:stretch}
-.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px}
+/* Label-above-input (one .traitcard per axis value, "value" then "weight" each on their own
+   two lines) cost four lines of height per value — only one or two fit a phone screen at
+   once, and a weight can't be compared against a sibling's without scrolling to it (REF-28).
+   Label-beside-input halves that: both fields read in one line each, so twice as many values'
+   weights stay on screen together. */
+.gt-grid .tc-feeds{display:flex;flex-direction:row;align-items:center;gap:6px}
+.gt-grid .tc-feeds-l{color:var(--faint);font-size:11px;flex:0 0 46px}
+.gt-grid .tc-feeds .cer-input{width:auto;flex:1;min-width:0}
 .tc-del{position:absolute;top:6px;right:6px;width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);cursor:pointer;border-radius:6px}
 .tc-del:hover{background:var(--hair);color:var(--text)}
 /* Trait rules editor rows */
@@ -1297,7 +1544,11 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .rr-name{font-weight:600}
 .rr-field{display:flex;flex-direction:column;gap:3px}
 .rr-field>span{color:var(--faint);font-size:11px}
-@media(max-width:760px){.rr-row{grid-template-columns:1fr}}
+/* Full stack (one column) put each value's name, excludes field and tags field on three
+   separate lines — the earlier value scrolled out of view by the time a later one's tags
+   field was in reach, which is exactly what REF-28 flags. A narrower version of the desktop
+   grid (160px → 64px) keeps every value a single compact row at any width instead. */
+@media(max-width:760px){.rr-row{grid-template-columns:64px 1fr 1fr;gap:6px}}
 .tc-preview{height:96px;display:grid;place-items:center;background-image:repeating-conic-gradient(#0e1013 0% 25%, transparent 0% 50%);background-size:18px 18px}
 .tc-chip{width:42px;height:42px;border-radius:11px}
 .tc-num{font-size:26px;color:var(--muted);font-family:var(--font-mono)}
@@ -1328,6 +1579,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cr-extend-n{width:74px;box-sizing:border-box;font-size:13px;padding:8px 10px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--text);font-family:inherit}
 /* The mechanism, at the step where it runs. Above the rarity table, which is the evidence
    of it having run. */
+.cr-arrivals{border-top:1px solid var(--hair-soft);padding-top:16px;margin-bottom:20px}
+.cr-arr-h{font-size:var(--fs-s);font-weight:600;color:var(--text);margin:0}
+.cr-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
+@media(max-width:900px){.cr-strip{grid-template-columns:repeat(6,1fr)}}
+@media(max-width:560px){.cr-strip{grid-template-columns:repeat(4,1fr)}}
+.cr-arr{position:relative;aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid var(--hair);background:var(--bg)}
+.cr-arr.rejected{opacity:.42}
+.cr-arr-img{display:block;width:100%;height:100%;object-fit:cover}
 .cr-splice{border-left:2px solid color-mix(in srgb,var(--accent) 40%,var(--hair));padding:2px 0 2px 12px;margin:0 0 20px;font-size:12.5px;color:var(--muted);line-height:1.55;max-width:70ch}
 .cr-dist{border-top:1px solid var(--hair-soft);padding-top:16px}
 .cr-dist-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px} .cr-ok{font-size:11.5px;color:var(--accent-soft)}
@@ -1355,6 +1614,9 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
 .cu-keep{border:1px solid color-mix(in srgb,var(--good) 40%,var(--hair));color:var(--good)} .cu-keep:hover{background:color-mix(in srgb,var(--good) 8%,transparent)}
 .cu-reject{border:1px solid color-mix(in srgb,#e5746a 40%,var(--hair));color:var(--red-500,#e5746a)} .cu-reject:hover{background:color-mix(in srgb,#e5746a 8%,transparent)}
 .kbd{font-family:var(--font-mono);font-size:10px;border:1px solid currentColor;border-radius:4px;padding:1px 5px;opacity:.7}
+/* K/R are shortcuts for a physical keyboard; a touch-only pointer has none (P-1a), same
+   pattern as the chat composer's own keyboard hints (see .hint .keys above). */
+@media (hover:none) and (pointer:coarse){.cu-keep .kbd,.cu-reject .kbd{display:none}}
 .cu-nav{display:flex;justify-content:space-between;font-size:12px}
 .cu-supply{border-top:1px solid var(--hair-soft);margin-top:24px;padding-top:16px}
 .cu-supply-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px} .cu-order{font-size:11px;color:var(--accent-soft)}
@@ -1399,10 +1661,14 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   /* topbar fits the phone: title ellipsizes; posture collapses to chip + start
      (credits/compute live one tap away in the account panel). */
   .topbar{flex-wrap:nowrap; gap:8px}
-  .surface-title{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  /* A phone's title box is too narrow for a parent beside the leaf — the posture cluster takes
+     most of the bar — so the parents are collapsed all the way and the leaf has the box to
+     itself, readable instead of ellipsized to its first syllable. The bottom-bar rail and the
+     browser's back carry the way up, as they do for .crumb above. */
+  .ph-crumb a, .ph-crumb .sep{display:none}
   .posture{flex:0 0 auto; gap:7px}
   .posture .pc-pill.credits, .posture .pc-pill.compute{display:none}
-  .pc-pill.id-chip .nm{max-width:5.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .pc-pill.id-chip .nm{max-width:6.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
   /* bottom-bar rail: show only the global nav; Funding/Settings/account move into the
      account panel (topbar chip), so the foot doesn't crowd or leak into the bar. */
@@ -1437,27 +1703,32 @@ i[data-lucide]{display:inline-flex;width:16px;height:16px}              /* pre-h
   .mobile-zoom-safe{font-size:16px}
 
   /* catalog toolbars: search/filters/sort wrap onto their own lines instead of
-     squeezing the modality + verb chip rows into whatever space is left. */
+     squeezing the modality + verb chip rows into whatever space is left. The modality
+     facet takes a line of its own so the result count stays beside the sort — in the
+     control row, never a line of its own above the column headers (REFERENCES.md REF-17). */
   .cat-toolbar{flex-wrap:wrap; row-gap:8px}
   .cat-search{flex:1 1 100%; max-width:none; order:1}
   .cat-filters{order:2}
   .cat-sort{margin-left:0; order:3}
   .cat-toolbar.cat-verbs .cat-filters{order:initial}
+  .cat-controls{margin-left:0; order:3; flex:1 1 100%; column-gap:var(--s2)}
+  .cat-controls .cat-select-mod{flex:1 1 100%}
+  .cat-count{margin-left:auto}
 
-  /* registry column header: labels track the stacked 2-line data row below
-     (name+pin on line 1, modality+version as a smaller line 2). */
-  .reg-bar{flex-wrap:wrap; row-gap:2px}
-  .reg-bar .c-name{flex:1 1 100%}
-  .reg-bar .c-mod{width:auto; flex:1; font-size:8.5px}
-  .reg-bar .c-ver{width:auto; flex:1; font-size:8.5px}
-
-  /* registry row: stack into two lines — name/id + pin on line 1, modality +
-     version as a smaller line 2 — instead of crushing everything onto one row. */
-  .reg-row{flex-wrap:wrap; row-gap:4px}
-  .reg-name{flex:1 1 auto; min-width:0}
-  .reg-mod{width:auto; flex:1; order:3; font-size:10px}
-  .reg-ver{width:auto; flex:1; order:4; font-size:10px}
-  .reg-row .pin{order:2; width:44px; height:44px}
+  /* registry on a phone: one grid for the header and every row, so the modality
+     and pin sit in the same columns whether the id is "rmbg" or
+     "modus.dataset-decompose" (DESIGN.md D-59). The name stacks over its id in the
+     first column instead of the row wrapping by content length. */
+  .reg-bar,.reg-row{display:grid; grid-template-columns:minmax(0,1fr) 64px 44px; column-gap:8px; align-items:center}
+  .reg-bar .c-mod{width:auto; font-size:8.5px}
+  /* The version neither tells a flow apart (almost every row reads 1.0.0) nor lets the
+     user act on it, so at this width it goes to the card, where it already is
+     (DESIGN.md D-57). The desktop table has the room and keeps it. */
+  .reg-bar .c-ver,.reg-ver{display:none}
+  .reg-name{flex-direction:column; align-items:flex-start; gap:2px; min-width:0}
+  .reg-name .nm,.reg-name .id{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .reg-mod{width:auto; font-size:10px; gap:6px}
+  .reg-row .pin{margin-left:0; width:44px; height:44px}
   .reg-row .pin svg{width:16px; height:16px}
 }
 

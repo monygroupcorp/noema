@@ -80,12 +80,14 @@ export const ceremony = {
         zkeyHash?: string | null;
         zkeySource?: ServedKey['source'];
         verifierPaired?: boolean | null;
+        imageKeyHash?: string | null;
       };
       if (cfg.zkeySource === undefined) return null;
       return {
         hash: cfg.zkeyHash ?? null,
         source: cfg.zkeySource ?? null,
         paired: cfg.verifierPaired ?? null,
+        imageKeyHash: cfg.imageKeyHash ?? null,
       };
     } catch {
       return null;
@@ -175,6 +177,11 @@ export interface ServedKey {
    * half. null when the site cannot say — an older server, or a key hosted elsewhere.
    */
   paired?: boolean | null;
+  /**
+   * sha256 of the proving key this build carries, when that is not the key being served.
+   * Null when there is nothing to disambiguate, and on a server that predates the field.
+   */
+  imageKeyHash?: string | null;
 }
 
 export type ServedKeyVerdict =
@@ -182,8 +189,17 @@ export type ServedKeyVerdict =
   | 'match'
   /** The site serves a key the transcript does not name. */
   | 'mismatch'
-  /** The transcript names a final key the site has not got. */
+  /** The transcript names a final key the site has not got, and it holds no other. */
   | 'absent'
+  /**
+   * The transcript names a final key the site has not got, and the key it IS holding is a
+   * different one — so it serves nothing rather than pass that off as the ceremony's.
+   * Same refusal as `absent`, opposite remedy: this box has a proving key and it is the
+   * wrong one, which is what a build older than the ceremony's output looks like from
+   * outside. Splitting the two is the difference between "publish the key here" and
+   * "this site is not running the build that carries it".
+   */
+  | 'withheld'
   /** The key is hosted elsewhere, so the API has not seen those bytes and cannot name them. */
   | 'external'
   /**
@@ -211,6 +227,59 @@ export function contributionsPaused(status: CeremonyStatus | null): boolean {
   return status?.phase === 'open' && status.acceptingContributions === false;
 }
 
+/** The ceremony page's one filled button, and the line the fold says beside it. */
+export interface HeroAction {
+  label: string;
+  /** In-page anchor: the contribution card, or the transcript. */
+  href: '#contribute' | '#transcript';
+  /** Why a visitor is not being asked to contribute, when they are not. */
+  note: string | null;
+}
+
+/**
+ * What the hero invites follows the status it shows. A filled "Contribute" under a pill
+ * reading "finalized" or "paused" asks for the one thing the page cannot accept; once
+ * contributions are closed, the thing a visitor can still do is read the transcript and
+ * check the published key against it, so that becomes the primary action and the reason
+ * moves up into the fold. Announced and open keep inviting a contribution.
+ */
+export function heroAction(status: CeremonyStatus | null): HeroAction {
+  if (status?.phase === 'finalized') {
+    return {
+      label: 'Verify the published key',
+      href: '#transcript',
+      note: 'Contributions are closed: the ceremony is complete, and the key it produced is published in the transcript below for anyone to check.',
+    };
+  }
+  if (contributionsPaused(status)) {
+    return {
+      label: 'Read the transcript',
+      href: '#transcript',
+      note: 'Contributions are paused: this server does not currently hold the key the next one builds on. Nothing already contributed is lost — check back shortly.',
+    };
+  }
+  return { label: 'Contribute', href: '#contribute', note: null };
+}
+
+/** The closing line's link: the one thing on the page the hero does not already offer. */
+export interface FootAction {
+  label: string;
+  href: HeroAction['href'];
+}
+
+/**
+ * The page ends with a plain link, and the hero is the page's one filled button; when the
+ * two carry the same label to the same anchor they are one control shown twice (P-1d).
+ * The foot offers the other half of the page: while the hero invites a contribution, the
+ * foot leads to the transcript; once the hero leads to the transcript, the foot leads to
+ * the contribution card, where the page explains why contributions are closed or paused.
+ */
+export function footAction(status: CeremonyStatus | null): FootAction {
+  if (status?.phase === 'finalized') return { label: 'Why contributions are closed', href: '#contribute' };
+  if (contributionsPaused(status)) return { label: 'Why contributions are paused', href: '#contribute' };
+  return { label: 'Read the transcript', href: '#transcript' };
+}
+
 export function checkServedKey(
   status: CeremonyStatus | null,
   served: ServedKey | null,
@@ -218,7 +287,9 @@ export function checkServedKey(
   if (!status || status.phase !== 'finalized' || !status.finalHash) return 'unknown';
   if (!served || served.source === null) return 'unknown';
   if (served.source === 'external') return 'external';
-  if (served.source === 'none' || !served.hash) return 'absent';
+  if (served.source === 'none' || !served.hash) {
+    return served.imageKeyHash ? 'withheld' : 'absent';
+  }
   if (served.hash.toLowerCase() !== status.finalHash.toLowerCase()) return 'mismatch';
   // Only an explicit false downgrades the verdict: a server that does not report the
   // pairing is the older build, and 'match' is what it was always able to say.

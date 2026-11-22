@@ -42,4 +42,20 @@ export class MongoLinkToken implements LinkTokenStore {
     if (rec.expiresAt.getTime() <= this.now().getTime()) return null
     return rec.animaId
   }
+
+  async claim(key: string, kind: LinkTokenKind, ttlSeconds: number): Promise<boolean> {
+    try {
+      // The unique index on codeHash is the single-writer guard: a second claim, from any
+      // instance, collides here.
+      await this.col.insertOne({
+        codeHash: hashLinkToken(key),
+        kind,
+        expiresAt: new Date(this.now().getTime() + ttlSeconds * 1000),
+      })
+      return true
+    } catch (err) {
+      if ((err as { code?: unknown }).code === 11000) return false
+      throw err
+    }
+  }
 }

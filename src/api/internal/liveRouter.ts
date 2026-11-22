@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { bus } from '../../lib/bus.js'
+import { internalSecretMatches } from '../../lib/internalSecret.js'
 
 export function createLiveRouter(secret?: string): Router {
   const router = Router()
@@ -7,8 +8,7 @@ export function createLiveRouter(secret?: string): Router {
   router.get('/live', (req, res) => {
     // Auth — unconditional. An unconfigured INTERNAL_SECRET refuses every request rather
     // than admitting it; configuration is asserted at boot (see `src/index.ts`).
-    const provided = req.headers['x-internal-secret'] ?? req.query.token
-    if (!secret || provided !== secret) {
+    if (!internalSecretMatches(secret, req.headers['x-internal-secret'])) {
       res.status(401).json({ error: 'unauthorized' })
       return
     }

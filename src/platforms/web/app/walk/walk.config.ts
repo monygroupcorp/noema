@@ -28,5 +28,5 @@ export const fixtures: Record<string, Record<string, string>> = {
   // invented one photographs the not-found stub instead of the page. `/blog/:slug` landed
   // without its fixture and the census has refused to run ever since — loudly, as designed.
   '/blog/:slug': { slug: 'train-a-model' },
-  '/account/:section': { section: 'profile' },
+  '/account/:section': { section: 'compute' },
 };

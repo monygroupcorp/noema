@@ -26,6 +26,8 @@
  * fatal. Degrade, log what is degraded and what still works, carry on.
  */
 
+import { ALLOWED_UPDATES } from './updateLog.js'
+
 export interface BotCommandSpec {
   command: string
   description: string
@@ -35,7 +37,7 @@ export interface BotCommandSpec {
 export interface TelegramStartable {
   telegram: {
     setMyCommands(commands: BotCommandSpec[]): Promise<unknown>
-    setWebhook(url: string): Promise<unknown>
+    setWebhook(url: string, extra?: { allowed_updates?: readonly (typeof ALLOWED_UPDATES)[number][] }): Promise<unknown>
   }
   // `Telegraf#launch` is overloaded on a leading callback; accepting that shape here is what lets a
   // real bot satisfy this interface structurally. Only the config form is used.
@@ -166,7 +168,7 @@ export async function startTelegram(opts: StartTelegramOptions): Promise<Telegra
     try {
       const hookUrl = `${webhookUrl}/telegram`
       await withTimeout(
-        Promise.resolve(bot.telegram.setWebhook(hookUrl)),
+        Promise.resolve(bot.telegram.setWebhook(hookUrl, { allowed_updates: ALLOWED_UPDATES })),
         callTimeoutMs,
         'setWebhook',
       )
@@ -188,7 +190,7 @@ export async function startTelegram(opts: StartTelegramOptions): Promise<Telegra
   }
 
   let launchError: unknown
-  const launched = Promise.resolve(bot.launch({ allowedUpdates: ['message', 'callback_query'] }))
+  const launched = Promise.resolve(bot.launch({ allowedUpdates: [...ALLOWED_UPDATES] }))
     .then(() => undefined)
     .catch((e: unknown) => { launchError = e; throw e })
   // The rejection is observed by the race below within the probe window; past it, keep it observed
@@ -224,7 +226,7 @@ function attachPollingErrorHandler(bot: TelegramStartable, log: StartLogger): vo
     consecutiveErrors = 0
     const timer: NodeJS.Timeout | number = setTimeout(() => {
       restartInProgress = false
-      Promise.resolve(bot.launch({ allowedUpdates: ['message', 'callback_query'] }))
+      Promise.resolve(bot.launch({ allowedUpdates: [...ALLOWED_UPDATES] }))
         .catch((e: unknown) => log.error(`Bot failed restart after ${reason}`, { error: describe(e) }))
     }, delayMs)
     ;(timer as NodeJS.Timeout).unref?.()

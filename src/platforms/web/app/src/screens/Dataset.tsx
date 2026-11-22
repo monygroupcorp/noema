@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
-import { custodyGlyph, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
+import { BACK, LoadFailure } from '../components/LoadFailure';
+import { custodyGlyph, datasetStatsLine, gardenSummaryLine, isGardenOpen, toggleGardenId } from '../lib/datasets';
 import { api, type Dataset as DatasetT, type MuseSessionView } from '../lib/api';
 import {
   ARCHIVE_MEANING,
@@ -338,16 +339,10 @@ export function Dataset() {
   }
 
   if (datasets === null) {
-    return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">loading…</div></div></div></AppShell>;
+    return <AppShell title="Dataset"><div className="page"><div className="pw wide"><div className="sub mono">Loading…</div></div></div></AppShell>;
   }
   if (!d) {
-    return (
-      <AppShell title="Dataset">
-        <div className="page"><div className="pw wide">
-          <div className="sub mono">dataset not found. <Link to="/datasets">back to datasets</Link></div>
-        </div></div>
-      </AppShell>
-    );
+    return <AppShell title="Dataset"><LoadFailure noun="dataset" kind="missing" back={BACK.datasets} /></AppShell>;
   }
   const active = activeSet ?? (d.captionsets[0]?.id ?? '');
   const version = d.versions[d.versions.length - 1]?.v ?? '—';
@@ -384,7 +379,7 @@ export function Dataset() {
   );
 
   const crumb = (
-    <span className="ph-crumb"><Link to="/datasets">datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
+    <span className="ph-crumb"><Link to="/datasets">Datasets</Link> <span className="sep">/</span> <b>{d.name}</b></span>
   );
 
   return (
@@ -395,7 +390,7 @@ export function Dataset() {
             <h1 className="ds-d-name">{d.name} <span className="ds-badge" style={{ color: 'var(--m-image)' }}><span className="dot" style={{ background: 'var(--m-image)' }} /> {d.modality}</span></h1>
             {/* The count is the LIVE media — archiving two of nine and still reading nine would
                 contradict the coverage line beside it, which the server has already moved. */}
-            <div className="sub mono">{live.length} {d.modality === 'video' ? 'clips' : 'images'} · {version} · {d.captionsets.length} captionsets · updated {d.mutatum}</div>
+            <div className="sub mono">{datasetStatsLine(d, live.length, `updated ${d.mutatum}`)}</div>
           </div>
           {/* Archiving the SET, with the set's own identity — not buried in a menu. It asks
               once, says what archive means, and offers the set back after. */}
@@ -404,7 +399,7 @@ export function Dataset() {
                 One press, reversible, no confirm — unlike archive this destroys nothing. */}
             <button className="btn ghost sm" type="button" disabled={pubBusy}
               onClick={() => void togglePublish(d)}>
-              {pubBusy ? 'working…' : d.access?.kind === 'public' ? 'published — unpublish' : 'publish to the catalog'}
+              {pubBusy ? 'working…' : d.access?.kind === 'public' ? 'published — unpublish' : 'publish to the catalogue'}
             </button>
             {archivedSet ? (
               <button className="btn ghost sm" type="button" disabled={archiving}
@@ -423,7 +418,7 @@ export function Dataset() {
               </>
             )}
             <div className="sub ds-archive-note">{ARCHIVE_MEANING}</div>
-            {d.access?.kind === 'public' && <div className="sub mono">published — anyone can find this set in the catalog and Muse on it.</div>}
+            {d.access?.kind === 'public' && <div className="sub mono">published — anyone can find this set in the catalogue and Muse on it.</div>}
             {pubErr && <div className="sub mono">that did not go through: {pubErr}</div>}
             {archivedSet && <div className="sub mono">this set is archived — it is out of your datasets until you take it back.</div>}
             {archiveErr && <div className="sub mono">that did not go through: {archiveErr}</div>}
@@ -534,7 +529,7 @@ export function Dataset() {
           {/* the panels */}
           <aside className="ds-side">
             <div className="ds-panel">
-              <div className="ds-panel-l">captionsets · {d.captionsets.length} · pick to train</div>
+              <div className="ds-panel-l">captionsets{d.captionsets.length ? ` · ${d.captionsets.length}` : ''} · pick to train</div>
               {d.captionsets.length === 0 ? (
                 <p className="ds-panel-note">no captionset yet — a model learns from a caption layer. Run a caption job to make one.</p>
               ) : d.captionsets.map((cs) => (
@@ -610,7 +605,7 @@ export function Dataset() {
               onClick={() => navigate(d.captionsets.length === 0 ? `/datasets/${d.id}/caption` : `/datasets/${d.id}/derive`)}>
               {d.captionsets.length === 0 ? 'Caption it, then train →' : 'Train a model from this →'}
             </button>
-            <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>muse →</Link>
+            <Link className="btn ghost block" to={`/datasets/${d.id}/muse`}>Muse →</Link>
             {/* Beside the door, not behind it: how many sessions this dataset has, and the
                 way to the ones that are not the current work. */}
             {sessionCountLine(museSessions ?? []) && (

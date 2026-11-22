@@ -1,5 +1,249 @@
 # Changelog
 
+## [5.36.0](https://github.com/monygroupcorp/noema/compare/v5.35.0...v5.36.0) (2026-11-21)
+
+
+### Features
+
+* **analytics:** a pseudonymous behaviour corpus that says where visitors stop ([2ea4fd5](https://github.com/monygroupcorp/noema/commit/2ea4fd57801798311bdaba3d5ba509d0058c2d28))
+* **analytics:** a pseudonymous behaviour corpus that says where visitors stop ([80b2c10](https://github.com/monygroupcorp/noema/commit/80b2c101a60f24fe3b363d61c292e12fc1ad60b1))
+
+
+### Bug Fixes
+
+* **blog:** make the canvas and api guides match what actually ships ([#747](https://github.com/monygroupcorp/noema/issues/747)) ([b3c4554](https://github.com/monygroupcorp/noema/commit/b3c4554b05e52aaaa53e216427105d7bdc2a8644))
+* **crystal:** bind licence terms by a flow's weights, not only its declaration ([d826a2c](https://github.com/monygroupcorp/noema/commit/d826a2c9218606eebe9e98044c4c554dfdc915c3))
+* **crystal:** complete the actum from the pod's SSE stream, not just its webhook ([#744](https://github.com/monygroupcorp/noema/issues/744)) ([d280707](https://github.com/monygroupcorp/noema/commit/d28070768e6e5bef008a19f1a0be5830bb8a51ab))
+* **crystal:** let an admin kill switch pull a model out of the public catalogue ([7f889fa](https://github.com/monygroupcorp/noema/commit/7f889fa676b1285d6b3ae306b24651dab51482bf))
+* **crystal:** retire the activity index on every completion rail, not just the webhook ([0b9ea82](https://github.com/monygroupcorp/noema/commit/0b9ea82664275362d84336795f31dc274824e2df))
+* **crystal:** retire the activity index on every completion rail, not just the webhook ([cfd68b1](https://github.com/monygroupcorp/noema/commit/cfd68b10b48284d58d8bdbf7b2a8a5eb392a2205))
+* **crystal:** stop Census draining a studio over its own locked reservation ([5549572](https://github.com/monygroupcorp/noema/commit/55495723d07d3b603b9f13163ea826544c7a2c7a))
+* **crystal:** stop Census draining a studio over its own locked reservation ([5d78b1e](https://github.com/monygroupcorp/noema/commit/5d78b1ef0d0d59c72200faf46a6d4f6201f6f4e7))
+* **crystal:** stub lockedBalance on every fake Signorum in tests/ ([7857600](https://github.com/monygroupcorp/noema/commit/785760046a4b4f6b96f210ba705546f75f415be4))
+* **crystal:** wire Actorum into the production Census call ([f4205ad](https://github.com/monygroupcorp/noema/commit/f4205add0f4eb57df741c867d9144deed4201f3e))
+* **ledger:** log reserve's split-transaction abort over-lock ([#742](https://github.com/monygroupcorp/noema/issues/742)) ([0c40963](https://github.com/monygroupcorp/noema/commit/0c4096354fef94f0a308acdc61af876ffa6d993e))
+* **web:** the route census labels every public page public ([#745](https://github.com/monygroupcorp/noema/issues/745)) ([972848c](https://github.com/monygroupcorp/noema/commit/972848c3cb92a20a940d5aaafbc78767ee56c4fc))
+
+## [5.35.0](https://github.com/monygroupcorp/noema/compare/v5.34.0...v5.35.0) (2026-11-21)
+
+
+### Features
+
+* **crystal:** refuse MiniMax H3 runs from EU/UK/Korea origins before reservation ([#733](https://github.com/monygroupcorp/noema/issues/733)) ([173e688](https://github.com/monygroupcorp/noema/commit/173e688e8658189381df78aa9d32b310e0677ddd))
+* **crystal:** take a reported run's output down on a confirmed abuse violation ([#734](https://github.com/monygroupcorp/noema/issues/734)) ([37dc200](https://github.com/monygroupcorp/noema/commit/37dc200b85d6da0f9e7a98a9dd08db0c0f9419de))
+* **crystal:** walk the collection screens populated, against a local fixture ([e71898f](https://github.com/monygroupcorp/noema/commit/e71898f915272b3c057da89ab1a015f15ee66300))
+* **crystal:** walk the collection screens populated, against a local fixture ([f19ff81](https://github.com/monygroupcorp/noema/commit/f19ff81c15475afa6a70cff3023221fbb84423e8))
+* let any surface report H3 outputs; accept terms from chat ([#735](https://github.com/monygroupcorp/noema/issues/735)) ([5a492db](https://github.com/monygroupcorp/noema/commit/5a492db267b5836b71255e85a43c6b2e98d8447a))
+* **scripts:** a module census — the ten largest and ten most duplicated modules under src/ ([#710](https://github.com/monygroupcorp/noema/issues/710)) ([68f0d85](https://github.com/monygroupcorp/noema/commit/68f0d8515708cb3c8a6c7dfcb28a774cf5488b76))
+* **telegram:** collect photos into a default dataset ([#717](https://github.com/monygroupcorp/noema/issues/717)) ([cba0ff9](https://github.com/monygroupcorp/noema/commit/cba0ff918999076f26965e014560147eadcfdc4a))
+* **web:** dataset images arrive by drop, paste or a chosen folder ([#716](https://github.com/monygroupcorp/noema/issues/716)) ([d9e7401](https://github.com/monygroupcorp/noema/commit/d9e7401507c65da41d491529a46ea3c5550fc046))
+
+
+### Bug Fixes
+
+* **api:** handle a quote for an unregistered ministerium instead of 500ing ([#713](https://github.com/monygroupcorp/noema/issues/713)) ([2b884ab](https://github.com/monygroupcorp/noema/commit/2b884abd9127472208208eee35f73699d37b6a86))
+* **arcanum:** stop snarkjs leaking a file handle on a bad zkey header ([#739](https://github.com/monygroupcorp/noema/issues/739)) ([f3e34bd](https://github.com/monygroupcorp/noema/commit/f3e34bdcc0c60d07b2323883b78476f79d608896))
+* **crystal:** restore cuDNN's own CUDA runtime wheels after the training pod's torch pin ([#718](https://github.com/monygroupcorp/noema/issues/718)) ([84fa658](https://github.com/monygroupcorp/noema/commit/84fa658be8cafbc8254ff724a68e375b139b56f4))
+* **crystal:** retire runmake.* flow registrations that twin a modern id ([#723](https://github.com/monygroupcorp/noema/issues/723)) ([35dc694](https://github.com/monygroupcorp/noema/commit/35dc69461cc0094f5c6dcf7ef05daaa368202c96))
+* **deps:** pin uuid/qs/lodash and force ethersproject's ws to patched versions ([70f8811](https://github.com/monygroupcorp/noema/commit/70f88118c58a1910cf6ce94182833e3be2bbbe85))
+* **deps:** pin uuid/qs/lodash and force ethersproject's ws to patched versions ([acf3ae5](https://github.com/monygroupcorp/noema/commit/acf3ae5c61b9c9dbecded57f6ec2e27fe9846ff3))
+* land the 2026-11-06 security audit fixes ([#711](https://github.com/monygroupcorp/noema/issues/711)) ([d2326d5](https://github.com/monygroupcorp/noema/commit/d2326d5777b5d076fc865f8972cad9589f659b95))
+* **ops:** mount arcanum ceremony custody on staging deploys ([#740](https://github.com/monygroupcorp/noema/issues/740)) ([f50eba1](https://github.com/monygroupcorp/noema/commit/f50eba17123e6f57b0499463ea891be308f2160b))
+* **runs:** stamp the embed sweep's owner before quoting it ([#737](https://github.com/monygroupcorp/noema/issues/737)) ([80ceb3a](https://github.com/monygroupcorp/noema/commit/80ceb3af3c8ebb06f513f2ee75868de0e47642ad))
+* **space:** inspecting a point no longer forces the gallery drawer open ([#720](https://github.com/monygroupcorp/noema/issues/720)) ([4839e0c](https://github.com/monygroupcorp/noema/commit/4839e0c4079aa2e638ad0934f5dc4d72fe6f16ff))
+* **web:** /collections stops filling four buttons with the one live hue at once ([dcd1d6b](https://github.com/monygroupcorp/noema/commit/dcd1d6b7f1617147df870683be417ee87bd36e82))
+* **web:** /lab/landing fits a 390px viewport ([dcbf721](https://github.com/monygroupcorp/noema/commit/dcbf7212d4ecb0dd46e3b0a7f4a8e8652aed59a7))
+* **web:** /status stops holding "Loading your activity…" past a failed read ([da4ca06](https://github.com/monygroupcorp/noema/commit/da4ca0688a2789cbdad8a73f5dc4a62755007883))
+* **web:** a batch of small UI defects at 390px and across the DESIGN.md standard ([2358047](https://github.com/monygroupcorp/noema/commit/235804737a50944105e6a00b3a125c9734f5dca8))
+* **web:** a dropdown is the app's control, not the operating system's ([ac706a4](https://github.com/monygroupcorp/noema/commit/ac706a41c5f19d23d6b07a4049e2f43dff224c08))
+* **web:** concierge stops replaying a stale answer and tiles its output ([#721](https://github.com/monygroupcorp/noema/issues/721)) ([a9e74e2](https://github.com/monygroupcorp/noema/commit/a9e74e22c2e707563de36e422a8a03bcc51540c0))
+* **web:** curation's K/R hint stops advertising a keyboard a touch viewport has none of ([d121f37](https://github.com/monygroupcorp/noema/commit/d121f37d7ccdc710bf824aea5302b39a73140ef3))
+* **web:** EditioExport names reversibility before publishing to hosting, not after ([9b54a55](https://github.com/monygroupcorp/noema/commit/9b54a551ed27827c881a0922180dfb6b242ca136))
+* **web:** EditioExport's download action stops competing with --accent ([2cefb6b](https://github.com/monygroupcorp/noema/commit/2cefb6bc5bca716dc5e3aff68a28e4731021d407))
+* **web:** EditioHub's about-collection card drops its metaphor and its lowercase labels ([d0afe3a](https://github.com/monygroupcorp/noema/commit/d0afe3a932d9f9d912cdd5e11f14b406ec075d05))
+* **web:** EditioHub's section labels and status chip read in sentence case ([ee78dcb](https://github.com/monygroupcorp/noema/commit/ee78dcbd4d284a91ebc337c756cf5da06dd9e5ef))
+* **web:** one accent action per screen, an honest empty counter, and list screens that say how to narrow ([#709](https://github.com/monygroupcorp/noema/issues/709)) ([8a14245](https://github.com/monygroupcorp/noema/commit/8a14245fbd5193b91d5baf59fbe64719041b9181))
+* **web:** the Buy buttons on the pricing page stop reading as disabled ([7c9717c](https://github.com/monygroupcorp/noema/commit/7c9717c762aa82e4e3c251a44b861cbdbd9db55b))
+* **web:** the concierge's send button tells a screen reader what it does ([41ec8fc](https://github.com/monygroupcorp/noema/commit/41ec8fcf6ab1c46348ded8f45601c7772d4dec76))
+* **web:** the dataset picker stops offering image files storage will 400 on ([7a56a18](https://github.com/monygroupcorp/noema/commit/7a56a186c4bc1766f2478d5440bed1886dcb85b8))
+* **web:** the prose-button colour override references .btn's own colour, not a copy of it ([30db1e5](https://github.com/monygroupcorp/noema/commit/30db1e572d5bdadacce2a86ec894ad711bdd0f92))
+* **web:** the run bar on a phone no longer sits on the form it belongs to ([9b9f53b](https://github.com/monygroupcorp/noema/commit/9b9f53bfa15fb2f92d37b569c586559099f40b56))
+* **web:** the teams sign-in notice wraps as prose at phone width, not ragged columns ([8fcf6a3](https://github.com/monygroupcorp/noema/commit/8fcf6a3b84eb69c48bcf1bf8fc266410792e2a18))
+* **web:** TraitRules' exclude/tag rows stay comparable at phone width ([7ed8d2c](https://github.com/monygroupcorp/noema/commit/7ed8d2c787eaf46d50a2966276350e8a19ecbe3e))
+* **web:** TraitsGarden's weight field is comparable against its siblings without scrolling ([ff4e5e2](https://github.com/monygroupcorp/noema/commit/ff4e5e2437221ca192a0e81756e5c412e073c6c9))
+
+
+### Performance Improvements
+
+* **web:** cap the landing/pricing entry chunk at a size budget ([#712](https://github.com/monygroupcorp/noema/issues/712)) ([0ee55d3](https://github.com/monygroupcorp/noema/commit/0ee55d3b1ab7c3a6258ea821dbf96ec778b83299))
+
+## [5.34.0](https://github.com/monygroupcorp/noema/compare/v5.33.0...v5.34.0) (2026-11-18)
+
+
+### Features
+
+* **allocutio:** Buy credits in a private chat opens Funding signed in ([3291788](https://github.com/monygroupcorp/noema/commit/3291788ea1d80bd79fc1813f2a0af95f5e507220))
+* **allocutio:** Buy credits in the bot lands on Funding signed in ([acf8889](https://github.com/monygroupcorp/noema/commit/acf8889035d5ee1490477d16a2e124ce46b7c4ac))
+* **allocutio:** the bot explains the group rule, and two silent misreports are fixed ([399d24a](https://github.com/monygroupcorp/noema/commit/399d24ac0ca969e6320e7954bc200d5c835a370e))
+* **auth:** sign in from a Telegram Mini App launch, verified by its signature ([4c62e71](https://github.com/monygroupcorp/noema/commit/4c62e71925da87b32ce2549559f44c7361200bf7))
+* bind MiniMax H3 users to its use restrictions before they run it ([7594f8b](https://github.com/monygroupcorp/noema/commit/7594f8bd08b8d663677e886cfb9b3247d75e6f8c))
+* **ledger:** record which surface a purchased credit was bought through ([96f139c](https://github.com/monygroupcorp/noema/commit/96f139ccb4dd07e2232f2f085ed392af1e50d925))
+* **web:** a Telegram Mini App launch lands signed in on Funding ([ceb7ae7](https://github.com/monygroupcorp/noema/commit/ceb7ae7164eb52946ecc37d448657bc097b2e90b))
+
+
+### Bug Fixes
+
+* **allocutio:** stop /status from listing every terminated studio ([cbaba09](https://github.com/monygroupcorp/noema/commit/cbaba09c31d6011e1a1b9d84d1cefacf577bddbe))
+* **auth:** hold a Mini App launch's claim for as long as it can verify ([405f85a](https://github.com/monygroupcorp/noema/commit/405f85a6631aa2c6d000a901fc6c94739bd5511c))
+* **crystal:** ask RunPod v2 to inject SSH keys, and walk GPUs by its retry table ([a275bed](https://github.com/monygroupcorp/noema/commit/a275beddafe579687a44b5675978171000d94dba))
+* **crystal:** count the H3 grant live only where its safeguards are wired ([8f63908](https://github.com/monygroupcorp/noema/commit/8f63908188a6749950a03fd4a82a71cd14cd6ed6))
+* **crystal:** count the H3 grant live only where its safeguards are wired ([dc4116a](https://github.com/monygroupcorp/noema/commit/dc4116a12bb9056bb944239cc408961eb21b7ffc))
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([5f32beb](https://github.com/monygroupcorp/noema/commit/5f32bebb052475f0f9a7c2078d6d6414affdea05))
+* **crystal:** gate MiniMax H3 catalog listing on its licence grant's conditions ([e638c04](https://github.com/monygroupcorp/noema/commit/e638c040ee1d0b558ccf29918744c361135a7510))
+* **crystal:** move RunPod pod calls to REST API v2 ([38b840c](https://github.com/monygroupcorp/noema/commit/38b840cb2fc3b0d6bd16073efc881570bd1b26f2))
+* **crystal:** move RunPod pod calls to REST API v2 ([1f946ff](https://github.com/monygroupcorp/noema/commit/1f946ff4980d40eb7c6339154d4dd2a5abd893bf))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([e5297e5](https://github.com/monygroupcorp/noema/commit/e5297e5cf0d6d955f239a5f78f1c07193a9cd53c))
+* **test:** keep the crystal DB suite green on a hosted Mongo ([23458e3](https://github.com/monygroupcorp/noema/commit/23458e30f44eb19552686cef64a2a5def911b83c))
+
+## [5.33.0](https://github.com/monygroupcorp/noema/compare/v5.32.2...v5.33.0) (2026-11-14)
+
+
+### Features
+
+* **telegram:** log chat activity and membership changes durably ([#692](https://github.com/monygroupcorp/noema/issues/692)) ([7fceed3](https://github.com/monygroupcorp/noema/commit/7fceed393af0f2ad44ac4e275cdc7268c94e1221))
+
+
+### Bug Fixes
+
+* **arcanum:** clear finalHash when a ceremony reopens ([#689](https://github.com/monygroupcorp/noema/issues/689)) ([e3ae2c9](https://github.com/monygroupcorp/noema/commit/e3ae2c9c43920babb8fec74846ae684ce47dc660))
+* **crystal:** authenticate civitai weight downloads, never fail silently ([#697](https://github.com/monygroupcorp/noema/issues/697)) ([65972fb](https://github.com/monygroupcorp/noema/commit/65972fb5a609d34381f028e1be5d219451c1edea))
+* **crystal:** guard and backfill download sources for public LoRAs ([#693](https://github.com/monygroupcorp/noema/issues/693)) ([8dec0b1](https://github.com/monygroupcorp/noema/commit/8dec0b168fc31ade3bb584f531e9651d8fa69e0b))
+* **legal:** correct MiniMax H3 licence status, propose how to obtain one ([048bc53](https://github.com/monygroupcorp/noema/commit/048bc534523cd200068f8efb4aa7777b6c6827db))
+* **legal:** record the granted MiniMax H3 licence ([dafb598](https://github.com/monygroupcorp/noema/commit/dafb5987f5d58075796abeccad0407e5b76b88fb))
+* **web:** stop the funding path from misleading on privacy and deposit status ([#691](https://github.com/monygroupcorp/noema/issues/691)) ([6265ad5](https://github.com/monygroupcorp/noema/commit/6265ad53bd51dcd1735ce7ea2e93dd2e72597223))
+
+## [5.32.2](https://github.com/monygroupcorp/noema/compare/v5.32.1...v5.32.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **arcanum:** mount arcanum_0000.zkey so CEREMONY_REOPEN can actually read it ([#687](https://github.com/monygroupcorp/noema/issues/687)) ([00cfcda](https://github.com/monygroupcorp/noema/commit/00cfcdaffeb17dadd091323bab706808e5572d1e))
+
+## [5.32.1](https://github.com/monygroupcorp/noema/compare/v5.32.0...v5.32.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **compliance:** tolerate a private compliance module built before the CSAM reviewer-report seam ([#685](https://github.com/monygroupcorp/noema/issues/685)) ([1e7033e](https://github.com/monygroupcorp/noema/commit/1e7033e24c8d51d7268699350aa17e2a02526a69))
+
+## [5.32.0](https://github.com/monygroupcorp/noema/compare/v5.31.0...v5.32.0) (2026-11-11)
+
+
+### Features
+
+* **arcanum:** let a finalized ceremony start a real second round ([#684](https://github.com/monygroupcorp/noema/issues/684)) ([96e62ba](https://github.com/monygroupcorp/noema/commit/96e62ba318a59e3d65a9e745ec971eb2bca266a0))
+* **walk:** measure which elements stay pinned while scrolling, and tell the critic as fact ([#674](https://github.com/monygroupcorp/noema/issues/674)) ([5342239](https://github.com/monygroupcorp/noema/commit/534223949830777e50d29031de8ab66cba8e9ad8))
+* **web:** the concierge dock opens full-size and fences anything copyable ([#668](https://github.com/monygroupcorp/noema/issues/668)) ([a230c67](https://github.com/monygroupcorp/noema/commit/a230c67a7cae01d24ce17d7080f87da8d87be6b9))
+
+
+### Bug Fixes
+
+* **crystal:** match import-secret provider hosts exactly, not by substring ([#681](https://github.com/monygroupcorp/noema/issues/681)) ([eb95308](https://github.com/monygroupcorp/noema/commit/eb9530859f5b46a37c82dc570381913af7a5fd3f))
+* **deploy:** drop the plaintext Ethereum signer key from the prod container ([#682](https://github.com/monygroupcorp/noema/issues/682)) ([63c4174](https://github.com/monygroupcorp/noema/commit/63c41744a0572d054bd0c7bd9402a42ffebd8e4e))
+* **deps:** drop unused aws-sdk/csurf/[@solana](https://github.com/solana) deps, bump jimp and archiver ([#678](https://github.com/monygroupcorp/noema/issues/678)) ([0e9e05a](https://github.com/monygroupcorp/noema/commit/0e9e05a13d3ebd71a6348a6b7e03f7a0c9bd2702))
+* **deps:** pin proxy-addr to 2.0.8, patching the critical IP-spoof advisory ([#677](https://github.com/monygroupcorp/noema/issues/677)) ([04babdc](https://github.com/monygroupcorp/noema/commit/04babdc964795cb636e725b06aec56e7f903fff5))
+* make two implicit session state machines explicit ([#679](https://github.com/monygroupcorp/noema/issues/679)) ([23e1b2d](https://github.com/monygroupcorp/noema/commit/23e1b2d890e3d19b1e809dd028a21ef8279dbf96))
+* **ops:** back up the arcanum ceremony's local-only zkey state to R2 ([#675](https://github.com/monygroupcorp/noema/issues/675)) ([785a6c9](https://github.com/monygroupcorp/noema/commit/785a6c983d3f2a3d86d9391c706544f988034b0e))
+* remove expr-eval, a critical-RCE dependency with no fix and no live use ([#676](https://github.com/monygroupcorp/noema/issues/676)) ([188cfdd](https://github.com/monygroupcorp/noema/commit/188cfdda79f29497f53fea4d9139af34c65e5636))
+* **telegram:** reply in the forum topic a command was asked from ([#683](https://github.com/monygroupcorp/noema/issues/683)) ([3001e8f](https://github.com/monygroupcorp/noema/commit/3001e8f5f77946b84ccd2451e980d7b0699b85cd))
+* **web:** consistent catalogue copy, sentence-case loading and clearer empty states ([#673](https://github.com/monygroupcorp/noema/issues/673)) ([e97e9d2](https://github.com/monygroupcorp/noema/commit/e97e9d2ccfc4994856019617b799c9a6920186a3))
+* **web:** doc tables head each phone entry by its subject, and /about splits its privacy paragraph ([#671](https://github.com/monygroupcorp/noema/issues/671)) ([a7aba98](https://github.com/monygroupcorp/noema/commit/a7aba98d0471fb73af3cf4c43cc0013d5fa4f9b4))
+* **web:** one door per screen on home, feed, profile, project and catalogue ([#672](https://github.com/monygroupcorp/noema/issues/672)) ([7f84308](https://github.com/monygroupcorp/noema/commit/7f84308ae9154d9658c22bb0b8eb7b76daedad13))
+* **web:** settings section links read as navigation, not muted copy ([#670](https://github.com/monygroupcorp/noema/issues/670)) ([59f1583](https://github.com/monygroupcorp/noema/commit/59f158318c60daf8105fbe4f986005cd087140af))
+
+## [5.31.0](https://github.com/monygroupcorp/noema/compare/v5.30.0...v5.31.0) (2026-10-26)
+
+
+### Features
+
+* **walk:** measure which controls are filled, and tell the critic as fact ([#656](https://github.com/monygroupcorp/noema/issues/656)) ([5ab8fa0](https://github.com/monygroupcorp/noema/commit/5ab8fa0dc609c76f459c17d2e50cd71bcb401ebb))
+* **web:** a saved login's row carries its own switch and remove actions ([#666](https://github.com/monygroupcorp/noema/issues/666)) ([56e9726](https://github.com/monygroupcorp/noema/commit/56e9726144a735dbff41468bdac763c25e37bbd3))
+* **web:** long documents carry an on-page section list ([#659](https://github.com/monygroupcorp/noema/issues/659)) ([5080998](https://github.com/monygroupcorp/noema/commit/5080998c41dec3980302ce9558ede1f88e502db2))
+
+
+### Bug Fixes
+
+* **crystal:** a weight with no download address is refused by name, and never offered ([#636](https://github.com/monygroupcorp/noema/issues/636)) ([367f973](https://github.com/monygroupcorp/noema/commit/367f9738dde38dd98a8b083fe06b4730531ddd57))
+* **telegram:** every path a user can reach has a way forward ([#623](https://github.com/monygroupcorp/noema/issues/623)) ([650dea9](https://github.com/monygroupcorp/noema/commit/650dea998e52e3a75bf671a3480629bb9886d7cc))
+* **walk:** critique --resume reruns only the screens whose passes failed ([#663](https://github.com/monygroupcorp/noema/issues/663)) ([b5d1949](https://github.com/monygroupcorp/noema/commit/b5d19498415ee0c0adcd699bf6544c7c4c58cb0c))
+* **walk:** retry a shot of an empty document once, and mark it in the manifest ([#653](https://github.com/monygroupcorp/noema/issues/653)) ([9019c8d](https://github.com/monygroupcorp/noema/commit/9019c8d7c2b2c0c1bd1019fb2dc36bb6211f2552))
+* **walk:** say in the manifest when the camera could draw no WebGL, and tell the critic ([#639](https://github.com/monygroupcorp/noema/issues/639)) ([033f49d](https://github.com/monygroupcorp/noema/commit/033f49dd284073e35908445173273b9a3477ee4e))
+* **walk:** tell the critic what a filled button is ([#646](https://github.com/monygroupcorp/noema/issues/646)) ([bddf4ca](https://github.com/monygroupcorp/noema/commit/bddf4cada2dfc1713cb219e622b9f16467521c17))
+* **web:** a record gate has one primary, a lowercase way back, and tells a visitor they are not signed in ([#641](https://github.com/monygroupcorp/noema/issues/641)) ([6934edd](https://github.com/monygroupcorp/noema/commit/6934edd98f644d7ace482f5126d5ae6b5a6176ae))
+* **web:** a screen that cannot load its record says so plainly and offers the way back ([#627](https://github.com/monygroupcorp/noema/issues/627)) ([637ec0b](https://github.com/monygroupcorp/noema/commit/637ec0b953b7c5445849d5de816fb0b5819ea583))
+* **web:** account sections render their content, the destructive control goes last, and one control goes anonymous ([#630](https://github.com/monygroupcorp/noema/issues/630)) ([bc2a4cf](https://github.com/monygroupcorp/noema/commit/bc2a4cf00228acd399b23db12e4c8688606c88e4))
+* **web:** catalog rows share one column grid on a phone, and labels read in sentence case ([#640](https://github.com/monygroupcorp/noema/issues/640)) ([c736dd3](https://github.com/monygroupcorp/noema/commit/c736dd36843f76c4e4c99107ae2909e5e8a96067))
+* **web:** doc tables reflow on a phone, pack cards say what a pack buys, and the landing primary takes the accent ([#642](https://github.com/monygroupcorp/noema/issues/642)) ([6dfabfb](https://github.com/monygroupcorp/noema/commit/6dfabfb9119e6fa90e5c2d23a38ff6d797e45f36))
+* **web:** empty counts print no zeros, and every empty state offers the action that fills it ([#643](https://github.com/monygroupcorp/noema/issues/643)) ([79d6cbf](https://github.com/monygroupcorp/noema/commit/79d6cbf846554331cd3e32ecce413c7daa96aad8))
+* **web:** empty holdings print no zeros, and a sessionless visit asks for no partner record ([#637](https://github.com/monygroupcorp/noema/issues/637)) ([0f87554](https://github.com/monygroupcorp/noema/commit/0f875544b791501177b02e65a033e304b0def63b))
+* **web:** gate links become buttons, empty and error states say what to do ([#658](https://github.com/monygroupcorp/noema/issues/658)) ([9d7df55](https://github.com/monygroupcorp/noema/commit/9d7df559ba3563a431c92e3e4694686d55cc6cd9))
+* **web:** isolate spicy mode in its own restricted section on preferences ([#650](https://github.com/monygroupcorp/noema/issues/650)) ([7beb46b](https://github.com/monygroupcorp/noema/commit/7beb46be991ad34fbc95871ff2f5720a21902dd5))
+* **web:** one activity list on /status, newest first ([#652](https://github.com/monygroupcorp/noema/issues/652)) ([1d87259](https://github.com/monygroupcorp/noema/commit/1d87259a421da441bceb0b8bb73c464ca8b63987))
+* **web:** one door per screen, one instruction per error, and empty states that act ([#664](https://github.com/monygroupcorp/noema/issues/664)) ([a3800d8](https://github.com/monygroupcorp/noema/commit/a3800d8e249c8419c6b501a31299d9a548e9bab4))
+* **web:** one filled primary action per screen, and the topbar start pill stops competing with it ([#624](https://github.com/monygroupcorp/noema/issues/624)) ([daa22d2](https://github.com/monygroupcorp/noema/commit/daa22d2ae2d21711b7f02a5cf55cca8a8934ecf3))
+* **web:** one floating control per corner, and one filled action per marketing page ([#634](https://github.com/monygroupcorp/noema/issues/634)) ([4f0415a](https://github.com/monygroupcorp/noema/commit/4f0415ae59af5463a7270c8522b217fe41ebabca))
+* **web:** one noun per screen, accent only where it acts, and lists that state their shape ([#667](https://github.com/monygroupcorp/noema/issues/667)) ([8cfe28a](https://github.com/monygroupcorp/noema/commit/8cfe28a6db50ba94f1c19950d752e83d5db87e32))
+* **web:** pricing, export and account settings no longer say coming soon, and go anonymous is absent when already anonymous ([#635](https://github.com/monygroupcorp/noema/issues/635)) ([5a4394d](https://github.com/monygroupcorp/noema/commit/5a4394d1f5f2478adf3c6c8dce111a109e4253e3))
+* **web:** profile settings sections are each a jump target ([#651](https://github.com/monygroupcorp/noema/issues/651)) ([649ddc8](https://github.com/monygroupcorp/noema/commit/649ddc816920b9321e8eb09d3bc1aadff4783d60))
+* **web:** prose in sans, headings that descend, and a ceremony primary that follows its status ([#662](https://github.com/monygroupcorp/noema/issues/662)) ([8ff40e1](https://github.com/monygroupcorp/noema/commit/8ff40e120db2eaaac11458503c7e9f4a7fa62adc))
+* **web:** sentence case for the shell's labels and the screens that still read lowercase ([#626](https://github.com/monygroupcorp/noema/issues/626)) ([61c0fa0](https://github.com/monygroupcorp/noema/commit/61c0fa0028590c02a8be2b562a40c12c151c7a3c))
+* **web:** sentence-case the preferences labels and give the checkboxes a 44px row ([#655](https://github.com/monygroupcorp/noema/issues/655)) ([bfe664a](https://github.com/monygroupcorp/noema/commit/bfe664ade2835e7f927c10f37c0a135cb385f40d))
+* **web:** settings sections are reachable, their controls visible, and unavailable ones absent ([#665](https://github.com/monygroupcorp/noema/issues/665)) ([7e2ff02](https://github.com/monygroupcorp/noema/commit/7e2ff0258e3fd1f3cdd25da02cfa150b1154204b))
+* **web:** show what a pledge targets and does on the sponsorship form ([#648](https://github.com/monygroupcorp/noema/issues/648)) ([257b4f7](https://github.com/monygroupcorp/noema/commit/257b4f71e9d78d7225ae12a03406a60633be8bc4))
+* **web:** stop the mobile nav's Build group from being called Projects ([#649](https://github.com/monygroupcorp/noema/issues/649)) ([db91844](https://github.com/monygroupcorp/noema/commit/db91844db571c3a088520a843d0a74488c97d277))
+* **web:** surface a project's custody state at the top of its page ([#647](https://github.com/monygroupcorp/noema/issues/647)) ([d4720f3](https://github.com/monygroupcorp/noema/commit/d4720f31dbe703a879d26ee1d077435a01f70050))
+* **web:** the canvas keeps its stage at phone width and summons the tools as a sheet ([#660](https://github.com/monygroupcorp/noema/issues/660)) ([ce96fee](https://github.com/monygroupcorp/noema/commit/ce96fee19fb9bddbd1781513bb90c8ac24f38354))
+* **web:** the canvas leaves its loader when a read fails, with a retry or the door ([#645](https://github.com/monygroupcorp/noema/issues/645)) ([df183e9](https://github.com/monygroupcorp/noema/commit/df183e9164d6d8aadf71c547921a966f57ac1475))
+* **web:** the catalogue filters with one control row, and a model card never loads forever ([#631](https://github.com/monygroupcorp/noema/issues/631)) ([e3ab7be](https://github.com/monygroupcorp/noema/commit/e3ab7becf5eda42a7e2c92003e8c77b70f987067))
+* **web:** the concierge dock reserves its footprint on a phone instead of sitting on the page ([#625](https://github.com/monygroupcorp/noema/issues/625)) ([b8368fc](https://github.com/monygroupcorp/noema/commit/b8368fc2be0201a05468a5a758f6afb1c6ef7744))
+* **web:** the funding screen is headed by its name and lists both ways in, and vault, funding and onboard no longer say coming soon ([#628](https://github.com/monygroupcorp/noema/issues/628)) ([1e7c3a4](https://github.com/monygroupcorp/noema/commit/1e7c3a4585629564584e87f265cf7c12bc26d544))
+* **web:** the home's return surface comes first, and six phone-width screens lose what answered nothing ([#654](https://github.com/monygroupcorp/noema/issues/654)) ([c0678ff](https://github.com/monygroupcorp/noema/commit/c0678ff7a05bc6013c70ee4c2e586c21838c609e))
+* **web:** the profile asset tiles are buttons the keyboard can reach, and the account row labels are sentence case ([#657](https://github.com/monygroupcorp/noema/issues/657)) ([9202426](https://github.com/monygroupcorp/noema/commit/9202426df0e10124e3c901726e271181644ba0cf))
+* **web:** the topbar yields on every screen, a gate withholds Start, and a crumb ends in an ellipsis ([#644](https://github.com/monygroupcorp/noema/issues/644)) ([848515c](https://github.com/monygroupcorp/noema/commit/848515c8537e2dd7c17b26a140ee63316a8ff20a))
+* **web:** topbar pills meet the 44px touch target on phones ([#661](https://github.com/monygroupcorp/noema/issues/661)) ([2303c30](https://github.com/monygroupcorp/noema/commit/2303c303b2bd153bfb10e1562b6665257d777573))
+* **web:** zero counts stay silent, empty sections say what fills them, and document tables scroll instead of clipping ([#629](https://github.com/monygroupcorp/noema/issues/629)) ([e5eba5c](https://github.com/monygroupcorp/noema/commit/e5eba5cab49c7e5a577b4788340607f67fb25bf2))
+
+## [5.30.0](https://github.com/monygroupcorp/noema/compare/v5.29.0...v5.30.0) (2026-09-21)
+
+
+### Features
+
+* **collections:** show a running collection's pieces on the run screen ([#610](https://github.com/monygroupcorp/noema/issues/610)) ([7c39e48](https://github.com/monygroupcorp/noema/commit/7c39e481d2bc0e1d8564a51c0b4b0276daa4fc42))
+* **publish:** tell a publisher why hosting refused their collection, on every visit ([#620](https://github.com/monygroupcorp/noema/issues/620)) ([adae1a5](https://github.com/monygroupcorp/noema/commit/adae1a562a67ec271078c2b9abdccb244b1c72d1))
+
+
+### Bug Fixes
+
+* **api:** gate a collection piece rejection on the funder ([#604](https://github.com/monygroupcorp/noema/issues/604)) ([bd06533](https://github.com/monygroupcorp/noema/commit/bd065339612a86d108a4662346857acfeae7a1af))
+* **api:** stop warning about a refusal that is the ordinary answer ([#616](https://github.com/monygroupcorp/noema/issues/616)) ([a115c07](https://github.com/monygroupcorp/noema/commit/a115c076e84ec0906acb47c0179952f29f7e803e))
+* **api:** tell a refused caller that an empty balance is a terminal answer ([#614](https://github.com/monygroupcorp/noema/issues/614)) ([58e4293](https://github.com/monygroupcorp/noema/commit/58e42932488b236810fca57cb7f1cbd763b3bba2))
+* **arcanum:** say which proving key a box is holding when it serves none ([#621](https://github.com/monygroupcorp/noema/issues/621)) ([eaa587b](https://github.com/monygroupcorp/noema/commit/eaa587bd31b9590605f23ec3a30cc21943636c5a))
+* **arcanum:** serve the proving key the ceremony's transcript names, and rehearse the flow before opening it ([#605](https://github.com/monygroupcorp/noema/issues/605)) ([67be3b2](https://github.com/monygroupcorp/noema/commit/67be3b2926ad565728c3aef0df498a861c4db9b5))
+* **arcanum:** the site cannot report a proving key ready that it cannot verify against ([#603](https://github.com/monygroupcorp/noema/issues/603)) ([e8ecd46](https://github.com/monygroupcorp/noema/commit/e8ecd460addc13d2b960aa9c31d5a8a724b2cd57))
+* **blog:** ship the guides in the image, and stop denying the queue on the stream ([#601](https://github.com/monygroupcorp/noema/issues/601)) ([674df84](https://github.com/monygroupcorp/noema/commit/674df846c3836166039d15d7560fd251838d5809))
+* **blog:** the guides stop offering a captionset road the app does not have ([#606](https://github.com/monygroupcorp/noema/issues/606)) ([4961472](https://github.com/monygroupcorp/noema/commit/49614726ed637441dd657d27b5e8a5f7e6395c01))
+* **catalog:** stop offering the Klein 9B edit, and let the guard say why ([#615](https://github.com/monygroupcorp/noema/issues/615)) ([31a3f13](https://github.com/monygroupcorp/noema/commit/31a3f133c0d926c642b93541ae9b47fdaed7046c))
+* **ceremony:** the trusted-setup chain survives a deploy, and says so when it has not ([#602](https://github.com/monygroupcorp/noema/issues/602)) ([16a24e1](https://github.com/monygroupcorp/noema/commit/16a24e1ebc7ad6457a57f1ffb2f4ad464e8a09f0))
+* **concierge:** close the panel when the viewport narrows under it ([#611](https://github.com/monygroupcorp/noema/issues/611)) ([258e039](https://github.com/monygroupcorp/noema/commit/258e039e93a3ab4e2de6d727511fac7850b6dd5a))
+* **crystal:** point the four Wan 2.2 unets at a repo that has them, and refuse a dead weight address ([#598](https://github.com/monygroupcorp/noema/issues/598)) ([99faac1](https://github.com/monygroupcorp/noema/commit/99faac11e3bc76933d8fcd2d0818e968b9270a0f))
+* **datasets:** index the collection, dedupe ingested media, and upload a batch concurrently ([#612](https://github.com/monygroupcorp/noema/issues/612)) ([ab7dbdc](https://github.com/monygroupcorp/noema/commit/ab7dbdc58134ed7d5e7cdbdfcf91e2630c58d95c))
+* **publish:** a held collection stays held after its export-to-you download ([#608](https://github.com/monygroupcorp/noema/issues/608)) ([dac8755](https://github.com/monygroupcorp/noema/commit/dac87559ed7376711413dd0ea98e9f35f3da7095))
+* **publish:** a held collection stays held on the export screen when a destination is picked ([#607](https://github.com/monygroupcorp/noema/issues/607)) ([249a5c2](https://github.com/monygroupcorp/noema/commit/249a5c2e99c6640c7cfd70671cf20791caa8877f))
+* **publish:** a held collection still says so when the export screen is reopened ([#600](https://github.com/monygroupcorp/noema/issues/600)) ([779941a](https://github.com/monygroupcorp/noema/commit/779941a5f979eb3414b5f31d11693a8351a243d1))
+* **space:** stop losing a selection to the layer it was not carved in ([#613](https://github.com/monygroupcorp/noema/issues/613)) ([8b0cb2c](https://github.com/monygroupcorp/noema/commit/8b0cb2c6c054a98c5f1de9f901cebac7b22226c3))
+* **web:** keep transport wreckage off the screen ([#617](https://github.com/monygroupcorp/noema/issues/617)) ([a75a168](https://github.com/monygroupcorp/noema/commit/a75a168cb9b7868e5c07e3bf0fce4439c47531ec))
+* **web:** stop asking for owner-scoped data without an account ([#618](https://github.com/monygroupcorp/noema/issues/618)) ([3bb7526](https://github.com/monygroupcorp/noema/commit/3bb75267a29aa7112698495668985112c0809fdb))
+
 ## [5.29.0](https://github.com/monygroupcorp/noema/compare/v5.28.0...v5.29.0) (2026-09-09)
 
 

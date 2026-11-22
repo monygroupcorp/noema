@@ -22,6 +22,10 @@ import { AlchemyPricer, nullPricer } from './crystal/AssetPricer.js'
 import { permissiveSanctionsScreen, type SanctionsScreen } from './compliance/SanctionsScreen.js'
 import { createVestigiaRouter } from './api/vestigia/vestigiaRouter.js'
 import { createQuerelaRouter } from './api/querela/querelaRouter.js'
+import { fileAbuseReport } from './api/querela/fileAbuseReport.js'
+import { ownerKeyOf } from './crystal/ownerKey.js'
+import { requiredUseTerms, acceptUseTerms } from './crystal/useTerms.js'
+import { licenseUseTerms } from './crystal/modelLicense.js'
 import { createPartnerRequestRouter } from './api/partner/partnerRequestRouter.js'
 import { createPartnerAdminRouter } from './api/partner/partnerAdminRouter.js'
 import { verifyApiKeyToAccountId as verifyApiKeyToAccountIdCore } from './crystal/apiKeys.js'
@@ -72,6 +76,9 @@ import { WideEventStore }         from './analytics/WideEventStore.js'
 import { ensureWideIndexes }      from './analytics/ensureWideIndexes.js'
 import { startAnalyticsListener } from './analytics/analyticsListener.js'
 import { createAnalyticsRouter }  from './api/internal/analyticsRouter.js'
+import { BehaviourEventStore }    from './analytics/BehaviourEventStore.js'
+import { ensureBehaviourIndexes } from './analytics/ensureBehaviourIndexes.js'
+import { createEventsRouter }     from './api/internal/eventsRouter.js'
 import { PublicationWorker } from './crystal/PublicationWorker.js'
 import { selectModerationGate, type ModerationGate } from './crystal/ModerationGate.js'
 import { permissivePromptGuard, type PromptGuard } from './crystal/PromptGuard.js'
@@ -212,6 +219,10 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
 const R2_OUTPUTS_BUCKET = process.env.R2_OUTPUTS_BUCKET ?? process.env.R2_BUCKET_NAME
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL
+// Public origin for absolute links the bot and the agent card hand out.
+const PUBLIC_BASE = process.env.PUBLIC_BASE ?? 'https://noema.art'
+// Where credits are bought — linked from every "not enough credits" the bot says.
+const FUNDING_URL = `${PUBLIC_BASE}/funding`
 
 // TEE private compute — optional. Set TEE_IMAGE_ID to enable real pod provisioning.
 const TEE_IMAGE_ID        = process.env.TEE_IMAGE_ID         // e.g. "monyrth/tee-runner:latest"
@@ -413,6 +424,7 @@ async function main(): Promise<void> {
   log.info('MongoDB connected')
   await ensureIndexes(mongo.db(DB_NAME))
   await ensureWideIndexes(mongo.db(DB_NAME))
+  await ensureBehaviourIndexes(mongo.db(DB_NAME))
   log.info('Indexes ensured')
 
   // 2. Build embedding functions (CLIP service) and hosted-API providers
@@ -620,6 +632,7 @@ async function main(): Promise<void> {
       ...(AITK_REMOTE_MAX_SECONDS !== undefined ? { maxTrainingSeconds: AITK_REMOTE_MAX_SECONDS } : {}),
     },
     ...(process.env.HF_TOKEN ? { huggingFaceToken: process.env.HF_TOKEN } : {}),
+    ...(process.env.CIVITAI_API_TOKEN ? { civitaiApiToken: process.env.CIVITAI_API_TOKEN } : {}),
     ...(process.env.ARWEAVE_PRIVATE_KEY ? { arweavePrivateKey: process.env.ARWEAVE_PRIVATE_KEY } : {}),
     ...(apiProviders.length ? { apiProviders } : {}),
     ...(embed ? { embed } : {}),
@@ -757,6 +770,27 @@ async function main(): Promise<void> {
     onResolution: (cb) => { resCb = cb },
   }
 
+  // An abuse report names a run; its owner and its flow's licence terms are read from the run
+  // itself, never from the reporter. Shared by the REST reports route and the Telegram
+  // delivery menu's own Report tap — one answer to "who owns this run, under what terms"
+  // regardless of which surface the report came from.
+  const resolveRunForReport = async (runId: string): Promise<{ ownerKey: string; useTerms: string[] } | null> => {
+    const actum = await ring.actorum.findById(runId)
+    if (!actum) return null
+    const entry = await ring.actumIndex?.findByActumId?.(runId)
+    const owner = entry?.animaId ? { animaId: entry.animaId }
+      : entry?.commitment ? { commitment: entry.commitment }
+      : actum.bursaToken ? { bursaToken: actum.bursaToken }
+      : null
+    if (!owner) return null
+    const useTerms = await requiredUseTerms(
+      await ring.modorum.find(actum.modusId),
+      (id) => ring.modorum.find(id),
+      async (id) => licenseUseTerms((await intellae.find(id))?.license),
+    )
+    return { ownerKey: ownerKeyOf(owner), useTerms }
+  }
+
   // 6. Register ExecuteFlow
   const executeFlow = new ExecuteFlow({
     modorum: ring.modorum,
@@ -778,6 +812,19 @@ async function main(): Promise<void> {
       sodalitatum: ring.sodalitates,
       inline: raw => parseManifest(raw) !== null,
     },
+    fundingUrl: FUNDING_URL,
+    // A flow under licence terms (MiniMax H3) runs only for a caster who accepted them and is
+    // not suspended; the same records the REST run route reads. `accept` lets the chat surface
+    // (Telegram, Discord, …) take the click-through itself — a Telegram-only caster with no
+    // linked web account can tap Accept here and run, rather than being sent to a web account
+    // that does not exist for them.
+    useTerms: {
+      accepted: async (identity) => (await consuetudinum.resolveGeneratio(identity))?.termsAccepted,
+      strikes: (identity, termsId) => ring.querelae.countViolations(ownerKeyOf(identity), termsId),
+      accept: (identity, termsId) => acceptUseTerms(consuetudinum, identity, termsId),
+    },
+    intellarum: intellae,
+    siteUrl: PUBLIC_BASE,
   })
   router.register(executeFlow)
 
@@ -857,6 +904,13 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     vocator: ring.vocator,
     consuetudinum,
+    datasets: ring.datasets,
+    mediaFetcher: httpMediaFetcher,
+    // Collecting (noema/telegram-photos-into-a-dataset): a bare idle photo gets re-hosted
+    // into the same bucket everything else on this deployment lands in. Absent on a
+    // deployment with no R2 configured, where collecting mode cannot turn on either.
+    ...(RUNPOD_R2 ? { objectStore: new R2Uploader(RUNPOD_R2) } : {}),
+    fundingUrl: FUNDING_URL,
     ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
     // Private generation (noema-347): a private run's output is a marker, so the bot mints a
     // short-lived link per send and lets Telegram fetch the bytes server-side — the chat holds
@@ -871,6 +925,16 @@ async function main(): Promise<void> {
     } : {}),
     terminatePod: RUNPOD_API_KEY ? (podId) => terminatePod(RUNPOD_API_KEY, podId) : undefined,
     acta: ring.actorum,
+    // The delivery menu's Report button (Section V.5 of licences such as MiniMax H3's) —
+    // one write path shared with the web's own report control (POST /v1/reports), so a
+    // reported run is deduped/rate-limited/strike-counted the same way regardless of surface.
+    // A fixed description: a chat tap carries no free text, and the store's dedup key is the
+    // (reporter, run) pair, not the wording (same as a worded web report repeating itself).
+    reportAbuse: (auctor, actumId) => fileAbuseReport(
+      { querelae: ring.querelae, resolveRun: resolveRunForReport },
+      ownerKeyOf(auctor),
+      { runId: actumId, description: 'Flagged via Telegram.' },
+    ),
     cancelActum: async (actumId, reason) => {
       const a = await ring.actorum.findById(actumId)
       if (a && a.status !== 'completus' && a.status !== 'fractus') {
@@ -886,6 +950,10 @@ async function main(): Promise<void> {
     withTrace(traceCtx, () => allocutio.receive(ctx.update))
   })
   tgBot.on('callback_query', ctx => {
+    const traceCtx = makeTraceContext({ platform: 'telegram' })
+    withTrace(traceCtx, () => allocutio.receive(ctx.update))
+  })
+  tgBot.on('my_chat_member', ctx => {
     const traceCtx = makeTraceContext({ platform: 'telegram' })
     withTrace(traceCtx, () => allocutio.receive(ctx.update))
   })
@@ -1010,14 +1078,20 @@ async function main(): Promise<void> {
   // Crystal Agent API (/v1) — ApiAllocutio.
   // The agent-shaped facade over the ring + the credential→AuctorKey resolver.
   // Reviewer-confirmed-CSAM NCMEC report seam (human-review path, spec §4). From the
-  // private module; absent (public build) → the confirm action rejects but logs that no
-  // report was filed. Assembles + preserves; live NCMEC submission needs the ESP account.
-  const csamReviewReporter = compliance?.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+  // private module; absent (public build), or present but built before this seam existed
+  // → the confirm action rejects but logs that no report was filed. Assembles + preserves;
+  // live NCMEC submission needs the ESP account.
+  const csamReviewReporter = typeof compliance?.configureCsamReviewReporter === 'function'
+    ? compliance.configureCsamReviewReporter({ fetcher: httpMediaFetcher })
+    : undefined
 
   // Wide-event store (per-job telemetry incl. costUsd) — constructed here (ahead of its other
   // consumers below) so the admin COGS report can read off the SAME instance analyticsListener
   // writes through.
   const wideStore = new WideEventStore(mongo.db(DB_NAME))
+  // Behaviour corpus (noema/user-behaviour-corpus) — non-run visitor events (catalog view,
+  // quote, sign-in, funding attempt), pseudonymous-keyed, device-bucketed, no IP/raw-UA.
+  const behaviourStore = new BehaviourEventStore(mongo.db(DB_NAME))
 
   // GDPR Art. 17 right-to-erasure (noema-025) — build the erased-account denylist (session
   // revocation, shared with the auth acceptors below so an erase is visible to verifyJwt at once)
@@ -1068,6 +1142,8 @@ async function main(): Promise<void> {
     actumIndex: ring.actumIndex,
     modos: ring.modos,
     consuetudinum,
+    // The strike count behind a licence-terms suspension (MiniMax H3).
+    querelae: ring.querelae,
     // Private generation (noema-347): presence gates the preference (a toggle the deployment
     // cannot honour is refused, not silently downgraded) and presigns markers on an owner-scoped
     // run read.
@@ -1173,11 +1249,39 @@ async function main(): Promise<void> {
   // Querela reports (bug/feature/feedback) — anon-capable (animaId,
   // commitment, AND bursaToken), so mounted here (not via apiResolver-only vestigia-style
   // resolveCaller) with its own bursa-permitting auth seam, mirroring createSponsioRouter below.
-  app.use('/v1/reports', express.json(), createQuerelaRouter({ querelae: ring.querelae, identity: apiResolver }))
+  app.use('/v1/reports', express.json(), createQuerelaRouter({
+    querelae: ring.querelae,
+    identity: apiResolver,
+    resolveRun: resolveRunForReport,
+    bursarium: ring.bursarium,
+  }))
   // Admin read + triage of those reports (list across all owners, close). Platform-admin
   // only — see querelaAdminRouter.ts's header for why the gate is reproduced there rather
   // than shared via the CrystalApi facade.
-  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({ querelae: ring.querelae, identity: apiResolver }))
+  app.use('/v1/admin/reports', express.json(), createQuerelaAdminRouter({
+    querelae: ring.querelae,
+    identity: apiResolver,
+    // A confirmed violation takes the run's output down (minimax-h3-violation-takedown):
+    // retract every live, non-private Editio of the run (feed/bucket/marketplace/…), then
+    // privatize any gallery-listed/link-shared Vestigium trace of the same run. The admin
+    // auctor the router already resolved is reused (not re-derived) so `_assertPlatformAdmin`
+    // runs against the SAME identity both times.
+    takedownRun: async (auctor, runId) => {
+      const editions = await crystalApi.adminRetractAllEditions(auctor, { kind: 'actum', id: runId })
+      const traces = await ring.vestigiorum.findByActumId(runId)
+      const privatized: string[] = []
+      for (const v of traces) {
+        if (v.visibilitas === 'privata') continue
+        await ring.vestigiorum.update(v.id, { visibilitas: 'privata' })
+        privatized.push(v.id)
+      }
+      return { ...editions, privatizedVestigia: privatized }
+    },
+  }))
+
+  // Behaviour corpus intake (noema/user-behaviour-corpus) — non-run visitor events. Mirrors
+  // querelaRouter's shape: anon-capable, own rate limit, no CrystalApi facade.
+  app.use('/v1/events', express.json(), createEventsRouter({ events: behaviourStore, identity: apiResolver, bursarium: ring.bursarium }))
 
   // Partner program intake (B2B "request a demo") — public, anon-capable (identity is
   // OPPORTUNISTIC here: a logged-in submitter's animaId is attached, but resolution
@@ -1280,6 +1384,7 @@ async function main(): Promise<void> {
       jwtSecret: process.env.JWT_SECRET as string,
       linkTokens,
       ...(process.env.TELEGRAM_BOT_USERNAME ? { botUsername: process.env.TELEGRAM_BOT_USERNAME } : {}),
+      botToken: BOT_TOKEN,
       ...(process.env.SESSION_TTL_SECONDS ? { ttl: { sessionSeconds: Number(process.env.SESSION_TTL_SECONDS) } } : {}),
       rateLimiters: { register: limiter(20), login: limiter(20), wallet: limiter(30) },
     })
@@ -1403,6 +1508,7 @@ async function main(): Promise<void> {
   app.use('/api/v1/x402', express.json(), createX402AgentRouter({
     legati: ring.legati,
     modorum: ring.modorum,
+    intellarum: intellae,
     facilitator: cdpFacilitator ?? disabledX402Facilitator,
     log: ring.x402Log,
     config: x402Config,
@@ -1532,7 +1638,7 @@ async function main(): Promise<void> {
   // ERC-8004 platform agent card (ADR-0011 §5): advertises Noema itself as the x402
   // capability execution target an external agent resolves → pays → runs against.
   // Mounted at `/` (specific paths only).
-  const cardBase = process.env.PUBLIC_BASE ?? 'https://noema.art'
+  const cardBase = PUBLIC_BASE
   app.use(createAgentCardRouter({
     legati: ring.legati,
     modorum: ring.modorum,
@@ -1657,6 +1763,7 @@ async function main(): Promise<void> {
     signorum: ring.signorum,
     nexus,
     modos: ring.modos,
+    acta: ring.actorum,
   }, 60_000)
   log.info('census started', { tickMs: 60_000 })
 
@@ -1679,7 +1786,7 @@ async function main(): Promise<void> {
   log.info('license tripwire started', { tickMs: 6 * 60 * 60 * 1000 })
 
   app.use('/internal', createLiveRouter(INTERNAL_SECRET))
-  app.use('/internal/analytics', createAnalyticsRouter(wideStore, INTERNAL_SECRET))
+  app.use('/internal/analytics', createAnalyticsRouter({ wideStore, behaviourStore, actorum: ring.actorum }, INTERNAL_SECRET))
   // BYO-secrets Phase C: the weight-download proxy. Mounted only when a job-token secret AND a
   // secret store are configured (the same envs that let the Compiler rewrite gated urls). A pod
   // presents its per-job token; we stream the owner's gated private weights with their BYO token
@@ -1940,13 +2047,16 @@ async function main(): Promise<void> {
   // that is already serving HTTP. Every Telegram call inside it is bounded by a timeout, and the
   // polling start is not awaited to completion. See src/allocutio/telegram/startTelegram.ts.
   const BOT_COMMANDS = [
-    { command: 'make',   description: 'Generate images and art'        },
-    { command: 'chat',   description: 'Chat with an AI model'          },
-    { command: 'flows',  description: 'Browse all available tools'     },
-    { command: 'status', description: 'View your balance and account'  },
-    { command: 'wallet', description: 'Manage connected wallets'       },
-    { command: 'cancel', description: 'Cancel current action'          },
-    { command: 'help',   description: 'Show available commands'        },
+    { command: 'make',    description: 'Generate an image from a prompt'      },
+    { command: 'run',     description: 'Run any flow by name'                 },
+    { command: 'chat',    description: 'Chat with an AI model'                },
+    { command: 'flows',   description: 'Browse all available tools'           },
+    { command: 'arm',     description: 'Set up a warm studio'                 },
+    { command: 'status',  description: 'Balance and running gens'             },
+    { command: 'wallet',  description: 'How to top up credits'                },
+    { command: 'recover', description: 'Sign in on the web as this account'   },
+    { command: 'cancel',  description: 'Cancel current action'                },
+    { command: 'help',    description: 'Show available commands'              },
   ]
 
   const tgStart = await startTelegram({

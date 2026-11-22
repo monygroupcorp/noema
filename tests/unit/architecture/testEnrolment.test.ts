@@ -16,9 +16,23 @@ const ALLOWLIST = [
   'tests/unit/arcanum/ArcanumProver.real.test.ts',
 ]
 
+// A script names its patterns one of two ways: inline and quoted, or `--from <file>` pointing at a
+// list with one pattern per line. test:hermetic uses the file because it is appended to constantly
+// and a single-line list makes every append collide; this guard has to follow the indirection, or it
+// reads zero patterns and calls every hermetic test an orphan.
 function extractPatterns(scriptCmd: string): string[] {
-  const re = /'([^']+)'/g
   const out: string[] = []
+
+  const from = /--from\s+(\S+)/.exec(scriptCmd)
+  if (from) {
+    const listed = readFileSync(path.join(process.cwd(), from[1]), 'utf8')
+    for (const raw of listed.split('\n')) {
+      const line = raw.replace(/#.*$/, '').trim()
+      if (line) out.push(line)
+    }
+  }
+
+  const re = /'([^']+)'/g
   let m: RegExpExecArray | null
   while ((m = re.exec(scriptCmd))) out.push(m[1])
   return out
@@ -42,7 +56,8 @@ test('every tests/unit/**/*.test.ts file is enrolled in test:hermetic or test:cr
     orphans,
     [],
     `${orphans.length} test file(s) are not enrolled in test:hermetic or test:crystal and never ` +
-      `run in CI: ${orphans.join(', ')}. Add each to package.json's test:hermetic script (or ` +
-      `test:crystal if it needs a live Mongo), or add it to the ALLOWLIST in this file with a reason.`
+      `run in CI: ${orphans.join(', ')}. Append each to tests/hermetic.patterns, one per line (or ` +
+      `to package.json's test:crystal script if it needs a live Mongo), or add it to the ALLOWLIST ` +
+      `in this file with a reason.`
   )
 })

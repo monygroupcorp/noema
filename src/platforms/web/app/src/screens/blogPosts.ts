@@ -9,7 +9,8 @@ export interface Post {
   /** URL segment, from the filename: `train-a-model.md` → `/blog/train-a-model`. */
   slug: string;
   title: string;
-  /** One line under the title in the index. The post's first paragraph. */
+  /** One line under the title in the index: what the reader will be able to do afterwards.
+   *  From a `**Summary:** …` line in the post's front matter, else the post's first paragraph. */
   blurb: string;
   /** ISO date from a `**Published:** YYYY-MM-DD` line, when the post carries one. */
   published?: string;
@@ -28,16 +29,27 @@ export function parsePost(slug: string, md: string): Post {
 
   const published = md.match(/^\*\*Published:\*\*\s*(\d{4}-\d{2}-\d{2})/m)?.[1];
 
-  // the first real paragraph after the title — not the date line, not a rule, not a heading
-  let blurb = '';
-  for (const line of lines.slice(titleLine + 1)) {
-    const t = line.trim();
-    if (!t || t.startsWith('#') || t.startsWith('---') || t.startsWith('**Published:**')) continue;
-    blurb = t.replace(/[*_`]/g, '');
-    break;
-  }
+  // The index line is front matter, like the date: a `**Summary:**` line says what the reader
+  // will be able to do after the guide, which a post's own lede — written for someone already
+  // reading it — need not. It is index copy, so it leaves the body before the body is shown.
+  const summaryLine = /^\*\*Summary:\*\*\s*(.+)$/m;
+  const summary = md.match(summaryLine)?.[1]?.trim();
 
-  return { slug, title, blurb, published, body: md };
+  // Without one: the first real paragraph after the title — not the date line, not a rule,
+  // not a heading.
+  let blurb = summary ?? '';
+  if (!blurb) {
+    for (const line of lines.slice(titleLine + 1)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#') || t.startsWith('---') || t.startsWith('**Published:**')) continue;
+      blurb = t;
+      break;
+    }
+  }
+  blurb = blurb.replace(/[*_`]/g, '');
+
+  const body = summary ? md.replace(summaryLine, '').replace(/\n{3,}/g, '\n\n') : md;
+  return { slug, title, blurb, published, body };
 }
 
 const files = import.meta.glob('../content/blog/*.md', { query: '?raw', import: 'default', eager: true });

@@ -220,7 +220,9 @@ Two registers, deliberately: **calm in the app, fierce in advertising**. Geist c
 in-product surface. Martian Mono carries marketing display type and the wordmark only.
 
 - **D-16** In-product text is `--font-sans`, or `--font-mono` when the content is an identifier, a
-  hash, a version, a count, or code. Mono is for things that are *read as data*.
+  hash, a version, a count, or code. Mono is for things that are *read as data*. Headings
+  (`h1`–`h4`) take the display role, `--font-display` (Fraunces, EX-3) — the one departure from
+  sans in running text, and a heading only.
 - **D-17** `--font-marquee` appears only in marketing display type and the wordmark. It never
   appears inside the application shell.
 - **D-18** Every text-bearing element resolves to a house family. Form controls do not inherit
@@ -439,8 +441,10 @@ already been rejected, and it must be discarded.**
 - **EX-2 — The desaturated slate/grey trust palette.** `#7d8aa6` and `#6a7079` are intentionally
   low-chroma; the fade *is* the mechanic (D-12). "Low contrast accent" against these values is not
   a finding.
-- **EX-3 — Geist / Geist Mono.** The typeface pairing is settled. Font-choice findings are not
-  admissible.
+- **EX-3 — Geist body, Geist Mono data, Fraunces display.** The typeface trio is settled: Geist
+  carries body text, Geist Mono carries data, and Fraunces carries `h1`–`h4` (D-16, commit
+  `58528d44`, measured across a signed-in walk of fifty routes). Font-choice findings against any
+  of the three are not admissible.
 - **EX-4 — Honest black elevation shadows, no glow.** Shadow colour findings proposing accent
   tint or emission are rejected (D-35, D-36).
 - **EX-5 — No gradient text, anywhere.** Rejected on sight (D-37).
@@ -455,6 +459,22 @@ already been rejected, and it must be discarded.**
   read as history. It is never cited as a rule, and never seeded into a critique.
 - **EX-10 — `styles/design/**` findings are out of scope for this repo.** Correct upstream and
   re-copy (D-1). A finding whose only fix is editing a vendored file is not actionable here.
+- **EX-19 — The spend meter is absent from the topbar at phone width.** D-50 says the topbar
+  carries the meter; at phone width it does not. The `app.css` rule from 2026-06-30 collapses the
+  phone topbar to crumb, identity and Start, with credits and compute one tap away in the account
+  panel instead. Ruled by rth, 2026-10-26 (deliverable 2026-10-26-mqdz00, picked over
+  `meter-on-phones`): the account panel satisfies "one tap away," and D-50 findings against a
+  phone topbar's missing meter are not admissible.
+- **EX-20 — The concierge's arrival greeting opens once per browser, without a scrim.** It
+  used to re-open on the first visit to every route (up to 55 times per visitor) under a full
+  scrim that swallowed the dismissing click. It now sets one `concierge-seen` key the first time
+  any route is reached, opens beside the page rather than over it, and folds away on the first
+  pointer-down anywhere outside the panel — which still lands on whatever it was aimed at. The
+  focus-triggered assist is a separate path and keeps its scrim; it was not in question. Ruled by
+  rth, 2026-10-26 (deliverable 2026-10-26-z8vwq6, picked `once-per-browser` over
+  `per-route-no-scrim` / `never-greet` / `as-is`): this satisfies D-52 without a reserved-space
+  change, because the greeting no longer occludes anything, and findings against the old
+  per-route/modal behaviour are not admissible.
 
 ### Open debts — real, tracked, not to be re-filed as new
 
@@ -485,7 +505,9 @@ Collected for one pass, in priority order:
 - **R-3** (§6.1) — **resolved, rth 2026-08-26.** Retuned: radius tokens moved to the observed
   ladder (`--r-sm 8`, `--r 10`, `--r-lg 14`).
 - **R-4** (§9) — **resolved, rth 2026-08-26.** Exceptions list confirmed complete, no additions
-  or removals.
+  or removals. Superseded in part 2026-10-26: EX-19 added by a specific ruling (deliverable
+  2026-10-26-mqdz00) on a D-50 finding R-4 did not anticipate, and EX-20 added by a specific
+  ruling (deliverable 2026-10-26-z8vwq6) on the concierge's arrival greeting.
 
 All four ratification questions are answered. DESIGN.md is fully ratified as of 2026-08-26; the
 Phase-2 critic may cite it.

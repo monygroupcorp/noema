@@ -1,6 +1,7 @@
 # Compose a workflow on the canvas
 
 **Published:** 2026-09-05
+**Summary:** Wire several models into one flow you can run, publish and call over the API like any other.
 
 How to wire several models into one flow you can run, publish, and call like any other.
 
@@ -29,19 +30,18 @@ Drop a node and its ports appear: one per field in that flow's own input schema,
 the flow labels them. Nothing about a node is hand-drawn, which is why the palette can carry flows
 nobody anticipated.
 
-Ports come in three kinds, and it is worth knowing why three:
+The palette colours ports into three families, so a glance tells you what a wire is for:
 
 - **text** — prompts, names, anything written.
 - **number** — counts, dimensions, seeds, strengths.
 - **media** — an image, a video, an audio file, a 3D asset.
 
-Image, video, audio and 3D all share one kind because, on the wire, they are the same thing: a URL.
-There is no signal left to tell them apart, so the canvas does not invent one. Colouring an image
-port differently from a video port would be a promise the connection cannot keep — it would let you
-wire an image into a video-only input and call it type-checked.
-
-So: a media port accepts media. Whether *this* video model accepts *that* image is a question the
-flow answers when it runs, and the canvas does not pretend otherwise.
+The colour is a family, not a promise of fit. Underneath, every port also carries its own exact
+type — `image`, `video`, `audio` and `3d` on the media side, `int` and `float` on the number side —
+and that exact type is what a wire is checked against, not the family it is coloured by. Two media
+ports sharing a colour does not mean they accept each other: a wire from an image output into a
+video-only input is a mismatch, the same as a wire from an `int` output into a `float` input. The
+family tells you roughly what a port is for; the exact type is what has to match.
 
 ## Wiring and parameters
 
@@ -58,8 +58,9 @@ values are for the constants of your flow; wires are for what changes per run.
 anywhere a flow is runnable, including a single `POST /v1/runs` — the whole graph behind one call.
 
 Publishing is also where the graph gets checked. A graph with a cycle, or a wire between ports whose
-kinds do not match, is refused, and the offending wire is marked on the canvas so you are looking at
-the problem rather than reading about it. This is deliberately at publish rather than at
+exact types do not match — an image output into a video input counts, even though both wear the
+same media colour — is refused, and the offending wire is marked on the canvas so you are looking
+at the problem rather than reading about it. This is deliberately at publish rather than at
 wiring time: mid-build, a graph is allowed to be temporarily wrong.
 
 An empty canvas cannot be published — there is nothing to compile.

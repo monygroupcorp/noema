@@ -31,6 +31,7 @@ export function menuKeyboard(actumId: string, state: MenuState, rateGlyph: strin
         { label: GLYPH.tweak,  data: `dm:tweak:${actumId}` },
         { label: GLYPH.rerun,  data: `dm:rerun:${actumId}` },
         { label: GLYPH.save,   data: `dm:save:${actumId}` },
+        { label: GLYPH.report, data: `dm:report:${actumId}` },
       ]]
     default:
       return [[

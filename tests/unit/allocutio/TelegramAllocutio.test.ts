@@ -8,6 +8,11 @@ import type {
 } from '../../../src/flow/types.js'
 import type { TelegramUpdate } from '../../../src/allocutio/telegram/telegramTypes.js'
 import type { WideEvent } from '../../../src/lib/wide.js'
+import { MemoryConsuetudinum } from '../../../src/crystal/MemoryConsuetudinum.js'
+import { isArchived, liveMedia } from '../../../src/types/dataset.js'
+import type { Dataset, DatasetListOpts, DatasetListPage, DatasetMediaItem, DatasetSummaryListPage, Datasets } from '../../../src/types/dataset.js'
+import type { MediaFetcher } from '../../../src/crystal/MediaFetcher.js'
+import type { ObjectStore } from '../../../src/crystal/R2Uploader.js'
 
 // =============================================================================
 // Mock types
@@ -17,10 +22,11 @@ import type { WideEvent } from '../../../src/lib/wide.js'
 // Mock builders
 // =============================================================================
 
-function makeSender() {
+function makeSender(opts: { getFileLink?: (fileId: string) => Promise<string> } = {}) {
   const sent: Array<{ chatId: number; text: string; extra?: unknown }> = []
   const edited: Array<{ chatId: number; messageId: number; text: string; extra?: unknown }> = []
   const answered: string[] = []
+  const toasts: Array<{ id: string; text?: string }> = []
   const photos: Array<{ chatId: number; url: string; extra?: unknown }> = []
   const videos: Array<{ chatId: number; url: string; extra?: unknown }> = []
   const mediaGroups: Array<{ chatId: number; media: unknown[] }> = []
@@ -33,6 +39,7 @@ function makeSender() {
     sent,
     edited,
     answered,
+    toasts,
     photos,
     videos,
     mediaGroups,
@@ -48,8 +55,9 @@ function makeSender() {
     editMessageText: async (chatId: number, messageId: number, text: string, extra?: unknown) => {
       edited.push({ chatId, messageId, text, extra })
     },
-    answerCallbackQuery: async (id: string) => {
+    answerCallbackQuery: async (id: string, text?: string) => {
       answered.push(id)
+      toasts.push({ id, text })
     },
     sendPhoto: async (chatId: number, url: string, extra?: unknown) => {
       photos.push({ chatId, url, extra })
@@ -70,9 +78,9 @@ function makeSender() {
     setMessageReaction: async (chatId: number, messageId: number, reaction: Array<{ type: string; emoji: string }>) => {
       reactions.push({ chatId, messageId, emoji: reaction[0]?.emoji ?? '' })
     },
-    getFileLink: async (fileId: string) => {
+    getFileLink: opts.getFileLink ?? (async (fileId: string) => {
       return `https://api.telegram.org/file/bot-token/${fileId}`
-    },
+    }),
     captions,
     markups,
     editMessageCaption: async (chatId: number, messageId: number, caption: string, extra?: unknown) => {
@@ -188,13 +196,13 @@ function msgUpdate(userId: number, chatId: number, text: string, messageId = 1):
   }
 }
 
-function cbUpdate(userId: number, chatId: number, callbackData: string, cbId = 'cb-1'): TelegramUpdate {
+function cbUpdate(userId: number, chatId: number, callbackData: string, cbId = 'cb-1', threadId?: number): TelegramUpdate {
   return {
     update_id: 2,
     callback_query: {
       id: cbId,
       from: { id: userId, username: 'tester' },
-      message: { message_id: 99, chat: { id: chatId } },
+      message: { message_id: 99, chat: { id: chatId }, ...(threadId !== undefined ? { message_thread_id: threadId } : {}) },
       data: callbackData,
     },
   }
@@ -225,7 +233,7 @@ function groupMsgUpdate(
   userId: number,
   chatId: number,
   text: string,
-  opts: { messageId?: number; replyToBot?: boolean; botUsername?: string } = {}
+  opts: { messageId?: number; replyToBot?: boolean; botUsername?: string; threadId?: number } = {}
 ): TelegramUpdate {
   return {
     update_id: 5,
@@ -235,6 +243,7 @@ function groupMsgUpdate(
       chat: { id: chatId, type: 'supergroup' },
       text,
       date: Math.floor(Date.now() / 1000),
+      ...(opts.threadId !== undefined ? { message_thread_id: opts.threadId } : {}),
       ...(opts.replyToBot
         ? { reply_to_message: { message_id: 900, from: { id: 1, username: opts.botUsername ?? 'stationbot' } } }
         : {}),
@@ -255,11 +264,65 @@ function staleMsgUpdate(userId: number, chatId: number, text: string, pastSecond
   }
 }
 
+// ── Collecting (noema/telegram-photos-into-a-dataset) test doubles ──
+
+class MemoryDatasets implements Datasets {
+  private store = new Map<string, Dataset>()
+  private seq = 0
+  async create(input: Omit<Dataset, 'id' | 'natum' | 'mutatum'>): Promise<Dataset> {
+    const now = new Date()
+    const d: Dataset = { ...input, id: `ds-${++this.seq}`, natum: now, mutatum: now }
+    this.store.set(d.id, d)
+    return d
+  }
+  async find(id: string): Promise<Dataset | null> { return this.store.get(id) ?? null }
+  async list(opts: DatasetListOpts): Promise<DatasetListPage> {
+    return { entries: [...this.store.values()].filter((d) => d.owner === opts.owner && !isArchived(d)) }
+  }
+  async listSummaries(opts: DatasetListOpts): Promise<DatasetSummaryListPage> {
+    const { entries } = await this.list(opts)
+    return { entries: entries.map((d) => ({ id: d.id, name: d.name, images: liveMedia(d.media).length })) }
+  }
+  async addCaptionset(): Promise<Dataset | null> { throw new Error('unused') }
+  async setCaption(): Promise<Dataset | null> { throw new Error('unused') }
+  async setFragments(): Promise<Dataset | null> { throw new Error('unused') }
+  async setAccess(): Promise<Dataset | null> { throw new Error('unused') }
+  async addMedia(datasetId: string, items: DatasetMediaItem[]): Promise<Dataset | null> {
+    const d = this.store.get(datasetId)
+    if (!d) return null
+    const updated: Dataset = { ...d, media: [...d.media, ...items], mutatum: new Date() }
+    this.store.set(datasetId, updated)
+    return updated
+  }
+  async archiveDataset(): Promise<Dataset | null> { throw new Error('unused') }
+  async restoreDataset(): Promise<Dataset | null> { throw new Error('unused') }
+  async archiveMedia(): Promise<Dataset | null> { throw new Error('unused') }
+  async restoreMedia(): Promise<Dataset | null> { throw new Error('unused') }
+}
+
+/** Builds the four deps collecting mode needs, seeded with `initialCollecting`'s Generatio
+ *  state for `{animaId: 'test-anima'}` — the identity `makeIdentity()` always resolves to. */
+function makeCollectingDeps(initialCollecting: boolean) {
+  const consuetudinum = new MemoryConsuetudinum()
+  const datasets = new MemoryDatasets()
+  const fetchedUrls: string[] = []
+  const puts: Array<{ key: string; contentType: string }> = []
+  const mediaFetcher: MediaFetcher = {
+    fetch: async (url: string) => { fetchedUrls.push(url); return Buffer.from('fake-jpeg-bytes') },
+  }
+  const objectStore: ObjectStore = {
+    put: async (key: string, _bytes: Buffer, contentType: string) => { puts.push({ key, contentType }); return `https://bucket.example/${key}` },
+    del: async () => {},
+  }
+  void consuetudinum.setGeneratio({ animaId: 'test-anima' }, { collecting: initialCollecting })
+  return { consuetudinum, datasets, mediaFetcher, objectStore, fetchedUrls, puts }
+}
+
 // =============================================================================
 // Helper: build TelegramAllocutio wired with router callbacks
 // =============================================================================
-function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined> } = {}) {
-  const sender = makeSender()
+function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolean; autoSettleMs?: number; intellarum?: unknown; modorum?: unknown; botUsername?: string; fundingUrl?: string; resolvePrivateMedia?: (marker: string) => Promise<string | undefined>; collecting?: boolean; getFileLink?: (fileId: string) => Promise<string>; reportAbuse?: (auctor: import('../../../src/flow/types.js').AuctorKey, actumId: string) => Promise<{ id: string }> } = {}) {
+  const sender = makeSender({ ...(opts.getFileLink ? { getFileLink: opts.getFileLink } : {}) })
   const identity = makeIdentity()
   const router = makeRouter()
   const terminated: string[] = []
@@ -278,15 +341,22 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
   }
   const acta = { async findById(_id: string) { return fakeActum as unknown as import('../../../src/types/actum.js').Actum } }
 
+  // Collecting (noema/telegram-photos-into-a-dataset): wired only when a test asks for it, so
+  // every pre-existing test (no `collecting` opt) exercises the exact no-store-wired path it
+  // always has.
+  const collectingDeps = opts.collecting !== undefined ? makeCollectingDeps(opts.collecting) : undefined
+
   const allocutio = new TelegramAllocutio({
     router: router as unknown as import('../../../src/allocutio/telegram/TelegramAllocutio.js').RouterDeps,
     sender,
     identity,
     botStartupTime: opts.botStartupTime,
     ...(opts.botUsername ? { botUsername: opts.botUsername } : {}),
+    ...(opts.fundingUrl ? { fundingUrl: opts.fundingUrl } : {}),
     ...(opts.autoSettleMs !== undefined ? { autoSettleMs: opts.autoSettleMs } : {}),
     ...(opts.resolvePrivateMedia ? { resolvePrivateMedia: opts.resolvePrivateMedia } : {}),
     acta,
+    ...(opts.reportAbuse ? { reportAbuse: opts.reportAbuse } : {}),
     ...(opts.intellarum ? { intellarum: opts.intellarum as unknown as import('../../../src/types/intelligendi.js').Intellarum } : {}),
     ...(opts.modorum ? { modorum: opts.modorum as unknown as import('../../../src/types/modus.js').Modorum } : {}),
     ...(opts.withPodControls ? {
@@ -294,9 +364,15 @@ function makeAllocutio(opts: { botStartupTime?: number; withPodControls?: boolea
       terminatePod: async (podId: string) => { terminated.push(podId) },
       cancelActum: async (actumId: string, reason: string) => { cancelCalls.push({ actumId, reason }); return true },
     } : {}),
+    ...(collectingDeps ? {
+      consuetudinum: collectingDeps.consuetudinum,
+      datasets: collectingDeps.datasets,
+      mediaFetcher: collectingDeps.mediaFetcher,
+      objectStore: collectingDeps.objectStore,
+    } : {}),
   })
 
-  return { allocutio, sender, identity, router, terminated, cancelCalls, materiaUpdates, fakeActum }
+  return { allocutio, sender, identity, router, terminated, cancelCalls, materiaUpdates, fakeActum, collectingDeps }
 }
 
 // =============================================================================
@@ -772,6 +848,135 @@ test('photo message with no active flow is a no-op', async () => {
   assert.equal(handleCall, undefined, 'router.handle should NOT be called with no active flow')
 })
 
+// Collecting (noema/telegram-photos-into-a-dataset): a bare idle photo's fate turns on
+// whether collecting mode is wired AND on.
+
+test('idle photo with no collecting deps wired falls back to the plain idle-media hint', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-only']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /send it again with \/make/)
+  assert.doesNotMatch(sender.sent[0].text, /\/collect/)
+})
+
+test('idle photo with collecting OFF gets the discoverable hint naming /collect, and nothing is filed', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: false })
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-only']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /turn on \/collect/)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('idle photo with collecting ON is downloaded, re-hosted, and appended to the default dataset — confirmed every time, not throttled', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1'], 1))
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-2'], 2))
+
+  assert.equal(sender.sent.length, 2, 'both confirmations sent — never throttled like the idle hint')
+  assert.match(sender.sent[0].text, /Saved to "Telegram collection" \(1 photo\)/)
+  assert.match(sender.sent[1].text, /Saved to "Telegram collection" \(2 photos\)/)
+
+  // The Telegram CDN link was fetched, but never stored — clause 2.
+  assert.ok(collectingDeps!.fetchedUrls.every((u) => u.includes('api.telegram.org')))
+  const { entries } = await collectingDeps!.datasets.list({ owner: 'test-anima' })
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].media.length, 2)
+  for (const item of entries[0].media) {
+    assert.ok(item.url.startsWith('https://bucket.example/'))
+    assert.doesNotMatch(item.url, /api\.telegram\.org/)
+  }
+})
+
+test('idle photo with collecting ON but a NON-photo bare media says so instead of silently dropping it (clause 4)', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+  const videoUpdate: TelegramUpdate = {
+    update_id: 9,
+    message: {
+      message_id: 1,
+      from: { id: 123, username: 'tester' },
+      chat: { id: 456, type: 'private' },
+      date: Math.floor(Date.now() / 1000),
+      video: { file_id: 'clip-1' },
+    },
+  }
+  await allocutio.receive(videoUpdate)
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /photos only/)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('a collect failure never logs the raw Telegram file URL (it embeds the bot token)', async () => {
+  // A realistic getFileLink URL — `bot<id>:<secret>` is exactly the shape redactSecrets'
+  // TELEGRAM_TOKEN_URL pattern matches (the test harness's default getFileLink stub uses a
+  // literal 'bot-token' placeholder that doesn't, so it would pass this test even unredacted).
+  const { allocutio, sender, collectingDeps } = makeAllocutio({
+    collecting: true,
+    getFileLink: async (fileId: string) => `https://api.telegram.org/file/bot123456789:FAKE-secret-ABCDEFGHIJ1234567890/${fileId}`,
+  })
+  // The real httpMediaFetcher throws with the URL baked into the message on a failed fetch
+  // (`media fetch failed: ${url} → ${status}`) — reproduce that exact shape.
+  collectingDeps!.mediaFetcher.fetch = async (url: string) => {
+    throw new Error(`media fetch failed: ${url} → 404`)
+  }
+
+  const entries: Array<{ msg: string; [k: string]: unknown }> = []
+  const onLog = (entry: { msg: string; [k: string]: unknown }) => { entries.push(entry) }
+  bus.on('log', onLog)
+  try {
+    await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1']))
+  } finally {
+    bus.off('log', onLog)
+  }
+
+  const failureLog = entries.find((e) => e.msg === 'telegram: collect photo failed')
+  assert.ok(failureLog, 'the failure is logged')
+  const logged = JSON.stringify(failureLog)
+  assert.doesNotMatch(logged, /bot\d+:[A-Za-z0-9_-]{10,}/, 'the bot token never reaches the log')
+  assert.doesNotMatch(logged, /api\.telegram\.org/, 'the Telegram file URL never reaches the log')
+  // Falls back to the plain idle hint, same as any other collect failure.
+  assert.match(sender.sent.at(-1)!.text, /send it again with \/make/)
+})
+
+test('a group chat is unaffected by collecting mode — same silence as before, even when ON', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: true })
+  const groupPhoto: TelegramUpdate = {
+    update_id: 10,
+    message: {
+      message_id: 1,
+      from: { id: 123, username: 'tester' },
+      chat: { id: -100456, type: 'supergroup' },
+      date: Math.floor(Date.now() / 1000),
+      photo: [{ file_id: 'group-photo', width: 100, height: 100 }],
+    },
+  }
+  await allocutio.receive(groupPhoto)
+  assert.equal(sender.sent.length, 0)
+  assert.deepEqual(await collectingDeps!.datasets.list({ owner: 'test-anima' }), { entries: [] })
+})
+
+test('/collect on turns collecting on, and a following bare photo is then filed', async () => {
+  const { allocutio, sender, collectingDeps } = makeAllocutio({ collecting: false })
+  await allocutio.receive(msgUpdate(123, 456, '/collect on'))
+  assert.match(sender.sent.at(-1)!.text, /Collecting is ON/)
+
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-id-1']))
+  const { entries } = await collectingDeps!.datasets.list({ owner: 'test-anima' })
+  assert.equal(entries[0]?.media.length, 1, 'the toggle set by /collect on is read by the idle-photo path')
+})
+
+test('bare /dataset reports the default dataset, minting it on first use', async () => {
+  const { allocutio, sender } = makeAllocutio({ collecting: false })
+  await allocutio.receive(msgUpdate(123, 456, '/dataset'))
+  assert.match(sender.sent.at(-1)!.text, /Default dataset: "Telegram collection" \(0 photos\)/)
+})
+
+test('/dataset with no dataset store wired reports unavailable', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/dataset'))
+  assert.match(sender.sent.at(-1)!.text, /Unknown command/)
+})
+
 // 20. Result primitive with textContent → sendMessage called
 test('Result primitive with textContent sends text via sendMessage', async () => {
   const { allocutio, router, sender } = makeAllocutio()
@@ -1087,7 +1292,32 @@ test('dm:wrench morphs the row to Back / Tweak / Rerun', async () => {
   await allocutio.receive(cbTo(201, 'dm:wrench:actum-1'))
   const m = sender.markups.at(-1)!.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }
   assert.deepEqual(m.inline_keyboard.flat().map(b => b.callback_data),
-    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1', 'dm:save:actum-1'])
+    ['dm:back:actum-1', 'dm:tweak:actum-1', 'dm:rerun:actum-1', 'dm:save:actum-1', 'dm:report:actum-1'])
+})
+
+test('dm:report files the abuse report under the presser and answers with its toast', async () => {
+  const calls: Array<{ auctor: unknown; actumId: string }> = []
+  const { allocutio, router, sender } = makeAllocutio({
+    reportAbuse: async (auctor, actumId) => { calls.push({ auctor, actumId }); return { id: 'q1' } },
+  })
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:report:actum-1'))
+  assert.deepEqual(calls, [{ auctor: { animaId: 'test-anima' }, actumId: 'actum-1' }])
+  assert.equal(sender.toasts.at(-1)!.text, 'Reported — thanks, we review every flagged run.')
+})
+
+test('dm:report with no reportAbuse dep wired is a silent no-op, not a crash', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make', 50))
+  router.triggerStep(flowCtx, resultStep('actum-1'))
+  await new Promise(r => setImmediate(r))
+  await allocutio.receive(cbTo(201, 'dm:report:actum-1'))
+  // Same fallback the wrench row's other optional hooks (e.g. `save`) already take: the tap is
+  // still acked (Telegram's spinner clears), just with no custom text.
+  assert.equal(sender.answered.at(-1), 'cb')
+  assert.equal(sender.toasts.at(-1)!.text, undefined)
 })
 
 test('dm:info edits the caption to DB-sourced stats', async () => {
@@ -1373,10 +1603,10 @@ test('warm window auto-settles (confirms) if the host does not interact', async 
 
 function fakeIntellarum() {
   const ALL = [
-    { id: 'intella.flux', nomen: 'FLUX Schnell', genus: 'model', architectura: 'dit', dest: 'checkpoints/flux.safetensors' },
-    { id: 'intella.sdxl', nomen: 'SDXL', genus: 'model', architectura: 'dit', dest: 'checkpoints/sdxl.safetensors' },
-    { id: 'intella.milady', nomen: 'Milady', genus: 'lora', dest: 'loras/milady.safetensors', baseIntellaId: 'intella.flux', slug: 'milady', trigger: 'milady' },
-    { id: 'intella.retro', nomen: 'Retro Style', genus: 'lora', dest: 'loras/retro.safetensors', baseIntellaId: 'intella.flux', slug: 'retro', trigger: 'retro artstyle' },
+    { id: 'intella.flux', nomen: 'FLUX Schnell', genus: 'model', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], architectura: 'dit', dest: 'checkpoints/flux.safetensors' },
+    { id: 'intella.sdxl', nomen: 'SDXL', genus: 'model', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], architectura: 'dit', dest: 'checkpoints/sdxl.safetensors' },
+    { id: 'intella.milady', nomen: 'Milady', genus: 'lora', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], dest: 'loras/milady.safetensors', baseIntellaId: 'intella.flux', slug: 'milady', trigger: 'milady' },
+    { id: 'intella.retro', nomen: 'Retro Style', genus: 'lora', sources: [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }], dest: 'loras/retro.safetensors', baseIntellaId: 'intella.flux', slug: 'retro', trigger: 'retro artstyle' },
   ]
   return {
     async list(_genus?: string) { return ALL },   // the catalog filters by mount itself
@@ -1905,6 +2135,58 @@ test('render target follows the flow\'s own chat, even after the user types else
 })
 
 // =============================================================================
+// Forum-topic routing: a reply lands in the same topic the command was asked from
+// =============================================================================
+
+test('a command asked inside a forum topic gets its reply tagged with that topic', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 42 }))
+
+  const reply = sender.sent.at(-1)!
+  assert.equal((reply.extra as { message_thread_id?: number }).message_thread_id, 42)
+})
+
+test('a command asked in General (no topic) gets a reply with no thread id', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start'))
+
+  const reply = sender.sent.at(-1)!
+  assert.equal((reply.extra as { message_thread_id?: number }).message_thread_id, undefined)
+})
+
+test('replies follow the asking topic even as the same chat sees traffic in other topics', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 1 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 1)
+
+  // A different topic in the SAME chat, between the two commands.
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 2 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 2)
+
+  // Back in the first topic — still 1, not stuck on whichever topic was last seen.
+  await allocutio.receive(groupMsgUpdate(123, 789, '/start', { threadId: 1 }))
+  assert.equal((sender.sent.at(-1)!.extra as { message_thread_id?: number }).message_thread_id, 1)
+})
+
+test('a session bulletin posted once a gen starts still lands in the topic the /make came from', async () => {
+  const { allocutio, router, sender } = makeAllocutio({ withPodControls: true })
+
+  await allocutio.receive(groupMsgUpdate(123, 456, '/make', { threadId: 9 }))
+  const ctx: FlowContext = { intent: 'execute', state: {}, identity: { animaId: 'a' }, platform: 'telegram', platformUserId: '123', platformChatId: '456' }
+  router.triggerStep(ctx, { primitives: [{ kind: 'Stream', label: 'g', actumId: 'a9', status: 'running' }] })
+  await new Promise(r => setImmediate(r))
+
+  // The bulletin is platform-agnostic and posts through the wrapped sender — the thread
+  // tag comes from the adapter (keyed by chatId), not from the bulletin's own call.
+  const posted = sender.sent.find(m => m.chatId === 456)
+  assert.ok(posted, 'bulletin control should have posted into the chat')
+  assert.equal((posted!.extra as { message_thread_id?: number } | undefined)?.message_thread_id, 9)
+})
+
+// =============================================================================
 // Private generation (noema-347): a private result arrives as MEDIA
 // =============================================================================
 //
@@ -2001,4 +2283,231 @@ test('a public result still falls back to the URL as text when the send fails', 
   await new Promise(r => setImmediate(r))
 
   assert.equal(sender.sent[0].text, 'https://example.com/image.png', 'the public fallback is unchanged')
+})
+
+// =============================================================================
+// Dead ends found walking the bot (audit): every tap and every idle message answers
+// =============================================================================
+
+const FUNDING = 'https://example.test/funding'
+const linkButtons = (extra: unknown) =>
+  ((extra as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string; web_app?: { url: string } }>> } } | undefined)
+    ?.reply_markup?.inline_keyboard ?? []).flat()
+
+test('a tap on a button whose flow is gone is answered with a toast, not silence', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  // No flow was ever entered in this chat: a button on an old card.
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42', 'cb-stale'))
+  assert.deepEqual(sender.toasts, [{ id: 'cb-stale', text: 'This menu has expired. Send /make to start again.' }])
+  assert.equal(sender.sent.length, 0, 'nothing is posted into the chat')
+  assert.equal(router.calls.find(c => c.method === 'handle'), undefined)
+})
+
+test('a tap the flow consumes is answered plainly (no toast)', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42', 'cb-live'))
+  assert.deepEqual(sender.toasts, [{ id: 'cb-live', text: undefined }])
+})
+
+test('a dead tap does not make the next /make overwrite that old message', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  await allocutio.receive(cbUpdate(123, 456, 's:opt-42'))       // stale: message_id 99
+  // The next /make's first card comes straight out of enter, as in production (the default
+  // mock emits an empty step there, which would quietly consume any stamped edit target).
+  router.enter = async (intent, platform, userId, chatId) => {
+    router.seedContext(platform, userId, {}, chatId)
+    router.triggerStep(router.peek(platform, userId, chatId)!, {
+      primitives: [{ kind: 'Select', label: 'Pick', options: [{ id: 'a', label: 'A' }] }],
+    })
+    void intent
+  }
+  sender.sent.length = 0; sender.edited.length = 0
+  await allocutio.receive(msgUpdate(123, 456, '/make', 7))
+  await new Promise(r => setImmediate(r))
+  assert.equal(sender.edited.length, 0, 'the old message is left alone')
+  assert.equal(sender.sent.length, 1, 'the card is posted fresh at the bottom')
+})
+
+test('start screen: the make button runs the bound /make flow, not the generic picker', async () => {
+  const { allocutio, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  router.calls.length = 0
+  await allocutio.receive(cbUpdate(123, 456, 's:make'))
+  const enter = router.calls.find(c => c.method === 'enter')
+  assert.ok(enter, 'enters the execute flow')
+  const init = enter!.args[5] as { state?: { modusId?: string } }
+  assert.equal(init.state?.modusId, 'flux-schnell', 'with the canon /make flow, exactly as /make does')
+})
+
+test('start screen: second row is status + a signed-in top-up; the dead wallet/balance buttons are gone', async () => {
+  const { allocutio, sender } = makeAllocutio({ fundingUrl: FUNDING })
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  const buttons = linkButtons(sender.sent[0].extra)
+  assert.ok(buttons.some(b => b.callback_data === 's:status'))
+  assert.ok(buttons.some(b => b.web_app?.url === FUNDING && /top up/i.test(b.text)), 'a Mini App button: opens Funding signed in')
+  assert.ok(!buttons.some(b => b.callback_data?.startsWith('a:')), 'no action button with no handler behind it')
+
+  sender.sent.length = 0
+  await allocutio.receive(cbUpdate(123, 456, 's:status'))
+  assert.equal(sender.sent.length, 1, 'the status button answers with a status message')
+})
+
+test('start screen without a funding url offers no top-up button (no link beats a dead one)', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  assert.ok(!linkButtons(sender.sent[0].extra).some(b => b.url || b.web_app), 'no link button')
+})
+
+test('start screen states the group rule, same words as /help', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/start'))
+  assert.match(sender.sent[0].text, /group/i)
+  assert.match(sender.sent[0].text, /mention me/i)
+})
+
+test('plain text into an idle private chat gets the hint, once a minute', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, 'a cat on a bike'))
+  await allocutio.receive(msgUpdate(123, 456, 'hello?'))
+  assert.equal(sender.sent.length, 1, 'one hint for the burst')
+  assert.match(sender.sent[0].text, /Nothing is running/)
+  assert.match(sender.sent[0].text, /\/make/)
+})
+
+test('a photo into an idle private chat says how it would be used', async () => {
+  const { allocutio, sender } = makeAllocutio()
+  await allocutio.receive(photoMsgUpdate(123, 456, ['file-1']))
+  assert.equal(sender.sent.length, 1)
+  assert.match(sender.sent[0].text, /\/make <prompt>/)
+})
+
+test('unaddressed text in a group with nothing running stays silent (no hint)', async () => {
+  const { allocutio, sender } = makeAllocutio({ botUsername: 'stationbot' })
+  await allocutio.receive(groupMsgUpdate(123, -100, 'just chatting among ourselves'))
+  assert.equal(sender.sent.length, 0)
+})
+
+test('an empty balance reaching the adapter is answered with the top-up route and link', async () => {
+  const { allocutio, sender, router } = makeAllocutio({ fundingUrl: FUNDING })
+  const realEnter = router.enter
+  router.enter = async () => { throw new Error('Insufficient funds: balance 0 < required 900') }
+  await allocutio.receive(msgUpdate(123, 456, '/make a cat'))
+  router.enter = realEnter
+  const msg = sender.sent.find(m => /Credits are bought on the web/.test(m.text))
+  assert.ok(msg, 'says how to top up, not just that the balance is short')
+  assert.doesNotMatch(msg!.text, /\/recover/, 'a private chat needs no code')
+  assert.ok(linkButtons(msg!.extra).some(b => b.web_app?.url === FUNDING), 'with a button that opens Funding signed in')
+})
+
+test('a flow completed by ✕ says Cancelled, not Done', async () => {
+  const { allocutio, sender, router } = makeAllocutio()
+  await allocutio.receive(msgUpdate(123, 456, '/make'))
+  const ctx = router.peek('telegram', '123', '456')!
+  sender.sent.length = 0
+  router.triggerResolution(ctx, { kind: 'complete', output: { cancelled: true } })
+  await new Promise(r => setImmediate(r))
+  assert.equal(sender.sent[0]?.text, 'Cancelled.')
+})
+
+// -----------------------------------------------------------------------------
+// Activity log: every received update leaves an info line keyed by chat.
+// -----------------------------------------------------------------------------
+
+async function captureTelegramLog(fn: () => Promise<void>): Promise<import('../../../src/lib/logger.js').LogEntry[]> {
+  const entries: import('../../../src/lib/logger.js').LogEntry[] = []
+  const collect = (e: import('../../../src/lib/logger.js').LogEntry) => { if (e.component === 'telegram:allocutio') entries.push(e) }
+  bus.on('log', collect)
+  try { await fn() } finally { bus.off('log', collect) }
+  return entries
+}
+
+test('a received message is logged at info with its chat id and chat type', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(msgUpdate(123, 456, 'just chatting')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.ok(line, 'an info line for the update')
+  assert.equal(line!.level, 'info')
+  assert.equal(line!.chatId, 456)
+  assert.equal(line!.chatType, 'private')
+  assert.equal(line!.kind, 'message')
+})
+
+test('a received callback is logged at info with its chat id', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive(cbUpdate(123, -789, 'noop')))
+  const line = entries.find(e => e.msg === 'telegram update')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.chatId, -789)
+  assert.equal(line?.kind, 'callback_query')
+})
+
+test('the bot being removed from a group is logged with the chat and timestamp, and nothing is dispatched', async () => {
+  const { allocutio, router, sender } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 5,
+    my_chat_member: {
+      chat: { id: -1002, type: 'supergroup', title: 'Night Shift' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'administrator', user: { id: 7 } },
+      new_chat_member: { status: 'kicked', user: { id: 7 } },
+    },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat membership')
+  assert.equal(line?.level, 'info')
+  assert.equal(line?.event, 'removed')
+  assert.equal(line?.chatId, -1002)
+  assert.equal(line?.at, '2023-11-14T22:13:20.000Z')
+  assert.equal(router.calls.length, 0)
+  assert.equal(sender.sent.length, 0)
+})
+
+test('being added to a group posts the group rule once; no other my_chat_member event posts anything', async () => {
+  const added = makeAllocutio()
+  await added.allocutio.receive({
+    update_id: 7,
+    my_chat_member: {
+      chat: { id: -2001, type: 'supergroup', title: 'Bastion' },
+      from: { id: 42 },
+      date: 1_700_000_000,
+      old_chat_member: { status: 'left', user: { id: 7 } },
+      new_chat_member: { status: 'member', user: { id: 7 } },
+    },
+  })
+  assert.equal(added.sender.sent.length, 1)
+  assert.equal(added.sender.sent[0].chatId, -2001)
+  assert.match(added.sender.sent[0].text, /group/i)
+
+  for (const [oldStatus, newStatus] of [
+    ['administrator', 'kicked'],   // removed
+    ['member', 'administrator'],  // promoted
+    ['administrator', 'member'],  // demoted
+    ['member', 'restricted'],     // restricted
+  ] as const) {
+    const other = makeAllocutio()
+    await other.allocutio.receive({
+      update_id: 8,
+      my_chat_member: {
+        chat: { id: -2002, type: 'supergroup' },
+        from: { id: 42 },
+        date: 1_700_000_000,
+        old_chat_member: { status: oldStatus, user: { id: 7 } },
+        new_chat_member: { status: newStatus, user: { id: 7 } },
+      },
+    })
+    assert.equal(other.sender.sent.length, 0, `${oldStatus} -> ${newStatus} should post nothing`)
+  }
+})
+
+test('a group migrating to a supergroup is logged with both chat ids', async () => {
+  const { allocutio } = makeAllocutio()
+  const entries = await captureTelegramLog(() => allocutio.receive({
+    update_id: 6,
+    message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: -55, type: 'group' }, migrate_to_chat_id: -100155 },
+  }))
+  const line = entries.find(e => e.msg === 'telegram chat migration')
+  assert.equal(line?.event, 'migrated_to')
+  assert.equal(line?.chatId, -55)
+  assert.equal(line?.toChatId, -100155)
 })

@@ -8,20 +8,38 @@
 
 import { GLYPH } from './symbols.js'
 
+/**
+ * The one sentence that explains the group gate (`_isAddressedToBot`) to a user who only
+ * sees its effect — silence. Shared by /help, the start screen and the one-time message
+ * posted when the bot joins a group, so the rule is said in the same words everywhere.
+ */
+export const GROUP_RULE = 'In a group, start with a /command, mention me, or reply to one of my messages. I stay quiet otherwise, so I don\'t talk over other bots.'
+
 export const HELP_TEXT = `\
 noema
 
   Creative
-  /make    — generate images and art
-  /chat    — chat with an AI model
-  /flows   — browse all available tools
+  /make <prompt>        — generate an image
+  /run <flow> [prompt]  — run any flow by name
+  /bind <verb> <flow>   — rebind a command to a flow
+  /chat                 — chat with an AI model
+  /flows                — browse all available tools
+  /arm                  — set up a warm studio
+
+  Collecting
+  /collect [on|off]       — save bare photos to your dataset (or report the state)
+  /dataset [list|use|new] — your default dataset: see it, switch it, or start one
 
   Account
-  /status  — view balance and account
-  /wallet  — manage connected wallets
+  /status   — balance and running gens
+  /wallet   — how to top up credits
+  /recover  — sign in on the web as this account
 
-  /cancel  — cancel current action
-  /help    — show this message\
+  /cancel   — cancel current action
+  /stop     — same as /cancel
+  /help     — show this message
+
+${GROUP_RULE}\
 `
 
 export const COPY = {
@@ -159,8 +177,65 @@ export const COPY = {
   command: {
     help: HELP_TEXT,
     cancelled: 'Cancelled.',
+    /** Posted once, as the reply to being added to a group — never backfilled into groups already joined. */
+    groupJoined: `I'm in. ${GROUP_RULE}`,
     statusComingSoon: 'Balance and account info coming soon.',
-    walletComingSoon: 'Wallet management coming soon.',
+    /**
+     * How a Telegram user gets credits. The bot cannot take a payment; the web can, signed in
+     * as the account this chat resolves to, and /recover is the way in. Said in full every time
+     * it is needed — on /wallet, under a refused run, and in place of a bare "not enough credits".
+     * `oneTap`: the button under it opens Funding already signed in (a private chat), so the
+     * /recover steps would only be in the way.
+     */
+    topUp: (fundingUrl?: string, oneTap = false): string => oneTap && fundingUrl ? [
+      'Credits are bought on the web. Tap Buy credits: it opens the Funding page signed in as this account.',
+      'Then come back and run again.',
+    ].join('\n') : [
+      'Credits are bought on the web, signed in as this account:',
+      '1. Send /recover here and copy the code.',
+      `2. ${fundingUrl ? `At ${fundingUrl}` : 'On the web'}, choose “Recover with Telegram” and paste it.`,
+      '3. Buy credits on the Funding page.',
+      'Then come back and run again.',
+    ].join('\n'),
+    /** A plain message with nothing running: say what would start something. Private chats only. */
+    idleText: 'Nothing is running. Send /make <your prompt> to generate an image, or /help for every command.',
+    /** A photo or clip with nothing running: it fills nothing on its own, so say how it would. */
+    idleMedia: 'To use this, send it again with /make <prompt> as the caption, or reply to it with /make <prompt>.',
+    /** Same bare-media idle case, but collecting mode is WIRED and just OFF — name the other
+     *  thing a bare photo could do here, so the mode is discoverable the moment it's relevant. */
+    idleMediaCollectable: 'To use this, send it again with /make <prompt> as the caption, or reply to it with /make <prompt>. Or turn on /collect to save photos like this one to your dataset.',
+    /** Collecting is ON but the idle media wasn't a photo — named rather than silently dropped
+     *  (clause 4: video/audio stay out of scope for collecting). */
+    collectImageOnly: 'Collecting saves photos only, for now — video and audio clips aren\'t saved. Send it with /make <prompt> as the caption instead.',
+    /** A photo collecting mode just filed — confirms where it landed and how many are there now,
+     *  so the mode stays visible at a glance every time it fires. */
+    collected: (datasetName: string, count: number): string =>
+      `Saved to "${datasetName}" (${count} photo${count === 1 ? '' : 's'}). /collect off to stop.`,
+    /** Bare or malformed /collect — show the two states. */
+    collectUsage: 'Usage: /collect on|off (no argument reports the current state)',
+    /** /collect's current-state line, read bare or after a toggle. */
+    collectState: (on: boolean): string => on
+      ? 'Collecting is ON — a photo sent here with nothing running is saved to your dataset. /collect off to stop.'
+      : 'Collecting is OFF — a photo sent here with nothing running is not saved. /collect on to start.',
+    /** Bare or malformed /dataset — show the subcommands. */
+    datasetUsage: 'Usage: /dataset [list | use <name> | new <name>]',
+    /** Bare /dataset — the default dataset's name + how much it holds. */
+    datasetDefault: (name: string, count: number): string =>
+      `Default dataset: "${name}" (${count} photo${count === 1 ? '' : 's'}). /dataset list to see others, /dataset use <name> to switch, /dataset new <name> to start one.`,
+    /** No datasets yet — say how to get one, same voice as every other empty-state line. */
+    datasetEmpty: 'You have no datasets yet. /dataset new <name> to start one.',
+    /** /dataset list — every dataset the caller owns, the default one marked. */
+    datasetList: (entries: Array<{ name: string; isDefault: boolean }>): string =>
+      entries.map((e) => `${e.isDefault ? '• ' : '  '}${e.name}${e.isDefault ? ' (default)' : ''}`).join('\n'),
+    /** /dataset use with a name/id that matches nothing this caller owns. */
+    datasetNotFound: (query: string, available: string[]): string =>
+      `No dataset named '${query}'.${available.length ? ` Try: ${available.join(', ')}` : ''}`,
+    /** /dataset use succeeded. */
+    datasetSwitched: (name: string): string => `Default dataset is now "${name}".`,
+    /** /dataset new succeeded. */
+    datasetCreated: (name: string): string => `Created "${name}" and set it as your default dataset.`,
+    /** A tap on a button whose menu is gone — answered as a toast, never as a chat message. */
+    menuExpired: 'This menu has expired. Send /make to start again.',
     unknown: `Unknown command. Type /help to see what's available.`,
     /** Bare or malformed /run — show how to call the universal runner. */
     runUsage: `Usage: /run <flow> [prompt]\nExample: /run flux-schnell a red fox`,

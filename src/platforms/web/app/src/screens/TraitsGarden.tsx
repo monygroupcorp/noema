@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import { api, type Collection, type FlowSummary, type Tractus, type TractusValor } from '../lib/api';
 import { guardedClick, useDirtyGuard } from '../lib/dirtyGuard';
@@ -16,11 +17,27 @@ import { axisSplice, SPLICE_WHEN } from '../lib/collections';
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const combos = (axes: Tractus[]) => axes.reduce((n, a) => n * Math.max(1, a.valores.length), 1);
 
+// The count line beside the title — "3 axes · 24 combinations · 100 pieces". A count of nothing
+// is not printed (DESIGN.md D-58): with no axis there is no grid to count combinations of, and a
+// supply of nothing is not a fact worth a glyph. Null when nothing is countable — the axes
+// column below already says "no axes yet", and that one line is enough.
+export function gardenCountLine(axes: readonly Tractus[], total: number): string | null {
+  const parts: string[] = [];
+  if (axes.length > 0) {
+    parts.push(`${axes.length} ${axes.length === 1 ? 'axis' : 'axes'}`);
+    parts.push(`${combos([...axes]).toLocaleString()} combinations`);
+  }
+  if (total > 0) parts.push(`${total} pieces`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 export function TraitsGarden() {
   const { id } = useParams();
   const nav = useNavigate();
   const [c, setC] = useState<Collection | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   const [axes, setAxes] = useState<Tractus[]>([]);
   const [active, setActive] = useState(0);
   const [dirty, setDirty] = useState(false);
@@ -42,13 +59,13 @@ export function TraitsGarden() {
       setAxes(r.collection.tractus ?? []);
       setModusId(r.collection.modusId);
       setTotal(r.collection.total);
-    }).catch((e) => { if (live) setErr(msg(e)); });
+    }).catch((e) => { if (live) setFail(loadFailureKind(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
   useEffect(() => { api.listFlows().then((r) => setFlows(r.flows)).catch(() => {}); }, []);
 
-  if (err) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load: {err}</div></div></div></AppShell>;
+  if (fail) return <AppShell title="Traits"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   if (!c) return <AppShell title="Traits"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
 
   const editable = c.status === 'draft';
@@ -96,7 +113,7 @@ export function TraitsGarden() {
     catch (e) { setErr(msg(e)); setBusy(false); }
   }
 
-  const crumb = <span className="ph-crumb"><Link to="/collections" onClick={guardedClick}>collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'collection'}</Link> <span className="sep">/</span> <b>traits</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections" onClick={guardedClick}>Collections</Link> <span className="sep">/</span> <Link to={`/collections/${id}`} onClick={guardedClick}>{c.nomen || 'Collection'}</Link> <span className="sep">/</span> <b>Traits</b></span>;
 
   return (
     <AppShell title={crumb}>
@@ -104,7 +121,7 @@ export function TraitsGarden() {
         <div className="garden-head">
           <div><h1>{c.nomen || 'Untitled collection'}</h1></div>
           <div className="garden-nudge">
-            <span className="gn-count mono">{axes.length} {axes.length === 1 ? 'axis' : 'axes'} · <b className="accent">{combos(axes).toLocaleString()}</b> combinations · {c.total} pieces</span>
+            {gardenCountLine(axes, c.total) && <span className="gn-count mono">{gardenCountLine(axes, c.total)}</span>}
             {!editable && <span className="gn-ai"><span className="hemi2 lit" /> This collection is fired — traits are locked.</span>}
           </div>
         </div>
@@ -157,7 +174,7 @@ export function TraitsGarden() {
                       : <b>{cat.label || cat.porta}</b>}
                     <span className="gt-badge">shows on nft</span>
                   </span>
-                  {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> remove axis</button>}
+                  {editable && <button className="btn ghost sm" onClick={() => removeAxis(active)}><Ic name="trash-2" /> Remove axis</button>}
                 </div>
                 <div className="gt-sub mono">
                   varies input port <b>{editable ? <input className="cer-input" value={cat.porta} onChange={(e) => patchAxis(active, { porta: e.target.value })} style={{ maxWidth: 140, display: 'inline-block' }} /> : cat.porta}</b>
@@ -192,7 +209,7 @@ export function TraitsGarden() {
                       {editable && <button className="tc-del" onClick={() => removeValor(active, j)} title="remove value"><Ic name="x" /></button>}
                     </div>
                   ))}
-                  {editable && <button className="traitcard add" onClick={() => addValor(active)}><Ic name="plus" /><span>add value</span></button>}
+                  {editable && <button className="traitcard add" onClick={() => addValor(active)}><Ic name="plus" /><span>Add value</span></button>}
                 </div>
               </>
             ) : (

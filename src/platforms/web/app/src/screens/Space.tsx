@@ -38,6 +38,18 @@ export function formatVestigiumDate(natum: string): string {
   const d = new Date(natum);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
+
+// noema/space-navigation-fights-the-user: Escape backs out one overlay at a time —
+// viewer, then the gallery drawer, then the point peek — the modeler convention (Esc
+// deselects/cancels) standing in for having to find an on-screen ✕. Pure so the stacking
+// order is covered without a DOM render (this app's toolchain has no jsdom).
+export type SpaceOverlay = 'viewer' | 'gallery' | 'peek';
+export function topOverlayToClose(state: { viewerOpen: boolean; galleryOpen: boolean; peekOpen: boolean }): SpaceOverlay | null {
+  if (state.viewerOpen) return 'viewer';
+  if (state.galleryOpen) return 'gallery';
+  if (state.peekOpen) return 'peek';
+  return null;
+}
 // buildFallbackItems: the flat-grid data shape, newest first — the CALLER's full
 // vestigia history as returned by GET /api/vestigia (already sorted newest-first
 // server-side; this just narrows/normalizes for the grid).
@@ -137,15 +149,45 @@ const base = (layer: Layer) => (layer === 'image' ? '/space-image' : '/space');
 // restored onto the layer it was carved in, never silently reprojected onto another.
 export type SelSphere = { x: number; y: number; z: number; r: number; mode: 'inc' | 'exc' };
 export const selectionKey = (scope: string) => `noema-${scope}-space-selection`;
-export function loadStoredSelection(scope: string, layer: Layer): SelSphere[] {
+
+/** The stored entry as written — its spheres AND the layer they were carved in, or null when
+ *  there is nothing readable. Callers that need to know WHICH layer owns the stored set read
+ *  this; `loadStoredSelection` is the narrower question of what restores onto a given layer. */
+export function readStoredSelection(scope: string): { layer: Layer; spheres: SelSphere[] } | null {
   try {
     const raw = localStorage.getItem(selectionKey(scope));
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (v && v.layer === layer && Array.isArray(v.spheres)) return v.spheres;
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (v && (v.layer === 'text' || v.layer === 'image') && Array.isArray(v.spheres)) {
+      return { layer: v.layer, spheres: v.spheres };
     }
-  } catch { /* malformed entry restores to empty, never throws */ }
-  return [];
+  } catch { /* malformed entry reads as nothing, never throws */ }
+  return null;
+}
+
+export function loadStoredSelection(scope: string, layer: Layer): SelSphere[] {
+  const stored = readStoredSelection(scope);
+  return stored && stored.layer === layer ? stored.spheres : [];
+}
+
+/**
+ * Write-through for the selection: hold it, or drop it — but only the layer that OWNS the
+ * stored entry may drop it.
+ *
+ * Empty does not always mean emptied. Standing on a layer other than the one a set was carved
+ * in reads as empty too, and removing on that destroys a selection nobody touched: it is how
+ * arriving at this screen at all could lose one, on the way back from looking at a run.
+ */
+export function persistSelection(scope: string, layer: Layer, selection: SelSphere[]): void {
+  try {
+    if (selection.length > 0) {
+      localStorage.setItem(selectionKey(scope), JSON.stringify({ layer, spheres: selection }));
+      return;
+    }
+    const stored = readStoredSelection(scope);
+    if (stored && stored.layer !== layer) return;
+    localStorage.removeItem(selectionKey(scope));
+  } catch { /* storage unavailable — this is view-state only, safe to skip */ }
 }
 
 // The corpus explorer mounts on data presence, not a build flag (UX handoff 2, D7): it always
@@ -433,7 +475,11 @@ function CorpusSpace() {
   const { activeAnimaId } = useSession();
   const scope = activeAnimaId ?? 'anon';
   const [selScope, setSelScope] = useState(scope);
-  const [layer, setLayer] = useState<Layer>('text');
+  // Land on the layer a stored selection was carved in, not always on 'text'. A selection is
+  // only ever restored onto its own layer, so mounting on the default meant an image-layer set
+  // read as empty — and the write-through below then deleted it. Arriving at this screen at all
+  // destroyed it, which is how a selection was lost on the way to look at a failed run.
+  const [layer, setLayer] = useState<Layer>(() => readStoredSelection(scope)?.layer ?? 'text');
   const [imageLayerOk, setImageLayerOk] = useState(true);
   // Data source switch: null while the
   // caller's own history is being checked; true = real vestigia (their own space), false
@@ -478,23 +524,28 @@ function CorpusSpace() {
   // different projection. Selection emptied by any existing gesture (remove-one, clear-all)
   // clears the stored entry too — one effect covers every path, no per-gesture bookkeeping.
   useEffect(() => {
-    try {
-      if (selection.length === 0) localStorage.removeItem(selectionKey(scope));
-      else localStorage.setItem(selectionKey(scope), JSON.stringify({ layer, spheres: selection }));
-    } catch { /* storage unavailable — this is view-state only, safe to skip */ }
+    persistSelection(scope, layer, selection);
   }, [selection, layer, scope]);
 
   const addSel = (mode: 'inc' | 'exc') => { if (sphere) setSelection(s => [...s, { x: sphere.x, y: sphere.y, z: sphere.z, r: sphere.r, mode }]); };
 
-  // Single click on a point: highlight it, open its neighborhood sphere at the atomic
-  // default radius, and open the side panel — the camera stays exactly where the user
-  // put it. Double-click is this plus a fly-to (focusPoint below).
+  // Single click on a point: highlight it and open its neighborhood sphere at the atomic
+  // default radius — the camera stays exactly where the user put it. Double-click is this
+  // plus a fly-to (focusPoint below).
+  //
+  // noema/space-navigation-fights-the-user: this used to also force the gallery drawer
+  // open on every click, which is the trap rth reported (2026-09-12) — double-click to fly
+  // somewhere, then have to go find the ✕ on a drawer nobody asked for before you could
+  // keep moving. Inspecting a point now only shows the light "peek" card (bottom-right,
+  // dismissed by Escape or by picking something else — see the Escape handler below); the
+  // full drawer is opened on request, from the peek card's own "explore neighborhood"
+  // button, never automatically.
   const selectPoint = (i: number) => {
     if (!corpus) return;
     const p = corpus.positions;
     const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
     setSphere({ x, y, z, r: DEFAULT_R });
-    setActiveCluster(null); setGalleryOpen(true); setPicked(i);
+    setActiveCluster(null); setPicked(i);
   };
   // Single click that hit no point: deselect. Routed through the pick result rather than
   // a click bubbling off the canvas, so a click that DID hit a point is not cancelled.
@@ -506,6 +557,8 @@ function CorpusSpace() {
     setFocus({ x, y, z, dist: 1.5, key: focusKey.current });
     selectPoint(i);
   };
+  const openNeighborhood = () => setGalleryOpen(true);
+  const closeGallery = () => { setGalleryOpen(false); setSphere(null); };
   const focusCluster = (id: number) => {
     if (!corpus) return;
     setSphere(null);
@@ -518,6 +571,20 @@ function CorpusSpace() {
     s /= c; focusKey.current++;
     setFocus({ x: cx, y: cy, z: cz, dist: Math.min(Math.max(s * 2.4, 1.6), 8), key: focusKey.current });
   };
+
+  // Escape is the zero-click way out of any inspection overlay — no hunting for a ✕.
+  // See topOverlayToClose for the stacking order this mirrors.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const layer = topOverlayToClose({ viewerOpen: viewer != null, galleryOpen, peekOpen: picked != null });
+      if (layer === 'viewer') setViewer(null);
+      else if (layer === 'gallery') closeGallery();
+      else if (layer === 'peek') clearPick();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewer, galleryOpen, picked]);
 
   // Source check: does the caller (signed-in or anon-commitment) have any vestigia at
   // all? Runs once — decides real-vs-static for every subsequent layer load below.
@@ -693,7 +760,7 @@ function CorpusSpace() {
     : activeInfo;
 
   return (
-    <AppShell crumb="space">
+    <AppShell crumb="Space">
       {/* No clear-on-click here: deselection is driven by the pick result inside the
           canvas (see onPick below), which is the only place that knows whether the
           click landed on a point. Clicks still bubble normally, which the panels
@@ -710,7 +777,7 @@ function CorpusSpace() {
             </div>
           </div>
         ) : !corpus ? (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>loading the {layer} space…</div>
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 13 }}>Loading the {layer} space…</div>
         ) : (
           <ErrorBoundary fallback={<NoWebGL />}>
             <Canvas dpr={[1, 2]} camera={{ position: cameraFrame.position, fov: cameraFrame.fov }} style={{ position: 'absolute', inset: 0 }}>
@@ -732,6 +799,17 @@ function CorpusSpace() {
                 </mesh>
               )}
               <CameraRig focus={focus} />
+              {/* noema/space-navigation-fights-the-user: the chosen, recorded navigation
+                  grammar is Blender/CAD-style orbit — drag rotates, mid/right-drag pans,
+                  scroll zooms to the cursor — the convention a 3D point cloud's own
+                  explorers (Blender, Sketchfab, the three.js editor) already share, and
+                  what rth asked for by name on 2026-09-12 ("blender or whatever most
+                  popular modeler navigation... most recognizable to user"). It carries
+                  REF-13's named qualities (pan, zoom, select, getting back to a prior
+                  view — REFERENCES.md) into the dimension Figma's flat canvas doesn't
+                  have: this space's three axes ARE the content, so the view must rotate,
+                  not just pan. No click is spent moving: every gesture below is a
+                  drag/scroll, never a click-and-release. */}
               <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={0.4} maxDistance={22}
                 zoomToCursor screenSpacePanning panSpeed={1.1} zoomSpeed={1.1}
                 mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} />
@@ -741,7 +819,7 @@ function CorpusSpace() {
                 are deliberately two distinct affordances, not merged into one button. */}
             <div className="orient-cluster" onClick={(e) => e.stopPropagation()}>
               <button onClick={resetView} title="reset view — reframe the camera">
-                <Ic name="rotate-cw" /> reset view
+                <Ic name="rotate-cw" /> Reset view
               </button>
               <Link to="/app" title="back to app home">
                 <Ic name="home" /> home
@@ -764,13 +842,13 @@ function CorpusSpace() {
               </div>
               <div className="search">
                 <Ic name="search" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'loading prompts…'} disabled={!meta} />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={meta ? 'Search the prompt space…' : 'Loading prompts…'} disabled={!meta} />
               </div>
               <div className="mono" style={{ textAlign: 'center', color: hasReal ? 'var(--accent-soft)' : 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 'var(--s2)' }}>
                 {hasReal ? 'your space' : 'the public exhibit'} · {corpus.manifest.n.toLocaleString()} creations · {shown.toLocaleString()} shown · {sortedClusters.length} clusters · CLIP ViT-B/32 · {corpus.manifest.projection}
               </div>
               <div className="mono" style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2, opacity: .8 }}>
-                drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there
+                blender-style orbit · drag rotate · mid/right-drag pan · scroll = zoom-to-cursor · dbl-click point or cluster = fly there · esc backs out
               </div>
             </div>
 
@@ -811,7 +889,7 @@ function CorpusSpace() {
                     <input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="trigger word (required)"
                       style={{ width: '100%', padding: '6px 8px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 12, boxSizing: 'border-box' }} />
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <select value={baseModel} onChange={(e) => setBaseModel(e.target.value)} style={{ flex: 1, padding: '5px 6px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--text)', fontSize: 11.5 }}>
+                      <select className="inp mono" value={baseModel} onChange={(e) => setBaseModel(e.target.value)} style={{ flex: 1, fontSize: 11.5 }}>
                         <option value="klein-4b">klein-4b</option>
                       </select>
                       <label className="mono" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--faint)' }}>
@@ -844,13 +922,18 @@ function CorpusSpace() {
               </button>
             )}
 
-            {/* small peek (hover/last pick) */}
+            {/* small peek (hover/last pick) — never forces the gallery drawer; that is an
+                explicit ask via the button below, not a side effect of inspecting a point */}
             <div className={`peek${peek ? ' show' : ''}`} onClick={(e) => { e.stopPropagation(); if (picked != null) setViewer(picked); }} style={{ cursor: peek ? 'pointer' : 'default' }}>
               {peek && <>
                 {peek.s ? <div className="pimg" style={{ backgroundImage: `url(${peek.s})`, backgroundSize: 'cover', backgroundPosition: 'center' }} /> : <div className="pimg" />}
                 <div className="pmeta">
                   <b style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{peek.p || '(no prompt)'}</b>
                   <span className="mono" style={{ color: 'var(--faint)' }}>{peek.m} · {peek.c} · {peek.d} · click to enlarge</span>
+                  <button onClick={(e) => { e.stopPropagation(); openNeighborhood(); }}
+                    style={{ marginTop: 6, padding: '3px 8px', borderRadius: 7, border: '1px solid var(--hair)', background: 'var(--raised)', color: 'var(--accent-soft)', fontSize: 11, cursor: 'pointer' }}>
+                    ▦ explore neighborhood
+                  </button>
                 </div>
               </>}
             </div>
@@ -865,7 +948,7 @@ function CorpusSpace() {
                   <span style={{ flex: '0 0 auto', width: 9, height: 9, borderRadius: '50%', background: galInfo.color }} />
                   <b style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{galInfo.label}</b>
                   <span className="mono" style={{ color: 'var(--faint)', fontSize: 11, flex: '0 0 auto' }}>{Math.min(galLimit, galleryIdx.length)} / {galInfo.count.toLocaleString()}</span>
-                  <button onClick={() => { setGalleryOpen(false); setSphere(null); }} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                  <button onClick={closeGallery} style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--faint)', cursor: 'pointer', fontSize: 16 }}>✕</button>
                 </div>
                 {sphere && (
                   <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--hair)', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -893,7 +976,7 @@ function CorpusSpace() {
                       </div>
                     );
                   })}
-                  {!meta && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 12, padding: 12 }}>loading thumbnails…</div>}
+                  {!meta && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 12, padding: 12 }}>Loading thumbnails…</div>}
                   {meta && galLimit < galleryIdx.length && <div className="mono" style={{ gridColumn: '1/-1', color: 'var(--faint)', fontSize: 11, padding: 8, textAlign: 'center' }}>scroll for more…</div>}
                 </div>
               </div>

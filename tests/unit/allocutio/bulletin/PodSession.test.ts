@@ -128,6 +128,61 @@ test('end() freezes and clears the live line', () => {
   assert.equal(s.snapshot().live, null)
 })
 
+// ── lifecycle: armed/starting/ended/cancelled ──────────────────────────────
+
+test('isArmedIdle: true once armed + confirmed with no pod, false once Start is pressed, true again if Start fails', () => {
+  const s = new PodSession('host-1')
+  assert.equal(s.isArmedIdle, false, 'never armed')
+
+  s.beginArm([], [])
+  assert.equal(s.isArmedIdle, true, 'armed + auto-confirmed, no pod yet')
+
+  s.beginStarting()
+  assert.equal(s.isArmedIdle, false, 'Start pressed — provisioning in flight')
+  assert.equal(s.starting, true)
+
+  s.endStarting()
+  assert.equal(s.isArmedIdle, true, 'provisioning failed — back to armed-idle to retry')
+  assert.equal(s.starting, false)
+})
+
+test('isWarmIdle: true once a pod is bound, confirmed, and resting (nothing live)', () => {
+  const s = new PodSession('host-1')
+  assert.equal(s.isWarmIdle, false, 'no pod yet')
+  s.onProgressus(lockP({ podId: 'p', gpuType: 'RTX 4090', costPerHr: 0.69 }), 0)
+  assert.equal(s.isWarmIdle, false, 'has a pod but still generating (live) and not confirmed')
+  s.recordGen({ costUsd: 0.08, execMs: 1000 })   // rests: live clears
+  assert.equal(s.isWarmIdle, false, 'resting but not confirmed yet')
+  s.setConfirmed(true)
+  assert.equal(s.isWarmIdle, true)
+})
+
+test('cancel() ends the session and records cancelled:true; a plain end() records cancelled:false', () => {
+  const armed = new PodSession('host-1')
+  armed.beginArm([], [])
+  armed.cancel()
+  assert.equal(armed.ended, true)
+  assert.equal(armed.snapshot().cancelled, true)
+
+  const live = new PodSession('host-2')
+  live.onProgressus(lockP({ podId: 'p' }), 0)
+  live.end()
+  assert.equal(live.ended, true)
+  assert.equal(live.snapshot().cancelled, false, 'a real pod shut-down is not a cancel')
+})
+
+test('ending a session mid-Start forces starting off — no stale "provisioning…" on a terminal session', () => {
+  const s = new PodSession('host-1')
+  s.beginArm([], [])
+  s.beginStarting()
+  assert.equal(s.starting, true)
+
+  s.end()   // e.g. Destroy pressed while a cold start is still in flight
+  assert.equal(s.ended, true)
+  assert.equal(s.starting, false, 'a terminal session can never also report starting')
+  assert.equal(s.isArmedIdle, false)
+})
+
 test('queueModel: LoRAs accumulate, deduped on intellaId', () => {
   const s = new PodSession('host-1')
   s.queueModel({ intellaId: 'intella.milady', nomen: 'Milady', genus: 'lora' })

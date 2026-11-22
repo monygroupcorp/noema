@@ -1267,6 +1267,14 @@ Buy a fixed credit pack with fiat: create a Stripe Checkout session for the chos
     "cancelUrl": {
       "type": "string",
       "description": "Optional redirect URL on abandoned checkout; falls back to the server default."
+    },
+    "allocutio": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "web"
+      ],
+      "description": "Optional: the surface the buyer came from, recorded on the credit for attribution. Never changes the amount; an unknown value is ignored."
     }
   },
   "required": [
@@ -2079,11 +2087,19 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
   "properties": {
     "balanceImpetus": {
       "type": "string",
-      "description": "Spendable impetus balance, serialised as a string."
+      "description": "Spendable impetus balance, serialised as a string. Excludes anything currently held — see `heldImpetus`."
     },
     "balanceUsd": {
       "type": "number",
       "description": "USD-equivalent balance (informational)."
+    },
+    "heldImpetus": {
+      "type": "string",
+      "description": "Impetus currently LOCKED against the caller's own in-flight runs (the sum of `gens[].heldImpetus`), serialised as a string. Not spendable, not spent — a training run that reserves 7200 against a future charge shows here, not as a silent drop in `balanceImpetus` with nothing to explain it."
+    },
+    "heldUsd": {
+      "type": "number",
+      "description": "USD-equivalent of `heldImpetus` (informational)."
     },
     "gens": {
       "type": "array",
@@ -2118,6 +2134,8 @@ Return the authenticated caller's account snapshot — balance, in-flight gens, 
   "required": [
     "balanceImpetus",
     "balanceUsd",
+    "heldImpetus",
+    "heldUsd",
     "gens",
     "studios",
     "joinable",
@@ -2382,13 +2400,13 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
 ```json
 {
   "type": "object",
-  "description": "A page of the owner's activity: in-flight and settled runs merged newest-first.",
+  "description": "A page of the owner's activity: in-flight, settled, and released runs merged newest-first.",
   "properties": {
     "activity": {
       "type": "array",
       "items": {
         "type": "object",
-        "description": "One run in the owner's activity — in-flight or settled — with a door to its artifact.",
+        "description": "One run in the owner's activity — in-flight, settled, or released — with a door to its artifact.",
         "properties": {
           "actumId": {
             "type": "string",
@@ -2416,9 +2434,10 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
             "type": "string",
             "enum": [
               "running",
-              "settled"
+              "settled",
+              "released"
             ],
-            "description": "In-flight, or settled successfully."
+            "description": "In-flight, settled (charged), or released (failed/cancelled — nothing charged)."
           },
           "createdAt": {
             "type": "string",
@@ -2428,7 +2447,12 @@ The caller's activity — in-flight and settled runs in ONE newest-first project
           "settledAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When the run settled, ISO-8601. Absent while in flight."
+            "description": "When the run settled, ISO-8601. Absent unless status is \"settled\"."
+          },
+          "releasedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run released, ISO-8601. Absent unless status is \"released\"."
           },
           "door": {
             "type": "object",
@@ -8669,6 +8693,27 @@ The caller's owner-keyed account settings — presentation skin (Profile), cross
           },
           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
+        "termsAccepted": {
+          "type": "object",
+          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "versio": {
+                "type": "string",
+                "description": "The terms version accepted."
+              },
+              "acceptedAt": {
+                "type": "number",
+                "description": "Epoch-ms timestamp of the acceptance."
+              }
+            },
+            "required": [
+              "versio",
+              "acceptedAt"
+            ]
+          }
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -8928,6 +8973,27 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
       },
       "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
     },
+    "termsAccepted": {
+      "type": "object",
+      "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "versio": {
+            "type": "string",
+            "description": "The terms version accepted."
+          },
+          "acceptedAt": {
+            "type": "number",
+            "description": "Epoch-ms timestamp of the acceptance."
+          }
+        },
+        "required": [
+          "versio",
+          "acceptedAt"
+        ]
+      }
+    },
     "privateOutputs": {
       "type": "boolean",
       "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -9001,6 +9067,27 @@ Replace the caller's cross-cutting generation defaults (style, negative prompt, 
           },
           "description": "Short lines the concierge remembers about the caller between threads. Proposed by the agent as a turn-end delta and written by the CLIENT through this PUT; listed and editable on the Preferences screen. Capped server-side at 20 lines of 200 characters — a longer list is truncated to the newest 20 and each line to 200 characters rather than rejected. Deleted with the account."
         },
+        "termsAccepted": {
+          "type": "object",
+          "description": "Upstream licence terms the caller has accepted, keyed by terms id (e.g. 'minimax-h3'), each with the version accepted. A flow that carries terms runs only when the entry matches their current version. Written only by POST /v1/me/terms/:id — this PUT ignores it and keeps the stored record.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "versio": {
+                "type": "string",
+                "description": "The terms version accepted."
+              },
+              "acceptedAt": {
+                "type": "number",
+                "description": "Epoch-ms timestamp of the acceptance."
+              }
+            },
+            "required": [
+              "versio",
+              "acceptedAt"
+            ]
+          }
+        },
         "privateOutputs": {
           "type": "boolean",
           "description": "Private generation. When ON, the outputs of NEW runs are written to a bucket with no public binding; the run record carries an opaque marker and an owner-scoped run read returns a short-lived expiring link instead. Default-absent = OFF (outputs are public). Forward-only: objects already written stay where they are. Requires the deployment to have a private-outputs bucket — this PUT rejects with internal.unavailable otherwise."
@@ -9042,6 +9129,48 @@ Record the caller's one-time 18+ self-attestation (a click-through fact, NOT KYC
   },
   "required": [
     "attestation"
+  ]
+}
+```
+
+### POST /v1/me/terms/:id
+
+Accept the current version of a flow's upstream licence terms (e.g. 'minimax-h3', MiniMax H3's use restrictions, published at /legal/terms#minimax-h3). A flow that carries terms refuses to run with terms.required until this is on file, and with terms.suspended once the caller is suspended under them after repeated confirmed violations. Anon-capable (keyed by AuctorKey). An unknown terms id is not_found.terms.
+
+- **Auth:** required
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The caller's recorded acceptance of a flow's upstream licence terms.",
+  "properties": {
+    "acceptance": {
+      "type": "object",
+      "properties": {
+        "terms": {
+          "type": "string",
+          "description": "The terms id (e.g. 'minimax-h3')."
+        },
+        "versio": {
+          "type": "string",
+          "description": "The terms version accepted — the current one."
+        },
+        "acceptedAt": {
+          "type": "number",
+          "description": "Epoch-ms timestamp of the acceptance."
+        }
+      },
+      "required": [
+        "terms",
+        "versio",
+        "acceptedAt"
+      ]
+    }
+  },
+  "required": [
+    "acceptance"
   ]
 }
 ```
@@ -12114,6 +12243,153 @@ The human-review queue: publications the moderation gate HELD for review (spec �
 }
 ```
 
+### GET /v1/editiones
+
+The caller's own publications of one artifact, newest first. The review queue above carries HELD items only, so a terminal outcome — a moderation refusal, or a publication already live — could not be read back after the session that filed it ended; a publish surface that reopens needs this rather than the memory of the tab that pressed the button. Author-scoped on the publication's own identity: an artifact the caller never published reads as the empty list.
+
+- **Auth:** required
+
+**Query parameters:**
+
+- `artifact` (string, required) — The artifact whose publications to list, as '<kind>:<id>' (kind: actum | intella | collectio). Required — an unfiltered listing is not offered here.
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "editions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "The public projection of an Editio — a publication record referencing a canonical artifact.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "object",
+            "description": "The canonical artifact being published (referenced, never copied).",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "actum",
+                  "intella",
+                  "collectio"
+                ],
+                "description": "Which artifact kind."
+              },
+              "id": {
+                "type": "string",
+                "description": "The artifact's id."
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ]
+          },
+          "destination": {
+            "type": "string",
+            "description": "Adapter key — 'feed' | 'r2' | 'huggingface' | 'mint' | …"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "unlisted",
+              "feed",
+              "marketplace"
+            ]
+          },
+          "custody": {
+            "type": "string",
+            "enum": [
+              "ours",
+              "theirs",
+              "both"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "published",
+              "rejected",
+              "failed",
+              "retracted"
+            ],
+            "description": "Lifecycle: pending → published | rejected | failed; retracted on unpublish."
+          },
+          "reviewOutcome": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "description": "Human-review outcome when the moderation gate held this publication: pending (awaiting a reviewer) | approved (cleared → publishes) | rejected. Absent on the normal path."
+          },
+          "moderationNote": {
+            "type": "string",
+            "description": "Why this publication was held or refused, in terms the publisher can be told — a hold for a human reviewer, a refusal on the content, and a refusal because public publishing is closed each read differently. Never the classifier's raw verdict text; a platform admin sees the raw reason via `GET /editiones/:id/moderation`. Absent when never flagged."
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "The destination's handle — feed post id / HF repo / token id / R2 url."
+          },
+          "owners": {
+            "type": "array",
+            "description": "Rights split snapshot (team-owned only) — weights sum to ~1.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "animaId": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "animaId",
+                "weight"
+              ]
+            }
+          },
+          "license": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "artifact",
+          "destination",
+          "visibility",
+          "custody",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "editions"
+  ]
+}
+```
+
 ### GET /v1/editiones/:id
 
 Fetch one publication (author-scoped). Poll it to watch a `pending` settle land — an async archive ZIP build finishing (`externalRef` = the download url), or a public surface being gated.
@@ -14768,6 +15044,11 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.already_decided` | 409 | no |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
+| `terms.required` | 403 | no |
+| `terms.suspended` | 403 | no |
+| `terms.unknown` | 503 | no |
+| `territory.excluded` | 403 | no |
+| `not_found.terms` | 404 | no |
 | `secret.required` | 422 | no |
 | `deposit.price_unavailable` | 422 | no |
 | `feature.not_implemented` | 501 | no |

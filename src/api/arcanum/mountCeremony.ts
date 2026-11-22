@@ -13,7 +13,10 @@ declare const __dirname: string
 
 const ARTIFACTS = path.join(__dirname, '..', '..', 'arcanum', 'circuit', 'artifacts')
 const R1CS_PATH = path.join(ARTIFACTS, 'arcanum.r1cs')
-const ROOT_ZKEY = path.join(ARTIFACTS, 'arcanum_0000.zkey')
+// arcanum_0000.zkey is gitignored (too large to commit, per docs/arcanum-ceremony.md) and so is
+// never in the image. ARCANUM_ROOT_ZKEY_PATH mirrors ARCANUM_PTAU_PATH below: a mounted host
+// path for the one deploy that sets CEREMONY_OPEN or CEREMONY_REOPEN, read once at boot.
+const ROOT_ZKEY = process.env.ARCANUM_ROOT_ZKEY_PATH ?? path.join(ARTIFACTS, 'arcanum_0000.zkey')
 const REPO_ZKEY = path.join(ARTIFACTS, 'arcanum_final.zkey')
 
 /**
@@ -66,6 +69,12 @@ async function publishKey(
  * needs a redeploy):
  *
  *   CEREMONY_OPEN=1            — seed the chain root from arcanum_0000.zkey and open it.
+ *   CEREMONY_REOPEN=1          — start a new round over a FINALIZED ceremony: archives the
+ *                                finished round (CeremoniaStore.history) and reopens on
+ *                                arcanum_0000.zkey with an empty chain. Its own variable,
+ *                                never implied by CEREMONY_OPEN — CEREMONY_OPEN is a no-op
+ *                                past 'announced' on purpose, so a stray redeploy can never
+ *                                reopen a live or finished ceremony by accident.
  *   CEREMONY_HEAD_ZKEY=<path>  — put the chain head back in custody on a box that does not
  *                                have it, so an open ceremony can accept contributions again.
  *   CEREMONY_FINAL_ZKEY=<path> — publish a final proving key the image does NOT carry into
@@ -76,6 +85,9 @@ async function publishKey(
  *                                (run scripts/arcanum-trusted-setup.sh --finalize first).
  *   CEREMONY_ZKEY_DIR          — custody dir for the zkey chain (default: <artifacts>/ceremony,
  *                                which on a container does not survive a deploy — mount one).
+ *   ARCANUM_ROOT_ZKEY_PATH     — arcanum_0000.zkey, for CEREMONY_OPEN/CEREMONY_REOPEN to read
+ *                                at boot. Not in the image (too large to commit); mount it for
+ *                                the one deploy that sets either variable.
  *   ARCANUM_PTAU_PATH          — pot20_final.ptau for deep per-contribution verification.
  */
 export async function mountCeremony(app: Express, store: CeremoniaStore): Promise<void> {
@@ -106,6 +118,32 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
     }
   }
 
+  // ── one-time: reopen for a new round ───────────────────────────────────────────────
+  // Starting a second round over a finalized ceremony discards nothing (the finished
+  // round is archived, read it back with CeremoniaStore.history before trusting this
+  // ran), but it does mean every contributor who already landed one, in the round just
+  // closed, can land another — that is the point of a new round, not a bug in this one.
+  if (process.env.CEREMONY_REOPEN === '1') {
+    try {
+      const status = await store.status()
+      if (status.phase !== 'finalized') {
+        log.info('CEREMONY_REOPEN set but the ceremony is not finalized — no-op', { phase: status.phase })
+      } else if (!existsSync(ROOT_ZKEY)) {
+        log.error('CEREMONY_REOPEN set but arcanum_0000.zkey absent — run arcanum-trusted-setup.sh --init')
+      } else {
+        const bytes = readFileSync(ROOT_ZKEY)
+        const root = sha256Hex(bytes)
+        await custody.put(root, bytes)
+        const slots = process.env.CEREMONY_SLOTS ? Number(process.env.CEREMONY_SLOTS) : null
+        const did = await store.reopen(root, Number.isFinite(slots as number) ? slots : null)
+        log.info(did ? 'ceremony REOPENED for a new round' : 'CEREMONY_REOPEN raced another boot — no-op',
+          { rootHash: root })
+      }
+    } catch (err) {
+      log.error('ceremony reopen failed', { error: String(err) })
+    }
+  }
+
   // ── restore a lost chain head ─────────────────────────────────────────────────────
   // Custody is the sequencer's own disk. A box that never held the chain, or held it and
   // lost it, has an open ceremony it cannot serve: the transcript names a head no
@@ -115,11 +153,22 @@ export async function mountCeremony(app: Express, store: CeremoniaStore): Promis
   const headZkey = process.env.CEREMONY_HEAD_ZKEY
   if (headZkey) {
     try {
-      const declared = headHash(await store.status())
+      const status = await store.status()
+      const declared = headHash(status)
       if (!declared) {
         log.error('CEREMONY_HEAD_ZKEY set but the ceremony has no published head — nothing to restore')
       } else {
         await publishKey(custody, 'CEREMONY_HEAD_ZKEY', headZkey, declared)
+        // The head is the last contribution's output. A finalized ceremony serves the
+        // beacon'd final key, which is different bytes under a different hash, so a head
+        // restored here is a real key that /arcanum/circuit/zkey will never reach for —
+        // and the restore otherwise reports success while the site goes on serving none.
+        if (status.phase === 'finalized' && status.finalHash && status.finalHash !== declared) {
+          log.warn('this ceremony is FINALIZED: the key the site serves is its finalHash, not ' +
+            'the chain head restored here. If /arcanum/circuit/zkey is answering 503, the ' +
+            'variable that ends it is CEREMONY_FINAL_ZKEY.',
+            { restoredHead: declared, finalHash: status.finalHash })
+        }
       }
     } catch (err) {
       log.error('restoring the ceremony chain head failed', { error: String(err) })

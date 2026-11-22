@@ -129,6 +129,13 @@ const SORT_LABELS: { key: CatalogSort; label: string }[] = [
   { key: 'name', label: 'name' },
 ];
 
+// The kicker above the shelf heading. A zero is silent (DESIGN.md P-1c, D-58): the empty
+// card below already says "No models yet", so "your models · 0" would state it twice.
+export function shelfKicker(models: ModelCard[] | null, count: number): string {
+  if (!models) return 'loading…';
+  return count > 0 ? `your models · ${count}` : 'your models';
+}
+
 export function Shelf() {
   const { project: active, fileAsset } = useProject();
   const [models, setModels] = useState<ModelCard[] | null>(null);
@@ -298,15 +305,15 @@ export function Shelf() {
         <div className="pagehead shelf-head">
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>
-              {models ? `your models · ${count}` : 'loading…'}
-              {catOpen && catalog && <> · public catalog · {catalog.length}</>}
+              {shelfKicker(models, count)}
+              {catOpen && catalog && <> · public catalogue · {catalog.length}</>}
             </div>
-            <h1>Model shelf</h1>
+            <h1>Models</h1>
             <div className="sub">What you’ve taught NOEMA — run them, turn them into collections, and publish them.</div>
           </div>
           <div className="shelf-right">
-            <button className="btn ghost" onClick={() => setShowImport((v) => !v)}><Ic name="download" /> import by URL</button>
-            <Link className="btn" to="/datasets"><Ic name="plus" /> new training</Link>
+            <button className="btn ghost" onClick={() => setShowImport((v) => !v)}><Ic name="download" /> Import by URL</button>
+            <Link className="btn" to="/datasets"><Ic name="plus" /> New training</Link>
           </div>
         </div>
 
@@ -419,11 +426,11 @@ export function Shelf() {
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
             <div className="noema-kicker" style={{ marginBottom: 8 }}>the whole platform</div>
-            <h2>Browse the catalog</h2>
+            <h2>Browse the catalogue</h2>
             <div className="sub">Every model NOEMA publicly carries — seeded and user-published alike.</div>
           </div>
           <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
-            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'Hide catalogue' : 'Browse catalogue'}
           </button>
         </div>
 
@@ -459,8 +466,8 @@ export function Shelf() {
               </div>
             )}
 
-            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
-            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
+            {catErr && <div className="warn">Couldn’t load the catalogue — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalogue…</div></div>}
             {catalog && catShown.length === 0 && <div className="empty"><div className="t">No models match.</div></div>}
 
             {catShown.length > 0 && (

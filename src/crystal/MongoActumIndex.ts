@@ -2,9 +2,10 @@ import type { Collection, Filter, Document } from 'mongodb'
 import type { ActumIndex, ActumIndexStore } from '../types/actumIndex.js'
 import type { AuctorKey } from '../flow/types.js'
 
-/** Opaque page cursor = the (settledAt, actumId) of the last row on the previous
+/** Opaque page cursor = the (stamp, actumId) of the last row on the previous
  *  page. Base64url of `${iso}|${actumId}` — enough to resume the deterministic
- *  (settledAt desc, actumId desc) sort with no dupes and no skips. */
+ *  (stamp desc, actumId desc) sort with no dupes and no skips. Shared by `listSettled`
+ *  (stamp = settledAt) and `listReleased` (stamp = releasedAt). */
 function encodeCursor(settledAt: Date, actumId: string): string {
   return Buffer.from(`${settledAt.toISOString()}|${actumId}`, 'utf8').toString('base64url')
 }
@@ -56,7 +57,7 @@ export class MongoActumIndex implements ActumIndexStore {
     const owner = 'animaId' in key
       ? { animaId: key.animaId }
       : { commitment: key.commitment }
-    const filter = { ...owner, settledAt: { $exists: false } }
+    const filter = { ...owner, settledAt: { $exists: false }, releasedAt: { $exists: false } }
     const docs = await this.col.find(filter).toArray()
     return docs.map(d => {
       const { _id: _omit, ...rest } = d as ActumIndex & { _id: unknown }
@@ -91,19 +92,53 @@ export class MongoActumIndex implements ActumIndexStore {
     key: AuctorKey,
     opts: { limit: number; cursor?: string },
   ): Promise<{ entries: ActumIndex[]; nextCursor?: string }> {
+    return this._listTerminal(key, 'settledAt', opts)
+  }
+
+  /** Lifetime settled-impetus sum for the owner. Sums `impetus` (stored as a string) via
+   *  `$toDecimal` so the total is exact even beyond 2^53, then serialises it back to a
+   *  base-10 string. `'0'` when there is no settled history. */
+  async sumSettledImpetus(key: AuctorKey): Promise<string> {
+    return this._sumTerminal(key, 'settledAt')
+  }
+
+  /** Retain-on-release: the released twin of `settle` — stamps the row in place, no upsert.
+   *  See `ActumIndexStore.release` for why this is a separate stamp from `settle`. */
+  async release(actumId: string, patch: { releasedAt: Date; modusLabel: string }): Promise<void> {
+    await this.col.updateOne(
+      { actumId },
+      { $set: { releasedAt: patch.releasedAt, modusLabel: patch.modusLabel } },
+    )
+  }
+
+  async listReleased(
+    key: AuctorKey,
+    opts: { limit: number; cursor?: string },
+  ): Promise<{ entries: ActumIndex[]; nextCursor?: string }> {
+    return this._listTerminal(key, 'releasedAt', opts)
+  }
+
+  /** Shared newest-first, cursor-paginated listing over whichever terminal stamp
+   *  (`settledAt` or `releasedAt`) the caller asks for — `listSettled`/`listReleased` differ
+   *  only in which field they sort/filter on. */
+  private async _listTerminal(
+    key: AuctorKey,
+    stamp: 'settledAt' | 'releasedAt',
+    opts: { limit: number; cursor?: string },
+  ): Promise<{ entries: ActumIndex[]; nextCursor?: string }> {
     const owner = ownerFilter(key)
     if (!owner) return { entries: [] }
 
     const limit = Math.min(Math.max(Math.trunc(opts.limit) || 0, 1), 100)
-    const filter: Filter<Document> = { ...owner, settledAt: { $exists: true } }
+    const filter: Filter<Document> = { ...owner, [stamp]: { $exists: true } }
 
     if (opts.cursor) {
       const c = decodeCursor(opts.cursor)
       if (c) {
-        // Rows strictly after the cursor in (settledAt desc, actumId desc) order.
+        // Rows strictly after the cursor in (stamp desc, actumId desc) order.
         filter.$or = [
-          { settledAt: { $lt: c.settledAt } },
-          { settledAt: c.settledAt, actumId: { $lt: c.actumId } },
+          { [stamp]: { $lt: c.settledAt } },
+          { [stamp]: c.settledAt, actumId: { $lt: c.actumId } },
         ]
       }
     }
@@ -111,7 +146,7 @@ export class MongoActumIndex implements ActumIndexStore {
     // Fetch one extra to know whether another page exists.
     const docs = await this.col
       .find(filter)
-      .sort({ settledAt: -1, actumId: -1 })
+      .sort({ [stamp]: -1, actumId: -1 })
       .limit(limit + 1)
       .toArray()
 
@@ -125,20 +160,21 @@ export class MongoActumIndex implements ActumIndexStore {
     let nextCursor: string | undefined
     if (hasMore) {
       const last = entries[entries.length - 1]
-      if (last?.settledAt) nextCursor = encodeCursor(new Date(last.settledAt), last.actumId)
+      const lastStamp = last?.[stamp]
+      if (lastStamp) nextCursor = encodeCursor(new Date(lastStamp), last.actumId)
     }
     return { entries, ...(nextCursor ? { nextCursor } : {}) }
   }
 
-  /** Lifetime settled-impetus sum for the owner. Sums `impetus` (stored as a string) via
-   *  `$toDecimal` so the total is exact even beyond 2^53, then serialises it back to a
-   *  base-10 string. `'0'` when there is no settled history. */
-  async sumSettledImpetus(key: AuctorKey): Promise<string> {
+  /** Lifetime impetus sum for the owner over whichever terminal stamp is named (settled
+   *  rows carry a real cost; released rows carry none, so this is `'0'` for `releasedAt`
+   *  today, but shares the aggregation shape rather than hand-rolling a second one). */
+  private async _sumTerminal(key: AuctorKey, stamp: 'settledAt' | 'releasedAt'): Promise<string> {
     const owner = ownerFilter(key)
     if (!owner) return '0'
     const rows = await this.col
       .aggregate([
-        { $match: { ...owner, settledAt: { $exists: true } } },
+        { $match: { ...owner, [stamp]: { $exists: true } } },
         { $group: { _id: null, total: { $sum: { $toDecimal: '$impetus' } } } },
       ])
       .toArray()

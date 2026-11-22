@@ -4,13 +4,18 @@ import { BulletinModelCatalog } from '../../../src/allocutio/telegram/BulletinMo
 import type { Intellarum } from '../../../src/types/intelligendi.js'
 import type { Fundamentorum, Fundamentum } from '../../../src/types/fundamentum.js'
 
+/** Every fixture record has a download address unless a test says otherwise: a record without one is
+ *  a name with no file, and the picker no longer offers those (see the addressless tests below). */
+const SRC = [{ provenance: 'miladystation', uri: 'https://example.com/w.safetensors' }]
 const CATALOG = [
-  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', architectura: 'dit', dest: 'unet/flux.safetensors', sizeGb: 24 },
-  { id: 'intella.flux-vae', nomen: 'FLUX VAE', genus: 'embedding', architectura: 'vae', dest: 'vae/ae.safetensors', sizeGb: 0.3 },
-  { id: 'intella.clip-l', nomen: 'CLIP-L (text encoder)', genus: 'embedding', architectura: 'transformer', dest: 'clip/clip_l.safetensors' },
-  { id: 'intella.sd15', nomen: 'Stable Diffusion 1.5', genus: 'model', architectura: 'sd15', dest: 'checkpoints/v1-5-pruned-emaonly.safetensors' },
-  { id: 'intella.smollm2', nomen: 'SmolLM2 135M Instruct', genus: 'model', architectura: 'gguf', dest: 'gguf/smollm2.gguf', sizeGb: 0.145 },
-  { id: 'l1', nomen: 'drifella', genus: 'lora', dest: 'loras/drifella.safetensors', tags: [{ tag: 'flux' }] },
+  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', sources: SRC, architectura: 'dit', dest: 'unet/flux.safetensors', sizeGb: 24 },
+  { id: 'intella.flux-vae', nomen: 'FLUX VAE', genus: 'embedding', sources: SRC, architectura: 'vae', dest: 'vae/ae.safetensors', sizeGb: 0.3 },
+  { id: 'intella.clip-l', nomen: 'CLIP-L (text encoder)', genus: 'embedding', sources: SRC, architectura: 'transformer', dest: 'clip/clip_l.safetensors' },
+  { id: 'intella.sd15', nomen: 'Stable Diffusion 1.5', genus: 'model', sources: SRC, architectura: 'sd15', dest: 'checkpoints/v1-5-pruned-emaonly.safetensors' },
+  { id: 'intella.smollm2', nomen: 'SmolLM2 135M Instruct', genus: 'model', sources: SRC, architectura: 'gguf', dest: 'gguf/smollm2.gguf', sizeGb: 0.145 },
+  { id: 'l1', nomen: 'drifella', genus: 'lora', sources: SRC, dest: 'loras/drifella.safetensors', tags: [{ tag: 'flux' }] },
+  // A legacy LoRA migrated without a download URL: keeps its name and trigger word, has no file.
+  { id: '6840901d0c6e432ada9d099e', nomen: 'ghostlora', genus: 'lora', sources: [], dest: 'models/loras/ghost.safetensors', trigger: 'ghost', tags: [{ tag: 'flux' }] },
 ]
 const intellarum = {
   async list() { return CATALOG as never },
@@ -88,7 +93,7 @@ test('an image advertises the SET of runtimes it can serve (capability, not 1:1)
 
 test('resolveTriggers with a base family defers to the crystal triggerMap (familia-keyed)', async () => {
   // The studio is armed to FLUX → resolution must go through triggerMap('flux'), NOT a tag scan.
-  const lora = { id: 'l1', nomen: 'drifella', genus: 'lora', dest: 'loras/drifella.safetensors', trigger: 'drifella' }
+  const lora = { id: 'l1', nomen: 'drifella', genus: 'lora', sources: SRC, dest: 'loras/drifella.safetensors', trigger: 'drifella' }
   let askedFamilia: string | undefined
   const ir = {
     async list() { throw new Error('list() must not be used on the family path') },
@@ -110,7 +115,7 @@ test('resolveTriggers with a base family defers to the crystal triggerMap (famil
 test('resolveTriggers without a family falls back to a flat scan over all LoRAs', async () => {
   const withTriggers = [
     ...CATALOG,
-    { id: 'l2', nomen: 'painterly', genus: 'lora', dest: 'loras/painterly.safetensors', trigger: 'painterly, oilpaint' },
+    { id: 'l2', nomen: 'painterly', genus: 'lora', sources: SRC, dest: 'loras/painterly.safetensors', trigger: 'painterly, oilpaint' },
   ]
   const ir = {
     async list() { return withTriggers as never },
@@ -150,10 +155,10 @@ test('vramGb falls back to summing the resolved weight sizes when the fundament 
 // a Kontext-trained LoRA out of a schnell studio while still offering it in a Kontext one.
 
 const DIRECTED_CATALOG = [
-  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', familia: 'flux', dest: 'unet/flux.safetensors', sizeGb: 24 },
-  { id: 'intella.flux-kontext', nomen: 'FLUX.1 Kontext', genus: 'model', familia: 'flux', dest: 'unet/kontext.safetensors', sizeGb: 24 },
-  { id: 'lora.flux', nomen: 'flux-lora', genus: 'lora', familia: 'flux', dest: 'loras/flux-lora.safetensors', trigger: 'fluxtrig' },
-  { id: 'lora.kontext', nomen: 'kontext-lora', genus: 'lora', familia: 'kontext', dest: 'loras/kontext-lora.safetensors', trigger: 'kontexttrig' },
+  { id: 'intella.flux-schnell', nomen: 'FLUX.1 Schnell', genus: 'model', sources: SRC, familia: 'flux', dest: 'unet/flux.safetensors', sizeGb: 24 },
+  { id: 'intella.flux-kontext', nomen: 'FLUX.1 Kontext', genus: 'model', sources: SRC, familia: 'flux', dest: 'unet/kontext.safetensors', sizeGb: 24 },
+  { id: 'lora.flux', nomen: 'flux-lora', genus: 'lora', sources: SRC, familia: 'flux', dest: 'loras/flux-lora.safetensors', trigger: 'fluxtrig' },
+  { id: 'lora.kontext', nomen: 'kontext-lora', genus: 'lora', sources: SRC, familia: 'kontext', dest: 'loras/kontext-lora.safetensors', trigger: 'kontexttrig' },
 ]
 
 const DIRECTED_FUNDS: Fundamentum[] = [
@@ -311,4 +316,44 @@ test('the runtime suffix is stripped only when it names the fundament’s own ru
 test('a nomen-less fundament still falls back to its base-family name', async () => {
   const flows = await catOf([{ ...VERSIONED[0], nomen: undefined }]).listFlows()
   assert.equal(flows.find(f => f.id === 'flux-comfyui')!.label, 'FLUX', 'baseFamilyName remains the fallback')
+})
+
+// ---------------------------------------------------------------------------
+// A record with no download address is a name without a file. The Compiler refuses it when a run
+// reaches it, so the picker must not offer it in the first place — in the mount list, in search,
+// or as the LoRA a trigger word resolves to.
+// ---------------------------------------------------------------------------
+
+test('listMount does not offer a LoRA with no download address', async () => {
+  const { items } = await cat().listMount('loras', {})
+  assert.deepEqual(items.map(i => i.nomen), ['drifella'], 'ghostlora is not on offer')
+})
+
+test('the /arm card counts only the LoRAs a pod could fetch', async () => {
+  const flows = await cat().listFlows()
+  assert.match(flows.find(f => f.label === 'FLUX')!.blurb ?? '', /1 LoRA/, 'ghostlora does not count')
+})
+
+test('search does not surface a LoRA with no download address', async () => {
+  assert.deepEqual(await cat().search('ghost'), [])
+  assert.deepEqual((await cat().search('drif')).map(i => i.nomen), ['drifella'])
+})
+
+test('a trigger word whose only LoRA has no download address goes unmatched (flat scan)', async () => {
+  const { matched, unmatched } = await cat().resolveTriggers('ghost drifella', {})
+  assert.deepEqual(matched, [], 'drifella carries no trigger; ghost resolves to nothing usable')
+  assert.deepEqual(unmatched, ['ghost', 'drifella'])
+})
+
+test('on the family path a trigger word skips the addressless LoRA and takes one with a file', async () => {
+  const orphan  = { id: 'x1', nomen: 'orphan',  genus: 'lora', sources: [], dest: 'loras/o.safetensors', trigger: 'twin' }
+  const healthy = { id: 'x2', nomen: 'healthy', genus: 'lora', sources: SRC, dest: 'loras/h.safetensors', trigger: 'twin' }
+  const ir = {
+    async list() { throw new Error('list() must not be used on the family path') },
+    async find() { return null },
+    async triggerMap() { return new Map([['twin', [orphan, healthy]], ['lonely', [orphan]]]) as never },
+  } as unknown as Intellarum
+  const { matched, unmatched } = await new BulletinModelCatalog({ intellarum: ir, sender }).resolveTriggers('twin lonely', { family: 'flux' })
+  assert.deepEqual(matched.map(m => m.nomen), ['healthy'])
+  assert.deepEqual(unmatched, ['lonely'])
 })

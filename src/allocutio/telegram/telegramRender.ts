@@ -10,7 +10,12 @@ import { isMediaRef } from '../../crystal/MediaFetcher.js'
 
 // ── inline keyboard helpers ──────────────────────────────────────────────────
 
-export type InlineButton = { text: string; callback_data: string }
+/** A tap the bot answers (`callback_data`), a link Telegram opens for the user (`url`), or a page
+ *  Telegram opens as a Mini App (`web_app`), handing it the user's signed identity. */
+export type InlineButton =
+  | { text: string; callback_data: string }
+  | { text: string; url: string }
+  | { text: string; web_app: { url: string } }
 export type InlineKeyboard = { inline_keyboard: InlineButton[][] }
 
 export function inlineKeyboard(rows: InlineButton[][]): InlineKeyboard {
@@ -19,6 +24,31 @@ export function inlineKeyboard(rows: InlineButton[][]): InlineKeyboard {
 
 export function btn(text: string, data: string): InlineButton {
   return { text, callback_data: data }
+}
+
+export function urlBtn(text: string, url: string): InlineButton {
+  return { text, url }
+}
+
+/** A private chat: Telegram gives users positive chat ids, groups and channels negative ones. */
+export function isPrivateChat(chatId: number): boolean {
+  return chatId > 0
+}
+
+/**
+ * A link to one of our own pages that should open signed in as this chat's account. In a private
+ * chat it is a Mini App button: Telegram opens the page with a signed launch the web exchanges for
+ * a session, so the user lands there signed in with nothing to paste. Telegram allows `web_app`
+ * buttons in private chats only, so anywhere else it is a plain link.
+ */
+export function accountBtn(text: string, url: string, chatId: number): InlineButton {
+  return isPrivateChat(chatId) ? { text, web_app: { url } } : urlBtn(text, url)
+}
+
+/** The one button under every "you need credits" message: the Funding page, signed in where the
+ *  chat allows it. Undefined when the deployment has not said where that is — no button beats a dead one. */
+export function topUpMarkup(chatId: number, fundingUrl?: string): { reply_markup: InlineKeyboard } | undefined {
+  return fundingUrl ? { reply_markup: inlineKeyboard([[accountBtn('Buy credits', fundingUrl, chatId)]]) } : undefined
 }
 
 // ── renderPrimitive — Telegram rendering for each primitive kind ─────────────
@@ -47,7 +77,8 @@ function displayValue(value: unknown): string {
   return str
 }
 
-export function renderPrimitive(primitive: Primitive): RenderResult {
+/** `chatId` is the chat the card goes to; it decides whether an account link opens signed in. */
+export function renderPrimitive(primitive: Primitive, chatId?: number): RenderResult {
   switch (primitive.kind) {
     case 'Select': {
       const rows = primitive.options.map(opt => [btn(opt.label, `s:${opt.id}`)])
@@ -133,7 +164,11 @@ export function renderPrimitive(primitive: Primitive): RenderResult {
     }
 
     case 'Detail': {
-      const rows = primitive.actions.map(action => [btn(action.label, `a:${action.id}`)])
+      const rows = primitive.actions.map(action => [
+        !action.url ? btn(action.label, `a:${action.id}`)
+          : action.asAccount && chatId !== undefined ? accountBtn(action.label, action.url, chatId)
+          : urlBtn(action.label, action.url),
+      ])
       return {
         text: `${primitive.label}\n\n${primitive.content}`,
         extra: { reply_markup: inlineKeyboard(rows) },

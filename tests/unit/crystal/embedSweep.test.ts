@@ -414,6 +414,64 @@ test('entry point: the pass is capped however large a limit is asked for', async
 
 // ── The whole rail: reserve, dispatch, settle — once ─────────────────────────
 
+// ── The quote path: priced from the caller's own backlog, never a bare 500 ──
+//
+// `quote()` estimates against the RAW aditus the caller sent — which for every other
+// modus is also the one the cursor reserves against, but the embed sweep's cursor
+// refuses to reserve without an `_owner`/`_sweep` stamp only `invokeFlow` used to apply
+// (`EmbedSweepCursor.resolveWork` throws a plain Error otherwise, surfacing to the caller
+// as an unhandled 500 — prod 5.33.0, 2026-11-14/16). `quote()` must apply the same stamp.
+
+/** A CrystalApi wired with a real EmbedSweepCursor over a real backlog, for `quote()`. */
+function quoteApi(store: MemoryVestigiorum): CrystalApi {
+  const cursorum = new Cursorum()
+  cursorum.register(EMBED_SWEEP_MINISTERIUM, new EmbedSweepCursor({ clip: recordingClip(), vestigiorum: store }))
+  const deps = {
+    modorum: { async find(id: string) { return id === MODUS_EMBED_SWEEP.id ? MODUS_EMBED_SWEEP : null } },
+    cursorum,
+    vestigiorum: store,
+  } as unknown as CrystalApiDeps
+  return new CrystalApi(deps)
+}
+
+test('quote: the embed sweep is priced from the caller’s own backlog', async () => {
+  const store = new MemoryVestigiorum(async () => fakeVector('x'))
+  await seedTrace(store, MINE, 'one')
+  await seedTrace(store, MINE, 'two')
+  await seedTrace(store, THEIRS, 'theirs')
+
+  const quote = await quoteApi(store).quote(MINE, { modusId: MODUS_EMBED_SWEEP.id }, {})
+  assert.equal(quote.impetus, (2n * EMBED_SWEEP_IMPETUS_PER_ITEM).toString(), 'priced for my two, not the stranger’s one')
+})
+
+test('quote: a body naming another identity’s backlog is dropped unread', async () => {
+  const store = new MemoryVestigiorum(async () => fakeVector('x'))
+  await seedTrace(store, MINE, 'mine')
+  const theirs = await seedTrace(store, THEIRS, 'theirs')
+
+  const quote = await quoteApi(store).quote(MINE, { modusId: MODUS_EMBED_SWEEP.id }, {
+    _owner: sweepOwnerToken(THEIRS),
+    _sweep: [{ id: theirs.id, textum: 'theirs' }],
+  })
+  assert.equal(quote.impetus, (1n * EMBED_SWEEP_IMPETUS_PER_ITEM).toString(), 'priced for MY backlog, not the forged one')
+})
+
+test('quote: a caller with nothing to sweep gets a handled error, never an unhandled 500', async () => {
+  const store = new MemoryVestigiorum(async () => fakeVector('x'))
+  const v = await seedTrace(store, MINE, 'mine')
+  await store.setEmbedding(v.id, MINE, 'promptum', fakeVector('mine'))
+
+  await assert.rejects(
+    () => quoteApi(store).quote(MINE, { modusId: MODUS_EMBED_SWEEP.id }, {}),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError, 'a typed, status-bearing error — not the cursor’s bare Error')
+      assert.equal(err.code, 'conflict.nothing_to_sweep')
+      assert.equal(err.httpStatus, 409)
+      return true
+    },
+  )
+})
+
 test('rail: a sweep reserves, runs and settles for what it embedded', async () => {
   const signorum = new MemorySignorum()
   const acta = new MemoryActorum()

@@ -9,6 +9,7 @@ const ALICE = { animaId: 'anima-alice' }
 const empty: StatusSnapshot = {
   auctorKey: ALICE,
   balanceImpetus: 0n, balanceUsd: 0,
+  heldImpetus: 0n, heldUsd: 0,
   gens: [], studios: [], joinable: [],
   takenAt: NOW,
 }
@@ -21,13 +22,13 @@ test('signed-in zero-state: only Balance + footer', () => {
   assert.ok(!text.includes('YOUR GENS'), 'no empty section header')
   assert.ok(!text.includes('YOUR STUDIOS'))
   assert.ok(!text.includes('JOINABLE'))
-  assert.deepEqual(cb(keyboard).sort(), ['stat:history', 'stat:refresh', 'stat:settings'].sort())
+  assert.deepEqual(cb(keyboard), ['stat:refresh'], 'only buttons that do something')
 })
 
 test('not signed in: prompts to connect; only footer affordances', () => {
   const { text, keyboard } = StatusView.render({ ...empty, auctorKey: null })
   assert.match(text, /Not signed in/)
-  assert.deepEqual(cb(keyboard).sort(), ['stat:history', 'stat:refresh', 'stat:settings'].sort())
+  assert.deepEqual(cb(keyboard), ['stat:refresh'])
 })
 
 test('balance: formats with thousands separator + USD', () => {
@@ -40,12 +41,67 @@ test('balance: sub-cent USD reads as "<$0.01"', () => {
   assert.match(text, /Balance: 5 impetus \(<\$0\.01\)/)
 })
 
+test('held: a locked reservation reads as held, not as a vanished balance', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    balanceImpetus: 0n, balanceUsd: 0,
+    heldImpetus: 7_200n, heldUsd: 2.4264,
+    gens: [{
+      actumId: 'act-train', modusLabel: 'LoRA training', heldImpetus: 7_200n,
+      studio: null, status: 'nascens',
+    }],
+  })
+  assert.match(text, /Balance: 0 impetus \(\$0\.00\)/)
+  assert.match(text, /Held for 1 run: 7,200 impetus \(\$2\.43\) — reserved, not spent/)
+  assert.match(text, /LoRA training — queued on pending — queued — holding 7,200 impetus/)
+})
+
+test('held: plural "runs" when more than one gen is holding', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    heldImpetus: 300n, heldUsd: 0.1,
+    gens: [
+      { actumId: 'a1', modusLabel: 'X', heldImpetus: 100n, studio: null, status: 'nascens' },
+      { actumId: 'a2', modusLabel: 'Y', heldImpetus: 200n, studio: null, status: 'nascens' },
+    ],
+  })
+  assert.match(text, /Held for 2 runs:/)
+})
+
+test('held: zero held shows no held line', () => {
+  const { text } = StatusView.render(empty)
+  assert.ok(!text.includes('Held for'))
+})
+
+test('recentSettlement: a charge is legible in the same place as balance', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    recentSettlement: {
+      actumId: 'act-1', modusLabel: 'LoRA training', kind: 'charge',
+      impetus: 4_500n, usd: 1.5165, at: NOW,
+    },
+  })
+  assert.match(text, /Last settled: LoRA training — charged 4,500 impetus \(\$1\.52\)/)
+})
+
+test('recentSettlement: a release is legible — explicitly nothing charged', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    recentSettlement: {
+      actumId: 'act-1', modusLabel: 'LoRA training', kind: 'release',
+      impetus: 0n, usd: 0, at: NOW,
+    },
+  })
+  assert.match(text, /Last settled: LoRA training — released, nothing charged/)
+})
+
 test('YOUR GENS section: one row + per-gen Cancel button', () => {
   const { text, keyboard } = StatusView.render({
     ...empty,
     gens: [{
       actumId: 'act-1',
       modusLabel: 'Flux Schnell',
+      heldImpetus: 0n,
       studio: { id: 'mat-1', hostLabel: '@bob', isOwn: false },
       status: 'agens',
       elapsedMs: 12_000,
@@ -62,6 +118,7 @@ test('YOUR GENS: queued gen with ETA', () => {
     gens: [{
       actumId: 'act-q',
       modusLabel: 'Chat',
+      heldImpetus: 0n,
       studio: { id: 'mat-2', hostLabel: '@carol', isOwn: false },
       status: 'nascens',
       etaMs: 30_000,
@@ -100,6 +157,40 @@ test('YOUR STUDIOS: draining status renders explicitly', () => {
   assert.match(text, /draining \(balance depleted\)/)
 })
 
+test('YOUR STUDIOS: terminated studios are counted, not enumerated', () => {
+  const makeTerminated = (i: number) => ({
+    studioId: `mat-dead-${i}`, materiaId: `mat-dead-${i}`, label: 'pytorch on RTX 4090',
+    status: 'terminated' as const, guestsToday: 0, netImpetus: -10n, netUsd: -0.003,
+  })
+  const { text, keyboard } = StatusView.render({
+    ...empty,
+    studios: [
+      { studioId: 'mat-live', materiaId: 'mat-live', label: 'flux-v1 on H100', status: 'idle', guestsToday: 0, netImpetus: 0n, netUsd: 0 },
+      ...Array.from({ length: 52 }, (_, i) => makeTerminated(i)),
+    ],
+  })
+  assert.match(text, /YOUR STUDIOS \(1\)/, 'header counts live studios only')
+  assert.match(text, /flux-v1 on H100 — idle/, 'the live studio still gets its row')
+  assert.ok(!text.includes('terminated —'), 'no per-row terminated line')
+  assert.match(text, /\(\+52 terminated\)/, 'one terse count line for the rest')
+  assert.equal(text.split('\n').filter(l => l.includes('pytorch on RTX 4090')).length, 0,
+    'the dead studios never print their own line')
+  assert.ok(cb(keyboard).includes('stat:bulletin:mat-live'), 'the live studio keeps its bulletin button')
+  assert.ok(!cb(keyboard).some(d => d.startsWith('stat:bulletin:mat-dead')),
+    'terminated studios get no bulletin button — nothing to jump to')
+})
+
+test('YOUR STUDIOS: all studios terminated still surfaces the count', () => {
+  const { text } = StatusView.render({
+    ...empty,
+    studios: [{
+      studioId: 'mat-1', materiaId: 'mat-1', label: 'flux-v1 on H100', status: 'terminated',
+      guestsToday: 0, netImpetus: 0n, netUsd: 0,
+    }],
+  })
+  assert.match(text, /\(\+1 terminated\)/)
+})
+
 test('JOINABLE: open vs queue depth', () => {
   const { text, keyboard } = StatusView.render({
     ...empty,
@@ -119,7 +210,7 @@ test('full snapshot: section ordering balance → gens → studios → joinable 
   const { text } = StatusView.render({
     ...empty,
     balanceImpetus: 500n, balanceUsd: 0.17,
-    gens: [{ actumId: 'a', modusLabel: 'X', studio: null, status: 'nascens' }],
+    gens: [{ actumId: 'a', modusLabel: 'X', heldImpetus: 0n, studio: null, status: 'nascens' }],
     studios: [{ studioId: 's', materiaId: 's', label: 'l', status: 'idle', guestsToday: 0, netImpetus: 0n, netUsd: 0 }],
     joinable: [{ studioId: 'j', label: 'k', hostLabel: '@z', queueDepth: 0 }],
   })

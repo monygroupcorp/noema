@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { trainRunNotice } from './TrainRun';
 import type { Run, RunOrder } from '../lib/api';
@@ -59,5 +61,15 @@ describe('trainRunNotice — sequencing (attempting vs scheduled)', () => {
     expect(trainRunNotice(undefined, run({ status: 'failed' })).chip).toBe('failed');
     expect(trainRunNotice(undefined, run({ status: 'complete' })).chip).toBe('finished');
     expect(trainRunNotice(undefined, run({ status: 'running' })).chip).toBe('running');
+  });
+});
+
+describe('a run that cannot be read offers the way back (D-62)', () => {
+  it('the training run screen renders the shared state, back to Home', () => {
+    const src = readFileSync(fileURLToPath(new URL('./TrainRun.tsx', import.meta.url)), 'utf8');
+    expect(src).toContain('<LoadFailure ');
+    expect(src).toContain('back={BACK.home}');
+    expect(src).not.toContain('Couldn’t load');
+    expect(src).not.toMatch(/not found\./);
   });
 });

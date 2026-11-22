@@ -58,6 +58,28 @@ export const gardenSummaryLine = (fragmentCount: number, excludedCount: number):
     : `${fragmentCount} ${noun}`;
 };
 
+// The facts line under a dataset's name — "12 images · 2 captionsets · v3". A count of nothing
+// is not printed (DESIGN.md D-58): only the non-zero counts and a real version are joined, and a
+// set with none of them reads as new. `extra` carries a trailing fact that is not a count
+// (an "updated …" stamp) and rides along whatever the counts say.
+export const EMPTY_DATASET_LINE = 'nothing in it yet';
+export function datasetStatsLine(
+  d: { modality: string; captionsets: readonly unknown[]; versions: readonly { v: string }[] },
+  mediaCount: number,
+  extra?: string,
+): string {
+  const parts: string[] = [];
+  const noun = d.modality === 'video' ? 'clip' : 'image';
+  if (mediaCount > 0) parts.push(`${mediaCount} ${noun}${mediaCount === 1 ? '' : 's'}`);
+  const sets = d.captionsets.length;
+  if (sets > 0) parts.push(`${sets} captionset${sets === 1 ? '' : 's'}`);
+  const version = d.versions[d.versions.length - 1]?.v;
+  if (version) parts.push(version);
+  if (parts.length === 0) parts.push(EMPTY_DATASET_LINE);
+  if (extra) parts.push(extra);
+  return parts.join(' · ');
+}
+
 // hemisphere glyph class for a custody value
 export const custodyGlyph = (c: Custody): 'lit' | 'ring' | 'dashed' =>
   c === 'remote' ? 'lit' : c === 'sealed' ? 'ring' : 'dashed';

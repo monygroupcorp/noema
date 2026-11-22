@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import { api, type Collection } from '../lib/api';
 import { COLL_STATUS_LABEL, collGlyph, collTile } from '../lib/collections';
@@ -13,7 +14,8 @@ import { publishNote, publishOutcome } from '../lib/editio';
 export function EditioHub() {
   const { id } = useParams();
   const [c, setC] = useState<Collection | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
   // Cross-link into the other publish system: post the whole collection to the moderated feed
   // (UX handoff 2, D6). Mirrors Card's per-result publish, but with a `collectio` artifact ref.
   // 'refused' is separate from 'err' for the same reason it is on Card: a gate refusal is
@@ -24,9 +26,9 @@ export function EditioHub() {
   useEffect(() => {
     if (!id) return;
     let live = true;
-    api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+    api.getCollection(id).then((r) => { if (live) setC(r.collection); }).catch((e) => { if (live) setFail(loadFailureKind(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
   async function postToFeed(collId: string) {
     setPub({ s: 'busy' });
@@ -39,11 +41,11 @@ export function EditioHub() {
     }
   }
 
-  if (err) {
-    return <AppShell title="Collection"><div className="page"><div className="pw wide"><div className="warn">Couldn’t load this collection: {err}</div></div></div></AppShell>;
+  if (fail) {
+    return <AppShell title="Collections"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
   }
   if (!c) {
-    return <AppShell title="Collection"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
+    return <AppShell title="Collections"><div className="page"><div className="pw wide"><div className="empty"><div className="t">Loading…</div></div></div></div></AppShell>;
   }
 
   const name = c.nomen || 'Untitled collection';
@@ -60,14 +62,14 @@ export function EditioHub() {
     { n: 5, to: `/collections/${c.id}/export`, ico: 'send', t: 'Export & publish', s: 'download · hosting · noesis' },
   ];
 
-  const crumb = <span className="ph-crumb"><Link to="/collections">collections</Link> <span className="sep">/</span> <b>{name}</b></span>;
+  const crumb = <span className="ph-crumb"><Link to="/collections">Collections</Link> <span className="sep">/</span> <b>{name}</b></span>;
 
   return (
     <AppShell title={crumb}>
       <div className="page"><div className="pw wide">
         <div className="ph-head">
           <div>
-            <div className="ph-kick">collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
+            <div className="ph-kick">Collection · <span className={`hemi2 ${collGlyph()}`} /> {COLL_STATUS_LABEL[c.status]}</div>
             <h1 className="ph-name">{name}</h1>
             {c.descriptio && <p className="ph-desc">{c.descriptio}</p>}
             <p className="ph-desc">{needsSetup
@@ -85,7 +87,7 @@ export function EditioHub() {
         {needsSetup && (
           <div className="ph-band" style={{ margin: 'var(--s4) 0' }}>
             <div className="ph-about">
-              <div className="ph-l">next step</div>
+              <div className="ph-l">Next step</div>
               <p><b>{name}</b> needs a <b>base flow</b> and a <b>set of traits</b> before it can generate anything. Nothing has been spent — pick them yourself in the garden, or talk it through with the concierge.</p>
               <div className="pub-row">
                 <Link className="btn" to={`/chat?seed=${encodeURIComponent(seed)}`}><Ic name="sparkles" /> Ask the concierge</Link>
@@ -127,12 +129,12 @@ export function EditioHub() {
 
         <div className="ph-band">
           <div className="ph-about">
-            <div className="ph-l">about this collection</div>
-            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent. That asymmetry is the spine.</p>
+            <div className="ph-l">About this collection</div>
+            <p>A collection is a <b>hub</b> — pure, persistent, multiplayer. Generation + curation are <b>local and reversible</b>; only export/mint crosses to public &amp; permanent — nothing before that step can be seen outside this account.</p>
             <div className="ph-meta mono">{c.modusId ? <>flow {c.modusId} · provenance {c.provenanceHash.slice(0, 18)}…</> : <>no flow · no provenance yet</>} · local until you publish</div>
           </div>
           <div className="ph-activity">
-            <div className="ph-l">activity</div>
+            <div className="ph-l">Activity</div>
             <div className="ph-ev"><span className="av" style={{ background: collTile(c.id) }} /><span className="ev-t"><b>you</b> started the canonic supply <span className="mono ev-meta"><span className="hemi2 dashed" /> local{c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString()}` : ''}</span></span></div>
           </div>
         </div>

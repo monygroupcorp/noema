@@ -108,3 +108,11 @@ describe('Dataset chip garden — read-only, no curation affordance (noema-323)'
     expect(SOURCE).toMatch(/\/datasets\/\$\{d\.id\}\/muse/);
   });
 });
+
+describe('a dataset that cannot be opened offers the way back (D-62)', () => {
+  it('renders the shared state, back to Datasets', () => {
+    expect(SOURCE).toContain('<LoadFailure ');
+    expect(SOURCE).toContain('back={BACK.datasets}');
+    expect(SOURCE).not.toMatch(/not found\./);
+  });
+});

@@ -7,9 +7,24 @@ import { useSession } from '../state/session';
 import type { Editio, FeedItem } from '../lib/editio';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { ReviewQueueSection } from './Review';
+import { ReportOutput } from '../shell/ReportOutput';
 import './feed.css';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// The feed reads the newest FEED_LIMIT editions; GET /v1/feed offers no narrowing beyond that
+// and no total. The intro states what these are, how many, and how to narrow them (DESIGN.md
+// D-55) — the honest answer to the third part, while the API offers nothing more, is that there
+// isn't one yet, which the rule is satisfied by saying rather than by omitting.
+export const FEED_LIMIT = 60;
+export function feedShape(items: FeedItem[] | null, limit = FEED_LIMIT): string {
+  const base = 'What people are making and choosing to share';
+  const narrow = 'Newest first — no filters yet.';
+  if (!items || items.length === 0) return `${base}. ${narrow}`;
+  const n = items.length;
+  if (n >= limit) return `${base} — the latest ${limit} pieces. ${narrow}`;
+  return `${base} — ${n} ${n === 1 ? 'piece' : 'pieces'}. ${narrow}`;
+}
 
 // Relative "3m ago" without pulling a date library.
 function ago(iso: string): string {
@@ -84,6 +99,10 @@ function Lightbox({ item, onClose }: { item: FeedItem; onClose: () => void }) {
           <button className="btn ghost" onClick={copyLink}>
             <Ic name="rss" /> {copied ? 'Link copied ✓' : 'Copy link'}
           </button>
+          {/* A published run (not an Intella listing or a collection) can be reported —
+              the terms a flow carries (e.g. MiniMax H3's) require this everywhere its
+              output is seen, not just on the maker's own /run page. */}
+          {item.artifact.kind === 'actum' && <ReportOutput runId={item.artifact.id} />}
         </div>
       </div>
     </div>
@@ -101,7 +120,7 @@ export function Feed() {
 
   useEffect(() => {
     let live = true;
-    api.feed({ visibility: 'feed', limit: 60 })
+    api.feed({ visibility: 'feed', limit: FEED_LIMIT })
       .then((r) => { if (live) setItems(r.feed); })
       .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
@@ -128,9 +147,10 @@ export function Feed() {
         <div className="pagehead">
           <div>
             <h1>Feed</h1>
-            <div className="sub">What people are making and choosing to share. Publish your own from any result.</div>
+            {/* The topbar's "Start" already begins a piece from every screen; a link here would
+                be the same action twice (P-1d), so the heading only says how a piece gets here. */}
+            <div className="sub">{feedShape(items)} A piece lands here when its maker publishes it from the result.</div>
           </div>
-          <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
         </div>
 
         {pendingErr && <div className="warn">{pendingErr}</div>}
@@ -147,8 +167,7 @@ export function Feed() {
         {items !== null && items.length === 0 && (
           <div className="empty">
             <div className="t">Nothing published yet</div>
-            <div className="s">Be the first — make something and hit “Publish to feed” on the result.</div>
-            <Link className="btn" to="/card"><Ic name="plus" /> Make something</Link>
+            <div className="s">Be the first — <Link to="/card">make something</Link> and hit “Publish to feed” on the result.</div>
           </div>
         )}
 

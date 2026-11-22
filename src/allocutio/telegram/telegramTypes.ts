@@ -34,9 +34,16 @@ export interface TelegramUpdate {
     from?: { id: number; username?: string; first_name?: string }
     chat: { id: number; type: string }
     text?: string
+    /** Service message: this group was upgraded to a supergroup with a new id (old chat side). */
+    migrate_to_chat_id?: number
+    /** Service message: this supergroup was upgraded from a group with the given id (new chat side). */
+    migrate_from_chat_id?: number
     /** A command can ride attached media's caption — a different field from `text`. */
     caption?: string
     date: number
+    /** Set when this message lives inside a forum topic other than General — the reply
+     *  must carry it back so it lands in the topic the command was asked from. */
+    message_thread_id?: number
     reply_to_message?: TelegramMedia & {
       message_id: number
       /** Who sent the message being replied to — used to detect a reply to the bot itself. */
@@ -46,14 +53,16 @@ export interface TelegramUpdate {
   callback_query?: {
     id: string
     from: { id: number; username?: string; first_name?: string }
-    message?: { message_id: number; chat: { id: number } }
+    message?: { message_id: number; chat: { id: number; type?: string }; message_thread_id?: number }
     data?: string
   }
+  /** The bot's own membership of a chat changed. Logged, never dispatched. */
+  my_chat_member?: import('./updateLog.js').ChatMemberUpdated
 }
 
 /** TelegramSender — the outbound surface, injected so tests can mock it. */
 export interface TelegramSender {
-  sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string }): Promise<{ message_id: number }>
+  sendMessage(chatId: number, text: string, extra?: { reply_markup?: unknown; caption?: string; message_thread_id?: number }): Promise<{ message_id: number }>
   editMessageText(chatId: number, messageId: number, text: string, extra?: { reply_markup?: unknown }): Promise<void>
   /** Edit a media message's caption (text-message edit won't work on photos). */
   editMessageCaption?(chatId: number, messageId: number, caption: string, extra?: { reply_markup?: unknown }): Promise<void>
@@ -61,11 +70,13 @@ export interface TelegramSender {
   editMessageReplyMarkup?(chatId: number, messageId: number, reply_markup: unknown): Promise<void>
   /** Delete a message — used to re-post the session bulletin at the bottom of the chat. */
   deleteMessage?(chatId: number, messageId: number): Promise<void>
-  answerCallbackQuery(callbackQueryId: string): Promise<void>
-  sendPhoto(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendVideo(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendDocument(chatId: number, url: string, extra?: unknown): Promise<{ message_id: number }>
-  sendMediaGroup(chatId: number, media: unknown[]): Promise<void>
+  /** Answer a button tap. `text` shows as a toast on the tapper's screen — the one channel a
+   *  tap on a dead button can be answered through without posting into the chat. */
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>
+  sendPhoto(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendVideo(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendDocument(chatId: number, url: string, extra?: { message_thread_id?: number } & Record<string, unknown>): Promise<{ message_id: number }>
+  sendMediaGroup(chatId: number, media: unknown[], extra?: { message_thread_id?: number }): Promise<void>
   setMessageReaction?(chatId: number, messageId: number, reaction: unknown[]): Promise<void>
   getFileLink(fileId: string): Promise<string>
   /**

@@ -3064,7 +3064,7 @@ test('a search matches a session by the text of a fragment in a piece\'s lineage
 
   // And a search that matches nothing says which field it ran over.
   assert.match(sessionSearchEmptyNote(filterSessionHistory(rows, 'zebra'), 'zebra')!, /fragments/)
-  assert.match(sessionSearchEmptyNote([], '')!, /no muse sessions/)
+  assert.match(sessionSearchEmptyNote([], '')!, /no muse sessions/i)
   assert.equal(sessionSearchEmptyNote(rows, ''), null)
 })
 

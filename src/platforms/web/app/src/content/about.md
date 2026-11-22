@@ -7,13 +7,18 @@ we keep honest, and a public record of which ones are not true yet.
 
 The most powerful AI should feel like a studio, not a settings panel. You describe what you want; a concierge picks the models and tools and makes it — and you can open the controls whenever you care to.
 
-We also believe you shouldn't have to hand over your identity to use it. There is no email
-address anywhere in signing up: an account is a username and a password, and recovery runs
-through a wallet or a Telegram account you choose to bind. Funding with crypto today does leave a
-link — the depositing address reaches us and is retained for compliance, as the privacy policy
-says. The unlinkable bearer purse breaks the other half of that link, between a spend and the
-account it came from; it unlocks after the trusted-setup ceremony. Keeping us from ever seeing the
-funding wallet at all is a further step, and it is not built.
+We also believe you shouldn't have to hand over your identity to use it.
+
+There is no email address anywhere in signing up: an account is a username and a password, and
+recovery runs through a wallet or a Telegram account you choose to bind.
+
+Funding with crypto today does leave a link — the depositing address reaches us and is retained
+for compliance, as the privacy policy says.
+
+The unlinkable bearer purse breaks the other half of that link, between a spend and the account it
+came from; it unlocks after the trusted-setup ceremony.
+
+Keeping us from ever seeing the funding wallet at all is a further step, and it is not built.
 
 ## How we built it
 
@@ -36,7 +41,7 @@ Noema is a boutique generative-AI studio. We provide:
 - **A creative workspace** — a typed, composable canvas for building multi-step AI flows
 - **Billing without an identity** — no email to sign up; zero-knowledge credit proofs once the bearer purse ships
 
-We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalog, and operate our own payment rails.
+We are not a wrapper around OpenAI. We run our own infrastructure, curate our own model catalogue, and operate our own payment rails.
 
 ## The team
 

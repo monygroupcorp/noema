@@ -116,11 +116,28 @@ export class MongoActorum implements Actorum {
     return docs.map(fromDoc)
   }
 
+  async findLiveByMateriamId(materiamId: string): Promise<Actum[]> {
+    const docs = await this.col
+      .find({ materiamId, status: { $in: ['nascens', 'agens'] } })
+      .toArray()
+    return docs.map(fromDoc)
+  }
+
   // One counting query for the whole id set, and no documents come back: the caller wants a
   // number, and its id sets are whole collections (a 10k-piece run is 10k ids). `id` is the
   // lookup key every other read here uses, so the `$in` rides the same index.
   async countByIdsWithStatus(ids: string[], statuses: ActumStatus[]): Promise<number> {
     if (ids.length === 0 || statuses.length === 0) return 0
     return this.col.countDocuments({ id: { $in: ids }, status: { $in: statuses } })
+  }
+
+  async statusCountsSince(since: Date): Promise<Partial<Record<ActumStatus, number>>> {
+    const rows = await this.col.aggregate<{ _id: ActumStatus; count: number }>([
+      { $match: { inceptum: { $gte: since } } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]).toArray()
+    const out: Partial<Record<ActumStatus, number>> = {}
+    for (const row of rows) out[row._id] = row.count
+    return out
   }
 }

@@ -927,3 +927,11 @@ test('callbackNonce survives a round-trip through the actum store', async () => 
   assert.equal((await actorum.findByCallbackNonce('nonce-A'))?.id, 'actum-test-1')
   assert.equal(await actorum.findByCallbackNonce('nonce-B'), null)
 })
+
+// ── Retain-on-release (noema reservation-reads-as-credits-gone) ────────────────
+// A fractus run must stay visible as "released, nothing charged" rather than silently
+// vanishing the instant its hold clears. This webhook no longer stamps that itself —
+// `ActumCompletor.fail()` does, at the single choke point every failure rail (this
+// webhook, the expiry reaper, the warm-pod line, an owner cancel) reaches, so none of
+// them can leave the index row stuck "running" the way only the webhook used to clear
+// it. See `tests/unit/execution/ActumCompletor.test.ts`'s "ActumIndex stamping" tests.

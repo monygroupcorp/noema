@@ -378,7 +378,7 @@ export const ESSENTIA_FLUXI2I: Essentia = {
 export const ESSENTIA_KONTEXTEDIT: Essentia = {
   id: 'kontext-edit',
   nomen: 'FLUX.1 Kontext — instruction edit',
-  descriptio: 'FLUX.1 Kontext instruction edit — follows plain-language edits ("add a hat", "make it night") and works with flux.1 LoRAs. Pick it for targeted edits; use FLUX.2 Klein for stronger, newer edits.',
+  descriptio: 'FLUX.1 Kontext instruction edit — follows plain-language edits ("add a hat", "make it night") and works with flux.1 LoRAs. Pick it for targeted edits; use FLUX.2 Klein 4B for newer edits.',
   genus: 'atomicus',
   versio: '1.0.0',
   contentHash: '',
@@ -517,6 +517,89 @@ export const ESSENTIA_KLEIN: Essentia = {
 
   natum: new Date('2026-07-06'),
   mutatum: new Date('2026-07-06'),
+}
+
+// MOSS-Image — TEXT TO IMAGE. The 5B OpenMOSS DiT (familia 'moss-image'), strong bilingual
+// (English/Chinese) text rendering and long-prompt adherence; pick it as the local Apache-2.0
+// alternative to a closed text-renders-well model. Sampler/scheduler (er_sde/simple) follow the
+// official Comfy-Org workflow template's faster settings (vs OpenMOSS's own 50-step/euler/cfg 3)
+// — a speed tradeoff, not a correctness one; `steps`/`guidance` let a caller dial back toward the
+// slower official defaults. categoria 'image'.
+export const ESSENTIA_MOSS_IMAGE: Essentia = {
+  id: 'moss-image',
+  nomen: 'MOSS-Image — text to image',
+  descriptio: 'MOSS-Image text-to-image (familia \'moss-image\') — a 5B Apache-2.0 model with strong bilingual text rendering and long-prompt adherence. Pick it for in-image text/signage or when a fully open-weight generator is required.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'moss-image-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  aditus: {
+    prompt:          { type: 'text',  required: true,  description: 'Text prompt for image generation — describe the scene, including any in-image text verbatim in quotes.' },
+    negative_prompt: { type: 'text',  required: false, default: 'nsfw, worst quality, bad anatomy, watermark, jpeg artifact', description: 'What to avoid in the generated image' },
+    width:           { type: 'int',   required: false, default: 1024, description: 'Output width in pixels (multiples of 16)' },
+    height:          { type: 'int',   required: false, default: 1024, description: 'Output height in pixels (multiples of 16)' },
+    steps:           { type: 'int',   required: false, default: 25,   description: 'Sampling steps' },
+    guidance:        { type: 'float', required: false, default: 2.5,  description: 'KSampler cfg — how strongly the image follows the prompt' },
+    input_seed:      { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Generated image' } },
+
+  workflowTemplate: 'moss-image',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-11-21'),
+  mutatum: new Date('2026-11-21'),
+}
+
+// MOSS-Image — INSTRUCTION EDIT. Same substrate as ESSENTIA_MOSS_IMAGE, with the rank-64 edit
+// LoRA (comfyanonymous/ComfyUI#17296) stacked on top via `intellae` (same weight-split pattern
+// as the minimax-h3 flows — the base DiT lives on the fundament, the flow-specific adapter is
+// declared here). The edit LoRA's own license is unverified (see INTELLA_MOSS_IMAGE_EDIT_LORA) —
+// that gates commercial-catalog promotion, not running the flow. v1 supports a single reference
+// image; the LoRA supports up to four, left for a later iteration. categoria 'image'.
+export const ESSENTIA_MOSS_IMAGE_EDIT: Essentia = {
+  id: 'moss-image-edit',
+  nomen: 'MOSS-Image — instruction edit',
+  descriptio: 'MOSS-Image instruction edit (familia \'moss-image\') — describe the change you want and it is applied to the reference image. Pick it for a fully open-weight local edit; use moss-image for plain text-to-image.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'moss-image-comfyui',
+  fundamentumVersio: '1.0.0',
+
+  intellae: [
+    { id: 'intella.moss-image-edit-lora', role: 'lora' },
+  ],
+
+  aditus: {
+    prompt:          { type: 'text',  required: true,  description: 'Edit instruction — describe the change you want applied to the reference image.' },
+    image:           { type: 'image', required: true,  description: 'Reference image to edit' },
+    negative_prompt: { type: 'text',  required: false, default: 'nsfw, worst quality, bad anatomy, watermark, jpeg artifact', description: 'What to avoid in the edited image' },
+    steps:           { type: 'int',   required: false, default: 25,   description: 'Sampling steps' },
+    guidance:        { type: 'float', required: false, default: 2.5,  description: 'KSampler cfg — how strongly the edit follows the instruction' },
+    input_seed:      { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+  exitus: { image: { type: 'image', description: 'Edited image' } },
+
+  workflowTemplate: 'moss-image-edit',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: { batchSize: 1, seedStrategy: 'shuffle', seedPlaceholder: 88888888, privateMode: false, vramGb: 24 },
+
+  natum: new Date('2026-11-21'),
+  mutatum: new Date('2026-11-21'),
 }
 
 // Background removal — i2i (enhance). InspyrenetRembg pack (self-downloads its ckpt) on the weightless
@@ -1125,6 +1208,8 @@ export const ESSENTIA_MINIMAX_H3_T2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [
@@ -1193,6 +1278,8 @@ export const ESSENTIA_MINIMAX_H3_FL2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [
@@ -1277,6 +1364,8 @@ export const ESSENTIA_MINIMAX_H3_REF2V: Essentia = {
   categoria: 'video',
 
   fundamentumId: 'minimax-h3-comfyui',
+  // MiniMax H3 Community License V.2: every user is bound to its use restrictions before access.
+  useTerms: ['minimax-h3'],
   fundamentumVersio: '1.0.0',
 
   intellae: [
@@ -1333,9 +1422,16 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_KREA_TURBO,
   ESSENTIA_FLUXI2I,
   ESSENTIA_KONTEXTEDIT,
-  ESSENTIA_KLEINEDIT,
+  // ESSENTIA_KLEINEDIT (Klein 9B edit) is NOT offered. Its only weight source is gated on
+  // HuggingFace and a pod downloads with unauthenticated wget, so the flow could never run: the
+  // machine is provisioned and paid for, then dies at the weights pull. An offer that fails after
+  // the money is spent is worse than no offer. ESSENTIA_KLEINEDIT_4B does the same edit on the 4B
+  // stack, whose weights are reachable. Put this line back when the 9B is mirrored to an auth-free
+  // source as sources[0] — the definition is untouched below, and so is the fundamentum.
   ESSENTIA_KLEINEDIT_4B,
   ESSENTIA_KLEIN,
+  ESSENTIA_MOSS_IMAGE_EDIT,
+  ESSENTIA_MOSS_IMAGE,
   ESSENTIA_RMBG,
   ESSENTIA_UPSCALE,
   ESSENTIA_QWEN3_VL,

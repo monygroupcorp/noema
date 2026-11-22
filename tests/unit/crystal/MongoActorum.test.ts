@@ -150,6 +150,42 @@ test('findExpired returns multiple expired actum', async () => {
   assert.equal(results.length, 2)
 })
 
+// ── findLiveByMateriamId ───────────────────────────────────────────────────────
+
+test('findLiveByMateriamId returns a nascens actum paired to the materia', async () => {
+  const live = makeActum({ materiamId: 'mat-1', status: 'nascens' })
+  await acta.create(live)
+  const results = await acta.findLiveByMateriamId!('mat-1')
+  assert.equal(results.length, 1)
+  assert.equal(results[0].id, live.id)
+})
+
+test('findLiveByMateriamId returns an agens actum paired to the materia', async () => {
+  const live = makeActum({ materiamId: 'mat-1', status: 'agens' })
+  await acta.create(live)
+  const results = await acta.findLiveByMateriamId!('mat-1')
+  assert.equal(results.length, 1)
+  assert.equal(results[0].id, live.id)
+})
+
+test('findLiveByMateriamId ignores a completus/fractus actum on the same materia', async () => {
+  await acta.create(makeActum({ materiamId: 'mat-1', status: 'completus' }))
+  await acta.create(makeActum({ materiamId: 'mat-1', status: 'fractus' }))
+  const results = await acta.findLiveByMateriamId!('mat-1')
+  assert.equal(results.length, 0)
+})
+
+test('findLiveByMateriamId ignores a live actum paired to a DIFFERENT materia', async () => {
+  await acta.create(makeActum({ materiamId: 'mat-other', status: 'agens' }))
+  const results = await acta.findLiveByMateriamId!('mat-1')
+  assert.equal(results.length, 0)
+})
+
+test('findLiveByMateriamId returns [] for a materia with no acta at all', async () => {
+  const results = await acta.findLiveByMateriamId!('mat-unseen')
+  assert.deepEqual(results, [])
+})
+
 // ── findByExternusJobId ───────────────────────────────────────────────────────
 
 test('findByExternusJobId returns null when no actum has that externusJobId', async () => {
@@ -183,4 +219,27 @@ test('findByExternusJobId finds actum whose externusJobId was set via update', a
   const found = await acta.findByExternusJobId('ext-job-updated')
   assert.ok(found)
   assert.equal(found.id, a.id)
+})
+
+// ── statusCountsSince (clause 1, noema/user-behaviour-corpus) ──────────────────
+
+test('statusCountsSince groups created-since acta by current status', async () => {
+  const since = new Date(Date.now() - 60_000)
+  await acta.create(makeActum({ status: 'nascens' }))
+  const toComplete = await acta.create(makeActum({ status: 'nascens' }))
+  await acta.update(toComplete.id, { status: 'completus' })
+  const toFail = await acta.create(makeActum({ status: 'nascens' }))
+  await acta.update(toFail.id, { status: 'fractus' })
+
+  const counts = await acta.statusCountsSince(since)
+  assert.equal(counts.nascens, 1)
+  assert.equal(counts.completus, 1)
+  assert.equal(counts.fractus, 1)
+})
+
+test('statusCountsSince excludes acta created before the cutoff', async () => {
+  await acta.create(makeActum())
+  const future = new Date(Date.now() + 60_000)
+  const counts = await acta.statusCountsSince(future)
+  assert.equal(Object.keys(counts).length, 0)
 })

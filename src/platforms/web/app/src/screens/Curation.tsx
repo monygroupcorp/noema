@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { api, type Collection, type CollectionPiece } from '../lib/api';
 import { mediaFromOutput } from '../lib/media';
 import { collTile } from '../lib/collections';
@@ -17,6 +18,10 @@ export function Curation() {
   const [rejected, setRejected] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The queue itself could not be read — distinct from `err`, which is one decision failing
+  // under a queue that is otherwise there to review.
+  const [fail, setFail] = useState<LoadFailureKind | null>(null);
+  const [tries, setTries] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -34,9 +39,9 @@ export function Curation() {
         setKept(reviewable.filter((piece) => piece.review === 'approved').length);
         setRejected(reviewable.filter((piece) => piece.review === 'rejected').length);
       })
-      .catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+      .catch((e) => { if (live) setFail(loadFailureKind(e)); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, tries]);
 
   const current = queue?.[idx];
 
@@ -63,10 +68,12 @@ export function Curation() {
     return () => window.removeEventListener('keydown', onKey);
   }, [decide]);
 
-  const name = col?.nomen || 'collection';
-  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>curation</b></span>;
+  const name = col?.nomen || 'Collection';
+  const crumb = <span className="ph-crumb"><Link to={`/collections/${id}`}>{name}</Link> <span className="sep">/</span> <b>Curation</b></span>;
   const reviewed = kept + rejected;
   const totalQ = queue ? queue.length : 0;
+
+  if (fail) return <AppShell title="Curation"><LoadFailure noun="collection" kind={fail} back={BACK.collections} onRetry={() => { setFail(null); setTries((n) => n + 1); }} /></AppShell>;
 
   return (
     <AppShell title={crumb}>
@@ -132,7 +139,7 @@ export function Curation() {
         <div className="cu-foot">
           <span className="mono"><span className="hemi2 dashed" /> Progress is saved · nothing is published until you export</span>
           <div className="right" style={{ display: 'flex', gap: 'var(--s3)' }}>
-            <Link className="btn ghost" to={`/collections/${id}/run`}>← run</Link>
+            <Link className="btn ghost" to={`/collections/${id}/run`}>← Run</Link>
             <Link className="btn accent" to={`/collections/${id}/export`}>Export →</Link>
           </div>
         </div>

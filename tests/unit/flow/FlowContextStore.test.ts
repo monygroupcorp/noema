@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MemoryFlowContextStore } from '../../../src/flow/FlowContextStore.js'
+import { MemoryFlowContextStore, FLOW_CONTEXT_TTL_MS } from '../../../src/flow/FlowContextStore.js'
 import type { FlowContext } from '../../../src/flow/types.js'
 
 function makeCtx(overrides: Partial<FlowContext> = {}): FlowContext {
@@ -106,4 +106,38 @@ test('different chats with same platform+userId are independent', () => {
   store.delete('telegram', 'user-1', 'chat-B')
   assert.equal(store.get('telegram', 'user-1', 'chat-A')?.intent, 'execute')
   assert.equal(store.get('telegram', 'user-1', 'chat-B'), undefined)
+})
+
+// ---------------------------------------------------------------------------
+// Idle lifetime — a context nobody touched for a day is gone, as if deleted
+// ---------------------------------------------------------------------------
+
+test('a context untouched past the TTL reads as absent (and its actum index entry with it)', () => {
+  let now = 1_000_000
+  const store = new MemoryFlowContextStore({ now: () => now })
+  store.set('telegram', 'user-1', 'chat-1', makeCtx({ pendingActumId: 'act-1' }))
+
+  now += FLOW_CONTEXT_TTL_MS - 1
+  assert.ok(store.get('telegram', 'user-1', 'chat-1'), 'still live a moment before the TTL')
+  assert.ok(store.findByPendingActumId('act-1'))
+
+  now += 1
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined, 'expired at the TTL')
+  assert.equal(store.findByPendingActumId('act-1'), undefined)
+})
+
+test('every set renews the lifetime — an active conversation never expires mid-flow', () => {
+  let now = 0
+  const store = new MemoryFlowContextStore({ ttlMs: 100, now: () => now })
+  const ctx = makeCtx()
+  store.set('telegram', 'user-1', 'chat-1', ctx)
+  now = 90; store.set('telegram', 'user-1', 'chat-1', ctx)
+  now = 180
+  assert.ok(store.get('telegram', 'user-1', 'chat-1'), 'touched at 90, so live until 190')
+  now = 190
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined)
+})
+
+test('the default TTL matches the persisted copy: 24 hours', () => {
+  assert.equal(FLOW_CONTEXT_TTL_MS, 24 * 60 * 60 * 1000)
 })

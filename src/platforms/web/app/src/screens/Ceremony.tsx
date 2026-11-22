@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ic } from '../lib/icons';
 import { SiteFooter } from './SiteFooter';
 import { Wordmark } from '../ui/Wordmark';
-import { ceremony, checkServedKey, contributionsPaused, type CeremonyStatus, type ContributePhase, type ServedKey } from '../lib/ceremony';
+import { ceremony, checkServedKey, contributionsPaused, footAction, heroAction, type CeremonyStatus, type ContributePhase, type ServedKey, type ServedKeyVerdict } from '../lib/ceremony';
 import { CEREMONY_GUIDE } from '../lib/repo';
 import { entryPath } from '../lib/entry';
 import './landing.css';
@@ -207,7 +207,10 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
   const verdict = checkServedKey(status, served);
   if (verdict === 'unknown') return null;
 
-  const NOTE = {
+  // Typed so a new verdict cannot be added without the words that go with it: an
+  // unhandled case here would render an empty banner under a finished transcript, which
+  // is the one place on this page that must never be silent.
+  const NOTES: Record<Exclude<ServedKeyVerdict, 'unknown'>, { icon: string; text: string }> = {
     match: {
       icon: 'check',
       text: 'The proving key this site serves is the key above, hash for hash. Check it yourself: '
@@ -223,6 +226,13 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
       text: 'This site is serving no proving key: the ceremony is finalized but its key is not '
         + 'published here yet. It serves nothing rather than serve a key the record does not name.',
     },
+    withheld: {
+      icon: 'flag',
+      text: 'This site is serving no proving key. It is holding one — but a different key from '
+        + 'the one this transcript names, so it is not handed out: a key outside the record has '
+        + 'no ceremony behind it. The ceremony above stands; what is missing is its key on this '
+        + 'server. Compare zkeyHash against imageKeyHash at /arcanum/config to see both.',
+    },
     external: {
       icon: 'file-text',
       text: 'The proving key is hosted off this API, so we cannot name its bytes for you. '
@@ -234,7 +244,8 @@ function ServedKeyNote({ status, served }: { status: CeremonyStatus | null; serv
         + 'key it judges proofs with came from a different setup, so a proof made with it '
         + 'will not verify here. The ceremony is not yet in force on this site.',
     },
-  }[verdict];
+  };
+  const NOTE = NOTES[verdict];
 
   return (
     <div className={`cer-served cer-served-${verdict}`}>
@@ -268,6 +279,9 @@ export function Ceremony() {
 
   const phase = status?.phase ?? 'announced';
   const chain = status?.chain ?? [];
+  // One filled button on the page (D-42), and it follows the status pill above it.
+  const hero = heroAction(status);
+  const foot = footAction(status);
 
   async function onClaim(e: React.FormEvent) {
     e.preventDefault();
@@ -301,9 +315,12 @@ export function Ceremony() {
         </p>
         <div className="cer-status-row"><StatusPill status={status} /></div>
         <div className="cta">
-          <a className="btn lg" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+          {/* The hero CTA jumps to the form (#contribute); the actual action is "Fold in my
+              randomness" below, so only that one carries the accent fill (DESIGN.md D-42). */}
+          <a className="btn lg ghost" href={hero.href}>{hero.label} <Ic name="arrow-right" /></a>
           <a className="btn-ghost" href="#how">How it works</a>
         </div>
+        {hero.note && <p className="cer-fold-note">{hero.note}</p>}
         <div className="proof">groth16 phase-2 · one honest contributor secures it forever</div>
       </div>
 
@@ -454,7 +471,7 @@ export function Ceremony() {
               </div>
             </div>
 
-            <div className="cer-chain">
+            <div className="cer-chain" id="transcript">
               <div className="cer-chain-h">
                 <span>Transcript</span>
                 <span className="cer-chain-n">{chain.length} contribution{chain.length === 1 ? '' : 's'}</span>
@@ -467,8 +484,12 @@ export function Ceremony() {
               )}
               {chain.length === 0 ? (
                 <div className="cer-empty">
-                  No contributions yet. The chain starts the moment the ceremony opens —
-                  this transcript will fill in, hash by hash, for anyone to verify.
+                  {phase === 'finalized'
+                    // A finalized ceremony produced a key, so an empty chain here is the
+                    // transcript not having loaded — never "hasn't started yet" (P-1a, P-1c):
+                    // that reads as contradicting the "finalized" status right above it.
+                    ? "The ceremony is finalized, but this transcript hasn't loaded. Reload to see the chain that produced the key."
+                    : 'No contributions yet. The chain starts the moment the ceremony opens — this transcript will fill in, hash by hash, for anyone to verify.'}
                 </div>
               ) : (
                 chain.map((c) => (
@@ -494,7 +515,9 @@ export function Ceremony() {
 
       <div className="endcta">
         <h2>Make the keys no one can forge — including us.</h2>
-        <a className="btn lg" href="#contribute">Contribute <Ic name="arrow-right" /></a>
+        {/* The hero's button is this page's one action; the closing line is a plain link to
+            the other half of the page, never a second control for the same thing (P-1d). */}
+        <a className="endlink" href={foot.href}>{foot.label} <Ic name="arrow-right" /></a>
       </div>
 
       <SiteFooter />

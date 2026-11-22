@@ -36,7 +36,7 @@ export function PlateLab() {
   const [stagger, setStagger] = useState(18);
   const [mode, setMode] = useState<'lock' | 'pass'>('lock');
   const [theme, setTheme] = useState<'current' | 'editorial'>('editorial');
-  const [cta, setCta] = useState<'blue' | 'ink' | 'outline'>('ink');
+  const [cta, setCta] = useState<'blue' | 'ink' | 'outline'>('blue');
   const [mark, setMark] = useState<'mono' | 'serif'>('serif');
   const filled = PLATES.filter((s) => !isPlaceholder(s)).length;
 

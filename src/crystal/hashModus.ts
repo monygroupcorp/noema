@@ -19,7 +19,10 @@ export function hashModus(modus: Modus): string {
   // hashed, and it does so by riding the `...rest` passthrough deliberately: it is a plain
   // nested object of numbers that `sortedReplacer` already orders deterministically. Only
   // bigint fields need the explicit prefix below; do not add a branch for it.
-  const { contentHash: _ch, natum: _n, mutatum: _m, impetusFixum, descriptio: _d, ...rest } = modus
+  // `useTerms` (the licence terms a caller must accept) is excluded for the same reason: it
+  // governs who may run the flow, not what the flow does on a pod, so declaring it must not move
+  // a flow's deployment identity.
+  const { contentHash: _ch, natum: _n, mutatum: _m, impetusFixum, descriptio: _d, useTerms: _t, ...rest } = modus
 
   const payload: Record<string, unknown> = { ...rest }
   if (impetusFixum !== undefined) payload.impetusFixum = `bigint:${impetusFixum}`

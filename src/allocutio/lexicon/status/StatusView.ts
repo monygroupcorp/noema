@@ -4,7 +4,7 @@
 // The complementary surface to BulletinView. Same shape (text + keyboard) so
 // the Telegram adapter treats it identically. No I/O, no timers, no bus.
 
-import type { StatusSnapshot, GenEntry, StudioEntry, JoinableEntry } from './types.js'
+import type { StatusSnapshot, GenEntry, StudioEntry, JoinableEntry, RecentSettlement } from './types.js'
 import { statusAffordancesFor, packStatusAffordances } from './affordances.js'
 import type { UiKeyboard } from '../ui/Keyboard.js'
 
@@ -17,9 +17,15 @@ export const StatusView = {
   render(s: StatusSnapshot): RenderedStatus {
     const lines: string[] = []
 
-    // 1. Balance line — always present.
+    // 1. Balance line — always present. A held reservation is named here, not left to read
+    // as a drop in balance with nothing to explain it (noema reservation-reads-as-credits-gone).
     if (s.auctorKey) {
       lines.push(`Balance: ${formatImpetus(s.balanceImpetus)} (${money(s.balanceUsd)})`)
+      if (s.heldImpetus > 0n) {
+        const forRuns = s.gens.length === 1 ? '1 run' : `${s.gens.length} runs`
+        lines.push(`  Held for ${forRuns}: ${formatImpetus(s.heldImpetus)} (${money(s.heldUsd)}) — reserved, not spent`)
+      }
+      if (s.recentSettlement) lines.push(`  ${settlementLine(s.recentSettlement)}`)
     } else {
       lines.push('Not signed in — connect a wallet or run /start.')
     }
@@ -31,11 +37,16 @@ export const StatusView = {
       for (const g of s.gens) lines.push(`  • ${genLine(g)}`)
     }
 
-    // 3. YOUR STUDIOS — section omitted if empty.
-    if (s.studios.length > 0) {
+    // 3. YOUR STUDIOS — live studios only; a terminated one is history, not state,
+    // and a long-running host can accumulate dozens of them. One terse count line
+    // in their place instead of a bullet per dead pod.
+    const liveStudios = s.studios.filter(st => st.status !== 'terminated')
+    const terminatedCount = s.studios.length - liveStudios.length
+    if (liveStudios.length > 0 || terminatedCount > 0) {
       lines.push('')
-      lines.push(`YOUR STUDIOS (${s.studios.length})`)
-      for (const st of s.studios) lines.push(`  • ${studioLine(st)}`)
+      lines.push(`YOUR STUDIOS (${liveStudios.length})`)
+      for (const st of liveStudios) lines.push(`  • ${studioLine(st)}`)
+      if (terminatedCount > 0) lines.push(`  (+${terminatedCount} terminated)`)
     }
 
     // 4. JOINABLE — section omitted if empty (v1 always empty pending admission spec).
@@ -67,7 +78,16 @@ function genLine(g: GenEntry): string {
     g.status === 'agens' && g.elapsedMs !== undefined ? `${fmtDur(g.elapsedMs)} elapsed` :
     g.etaMs !== undefined ? `ETA ${fmtDur(g.etaMs)}` :
     g.status === 'nascens' ? 'queued' : 'running'
-  return `${g.modusLabel} — ${g.status === 'agens' ? 'running on' : 'queued on'} ${where} — ${timing}`
+  const held = g.heldImpetus > 0n ? ` — holding ${formatImpetus(g.heldImpetus)}` : ''
+  return `${g.modusLabel} — ${g.status === 'agens' ? 'running on' : 'queued on'} ${where} — ${timing}${held}`
+}
+
+/** The most-recently-terminated run, in the same line style as the balance section —
+ *  a charge says what it cost; a release says plainly that nothing was. */
+function settlementLine(r: RecentSettlement): string {
+  return r.kind === 'charge'
+    ? `Last settled: ${r.modusLabel} — charged ${formatImpetus(r.impetus)} (${money(r.usd)})`
+    : `Last settled: ${r.modusLabel} — released, nothing charged`
 }
 
 function studioLine(st: StudioEntry): string {

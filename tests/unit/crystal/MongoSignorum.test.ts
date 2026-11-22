@@ -129,6 +129,37 @@ test('balance works by commitment', async () => {
   assert.equal(b, 200n)
 })
 
+// ── lockedBalance ─────────────────────────────────────────────────────────────
+
+test('lockedBalance returns 0n for unknown identity', async () => {
+  const b = await signorum.lockedBalance({ animaId: 'nobody' })
+  assert.equal(b, 0n)
+})
+
+test('lockedBalance sums ONLY locked signa for animaId — excludes valid', async () => {
+  const locked = await signorum.issue(makeSignum({ valor: 100n }))
+  await signorum.issue(makeSignum({ valor: 250n }))  // left valid — not counted here
+  await signorum.lock([locked.id], 'actum-1')
+  const b = await signorum.lockedBalance({ animaId: 'anima-abc' })
+  assert.equal(b, 100n)
+})
+
+test('lockedBalance does not include other identities', async () => {
+  const mine = await signorum.issue(makeSignum({ animaId: 'anima-abc', valor: 100n }))
+  const theirs = await signorum.issue(makeSignum({ animaId: 'anima-xyz', valor: 500n }))
+  await signorum.lock([mine.id], 'actum-1')
+  await signorum.lock([theirs.id], 'actum-2')
+  const b = await signorum.lockedBalance({ animaId: 'anima-abc' })
+  assert.equal(b, 100n)
+})
+
+test('lockedBalance works by commitment', async () => {
+  const s = await signorum.issue({ forma: 'arcanum', valor: 200n, auctor: 'system', testis: 'myhash' })
+  await signorum.lock([s.id], 'actum-1')
+  const b = await signorum.lockedBalance({ commitment: 'myhash' })
+  assert.equal(b, 200n)
+})
+
 // ── lock ──────────────────────────────────────────────────────────────────────
 
 test('lock changes signum status to locked', async () => {

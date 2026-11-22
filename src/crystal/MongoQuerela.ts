@@ -30,7 +30,7 @@ export class MongoQuerela implements QuerelaStore {
     return docs.map(d => fromDoc(d as Record<string, unknown>))
   }
 
-  async update(id: string, patch: Partial<Pick<Querela, 'status'>>): Promise<Querela> {
+  async update(id: string, patch: Partial<Pick<Querela, 'status' | 'verdict'>>): Promise<Querela> {
     const result = await this.col.findOneAndUpdate(
       { id },
       { $set: { ...patch, mutatum: new Date() } },
@@ -51,5 +51,12 @@ export class MongoQuerela implements QuerelaStore {
     if (filter?.status !== undefined) f.status = filter.status
     const docs = await this.col.find(f).sort({ natum: -1 }).toArray()
     return docs.map(d => fromDoc(d as Record<string, unknown>))
+  }
+
+  async countViolations(subjectOwnerKey: string, useTerms: string): Promise<number> {
+    // Distinct RUNS, not reports: three people reporting the same output, each confirmed, are one
+    // violation by its owner.
+    const runs = await this.col.distinct('capturedState.runId', { kind: 'abuse', verdict: 'violation', subjectOwnerKey, useTerms })
+    return runs.length
   }
 }

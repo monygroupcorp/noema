@@ -231,11 +231,11 @@ test('a supplied credential does not open an unconfigured gate', async () => {
   }
 })
 
-test('?token= query credential is still accepted when configured', async () => {
+test('?token= query credential is no longer accepted — header only', async () => {
   const { server, url } = await createServer('supersecret')
   try {
     const res = await httpGet(`${url}/internal/live?token=supersecret`)
-    assert.equal(res.statusCode, 200)
+    assert.equal(res.statusCode, 401)
     res.destroy()
   } finally {
     await closeServer(server)

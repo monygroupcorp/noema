@@ -45,9 +45,23 @@ function settledRow(over: Partial<ActumIndex> = {}): ActumIndex {
   }
 }
 
+/** A released index row (retain-on-release stamp present — failed/cancelled, no charge). */
+function releasedRow(over: Partial<ActumIndex> = {}): ActumIndex {
+  return {
+    animaId: 'anima-1',
+    actumId: 'act-released',
+    modusId: TRAINING,
+    createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    releasedAt: new Date('2026-07-02T00:00:00.000Z'),
+    modusLabel: 'Style trainer',
+    ...over,
+  }
+}
+
 interface Fixture {
   inFlight?: ActumIndex[]
   settled?: ActumIndex[]
+  released?: ActumIndex[]
   nextCursor?: string
   acta?: Record<string, { status?: string; aditus?: Record<string, unknown>; exitus?: Record<string, unknown> }>
   /** The warm-pod line, when one is wired. Keyed by actum id; a missing key is a run not waiting. */
@@ -58,7 +72,7 @@ interface Fixture {
 
 /** A CrystalApi wired to in-memory index + actum doubles, owner-scoped by the index key. */
 function apiFor(f: Fixture) {
-  const seen: { key?: AuctorKey; opts?: { limit: number; cursor?: string }; findForCalls: number } = { findForCalls: 0 }
+  const seen: { key?: AuctorKey; opts?: { limit: number; cursor?: string }; releasedOpts?: { limit: number; cursor?: string }; findForCalls: number } = { findForCalls: 0 }
   const owns = (key: AuctorKey, e: ActumIndex) => 'animaId' in key && e.animaId === key.animaId
   const index = {
     async record() {},
@@ -74,6 +88,10 @@ function apiFor(f: Fixture) {
       return { entries, ...(f.nextCursor ? { nextCursor: f.nextCursor } : {}) }
     },
     async sumSettledImpetus() { return '0' },
+    async listReleased(key: AuctorKey, opts: { limit: number; cursor?: string }) {
+      seen.releasedOpts = opts
+      return { entries: (f.released ?? []).filter(e => owns(key, e)) }
+    },
   }
   const actorum = {
     async findById(id: string) {
@@ -116,6 +134,51 @@ test('listActivity includes IN-FLIGHT rows alongside settled ones, newest first'
   assert.equal(page.activity[1].status, 'settled')
   assert.equal(page.activity[1].settledAt, '2026-07-02T00:00:00.000Z')
   assert.equal(page.activity[1].modusLabel, 'Style trainer')
+})
+
+test('listActivity includes a RELEASED row — a failed/cancelled run stays visible, not pruned', async () => {
+  const { api } = apiFor({
+    inFlight: [inFlightRow({ actumId: 'act-live', createdAt: new Date('2026-07-05T00:00:00.000Z') })],
+    released: [releasedRow()],
+    settled: [settledRow({ actumId: 'act-older', createdAt: new Date('2026-06-01T00:00:00.000Z'), settledAt: new Date('2026-06-02T00:00:00.000Z') })],
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.deepEqual(page.activity.map(r => r.actumId), ['act-live', 'act-released', 'act-older'], 'newest first across all three kinds')
+  const released = page.activity.find(r => r.actumId === 'act-released')
+  assert.equal(released?.status, 'released')
+  assert.equal(released?.releasedAt, '2026-07-02T00:00:00.000Z')
+  assert.equal(released?.settledAt, undefined)
+  assert.equal(released?.modusLabel, 'Style trainer')
+})
+
+test('listActivity: released rows ride the first page like in-flight ones, not the cursor walk', async () => {
+  const { api, seen } = apiFor({ released: [releasedRow()] })
+  const first = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(first.activity.length, 1)
+  assert.equal(seen.releasedOpts?.limit, 20)
+
+  const next = await api.listActivity({ animaId: 'anima-1' }, { cursor: 'CUR2' })
+  assert.deepEqual(next.activity, [], 'a cursor page never re-asks for released rows')
+})
+
+test('listActivity: a released row is never asked where it stands in the warm-pod line', async () => {
+  const { api, asked } = apiFor({
+    released: [releasedRow()],
+    queue: { 'act-released': { place: 1, depth: 1 } },
+  })
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.equal(page.activity[0].queue, undefined)
+  assert.deepEqual(asked, [])
+})
+
+test('listActivity: no listReleased on the wired store → released rows are simply absent, not an error', async () => {
+  const index = {
+    async record() {}, async findFor() { return [] }, async remove() {},
+    async listSettled() { return { entries: [] } },
+  }
+  const api = new CrystalApi({ actumIndex: index } as any)
+  const page = await api.listActivity({ animaId: 'anima-1' })
+  assert.deepEqual(page.activity, [])
 })
 
 test('listActivity reports each row\'s kind from the modus table', async () => {

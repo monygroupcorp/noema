@@ -33,7 +33,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { CrystalApi, type CrystalApiDeps } from '../../../src/allocutio/api/CrystalApi.js'
 import { ApiError } from '../../../src/allocutio/api/errors.js'
@@ -900,6 +900,8 @@ test('CONTROL: A\'s own scoped search DOES return A\'s privata rows', async () =
 //   3. a reported code off the contract  — a 404 the published error taxonomy omits
 
 const API_SOURCE = path.join(process.cwd(), 'src/allocutio/api/CrystalApi.ts')
+/** The layer classes `CrystalApi` extends; its methods are declared there, not in CrystalApi.ts. */
+const API_LAYERS_DIR = path.join(process.cwd(), 'src/allocutio/api/crystalApi')
 const ERRORS_SOURCE = path.join(process.cwd(), 'src/allocutio/api/errors.ts')
 
 /**
@@ -910,6 +912,15 @@ const ERRORS_SOURCE = path.join(process.cwd(), 'src/allocutio/api/errors.ts')
 const ERRORS_DECL = /(notFound[A-Za-z]+):\s*\([^)]*\)\s*=>\s*new ApiError\('(not_found\.[a-z_]+)'/g
 const ERRORS_CALL = /Errors\.(notFound[A-Za-z]+)\(/g
 const CODE_LITERAL = /'(not_found\.[a-z_]+)'/g
+
+/** CrystalApi.ts followed by every layer file under `crystalApi/`, as one source text. */
+function readApiSource(): string {
+  const layers = readdirSync(API_LAYERS_DIR).filter((f) => f.endsWith('.ts')).sort()
+  assert.ok(layers.length > 0, `no CrystalApi layer files found under ${API_LAYERS_DIR}`)
+  return [API_SOURCE, ...layers.map((f) => path.join(API_LAYERS_DIR, f))]
+    .map((f) => readFileSync(f, 'utf8'))
+    .join('\n')
+}
 
 /** `notFoundTeam` -> `not_found.team`, read off `errors.ts` rather than restated here. */
 function codeByConstructor(errorsSource: string): Map<string, string> {
@@ -949,6 +960,10 @@ const COVERED_RESOURCES: Record<string, string[]> = {
  * act this guard exists to force.
  */
 const UNCOVERED_ALLOWLIST: Record<string, string> = {
+  'not_found.terms':
+    'not owner-scoped: a terms id names published licence terms (crystal/useTerms.ts), the same ' +
+    'for every caller, so there is no other identity\'s record for it to leak. Covered by ' +
+    'tests/unit/allocutio/api/useTermsGate.test.ts.',
   'not_found.studio':
     'covered behaviourally by the studio-binding regression tests in ' +
     'tests/unit/allocutio/api/CrystalApi.test.ts (a studioId the caller does not host, and the ' +
@@ -977,7 +992,7 @@ function unlistedResources(source: string, codes: Map<string, string>): string[]
 }
 
 test('COVERAGE GUARD: every owner-scoped CrystalApi resource is either smoked here or allowlisted', () => {
-  const source = readFileSync(API_SOURCE, 'utf8')
+  const source = readApiSource()
   const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
   assert.ok(codes.size > 0, 'the errors.ts scan matched nothing — the constructor pattern has drifted')
 
@@ -996,7 +1011,7 @@ test('COVERAGE GUARD: every owner-scoped CrystalApi resource is either smoked he
 })
 
 test('COVERAGE GUARD: no listed resource has gone stale', () => {
-  const source = readFileSync(API_SOURCE, 'utf8')
+  const source = readApiSource()
   const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
   const reported = new Set(reportedResources(source, codes))
 
@@ -1021,7 +1036,7 @@ test('COVERAGE GUARD: no listed resource has gone stale', () => {
 })
 
 test('COVERAGE GUARD: every reported not-found code is declared in the API contract', () => {
-  const source = readFileSync(API_SOURCE, 'utf8')
+  const source = readApiSource()
   const codes = codeByConstructor(readFileSync(ERRORS_SOURCE, 'utf8'))
   const declared = new Set(API_CONTRACT.errorCodes.map((e) => e.code))
 
@@ -1085,14 +1100,23 @@ const OWNERSHIP_MEMBERS: string[] = [...new Set(Object.values(COVERED_RESOURCES)
 const MEMBER_DECL =
   /^ {2}(?:public |private |protected )?(?:readonly )?(?:async )?([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^\n]*?>)?\(/gm
 
-/** The body of `class CrystalApi`, from its opening brace to the closing brace in column 0. */
+/** A class that declares CrystalApi members: `CrystalApi` itself or one of its layers. */
+const CRYSTAL_API_CLASS = /^export (?:abstract )?class CrystalApi\w*(?: extends \w+)? \{$/gm
+
+/**
+ * The bodies of every class declaring CrystalApi members, each from its opening brace to
+ * the closing brace in column 0, joined in source order.
+ */
 function crystalApiClassBody(source: string): string {
-  const start = source.indexOf('export class CrystalApi {')
-  assert.ok(start >= 0, 'the CrystalApi class declaration was not found — the scan has drifted')
-  const rest = source.slice(start)
-  const end = rest.search(/\n\}\n/)
-  assert.ok(end > 0, 'the end of the CrystalApi class body was not found — the scan has drifted')
-  return rest.slice(0, end)
+  const bodies: string[] = []
+  for (const m of source.matchAll(CRYSTAL_API_CLASS)) {
+    const rest = source.slice(m.index as number)
+    const end = rest.search(/\n\}\n/)
+    assert.ok(end > 0, 'the end of a CrystalApi class body was not found — the scan has drifted')
+    bodies.push(rest.slice(0, end))
+  }
+  assert.ok(bodies.length > 0, 'the CrystalApi class declaration was not found — the scan has drifted')
+  return bodies.join('\n')
 }
 
 /**
@@ -1152,7 +1176,7 @@ const UNCOVERED_METHODS: Record<string, string> = {
 }
 
 test('COVERAGE GUARD: every public CrystalApi method that resolves ownership has a two-identity case', () => {
-  const derived = ownershipScopedMethods(readFileSync(API_SOURCE, 'utf8'))
+  const derived = ownershipScopedMethods(readApiSource())
   assert.ok(
     derived.length > 0,
     'the method scan matched nothing — the declaration or call pattern has drifted, and a guard ' +

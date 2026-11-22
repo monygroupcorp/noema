@@ -10,6 +10,7 @@ import type { Primitive, Step, Resolution, FlowContext, AuctorKey } from '../../
 import type { Allocutio, Nuntius, Responsum } from '../../types/allocutio.js'
 import type { Inceptio } from '../../types/cursus.js'
 import { makeLogger } from '../../lib/logger.js'
+import { describeUpdate, describeMyChatMember, describeChatMigration } from './updateLog.js'
 import { bus, type StageInfo } from '../../lib/bus.js'
 import type { Progressus } from '../../types/progressus.js'
 import { withTrace, getTrace, makeTraceContext } from '../../lib/trace.js'
@@ -24,15 +25,30 @@ import type { Intellarum } from '../../types/intelligendi.js'
 import type { Fundamentorum } from '../../types/fundamentum.js'
 import type { Consuetudinum } from '../../types/consuetudo.js'
 import type { ActumIndexStore } from '../../types/actumIndex.js'
+import type { Datasets } from '../../types/dataset.js'
+import { liveMedia } from '../../types/dataset.js'
+import type { MediaFetcher } from '../../crystal/MediaFetcher.js'
+import type { ObjectStore } from '../../crystal/R2Uploader.js'
+import { collectPhoto } from '../../crystal/collectPhoto.js'
+import {
+  ensureDefaultDataset,
+  getDefaultDataset,
+  createDefaultDataset,
+  setDefaultDataset,
+  listOwnDatasets,
+  type DefaultDatasetDeps,
+} from '../../crystal/defaultDataset.js'
 import { mintShareToken } from '../../crystal/shareToken.js'
 import { DRAIN_GRACE_MS } from '../../crystal/Census.js'
 import { aggregateStatus } from '../lexicon/status/aggregate.js'
 import { StatusView } from '../lexicon/status/StatusView.js'
 import { classifyError } from '../../lib/classifyError.js'
+import { ApiError } from '../api/errors.js'
 import { BulletinManager, type BulletinSink } from '../lexicon/bulletin/BulletinManager.js'
 import type { Loadout, PendingModel } from '../lexicon/bulletin/types.js'
 import { BulletinModelCatalog } from './BulletinModelCatalog.js'
 import { envelopeMedia, type EnvelopeMediaType } from './envelopeMedia.js'
+import { redactSecrets } from './redact.js'
 
 /** Infer the runtime shape from a studio's container image name (best-effort label for the
  *  loadout view). ComfyUI is the common one today; vLLM / llama.cpp / Diffusers are coming. */
@@ -49,11 +65,11 @@ import { DeliveryMenu, type DeliverySink } from '../lexicon/delivery/DeliveryMen
 import { SaveAsMenu, type SaveAsSeed } from './SaveAsMenu.js'
 import { ReactionController } from './reactions/ReactionController.js'
 import type { UiKeyboard } from '../lexicon/ui/Keyboard.js'
-import { inlineKeyboard, btn, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
+import { inlineKeyboard, btn, accountBtn, isPrivateChat, topUpMarkup, renderPrimitive, decodeCallbackData, type InlineKeyboard } from './telegramRender.js'
 import { CANON_VERBS } from '../../crystal/canonVerbs.js'
 import { CommandRouter, isKnownCommand } from './commands/CommandRouter.js'
 import { REACTION } from '../lexicon/symbols.js'
-import { COPY } from '../lexicon/copy.js'
+import { COPY, GROUP_RULE } from '../lexicon/copy.js'
 import { isPrivateMarker } from '../../crystal/MediaFetcher.js'
 import type { TelegramUpdate, TelegramSender, IdentityResolver, RouterDeps } from './telegramTypes.js'
 // Re-export the adapter contracts so existing importers (index, TelegramSenderAdapter) keep working.
@@ -92,6 +108,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Cancel an in-flight actum — fails it (releases reserved signa). Returns true if it
      *  actually refunded (false if the actum was already terminal). Backs destroy/retry. */
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** File an abuse report naming an actum — backs the delivery menu's Report button
+     *  (Section V.5 of licences such as MiniMax H3's). Absent → the button silently no-ops,
+     *  same fallback every other optional delivery-menu hook (`save`, …) takes. */
+    reportAbuse?: (auctor: AuctorKey, actumId: string) => Promise<{ id: string }>
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
@@ -107,8 +127,20 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     actumIndex?: ActumIndexStore
     /** Warm-pod line — lets /status say where a waiting gen stands rather than just "queued". */
     vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
-    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution. */
+    /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make resolution.
+     *  Also backs /dataset (paired with `datasets`) and /collect's state (noema/telegram-
+     *  photos-into-a-dataset). */
     consuetudinum?: Consuetudinum
+    /** Dataset store — backs /dataset + the media a collected photo lands in. Absent → /dataset
+     *  reports unavailable and a bare idle photo is never filed, no matter the /collect state. */
+    datasets?: Datasets
+    /** Downloads a Telegram file URL's bytes, so a collected photo can be re-hosted under our
+     *  own key instead of staying the transient api.telegram.org link. Absent → collecting
+     *  mode's write path is unavailable (paired with `objectStore`). */
+    mediaFetcher?: MediaFetcher
+    /** Where a collected photo's bytes land once downloaded. Absent → collecting mode's write
+     *  path is unavailable (paired with `mediaFetcher`). */
+    objectStore?: ObjectStore
     /** Bot's @username — composes `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
@@ -116,10 +148,24 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
      *  server-side. Absent → a private run's media cannot be delivered on this bot. */
     resolvePrivateMedia?: (marker: string) => Promise<string | undefined>
+    /** Where credits are bought on the web — linked wherever the bot says "not enough credits". */
+    fundingUrl?: string
   }
 
   // chatId lookup: platform:userId → chatId (set when first message arrives)
   private readonly chatIds = new Map<string, number>()
+
+  // Forum-topic routing: chatId → the message_thread_id the chat's traffic is currently
+  // in. A group with topics enabled puts every message and command inside some topic;
+  // a reply that omits message_thread_id lands in General regardless of where the
+  // triggering message was asked, which is the "wrong channel" bug this map fixes.
+  // Absent (DMs, and groups with topics off) → no entry, so sends carry no thread id.
+  private readonly chatThreadIds = new Map<number, number | undefined>()
+
+  // When each private chat last got the "nothing is running" hint — one per minute, not one
+  // per line of a paste.
+  private readonly idleHintAt = new Map<number, number>()
+  private static readonly IDLE_HINT_EVERY_MS = 60 * 1000
 
   // pending edit: platform:userId → messageId of the message to edit in place
   private readonly pendingEditMessageIds = new Map<string, number>()
@@ -163,6 +209,10 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     installStudioModels?: (podId: string, intellaIds: string[]) => Promise<{ installedModels: string[] } | null>
     acta?: { findById(id: string): Promise<Actum | null> }
     cancelActum?: (actumId: string, reason: string) => Promise<boolean>
+    /** File an abuse report naming an actum — backs the delivery menu's Report button
+     *  (Section V.5 of licences such as MiniMax H3's). Absent → the button silently no-ops,
+     *  same fallback every other optional delivery-menu hook (`save`, …) takes. */
+    reportAbuse?: (auctor: AuctorKey, actumId: string) => Promise<{ id: string }>
     /** Host-guest bond store — when present, group provisionings get their admin set
      *  resolved + stamped into Hospitium.adminAnimaIds on pod.parked. */
     hospitia?: HospitiumStore
@@ -184,8 +234,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
      *  on /status instead of a bare "queued". */
     vocator?: { place(actumId: string): Promise<{ place: number; depth: number } | null> }
     /** Owner-keyed verb→flow bindings — backs /bind persistence + per-user /make
-     *  resolution. Absent → /bind reports unavailable, every verb uses the default. */
+     *  resolution. Absent → /bind reports unavailable, every verb uses the default. Also
+     *  backs /dataset + /collect's persisted state (noema/telegram-photos-into-a-dataset). */
     consuetudinum?: Consuetudinum
+    /** Dataset store — backs /dataset + the media a collected photo lands in. Absent →
+     *  /dataset reports unavailable and a bare idle photo is never filed. */
+    datasets?: Datasets
+    /** Downloads a Telegram file URL's bytes for re-hosting a collected photo under our own
+     *  key. Absent → collecting mode's write path is unavailable (paired with `objectStore`). */
+    mediaFetcher?: MediaFetcher
+    /** Where a collected photo's bytes land once downloaded (paired with `mediaFetcher`). */
+    objectStore?: ObjectStore
     /** Bot's @username — used to compose `https://t.me/<bot>?start=pod_<token>` share links. */
     botUsername?: string
     /** Redeem a web-issued account-link code (`/start link_<code>`) — binds this Telegram as
@@ -195,6 +254,8 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     issueTelegramRecovery?: (telegramUserId: string) => Promise<string>
     /** No-interaction window before the bulletin auto-confirms the warm choice. Default 20s. */
     autoSettleMs?: number
+    /** Where credits are bought on the web. Absent → the route is still spelled out, unlinked. */
+    fundingUrl?: string
     /** Resolve a `noema-private://` marker into a short-lived link Telegram can fetch
      *  server-side (private generation, noema-347). The bytes live in a bucket with no public
      *  binding, so a marker is the only thing a private run hands us; the link is minted for
@@ -205,7 +266,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   }) {
     this.deps = deps
     this.router = deps.router
-    this.sender = deps.sender
+    // Every outbound send goes through this wrapper, so a forum topic's reply lands back
+    // in that topic no matter which subsystem (bulletin, delivery, status, flow render) sent it.
+    this.sender = this._withTopicRouting(deps.sender)
     this.identity = deps.identity
 
     // Mod • → Add catalog/search backend (own module — keeps this adapter lean).
@@ -261,6 +324,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           deleteMessage: (chatId, messageId) => this.sender.deleteMessage?.(chatId, messageId) ?? Promise.resolve(),
         },
         modorum: deps.modorum,
+        intellarum: deps.intellarum,
         resolveOwner: (userId) => this.identity.resolve(userId),
       })
     }
@@ -272,6 +336,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       acta: deps.acta,
       rerun: (actumId, presserUserId, chatId) => this._rerun(actumId, presserUserId, chatId),
       ...(this.saveAs ? { save: (actumId, presserUserId, chatId) => this._saveAs(actumId, presserUserId, chatId) } : {}),
+      ...(deps.reportAbuse ? { report: (actumId, presserUserId) => this._reportAbuse(actumId, presserUserId) } : {}),
     })
 
     // The 👌/🔥 reaction choreography on the command message.
@@ -310,10 +375,26 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         resolveVerb: async (userId, verb) => deps.consuetudinum!.resolve(await this.identity.resolve(userId), verb),
         bindVerb: async (userId, verb, modusId) => deps.consuetudinum!.bind(await this.identity.resolve(userId), verb, modusId),
       } : {}),
+      // /dataset: see/switch/create the default dataset. Omitted when the dataset store or
+      // the preference store isn't wired.
+      ...(deps.consuetudinum && deps.datasets ? {
+        datasetStatus: (userId) => this._datasetStatusText(userId),
+        datasetList: (userId) => this._datasetListText(userId),
+        datasetUse: (userId, nameOrId) => this._datasetUseText(userId, nameOrId),
+        datasetNew: (userId, name) => this._datasetNewText(userId, name),
+      } : {}),
+      // /collect: the toggle that makes a bare idle photo land in the default dataset instead
+      // of being dropped. Needs the dataset + fetch/store trio to actually file a photo, so
+      // the command itself is gated on the full set rather than just the preference store.
+      ...(this._canCollect ? {
+        collectStatus: (userId) => this._collectStatusText(userId),
+        setCollecting: (userId, on) => this._setCollectingText(userId, on),
+      } : {}),
       // Account backup/recovery (username-auth soul ⇆ Telegram) — wired in index.ts against
       // the link-token store. Absent → /recover + link deep links report unavailable.
       ...(deps.linkTelegramAccount ? { linkTelegram: deps.linkTelegramAccount } : {}),
       ...(deps.issueTelegramRecovery ? { issueTelegramRecovery: deps.issueTelegramRecovery } : {}),
+      ...(deps.fundingUrl ? { fundingUrl: deps.fundingUrl } : {}),
     })
 
     // Wire router callbacks
@@ -334,6 +415,28 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   /** Map a neutral UI keyboard to Telegram's inline-keyboard shape. */
   private _toInline(kb: UiKeyboard): InlineKeyboard {
     return inlineKeyboard(kb.map(row => row.map(b => btn(b.label, b.data))))
+  }
+
+  /** Wrap a raw TelegramSender so every message it *sends* (not edits — those are already
+   *  pinned to a messageId) carries the chat's current forum topic. Every subsystem in this
+   *  adapter (bulletins, delivery, status, flow renders) writes through `this.sender`, so
+   *  wrapping it once here is what makes all of them topic-correct, without teaching any of
+   *  them — most of which are deliberately platform-agnostic — what a Telegram topic is. */
+  private _withTopicRouting(sender: TelegramSender): TelegramSender {
+    const thread = (chatId: number) => this.chatThreadIds.get(chatId)
+    return {
+      ...sender,
+      sendMessage: (chatId, text, extra) =>
+        sender.sendMessage(chatId, text, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendPhoto: (chatId, url, extra) =>
+        sender.sendPhoto(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendVideo: (chatId, url, extra) =>
+        sender.sendVideo(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendDocument: (chatId, url, extra) =>
+        sender.sendDocument(chatId, url, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+      sendMediaGroup: (chatId, media, extra) =>
+        sender.sendMediaGroup(chatId, media, { ...extra, message_thread_id: extra?.message_thread_id ?? thread(chatId) }),
+    }
   }
 
   /** How the bulletin manager puts messages on Telegram (BulletinSink). */
@@ -414,6 +517,23 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     await this.router.enter('execute', 'telegram', presserUserId, String(chatId), identity, {
       state: { modusId: actum.modusId, aditus: actum.aditus, browsePageIndex: 0 },
     })
+  }
+
+  /** Report tap on a delivered result → file the abuse report naming this actum, filed by
+   *  whoever tapped (not necessarily who ran it). Only wired into the delivery menu when
+   *  `deps.reportAbuse` is present (see the constructor), so it is always set here. Returns
+   *  the toast text the tap is answered with — success, "already reported" (the write path
+   *  dedups and still answers 200), or why it didn't go through — since this is the one
+   *  delivery-menu action whose outcome the presser needs told. */
+  private async _reportAbuse(actumId: string, presserUserId: string): Promise<string> {
+    try {
+      const identity = await this.identity.resolve(presserUserId)
+      await this.deps.reportAbuse!(identity, actumId)
+      return 'Reported — thanks, we review every flagged run.'
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'rate.limited') return 'Too many reports — try again later.'
+      return 'Could not report — try again.'
+    }
   }
 
   /** Delivery-info entry: open Save-as seeded from the Actum's modus + aditus + pinnedModels. */
@@ -541,6 +661,24 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
   // -------------------------------------------------------------------------
 
   async receive(update: TelegramUpdate): Promise<void> {
+    log.info('telegram update', describeUpdate(update))
+
+    // The bot's own membership of a chat changed (added, removed, promoted, demoted). The
+    // record is the point — a report about a group can be traced to the moment the bot lost
+    // its seat or its rights there — except for 'added': that gets one reply stating the
+    // group rule, sent as a reaction to this event only. Never a backfill into a group the
+    // bot is already in; there is no loop here over existing memberships, only this update.
+    if (update.my_chat_member) {
+      const described = describeMyChatMember(update.my_chat_member)
+      log.info('telegram chat membership', described)
+      if (described.event === 'added') {
+        await this.sender.sendMessage(update.my_chat_member.chat.id, COPY.command.groupJoined).catch(() => {})
+      }
+      return
+    }
+    const migration = update.message && describeChatMigration(update.message)
+    if (migration) log.info('telegram chat migration', migration)
+
     const chatId =
       update.message?.chat.id ??
       update.callback_query?.message?.chat.id
@@ -568,8 +706,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         log.error('TelegramAllocutio error', { error: String(err) })
         if (chatId) {
           if (messageId) void this._react(chatId, messageId, REACTION.error)
+          // An empty balance is the one failure the user can fix themselves — so say how, with
+          // the link, rather than a sentence that sends them to /status to read the same zero.
+          const broke = /insufficient funds/i.test(err instanceof Error ? err.message : String(err))
           await this.sender
-            .sendMessage(chatId, classifyError(err))
+            .sendMessage(chatId, broke ? COPY.command.topUp(this.deps.fundingUrl, isPrivateChat(chatId)) : classifyError(err), broke ? topUpMarkup(chatId, this.deps.fundingUrl) : undefined)
             .catch(() => {})
         }
       }
@@ -602,6 +743,11 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // and force-reply reply paths). Render target no longer reads from this map; it
     // resolves from the chat-scoped FlowContext (ruling 3).
     this.chatIds.set(`telegram:${userId}`, chatId)
+    // Track which forum topic this chat's traffic is in right now, so every reply the
+    // various subsystems send back lands in the same topic, not General. Absent on a
+    // non-topic message (DM, or General itself) → clear, so sends there carry no thread id.
+    if (message.message_thread_id !== undefined) this.chatThreadIds.set(chatId, message.message_thread_id)
+    else this.chatThreadIds.delete(chatId)
 
     // Mod • → Add: a reply to a force-reply prompt carries either a search term or trigger word(s).
     const repliedTo = message.reply_to_message?.message_id
@@ -661,7 +807,13 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
           if (fileUrl) {
             await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text: fileUrl })
           }
+          return
         }
+        // A photo into an idle private chat fills nothing on its own — unless collecting mode
+        // is on, in which case this is exactly the moment it exists for: file it into the
+        // default dataset instead of dropping it (noema/telegram-photos-into-a-dataset).
+        // Groups are out of scope for now — same gate the idle hint has always had.
+        if (message.chat.type === 'private') await this._handleIdleMedia(chatId, userId, bare)
         return
       }
 
@@ -677,9 +829,122 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
       if (text === '') return
       if (this.router.hasContext('telegram', userId, String(chatId))) {
         await this.router.handle('telegram', userId, String(chatId), { kind: 'prompt', text })
+        return
       }
-      // No active flow → no-op
+      // No active flow. In a private chat (or when addressed in a group) that is a person
+      // typing at a bot that is not listening — say what would start something.
+      await this._idleHint(chatId, COPY.command.idleText)
     }
+  }
+
+  /** The "nothing is running" hint, at most once a minute per chat. */
+  private async _idleHint(chatId: number, text: string): Promise<void> {
+    const now = Date.now()
+    const last = this.idleHintAt.get(chatId)
+    if (last !== undefined && now - last < TelegramAllocutio.IDLE_HINT_EVERY_MS) return
+    this.idleHintAt.set(chatId, now)
+    await this.sender.sendMessage(chatId, text).catch(() => {})
+  }
+
+  // ---------------------------------------------------------------------------
+  // Collecting (noema/telegram-photos-into-a-dataset) — /collect, /dataset, and
+  // the bare-idle-photo write path they gate.
+  // ---------------------------------------------------------------------------
+
+  /** Whether a bare idle photo can actually be filed: the dataset store, the preference
+   *  store (where the /collect toggle + default-dataset pointer live), and the fetch/store
+   *  pair a re-host needs are all wired. */
+  private get _canCollect(): boolean {
+    return !!(this.deps.consuetudinum && this.deps.datasets && this.deps.mediaFetcher && this.deps.objectStore)
+  }
+
+  private _defaultDatasetDeps(): DefaultDatasetDeps {
+    return { datasets: this.deps.datasets!, consuetudinum: this.deps.consuetudinum! }
+  }
+
+  /** A bare message's media when no flow is waiting on it (private chats only). Collecting
+   *  mode is what turns this from "fills nothing" into "files it" — and only for a photo:
+   *  video/audio stay out of scope for now, said so rather than silently dropped. */
+  private async _handleIdleMedia(chatId: number, userId: string, bare: { fileId: string; type: EnvelopeMediaType }): Promise<void> {
+    if (!this._canCollect) {
+      await this._idleHint(chatId, COPY.command.idleMedia)
+      return
+    }
+    const owner = await this.identity.resolve(userId).catch(() => null)
+    const generatio = owner ? await this.deps.consuetudinum!.resolveGeneratio(owner).catch(() => undefined) : undefined
+    if (!owner || generatio?.collecting !== true) {
+      await this._idleHint(chatId, COPY.command.idleMediaCollectable)
+      return
+    }
+    if (bare.type !== 'image') {
+      await this._idleHint(chatId, COPY.command.collectImageOnly)
+      return
+    }
+    const fileUrl = await this._resolveFileUrl(bare.fileId)
+    if (!fileUrl) {
+      await this._idleHint(chatId, COPY.command.idleMedia)
+      return
+    }
+    try {
+      const collected = await collectPhoto(owner, fileUrl, {
+        ...this._defaultDatasetDeps(),
+        fetcher: this.deps.mediaFetcher!,
+        store: this.deps.objectStore!,
+      })
+      // Not throttled by `_idleHint` — collecting mode must stay visible at a glance every
+      // time it fires, not once a minute.
+      await this.sender.sendMessage(chatId, COPY.command.collected(collected.datasetName, collected.count)).catch(() => {})
+    } catch (err) {
+      // The fetch failure's own message embeds the file URL on a throw — and that URL
+      // carries the bot token (`getFileLink`'s whole reason for existing in redact.ts).
+      // Scrub it the same way every outbound send already does before it reaches logs.
+      log.warn('telegram: collect photo failed', { error: redactSecrets(String(err)) })
+      await this._idleHint(chatId, COPY.command.idleMedia)
+    }
+  }
+
+  private async _collectStatusText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const generatio = await this.deps.consuetudinum!.resolveGeneratio(owner)
+    return COPY.command.collectState(generatio?.collecting === true)
+  }
+
+  private async _setCollectingText(userId: string, on: boolean): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const generatio = await this.deps.consuetudinum!.resolveGeneratio(owner)
+    await this.deps.consuetudinum!.setGeneratio(owner, { ...(generatio ?? {}), collecting: on })
+    return COPY.command.collectState(on)
+  }
+
+  private async _datasetStatusText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const dataset = await ensureDefaultDataset(owner, this._defaultDatasetDeps())
+    return COPY.command.datasetDefault(dataset.name, liveMedia(dataset.media).length)
+  }
+
+  private async _datasetListText(userId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const deps = this._defaultDatasetDeps()
+    const [all, current] = await Promise.all([listOwnDatasets(owner, deps), getDefaultDataset(owner, deps)])
+    if (all.length === 0) return COPY.command.datasetEmpty
+    return COPY.command.datasetList(all.map((d) => ({ name: d.name, isDefault: d.id === current?.id })))
+  }
+
+  private async _datasetUseText(userId: string, nameOrId: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const deps = this._defaultDatasetDeps()
+    const target = await setDefaultDataset(owner, nameOrId, deps)
+    if (!target) {
+      const available = await listOwnDatasets(owner, deps)
+      return COPY.command.datasetNotFound(nameOrId, available.map((d) => d.name))
+    }
+    return COPY.command.datasetSwitched(target.name)
+  }
+
+  private async _datasetNewText(userId: string, name: string): Promise<string> {
+    const owner = await this.identity.resolve(userId)
+    const created = await createDefaultDataset(owner, name, this._defaultDatasetDeps())
+    return COPY.command.datasetCreated(created.name)
   }
 
   /** Group gate (ruling 2): was this message @-mentioning the bot, or replying to one
@@ -723,24 +988,32 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
 
     if (chatId) {
       this.chatIds.set(`telegram:${userId}`, chatId)
+      const threadId = query.message?.message_thread_id
+      if (threadId !== undefined) this.chatThreadIds.set(chatId, threadId)
+      else this.chatThreadIds.delete(chatId)
     }
 
-    // Always ack the callback query
-    await this.sender.answerCallbackQuery(query.id)
+    // Every tap is answered exactly once. A tap something below consumes is answered plainly;
+    // a tap nothing consumes — a button on a card whose flow is gone — is answered with a
+    // toast that says so. Telegram shows a spinner on the button until the answer lands, so
+    // the plain answer goes first and the handler runs after it.
+    const ack = (text?: string) => this.sender.answerCallbackQuery(query.id, text)
 
-    if (!query.data) return
+    if (!query.data) { await ack(); return }
 
     // Session bulletin — warm stepper / confirm / refresh / kill / Mod • picker.
     // Slice off the `bul:` prefix rather than split on ':' — picker ids carry their own
     // colon suffix (`mod.pick:3`, `mod.filter:lora`, `mod.page:next`) that a split would drop.
     if (query.data.startsWith('bul:') && chatId) {
+      await ack()
       const action = query.data.slice(4)
       await this.bulletins.handleControl(chatId, String(query.from.id), action)
       return
     }
 
-    // /status HUD — refresh / cancel:<actumId> / bulletin:<studioId> / join:<studioId> / history / settings
+    // /status HUD — refresh / cancel:<actumId> / bulletin:<studioId> / join:<studioId>
     if (query.data.startsWith('stat:') && chatId) {
+      await ack()
       await this._handleStatusCallback(query.data.slice(5), userId, chatId)
       return
     }
@@ -748,6 +1021,16 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Delivery menu — morphing row + Info stats. Data: dm:<action>:<actumId>[:<type>]
     if (query.data.startsWith('dm:') && chatId) {
       const [, action, actumId, ratedType] = query.data.split(':')
+      // Report is the one action whose outcome the presser needs told, so it answers with
+      // the menu's own toast text instead of the plain ack every other action gets up front
+      // (Telegram shows a spinner until the answer lands — those stay fast, unlike a report
+      // write, by acking first and running after, same as the comment above `ack` explains).
+      if (action === 'report') {
+        const toast = await this.delivery.handle(actumId, action, { presserUserId: String(query.from.id), chatId })
+        await ack(toast || undefined)
+        return
+      }
+      await ack()
       // Pass the callback's own chat so the menu can refuse cross-chat actumIds.
       await this.delivery.handle(actumId, action, { ratedType, presserUserId: String(query.from.id), chatId })
       return
@@ -756,47 +1039,63 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     // Save-as review — prompt-mode toggle / Save (collision check + register) / Cancel.
     // Keyed on the review message the button rode on (the SaveAsMenu owns the draft).
     if (query.data.startsWith('sa:') && chatId && query.message?.message_id !== undefined) {
+      await ack()
       await this.saveAs?.handle(query.message.message_id, query.data.slice(3), chatId, userId)
       return
     }
 
     // Pod invite button — send a forwardable invite message
     if (query.data.startsWith('pod_invite:') && chatId) {
+      await ack()
       void this.sender.sendMessage(chatId, COPY.status.podInvite).catch(() => {})
       return
     }
 
     const event = decodeCallbackData(query.data)
-    if (!event) return
+    if (!event) { await ack(); return }
 
     // Flow-card "Save as…" — open the Save-as menu seeded from the active flow's card
     // state (modusId + aditus + pinnedModels). Intercepted here, NOT routed to the flow
     // (the menu is force-reply driven, with no active flow step of its own).
     if (event.kind === 'action' && event.actionId === 'saveas' && chatId) {
+      await ack()
       await this._saveAsFromCard(userId, chatId)
       return
     }
 
-    // Store the message ID for in-place editing on the next step
-    if (query.message?.message_id !== undefined) {
-      this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
-    }
-
-    // Start-screen shortcut buttons — launch flows directly (same path as commands).
-    if (event.kind === 'select') {
-      if (event.selectedId === 'make' || event.selectedId === 'flows') {
-        await this._enterExecute(userId)
-        return
-      }
-      if (event.selectedId === 'chat') {
-        await this._enterExecute(userId, { modusId: CANON_VERBS.chat, aditus: {}, browsePageIndex: 0 })
+    // Start-screen shortcut buttons — each does what its command does. `make` runs the bound
+    // /make flow (it used to open the generic mode picker, which is what `flows` is for) and
+    // `status` is /status. The tapped message becomes the next card (edit in place).
+    if (event.kind === 'select' && chatId) {
+      const shortcut = event.selectedId
+      if (shortcut === 'make' || shortcut === 'flows' || shortcut === 'chat' || shortcut === 'status') {
+        await ack()
+        if (query.message?.message_id !== undefined && shortcut !== 'status') {
+          this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
+        }
+        if (shortcut === 'make') await this.commands.dispatch(userId, chatId, '/make')
+        else if (shortcut === 'flows') await this._enterExecute(userId)
+        else if (shortcut === 'chat') await this._enterExecute(userId, { modusId: CANON_VERBS.chat, aditus: {}, browsePageIndex: 0 })
+        else await this._showStatus(userId, chatId)
         return
       }
     }
 
     if (chatId && this.router.hasContext('telegram', userId, String(chatId))) {
+      await ack()
+      // The tapped message becomes the next step's card (edit in place). Only when the tap is
+      // going to be answered: stamping it for a dead tap made the NEXT /make overwrite that old
+      // message somewhere up the chat instead of posting at the bottom.
+      if (query.message?.message_id !== undefined) {
+        this.pendingEditMessageIds.set(`telegram:${userId}`, query.message.message_id)
+      }
       await this.router.handle('telegram', userId, String(chatId), event)
+      return
     }
+
+    // Nothing is behind this button any more: the flow it belonged to ended, expired, or was
+    // somebody else's. Say so where the tapper is looking, without posting into the chat.
+    await ack(COPY.command.menuExpired)
   }
 
   // -------------------------------------------------------------------------
@@ -832,7 +1131,7 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
         continue
       }
 
-      const { text, extra } = renderPrimitive(primitive)
+      const { text, extra } = renderPrimitive(primitive, chatId)
 
       // Feature 2: edit in place if we have a pending edit message ID and this primitive has a keyboard
       if (editMessageId !== undefined && extra?.reply_markup) {
@@ -1016,9 +1315,9 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     }
 
     if (action.startsWith('bulletin:') || action.startsWith('join:') || action === 'history' || action === 'settings') {
-      // V1 stubs — surface progress on these in later sprints. Acknowledge so
-      // the user sees something happen.
-      await this.sender.sendMessage(chatId, `\`${action}\` — coming soon.`)
+      // Not built. History and Settings no longer render; a tap on an older message, or on a
+      // studio row, gets a fresh /status rather than a promise.
+      await this._showStatus(userId, chatId)
       return
     }
   }
@@ -1030,12 +1329,17 @@ export class TelegramAllocutio implements Omit<Allocutio, 'parse' | 'resolve' | 
     const text = `\
 noema
 
-Generate AI art, chat with models, explore creative tools.`
+Generate AI art, chat with models, explore creative tools.
 
+${GROUP_RULE}`
+
+    // Every button here answers: the second row used to be "connect wallet" and "balance",
+    // which no handler ever received.
+    const fundingUrl = this.deps.fundingUrl
     await this.sender.sendMessage(chatId, text, {
       reply_markup: inlineKeyboard([
         [btn('make', 's:make'), btn('chat', 's:chat'), btn('flows', 's:flows')],
-        [btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')],
+        [btn('status', 's:status'), ...(fundingUrl ? [accountBtn('top up', fundingUrl, chatId)] : [])],
       ]),
     })
   }
@@ -1135,9 +1439,12 @@ Generate AI art, chat with models, explore creative tools.`
     if (chatId === null) return
 
     switch (resolution.kind) {
-      case 'complete':
-        await this.sender.sendMessage(chatId, COPY.status.done)
+      case 'complete': {
+        // A ✕ on a card completes the flow with `cancelled` set; "Done." would misname it.
+        const cancelled = (resolution.output as { cancelled?: boolean } | undefined)?.cancelled === true
+        await this.sender.sendMessage(chatId, cancelled ? COPY.command.cancelled : COPY.status.done)
         break
+      }
       case 'abandon':
         // Silent — abandon fires on implicit context replacement (e.g. /make while already in a flow).
         // Explicit /cancel sends its own message directly from the command handler.

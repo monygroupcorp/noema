@@ -69,9 +69,13 @@ COMPLIANCE_DIR="${COMPLIANCE_DIR:-/opt/noema/private/compliance}"
 CEREMONY_DIR="${CEREMONY_DIR:-/opt/noema/ceremony}"
 CEREMONY_DIR_IN_CONTAINER="/var/lib/noema/ceremony"
 
-# Keystore
-KEYSTORE_SCRIPT="${DEPLOY_ROOT}/keystore/loadKeystore.js"
-KEYSTORE_PATH="/etc/account/STATIONTHIS"
+# Arcanum circuit setup artifacts (host state, NOT in the image: arcanum_0000.zkey and
+# arcanum.r1cs are gitignored — too large to commit, per docs/arcanum-ceremony.md). Read-only;
+# the app only reads arcanum_0000.zkey from here, and only at boot, and only on the one deploy
+# that sets CEREMONY_OPEN or CEREMONY_REOPEN — the running ceremony's own chain lives in
+# CEREMONY_DIR above, not here.
+ARCANUM_ARTIFACTS_DIR="${ARCANUM_ARTIFACTS_DIR:-/opt/noema/arcanum-artifacts}"
+ARCANUM_ARTIFACTS_DIR_IN_CONTAINER="/var/lib/noema/arcanum-artifacts"
 
 # Health check tuning
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-80}"
@@ -229,12 +233,38 @@ assert_alias_serving() {
   return 1
 }
 
+# A CEREMONY_ZKEY_DIR line in .env is the one way to move ceremony custody off its mount
+# without touching this script or docker-compose.prod.yml — which is to say, the one way the
+# tests that read those two files cannot see. It lands on the same `docker run` as the
+# explicit --env below, and which of the two the container ends up with is a detail of the
+# docker CLI; whether a finished ceremony survives the next deploy must not rest on that.
+# This script points custody at the mount itself, so a value in .env is either the same path
+# or a ceremony with a deploy's worth of life left in it.
+assert_custody_not_repointed() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+  local line
+  line=$(grep -E '^[[:space:]]*CEREMONY_ZKEY_DIR(=|$)' "${ENV_FILE}" | tail -n1 || true)
+  [[ -n "${line}" ]] || return 0
+  local value
+  value=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*CEREMONY_ZKEY_DIR=?//' | tr -d '\r"'"'"'')
+  [[ "${value}" == "${CEREMONY_DIR_IN_CONTAINER}" ]] && return 0
+  log "Refusing to deploy: ${ENV_FILE} points CEREMONY_ZKEY_DIR at '${value}', and ceremony"
+  log "custody is mounted at ${CEREMONY_DIR_IN_CONTAINER}. Nothing is mounted where that line"
+  log "points, so the trusted-setup keys would live inside the container and this deploy would"
+  log "be the one that destroys them, while the published transcript went on naming every one."
+  log "Delete the line — deploy.sh sets the variable itself — or mount the path it names."
+  exit 1
+}
+
 # ==================================================================
 # DEPLOY SEQUENCE
 # ==================================================================
 
 log "=== Noema deploy started (image: ${IMAGE}) ==="
 rotate_logs
+# Before anything is pulled or taken out of service: a box that would lose its ceremony
+# keys is refused while it is still serving them.
+assert_custody_not_repointed
 
 # 1. Free disk space before pull — remove all unused images (old versioned tags accumulate)
 log "Pruning unused Docker images to free disk space..."
@@ -247,53 +277,49 @@ docker pull "${IMAGE}" 2>&1 | tee -a "${LOG_FILE}"
 # 3. Enable maintenance mode
 enable_maintenance
 
-# 4. Load Ethereum signer private key (interactive — requires TTY)
-log "Loading Ethereum signer private key..."
-PRIVATE_KEY=$(node "${KEYSTORE_SCRIPT}" --path "${KEYSTORE_PATH}" < /dev/tty)
-if [[ -z "${PRIVATE_KEY}" ]]; then
-  log "Failed to load private key; aborting."
-  exit 1
-fi
-
-# 5. Ensure infrastructure
+# 4. Ensure infrastructure
 ensure_network
 start_caddy
 
-# 6. Blue-green: start new container alongside old
+# 5. Blue-green: start new container alongside old
 NEW_CONTAINER="${APP_CONTAINER}-new"
 NEW_ALIAS="${CONTAINER_ALIAS}-new"
 stop_container_if_exists "${NEW_CONTAINER}"
 
+# Logs go to the host journal, not docker's json-file: a json-file log is deleted with its
+# container, and step 8 below removes the old container on every deploy, so an incident from
+# before the last deploy left nothing to read. The journal keeps them across deploys, rotated by
+# journald's own size cap. Read them with `journalctl -t noema` (`docker logs` still works too).
 run_logged "Starting new container (${IMAGE})..." docker run -d \
-  --env ETHEREUM_SIGNER_PRIVATE_KEY="${PRIVATE_KEY}" \
   --env MAINTENANCE_MODE_FILE="${MAINT_FLAG}" \
   --env CEREMONY_ZKEY_DIR="${CEREMONY_DIR_IN_CONTAINER}" \
+  --env ARCANUM_ROOT_ZKEY_PATH="${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}/arcanum_0000.zkey" \
   --env-file "${ENV_FILE}" \
   --network "${NETWORK_NAME}" \
   --network-alias "${NEW_ALIAS}" \
   --restart unless-stopped \
-  --log-opt max-size=100m \
-  --log-opt max-file=3 \
+  --log-driver journald \
+  --log-opt tag=noema \
   -v "${MAINT_DIR}:${MAINT_DIR}" \
   -v "${COMPLIANCE_DIR}:/usr/src/app/dist/private/compliance:ro" \
   -v "${CEREMONY_DIR}:${CEREMONY_DIR_IN_CONTAINER}" \
+  -v "${ARCANUM_ARTIFACTS_DIR}:${ARCANUM_ARTIFACTS_DIR_IN_CONTAINER}:ro" \
   --name "${NEW_CONTAINER}" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   "${IMAGE}"
 
-# 7. Health check new container — old keeps serving traffic
+# 6. Health check new container — old keeps serving traffic
 if ! health_check_app "${NEW_CONTAINER}" "${NEW_ALIAS}"; then
   log "Health check failed on new container; old container still serving."
   docker logs "${NEW_CONTAINER}" 2>&1 | tail -n 200 >> "${LOG_FILE}" || true
   stop_container_if_exists "${NEW_CONTAINER}"
-  unset PRIVATE_KEY
   disable_maintenance
   log "Deploy ABORTED. No downtime occurred."
   exit 1
 fi
 
-# 8. Swap: disconnect old, reconnect new with production alias
+# 7. Swap: disconnect old, reconnect new with production alias
 log "Swapping traffic to new container..."
 if docker ps --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   docker network disconnect "${NETWORK_NAME}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1 || true
@@ -317,14 +343,13 @@ if ! assert_alias_serving; then
   else
     log "CRITICAL: neither container holds ${CONTAINER_ALIAS}. Manual recovery required (see deploy.sh header)."
   fi
-  unset PRIVATE_KEY
   disable_maintenance
   log "Deploy ABORTED at the swap. Old container was NOT destroyed."
   exit 1
 fi
 log "Traffic swapped to new container."
 
-# 9. Stop old container (capturing shutdown logs), then rename new
+# 8. Stop old container (capturing shutdown logs), then rename new
 if docker ps -a --format '{{.Names}}' | grep -q "^${APP_CONTAINER}$"; then
   log "Stopping ${APP_CONTAINER} (${STOP_TIMEOUT}s graceful)..."
   docker stop --time "${STOP_TIMEOUT}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
@@ -338,7 +363,7 @@ fi
 docker rename "${NEW_CONTAINER}" "${APP_CONTAINER}" >> "${LOG_FILE}" 2>&1
 log "Container renamed to ${APP_CONTAINER}."
 
-# 9b. Report the compliance mount. An empty mount is indistinguishable from a correct one from
+# 8b. Report the compliance mount. An empty mount is indistinguishable from a correct one from
 # outside the container, so say which case happened rather than making the next reader exec in.
 if [ -n "$(ls -A "${COMPLIANCE_DIR}" 2>/dev/null || true)" ]; then
   log "Compliance mount POPULATED (${COMPLIANCE_DIR} -> read-only). Real OFAC/CSAM module available to the runtime."
@@ -351,16 +376,13 @@ else
   log "  To install it, follow the operator provisioning notes for the compliance module."
 fi
 
-# 10. Clear private key from memory
-unset PRIVATE_KEY
-
-# 11. Disable maintenance
+# 9. Disable maintenance
 disable_maintenance
 
-# 12. Tag current image as 'previous' for future rollbacks
+# 10. Tag current image as 'previous' for future rollbacks
 docker tag "${IMAGE}" "${REGISTRY}:previous" >> "${LOG_FILE}" 2>&1 || true
 
-# 13. Cleanup unused images (belt-and-suspenders after pre-pull prune)
+# 11. Cleanup unused images (belt-and-suspenders after pre-pull prune)
 docker image prune -a -f >> "${LOG_FILE}" 2>&1 || true
 
 log "Deployment complete. Recent app logs:"

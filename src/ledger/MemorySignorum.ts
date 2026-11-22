@@ -53,6 +53,12 @@ export class MemorySignorum implements Signorum {
       .reduce((sum, s) => sum + s.valor, 0n)
   }
 
+  async lockedBalance(by: { animaId: string } | { commitment: string }): Promise<bigint> {
+    return this.forIdentity(by)
+      .filter(s => s.status === 'locked')
+      .reduce((sum, s) => sum + s.valor, 0n)
+  }
+
   async history(by: { animaId: string } | { commitment: string }): Promise<Signa> {
     return this.forIdentity(by)
   }

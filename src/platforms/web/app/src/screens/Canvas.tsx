@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, Handle, Position,
@@ -7,9 +8,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { AppShell } from '../shell/AppShell';
+import { BACK, LoadFailure, loadFailureKind, type LoadFailureKind } from '../components/LoadFailure';
 import { Ic } from '../lib/icons';
 import {
-  api, ApiRequestError,
+  api, ApiRequestError, withReadTimeout,
   type FlowDescription, type FlowSummary, type JsonSchema, type Tabula, type TabulaNodus, type TabulaVinculum,
 } from '../lib/api';
 import './canvas.css';
@@ -44,12 +46,47 @@ export function buildPalette(flows: FlowDescription[]): PaletteEntry[] {
 }
 
 // The canonical catalog (GET /v1/flows) plus the caller's own (GET /v1/me/flows,
-// the picker's owner-scoped twin) — deduped by id for the palette.
+// the picker's owner-scoped twin) — one palette row per flow.
+//
+// Two rows can be the same flow under different ids: an owner's copy of a canonical flow
+// keeps the canonical name, and two versions of one flow share it too. (The registry twin
+// this guarded against — an older `runmake.flux-schnell` registration left live beside
+// `flux-schnell` — is retired at the source now: `scripts/migrations/
+// 2026_11_retire_runmake_flow_twins.ts` sets its `canonica` false, so `GET /v1/flows` no
+// longer carries it. This fold stays as a guard against the id-union cases above, and
+// against a future registration twin recurring the same way.) So after the id union, rows
+// are folded by name: the newest version wins, and between equal versions the one that
+// describes itself (`descriptio`), else the first listed.
 export function dedupeFlows(canonical: FlowSummary[], mine: FlowSummary[]): FlowSummary[] {
   const byId = new Map<string, FlowSummary>();
   for (const f of canonical) byId.set(f.id, f);
   for (const f of mine) byId.set(f.id, f);
-  return [...byId.values()];
+  const byName = new Map<string, FlowSummary>();
+  for (const f of byId.values()) {
+    const key = (typeof f.nomen === 'string' && f.nomen.trim()) || f.id;
+    const held = byName.get(key);
+    if (!held || prefersFlow(f, held)) byName.set(key, f);
+  }
+  return [...byName.values()];
+}
+
+// Whether `a` should stand for the flow `b` currently stands for — a newer version, or the
+// same version with a description where `b` has none.
+function prefersFlow(a: FlowSummary, b: FlowSummary): boolean {
+  const byVersion = compareVersio(a.versio, b.versio);
+  if (byVersion !== 0) return byVersion > 0;
+  return !!a.descriptio && !b.descriptio;
+}
+
+// Dotted numeric versions ("1.0.0" < "1.2" < "2.0.0"); a missing version sorts lowest.
+function compareVersio(a?: string, b?: string): number {
+  const parse = (v?: string) => (v ?? '').split('.').map((p) => parseInt(p, 10) || 0);
+  const pa = parse(a), pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }
 
 // A small fixed rotation of node colors, hashed off modusId for stable variety —
@@ -131,6 +168,31 @@ export function tabulaToEdges(tabula: Pick<Tabula, 'vincula'>): Edge[] {
 export function resolveTabulaForModus<T extends Pick<Tabula, 'modusId'>>(tabulae: T[], modusId?: string): T | undefined {
   const match = modusId ? tabulae.find((t) => t.modusId === modusId) : undefined;
   return match ?? tabulae[0];
+}
+
+// Everything the canvas needs before it can draw: the palette (the canonical catalogue plus
+// the caller's own flows, each described for its real ports) and the caller's current
+// Tabula — the most recently saved one, or a fresh draft when they have none.
+//
+// Tabulae are owned by whoever asks, a named account or the anonymous commitment alike, so
+// a visitor with no session gets a draft of their own here rather than a sign-in gate. Any
+// of these reads can still fail — a dropped connection, a server answering 5xx, a deployment
+// that refuses the caller — and the rejection is the screen's to show: it is not caught
+// here, so the one catch at the screen sees it whichever read it came from.
+//
+// The three lists are independent and go out together; only the flow descriptions wait on
+// the lists, and only the draft waits on the tabulae. The signal is the screen's: once it
+// leaves (or asks again), the describes are abandoned and no draft is created on its behalf.
+export async function loadCanvas(modusId: string | undefined, signal?: AbortSignal): Promise<{ palette: PaletteEntry[]; tabula: Tabula }> {
+  const [{ flows: canonical }, { flows: mine }, { tabulae }] = await Promise.all([api.listFlows(), api.listMyFlows(), api.listTabulae()]);
+  const described = await Promise.all(dedupeFlows(canonical, mine).map((f) => api.getFlow(f.id, signal)));
+  const palette = buildPalette(described);
+  let tabula = resolveTabulaForModus(tabulae, modusId);
+  if (!tabula) {
+    if (signal?.aborted) throw new DOMException('The canvas load was abandoned', 'AbortError');
+    tabula = (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
+  }
+  return { palette, tabula };
 }
 
 // ── Publish-error-on-edge (AMENDMENT v2 — the one judgment call in this item) ────
@@ -302,6 +364,79 @@ export function NodeParamPanel({ node, onChange, onClose }: {
   );
 }
 
+// ── The tools sheet (phone) ────────────────────────────────────────────────────
+// At phone width the stage has no room beside the palette: the list stood the full height
+// of the page and the graph, the surface this screen is (REFERENCES.md REF-19), was behind it.
+// There the palette is summoned instead — one button on the stage opens this sheet, which
+// states its shape first (how many tools, a filter to narrow them; D-55) and closes once a
+// tool is picked. The desktop palette is unchanged.
+
+// Narrow the palette by name as the visitor types: case-blind, whitespace-trimmed, every
+// word must appear somewhere in the name so "flux edit" finds "FLUX.1 Kontext — instruction edit".
+export function filterPalette(palette: PaletteEntry[], query: string): PaletteEntry[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return palette;
+  return palette.filter((entry) => {
+    const name = entry.nomen.toLowerCase();
+    return words.every((w) => name.includes(w));
+  });
+}
+
+export function toolsCount(n: number): string {
+  return `${n} ${n === 1 ? 'tool' : 'tools'}`;
+}
+
+// The sheet's own markup, portal-free so it can be rendered statically in the tests; Canvas
+// portals it to <body> so it sits above the shell, not inside the stage's stacking context.
+export function ToolsSheet({ palette, query, onQuery, onPick, onClose }: {
+  palette: PaletteEntry[];
+  query: string;
+  onQuery: (q: string) => void;
+  onPick: (entry: PaletteEntry) => void;
+  onClose: () => void;
+}) {
+  const shown = filterPalette(palette, query);
+  return (
+    <div className="canvas-tools-sheet" onClick={onClose}>
+      <div
+        className="canvas-tools-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="canvas-tools-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="canvas-tools-head">
+          <b id="canvas-tools-title">{toolsCount(palette.length)}</b>
+          <button type="button" className="btn ghost sm canvas-tools-close" onClick={onClose} aria-label="Close">
+            <Ic name="x" />
+          </button>
+        </div>
+        <div className="canvas-tools-filter">
+          <input
+            className="inp"
+            type="search"
+            value={query}
+            placeholder="Filter by name"
+            aria-label="Filter tools by name"
+            onChange={(e) => onQuery(e.target.value)}
+          />
+        </div>
+        <div className="canvas-tools-list">
+          {shown.map((entry) => (
+            <button key={entry.modusId} type="button" className="cp-item" onClick={() => onPick(entry)}>
+              <Ic name="plus" /> {entry.nomen}
+            </button>
+          ))}
+          {palette.length === 0 && <div className="canvas-tools-empty">No flows registered yet.</div>}
+          {palette.length > 0 && shown.length === 0 && (
+            <div className="canvas-tools-empty">No tool is named like "{query.trim()}". Clear the filter to see all {palette.length}.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Canvas() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -314,6 +449,11 @@ export function Canvas() {
   const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node<FlowData>>([]);
   const [edges, setEdges, onEdgesChangeRaw] = useEdgesState<Edge>([]);
   const [loading, setLoading] = useState(true);
+  // Why the canvas is not on screen, once the load has settled against it. Null while the
+  // load is in flight — and the load is bounded (withReadTimeout), so null is never permanent.
+  const [loadFailure, setLoadFailure] = useState<LoadFailureKind | null>(null);
+  // Bumped by "Try again": runs the load again without leaving the screen.
+  const [attempt, setAttempt] = useState(0);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<PublishErrorState | null>(null);
@@ -321,6 +461,10 @@ export function Canvas() {
   // The node whose parameter panel is open — id only, so it self-heals off `nodes` (a
   // delete/undo cycle, or an autosave-triggered node replacement, never shows stale data).
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // The phone's tools sheet (see ToolsSheet): open or not, and the name filter typed into it.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsQuery, setToolsQuery] = useState('');
+  const summonRef = useRef<HTMLButtonElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextSave = useRef(true);
   const rfInstance = useRef<ReactFlowInstance<Node<FlowData>, Edge> | null>(null);
@@ -331,29 +475,41 @@ export function Canvas() {
   const pendingUndo = useRef<{ node: Node<FlowData>; edges: Edge[] } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load the palette (canonical + owner's own flows, real ports) and the caller's
-  // current Tabula — the most recently saved one, or a fresh draft if they have none.
-  // Reopening /canvas lands back on the same workspace (no separate picker UI in scope).
+  // Load the palette and the caller's current Tabula (see loadCanvas). Reopening /canvas
+  // lands back on the same workspace (no separate picker UI in scope).
+  //
+  // The load is bounded and its failure is shown: a read the server never answers, or one it
+  // refuses, becomes a state with a way out instead of a loading screen that outlives the
+  // tab (D-62). Before this, any rejection here went unobserved and "Loading canvas…" stayed
+  // up for good.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const [{ flows: canonical }, { flows: mine }] = await Promise.all([api.listFlows(), api.listMyFlows()]);
-      const described = await Promise.all(dedupeFlows(canonical, mine).map((f) => api.getFlow(f.id)));
-      if (cancelled) return;
-      const built = buildPalette(described);
-      setPalette(built);
-
-      const { tabulae } = await api.listTabulae();
-      const current = resolveTabulaForModus(tabulae, modusId) ?? (await api.createTabula({ nomen: 'Untitled canvas' })).tabula;
-      if (cancelled) return;
-      setTabula(current);
-      setNodes(tabulaToNodes(current, built));
-      setEdges(tabulaToEdges(current));
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
+    // One signal for the whole load: the deadline pulls it, and so does leaving the screen.
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadFailure(null);
+    withReadTimeout((deadline) => {
+      deadline.addEventListener('abort', () => controller.abort(), { once: true });
+      return loadCanvas(modusId, controller.signal);
+    })
+      .then(({ palette: built, tabula: current }) => {
+        if (cancelled) return;
+        skipNextSave.current = true;
+        setPalette(built);
+        setTabula(current);
+        setNodes(tabulaToNodes(current, built));
+        setEdges(tabulaToEdges(current));
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setLoadFailure(loadFailureKind(e));
+        setLoading(false);
+      });
+    return () => { cancelled = true; controller.abort(); };
+    // `modusId` only picks the tabula on load; a later change to the query must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   // Autosave — debounced ~1.5s after any node/edge change, skipping the initial load.
   useEffect(() => {
@@ -390,6 +546,20 @@ export function Canvas() {
     if (error) dismissError();
   }, [setEdges, error, dismissError]);
 
+  const closeTools = useCallback(() => {
+    setToolsOpen(false);
+    setToolsQuery('');
+    summonRef.current?.focus();
+  }, []);
+
+  // Escape dismisses the sheet, as it does every other dialog in the app.
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeTools(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [toolsOpen, closeTools]);
+
   const addNode = useCallback((entry: PaletteEntry) => {
     const id = `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const count = nodes.length;
@@ -401,6 +571,12 @@ export function Canvas() {
     };
     setNodes((ns) => [...ns, node]);
   }, [nodes.length, setNodes]);
+
+  // Picking from the sheet places the node and puts the stage back in front.
+  const pickTool = useCallback((entry: PaletteEntry) => {
+    addNode(entry);
+    closeTools();
+  }, [addNode, closeTools]);
 
   // Delete a placed node: capture it + its connected edges for undo, then let xyflow's
   // own deleteElements drive the cascade (same onNodesChange/onEdgesChange path as any
@@ -469,16 +645,26 @@ export function Canvas() {
   // an in-flight load, instead of holding a copy that can go stale.
   const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null;
 
+  // The load settled without a canvas: say what happened and offer the way out — a retry,
+  // the door when the server refused this visitor, and home either way.
+  if (loadFailure) {
+    return (
+      <AppShell crumb="Canvas">
+        <LoadFailure noun="canvas" kind={loadFailure} back={BACK.home} onRetry={() => setAttempt((n) => n + 1)} />
+      </AppShell>
+    );
+  }
+
   if (loading) {
     return (
-      <AppShell crumb="canvas">
-        <div className="canvas-wrap canvas-loading">Loading canvas…</div>
+      <AppShell crumb="Canvas">
+        <div className="canvas-wrap canvas-loading" aria-busy="true">Loading canvas…</div>
       </AppShell>
     );
   }
 
   return (
-    <AppShell crumb="canvas">
+    <AppShell crumb="Canvas">
       <div className="canvas-wrap">
         {error && (
           <div className="canvas-error-banner">
@@ -510,7 +696,7 @@ export function Canvas() {
           <NodeParamPanel node={selectedNode} onChange={updateNodeAditus} onClose={() => setSelectedNodeId(null)} />
         )}
         <div className="canvas-palette">
-          <div className="cp-title">Tools</div>
+          <div className="cp-title">Tools · {palette.length}</div>
           {palette.map((entry) => (
             <button key={entry.modusId} className="cp-item" onClick={() => addNode(entry)}>
               <Ic name="plus" /> {entry.nomen}
@@ -518,9 +704,30 @@ export function Canvas() {
           ))}
           {palette.length === 0 && <div className="cp-empty">No flows registered yet.</div>}
         </div>
+        {/* Phone only (canvas.css): the palette above is hidden there and this summons it as a sheet. */}
+        <button
+          ref={summonRef}
+          type="button"
+          className="canvas-tools-summon"
+          onClick={() => setToolsOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={toolsOpen}
+        >
+          <Ic name="plus" /> Add a tool
+        </button>
+        {toolsOpen && createPortal(
+          <ToolsSheet palette={palette} query={toolsQuery} onQuery={setToolsQuery} onPick={pickTool} onClose={closeTools} />,
+          document.body,
+        )}
         <div className="canvas-bar">
           <span className="hint">
-            {nodes.length} tools{saveState !== 'idle' ? ` · ${saveState === 'saving' ? 'saving…' : 'saved'}` : ''} · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges
+            {/* An empty count is noise (D-58): "Add a tool" above already says the canvas is
+                new, so the counter earns its place only once there's something to count. */}
+            {nodes.length > 0 ? `${nodes.length} tools` : ''}
+            {saveState !== 'idle' ? `${nodes.length > 0 ? ' · ' : ''}${saveState === 'saving' ? 'saving…' : 'saved'}` : ''}
+            {/* Pointer and keyboard hints — hidden on a phone or a touch screen, where none of
+                them applies (DESIGN.md P-1a); the facts before them stay. */}
+            <span className="keys"> · drag a handle to wire · trash icon deletes a node · select + Backspace removes nodes or edges</span>
           </span>
           <button className="btn" onClick={publish} disabled={publishing || nodes.length === 0}>
             <Ic name="sparkles" /> {publishing ? 'Publishing…' : 'Publish'}

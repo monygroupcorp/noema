@@ -9,6 +9,8 @@ import type { ActumInceptor } from '../../execution/ActumInceptor.js'
 import { classifyError } from '../../lib/classifyError.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { isMediaRef } from '../../crystal/MediaFetcher.js'
+import { useTermsVerdict, type TermsAcceptance } from '../../crystal/useTerms.js'
+import { licenseUseTerms } from '../../crystal/modelLicense.js'
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow state types
@@ -56,6 +58,9 @@ interface ExecuteFlowState {
    * overrides from the resolved Intella.
    */
   pinnedModels?: ModelRef[]
+  /** The terms id an Accept tap on the current Detail would accept — set only while that Detail
+   *  is live, so the tap knows which id to record without the actionId having to carry it. */
+  pendingTermsId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +95,32 @@ export interface ExecuteFlowDeps {
    * reference is refused, the same fail-closed rule the REST run route follows.
    */
   ownedResources?: OwnedResourceStores
+  /**
+   * Licence-terms state for the caster (`Modus.useTerms`): what they have accepted, and their
+   * confirmed violations under a terms id. `accept` takes the click-through right here in chat —
+   * the same write `POST /v1/me/terms/:id` makes, keyed by the same anon-capable `AuctorKey`, so
+   * a Telegram-only caster (no linked web account) can agree and run in one exchange. Absent
+   * `accept` → the refusal falls back to sending the caster to the web. Absent the whole
+   * `useTerms` dep → nothing is on file, so a terms-bearing flow is refused, the same fail-closed
+   * rule the REST run route follows.
+   */
+  useTerms?: {
+    accepted(identity: FlowContext['identity']): Promise<Record<string, TermsAcceptance> | undefined>
+    strikes(identity: FlowContext['identity'], termsId: string): Promise<number>
+    accept?(identity: FlowContext['identity'], termsId: string): Promise<unknown>
+  }
+  /** Resolves a weight's licence, so a flow carrying an H3 (or any other grant-bound) weight in
+   *  its `intellae` is held to that grant's terms even where the flow never declares `useTerms`
+   *  itself — the same weight-derived check the REST run route makes. Absent → that derivation
+   *  is skipped here; a declared `useTerms` is still enforced. */
+  intellarum?: import('../../types/intelligendi.js').Intellarum
+  /** The public site origin the terms are published on, for the link in that refusal. */
+  siteUrl?: string
+  /**
+   * Where credits are bought — the web funding page. Absent → the insufficient-balance step
+   * still says how to top up, it just has no link to tap.
+   */
+  fundingUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +142,47 @@ const EFFECT_CATEGORIES = [
   { id: 'video', label: 'Video', description: 'Apply video effects' },
   { id: 'sound', label: 'Sound', description: 'Apply audio effects' },
 ]
+
+/**
+ * The insufficient-balance step's text. Credits are bought on the web, signed in as the
+ * same account this chat resolves to — `/recover` is how a Telegram identity gets there.
+ */
+/** What the chat says when a flow's licence terms stop a run. Exported for the test.
+ *  `canAcceptHere` reflects whether `deps.useTerms.accept` is wired — when it is, the Detail
+ *  carries an Accept action and the copy says so instead of sending the caster to the web. */
+export function useTermsCopy(
+  verdict: Exclude<Awaited<ReturnType<typeof useTermsVerdict>>, { ok: true }>,
+  siteUrl?: string,
+  canAcceptHere?: boolean,
+): string {
+  if (verdict.reason === 'unknown') return 'This flow cannot run here right now.'
+  const terms = siteUrl ? `${siteUrl}${verdict.terms.href}` : 'on the web, under Terms'
+  const web = siteUrl ?? 'the web'
+  if (verdict.reason === 'suspended') {
+    return `Your access to flows under the ${verdict.terms.nomen} is suspended after repeated violations of them.`
+  }
+  if (canAcceptHere) {
+    return `This flow runs under the ${verdict.terms.nomen} (${terms}). Tap Accept to agree to them and run it.`
+  }
+  // No accept wired on this surface: acceptance is taken when a run is started on the web,
+  // under the account this chat is linked to. Say that, rather than send people to a page with
+  // nothing to press.
+  return `This flow runs under the ${verdict.terms.nomen} (${terms}). Accept them by starting this flow once on ${web}, signed in to the account linked here (you will be asked there), then run it here again.`
+}
+
+export function topUpCopy(required: bigint, balance: bigint, fundingUrl?: string): string {
+  const where = fundingUrl ? `at ${fundingUrl}` : 'on the web'
+  return [
+    `This run costs ${required} impetus and your balance is ${balance}.`,
+    '',
+    ...(fundingUrl
+      ? ['Tap Buy credits: in a private chat with the bot it opens the Funding page signed in as this account.',
+         `If the page asks you to sign in, send /recover, then ${where} choose "Recover with Telegram" and paste the code.`]
+      : [`To top up: send /recover, then ${where} choose "Recover with Telegram", paste the code,`,
+         'and buy credits on the Funding page.']),
+    'Then tap Try again.',
+  ].join('\n')
+}
 
 // ---------------------------------------------------------------------------
 // ExecuteFlow
@@ -180,9 +252,11 @@ export class ExecuteFlow implements Flow {
 
       // Required-complete → fast-path submit. We validate-and-strip first so the
       // submitted aditus is canonical (defaults applied, unknowns dropped).
+      // Through the same balance gate the card walks, so an empty balance is answered with
+      // the top-up step rather than an exception the adapter can only turn into one sentence.
       if (this._requiredSatisfied(modus.aditus, state.aditus)) {
         state.aditus = validateAditus(modus.aditus, state.aditus)
-        return this._submit(ctx, state) as Promise<Step>
+        return this._runBalanceGateAndSubmit(ctx, state, modus) as Promise<Step>
       }
 
       // Partial — some aditus given but a required field is still missing →
@@ -244,12 +318,20 @@ export class ExecuteFlow implements Flow {
       const opts = this._buildReplyOpts(state, result.exitus)
       return this._buildResultStep(result.exitus, state.actumId ?? '', opts)
     } else {
+      // Back to CONFIGURE with the aditus kept: "Try again" re-submits this exact run. Left in
+      // AWAITING_COMPLETION, every tap on the failure card answered "Working…" for a result that
+      // was never coming — the only exits were /cancel and /make.
+      state.step = 'CONFIGURE'
+      state.actumId = undefined
       return {
         primitives: [{
           kind: 'Detail',
           label: 'Generation failed',
           content: classifyError(result.error),
-          actions: [{ id: 'run_again', label: 'Try again' }],
+          actions: [
+            { id: 'run_again', label: 'Try again' },
+            { id: 'cancel',    label: '✕'         },
+          ],
         }],
       }
     }
@@ -277,7 +359,12 @@ export class ExecuteFlow implements Flow {
   }
 
   private async _handleSelectCategory(ctx: FlowContext, state: ExecuteFlowState, event: PrimitiveEvent): Promise<Step | Resolution> {
-    if (event.kind !== 'select') return { primitives: [{ kind: 'Select', label: 'Choose a category', options: [] }] }
+    // Anything but a category tap (a stray message, say) re-asks the question WITH its
+    // options — an empty option list rendered as a question with no buttons to answer it.
+    if (event.kind !== 'select') {
+      const categories = state.mode === 'effect' ? EFFECT_CATEGORIES : CREATE_CATEGORIES
+      return { primitives: [{ kind: 'Select', label: 'Choose a category', options: categories }] }
+    }
 
     state.category = event.selectedId
     state.step = 'BROWSE_TOOLS'
@@ -330,11 +417,31 @@ export class ExecuteFlow implements Flow {
       }
 
       // Execute tap → validate (rejects on a missing required field, so a half-filled
-      // card cannot submit) and submit exactly as the fast path does.
-      if (event.actionId === 'execute') {
+      // card cannot submit) and submit exactly as the fast path does. "Try again" on a
+      // failure or top-up card is the same submit: the aditus is still here.
+      if (event.actionId === 'execute' || event.actionId === 'run_again') {
         const validated = validateAditus(modus.aditus, state.aditus)  // throws if a required field is missing
         state.aditus = validated
         return this._runBalanceGateAndSubmit(ctx, state, modus)
+      }
+
+      // Accept tap on the terms Detail → record the acceptance right here (works for any
+      // AuctorKey, including a Telegram-only commitment with no linked web account), then
+      // resubmit exactly as "Try again" does. `pendingTermsId` names which terms id this
+      // particular Detail was offering — cleared either way so a stale tap after it no
+      // longer applies can't accept the wrong id.
+      if (event.actionId === 'accept_terms') {
+        const termsId = state.pendingTermsId
+        state.pendingTermsId = undefined
+        if (!termsId || !this.deps.useTerms?.accept) return this._buildConfigureStep(state)
+        await this.deps.useTerms.accept(ctx.identity, termsId)
+        return this._runBalanceGateAndSubmit(ctx, state, modus)
+      }
+
+      // ✕ on a card → the flow ends, and says so. A silent abandon would leave the card's
+      // buttons live with nothing behind them.
+      if (event.actionId === 'cancel') {
+        return { kind: 'complete', output: { cancelled: true } }
       }
 
       return this._buildConfigureStep(state)
@@ -408,15 +515,19 @@ export class ExecuteFlow implements Flow {
     const reservation = await cursor.reserve(modus, state.aditus)
 
     if (balance < reservation && !process.env.DEV_FREE_EXECUTION) {
+      // The way out is on the web, so the step says the whole route — the bot cannot take a
+      // payment itself — and offers the link when it knows one. Every button here does
+      // something: a "connect wallet" tap that re-drew the card was the dead end this replaces.
+      const fundingUrl = this.deps.fundingUrl
       return {
         primitives: [{
           kind: 'Detail',
           label: 'Insufficient balance',
-          content: `This tool costs ${reservation} but your balance is ${balance}.\n\nTop up to continue.`,
+          content: topUpCopy(reservation, balance, fundingUrl),
           actions: [
-            { id: 'connect_wallet', label: 'connect wallet' },
-            { id: 'buy_credits',    label: 'buy credits'   },
-            { id: 'cancel',         label: '✕'             },
+            ...(fundingUrl ? [{ id: 'buy_credits', label: 'Buy credits', url: fundingUrl, asAccount: true }] : []),
+            { id: 'run_again', label: 'Try again' },
+            { id: 'cancel',    label: '✕'         },
           ],
         }],
       }
@@ -488,6 +599,33 @@ export class ExecuteFlow implements Flow {
       casting,
       state.aditus,
     )
+    const terms = await useTermsVerdict({
+      modus: casting,
+      find: (id) => this.deps.modorum.find(id),
+      findIntellaUseTerms: async (id) => licenseUseTerms((await this.deps.intellarum?.find(id))?.license),
+      accepted: async () => this.deps.useTerms?.accepted(ctx.identity),
+      ...(this.deps.useTerms ? { strikes: (id: string) => this.deps.useTerms!.strikes(ctx.identity, id) } : {}),
+    })
+    if (!terms.ok) {
+      // Set CONFIGURE regardless of which step called `_submit` (the conversational
+      // reply shortcut and RESULT's "continue the chat" path both land here too), so the
+      // Accept/✕ tap is routed to `_handleConfigure`, which still has `state.modusId`.
+      state.step = 'CONFIGURE'
+      const canAcceptHere = terms.reason === 'required' && Boolean(this.deps.useTerms?.accept)
+      if (canAcceptHere) state.pendingTermsId = terms.terms.id
+      return {
+        primitives: [{
+          kind: 'Detail',
+          label: terms.reason === 'suspended' ? 'Access suspended' : 'Terms to accept first',
+          content: useTermsCopy(terms, this.deps.siteUrl, canAcceptHere),
+          actions: [
+            ...(canAcceptHere ? [{ id: 'accept_terms', label: 'Accept' }] : []),
+            { id: 'cancel', label: '✕' },
+          ],
+        }],
+      }
+    }
+
     if (!verdict.ok) {
       // Names the port, never the value and never whether a record exists behind it — the same
       // non-enumerability the REST refusal preserves.

@@ -5,9 +5,9 @@ import {
   DEFAULT_GPU_TYPE_IDS,
   ACCEPTED_GPU_TYPE_IDS,
   assertGpuTypeIdsAccepted,
-  DEFAULT_CPU_INSTANCE_IDS,
-  ACCEPTED_CPU_INSTANCE_IDS,
-  assertCpuInstanceIdsAccepted,
+  DEFAULT_CPU_FLAVORS,
+  ACCEPTED_CPU_FLAVOR_IDS,
+  assertCpuFlavorsAccepted,
   PROVISION_BUDGET_MS,
   SSH_IPLESS_BAILOUT_MS,
 } from '../../../src/crystal/SecurePodClient.js'
@@ -109,6 +109,8 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
   costPerHr?: number
+  /** Status `POST /job` answers with — set to a 4xx to simulate a deterministic submit rejection. */
+  jobPostStatus?: number
 } = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     sshReadyAfterCalls = 1,
@@ -116,6 +118,7 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
     costPerHr,
+    jobPostStatus = 200,
   } = opts
   let statusCalls = 0
   const runnerBase = `https://${podId}-8080.proxy.runpod.net`
@@ -125,26 +128,27 @@ function makeFetchMock(podId = 'pod-xyz', opts: {
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ url, method, body: init?.body as string | undefined })
 
-    if (method === 'POST' && url.includes('rest.runpod.io') && url.includes('/pods') && !url.includes(podId)) {
+    if (method === 'POST' && url.includes('api.runpod.io/v2') && url.includes('/pods') && !url.includes(podId)) {
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
     }
     if (method === 'GET' && url.includes(`/pods/${podId}`)) {
       statusCalls++
       if (statusCalls >= sshReadyAfterCalls) {
         return new Response(JSON.stringify({
-          desiredStatus: 'RUNNING',
-          publicIp: '1.2.3.4',
-          portMappings: { '22': 12345, '8080': 18080 },
-          ...(costPerHr !== undefined ? { costPerHr } : {}),
+          status: 'RUNNING',
+          ssh: { direct: { host: '1.2.3.4', port: 12345 } },
+          ...(costPerHr !== undefined ? { cost: costPerHr } : {}),
         }), { status: 200 })
       }
-      return new Response(JSON.stringify({ desiredStatus: 'STARTING' }), { status: 200 })
+      return new Response(JSON.stringify({ status: 'STARTING' }), { status: 200 })
     }
     if (method === 'GET' && url === `${runnerBase}/health`) {
       return new Response(JSON.stringify({ status: runnerHealthStatus }), { status: 200 })
     }
     if (method === 'POST' && url === `${runnerBase}/job`) {
-      return new Response('{}', { status: 200 })
+      return jobPostStatus >= 400
+        ? new Response('rejected', { status: jobPostStatus })
+        : new Response('{}', { status: 200 })
     }
     if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
       return makeSseStream(sseEvents)
@@ -177,7 +181,7 @@ test('submit provisions a SECURE pod via RunPod REST API', async () => {
   const { fetch, calls } = makeFetchMock()
   const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
   await client.submit({ input: {} })
-  const provision = calls.find(c => c.method === 'POST' && c.url.includes('rest.runpod.io'))
+  const provision = calls.find(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2'))
   assert.ok(provision, 'expected a provision POST')
 })
 
@@ -197,13 +201,13 @@ test('submit throws when RunPod returns an error', async () => {
 test('submit provisions with SECURE cloudType by default', async () => {
   let provisionBody: unknown
   const fetchFn = (async (url: string, opts?: RequestInit): Promise<Response> => {
-    if ((opts?.method ?? 'GET').toUpperCase() === 'POST' && url.includes('rest.runpod.io')) {
+    if ((opts?.method ?? 'GET').toUpperCase() === 'POST' && url.includes('api.runpod.io/v2')) {
       provisionBody = JSON.parse(opts?.body as string)
       return new Response(JSON.stringify({ id: 'pod-1' }), { status: 200 })
     }
     if (url.includes('/pods/pod-1')) {
       return new Response(JSON.stringify({
-        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 22, '8080': 8080 },
+        status: 'RUNNING', ssh: { direct: { host: '1.2.3.4', port: 22 } },
       }), { status: 200 })
     }
     if (url.includes('health')) return new Response('{"status":"ready"}', { status: 200 })
@@ -215,7 +219,7 @@ test('submit provisions with SECURE cloudType by default', async () => {
 
   const client = makeClient(makeConfig({ cloudType: undefined }), () => makeSshTransport(), fetchFn)
   await client.submit({ input: {} })
-  assert.equal((provisionBody as { cloudType: string }).cloudType, 'SECURE')
+  assert.equal((provisionBody as { cloud: string }).cloud, 'SECURE')
 })
 
 // ── SSH bootstrap ─────────────────────────────────────────────────────────────
@@ -264,15 +268,143 @@ test('SSH bootstrap: does NOT fire FAILED after comfyrunner accepted (comfyrunne
   assert.equal((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false)
 })
 
+// ── completion from the SSE stream (noema pod-result-never-delivered) ─────────
+// comfyrunner's own completion webhook crosses the pod's egress path, which can fail
+// silently (the pod only logs it locally) and strand the run — the reservation never
+// unlocks and census reaps the pod. The `complete` SSE event carries the same output the
+// webhook would, so SecurePodClient must complete it itself through the same callback URL.
+
+test('submit: completes the actum from the SSE complete event, not just from the pod webhook', async () => {
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeFetchMock('pod-sse-complete', {
+    webhookPayloads,
+    sseEvents: [{ type: 'complete', output: [{ url: 'https://cdn.example.com/out.png' }], executionTimeMs: 4321 }],
+  })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const completed = (webhookPayloads as Array<{ id?: string; status?: string; output?: unknown; executionTime?: number }>)
+    .find(p => p.status === 'COMPLETED')
+  assert.ok(completed, 'expected a COMPLETED webhook posted from the SSE complete event, even though the pod never sent one')
+  assert.equal(completed!.id, 'pod-sse-complete')
+  assert.deepEqual(completed!.output, [{ url: 'https://cdn.example.com/out.png' }])
+  assert.equal(completed!.executionTime, 4321)
+})
+
 test('SSH bootstrap: no re-provision after comfyrunner accepted (no retry cascade)', async () => {
   const { fetch, calls } = makeFetchMock('pod-accepted', { sseEvents: [{ type: 'error', error: 'OOM' }] })
   const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
   await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
   await new Promise(r => setTimeout(r, 300))
   const provisionCalls = calls.filter(c =>
-    c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'),
+    c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'),
   )
   assert.equal(provisionCalls.length, 1)
+})
+
+// ── job-attempt outcome: rejected / throttled ──────────────────────────────────
+// These exercise the two JobAttemptOutcome kinds that weren't SecurePodClient-covered before:
+// a deterministic (4xx) submit rejection, and a throttle bail that survives, then exhausts, retry.
+// (`comfyrunnerClient.test.ts` covers `submitToRunner`'s non-permanent-5xx case and
+// `ThrottleError`'s own detection logic — not `classifyJobAttemptFailure` or the 4xx path, which
+// only this file exercises.)
+
+test('submit: a deterministic (4xx) job-submit rejection fails fast — no retry pod, one FAILED webhook keyed by the first pod', async () => {
+  const { fetch, calls, webhookPayloads } = makeFetchMock('pod-rejected', { jobPostStatus: 422 })
+  const client = makeClient(makeConfig(), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 300))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 1, 'a 422 is deterministic — no fresh pod is worth trying')
+  assert.equal(terminateSpy.calls.length, 1)
+  const failed = (webhookPayloads as Array<{ status?: string; id?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook')
+  assert.equal(failed!.id, 'pod-rejected')
+  assert.match(failed!.error ?? '', /422/)
+})
+
+test('submit: a throttle bail retries on a fresh pod instead of stopping (comfyrunner owns nothing yet)', async () => {
+  // Every pod this mock provisions shares one SSE stream (fixed podId), so a throttle bail on
+  // attempt 1 reproduces on attempt 2 too — this asserts the RETRY happened, not that it escapes it.
+  // ~5 MB/s for 60s (well under the 20 MB/s floor) sustained past THROTTLE_WINDOW_MS — same
+  // sequence `comfyrunnerClient.test.ts`'s "throws ThrottleError on sustained low download
+  // velocity" uses to actually trip the bail (a 2-sample sequence only arms the window; it
+  // doesn't cross it).
+  const throttleSse = [
+    { type: 'download-progress', bytesDownloaded: 0,           elapsedMs: 0 },
+    { type: 'download-progress', bytesDownloaded: 75_000_000,  elapsedMs: 15_000 },
+    { type: 'download-progress', bytesDownloaded: 150_000_000, elapsedMs: 30_000 },
+    { type: 'download-progress', bytesDownloaded: 225_000_000, elapsedMs: 45_000 },
+    { type: 'download-progress', bytesDownloaded: 300_000_000, elapsedMs: 60_000 },
+  ]
+  const { fetch, calls, webhookPayloads } = makeFetchMock('pod-throttled', { sseEvents: throttleSse })
+  const client = makeClient(makeConfig({ podRetries: 3 }), () => makeSshTransport(), fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
+  assert.equal(provisionCalls.length, 3, 'all 3 attempts retried on a throttle bail — none treated it as comfyrunner-owned')
+  // Retries exhausted: comfyrunner DID accept each attempt (POST /job succeeded every time), yet
+  // the FAILED webhook still fires — nobody else is going to, since every pod was bailed before
+  // completion. This is the sticky-"everAccepted"-but-still-fire-on-throttle-exhaustion case.
+  const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
+  assert.ok(failed, 'expected a FAILED webhook even though comfyrunner accepted every attempt')
+  assert.match(failed!.error ?? '', /throttl/i)
+})
+
+test('submit: a throttle bail followed by a plain provisioning failure does NOT fire a webhook for the throttle', async () => {
+  // Attempt 1 is accepted-then-throttled (comfyrunner owns nothing — Crystal deliberately bailed
+  // it), but the ladder is then exhausted by an ORDINARY provisioning failure on the final retry —
+  // never reaching comfyrunner at all. The webhook decision must answer for what actually ended
+  // the run (a plain provisioning failure, which comfyrunner never saw and never owns) rather than
+  // for the unrelated throttle bail two attempts earlier.
+  const podId = 'pod-mixed'
+  const runnerBase = `https://${podId}-8080.proxy.runpod.net`
+  const webhookPayloads: unknown[] = []
+  let provisionCalls = 0
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('api.runpod.io/v2') && url.includes('/pods')) {
+      provisionCalls++
+      if (provisionCalls === 1) return new Response(JSON.stringify({ id: podId }), { status: 200 })
+      // 400 ("could not be placed") exhausts the single configured GPU candidate immediately,
+      // with no backoff sleep — unlike a 5xx, which `createRunPodPod` retries with a real timer.
+      return new Response('{"error":"no capacity"}', { status: 400 })
+    }
+    if (method === 'GET' && url.includes(`/pods/${podId}`)) {
+      return new Response(JSON.stringify({ status: 'RUNNING', ssh: { direct: { host: '1.2.3.4', port: 22 } } }), { status: 200 })
+    }
+    if (method === 'GET' && url === `${runnerBase}/health`) {
+      return new Response(JSON.stringify({ status: 'ready' }), { status: 200 })
+    }
+    if (method === 'POST' && url === `${runnerBase}/job`) {
+      return new Response('{}', { status: 200 })
+    }
+    if (method === 'GET' && url.startsWith(`${runnerBase}/job/`)) {
+      // Same sustained-low-velocity sequence as the throttle test above — trips ThrottleError.
+      return makeSseStream([
+        { type: 'download-progress', bytesDownloaded: 0,           elapsedMs: 0 },
+        { type: 'download-progress', bytesDownloaded: 75_000_000,  elapsedMs: 15_000 },
+        { type: 'download-progress', bytesDownloaded: 150_000_000, elapsedMs: 30_000 },
+        { type: 'download-progress', bytesDownloaded: 225_000_000, elapsedMs: 45_000 },
+        { type: 'download-progress', bytesDownloaded: 300_000_000, elapsedMs: 60_000 },
+      ])
+    }
+    if (method === 'POST') { webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}')); return new Response('{}', { status: 200 }) }
+    return new Response('Not found', { status: 404 })
+  }) as unknown as typeof fetch
+
+  const client = makeClient(makeConfig({ podRetries: 3 }), () => makeSshTransport(), fetchFn)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 500))
+
+  assert.equal(provisionCalls, 3, 'attempt 1 provisions, then 2 more retries both fail to provision')
+  assert.equal(
+    (webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false,
+    'the run ended on a plain provisioning failure comfyrunner never saw — Crystal must not post a webhook on the stale throttle outcome from attempt 1',
+  )
 })
 
 // ── pod lifecycle ─────────────────────────────────────────────────────────────
@@ -298,9 +430,9 @@ test('pod lifecycle: terminates pod even when SSH never becomes ready', async ()
   assert.ok(terminateSpy.calls.length > 0, 'expected terminatePod call')
 })
 
-test('pod lifecycle: the SSH timeout error names the last-seen desiredStatus / publicIp / port-22 mapping', async () => {
+test('pod lifecycle: the SSH timeout error names the last-seen status / publicIp / port-22 mapping', async () => {
   // sshReadyAfterCalls: 9999 means every status poll returns the mock's default
-  // `{ desiredStatus: 'STARTING' }` body — a successful read, but never ready. The
+  // `{ status: 'STARTING' }` body — a successful read, but never ready. The
   // give-up message must carry that last reading, not the bare "SSH not ready" line.
   const webhookPayloads: unknown[] = []
   const { fetch } = makeFetchMock('pod-ssh-timeout', { sshReadyAfterCalls: 9999, webhookPayloads })
@@ -313,20 +445,20 @@ test('pod lifecycle: the SSH timeout error names the last-seen desiredStatus / p
   await new Promise(r => setTimeout(r, 300))
   const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
   assert.ok(failed, 'expected a FAILED webhook')
-  assert.match(failed!.error ?? '', /desiredStatus=STARTING/)
+  assert.match(failed!.error ?? '', /status=STARTING/)
   assert.match(failed!.error ?? '', /publicIp=<absent>/)
   assert.match(failed!.error ?? '', /port22=<absent>/)
 })
 
 test('pod lifecycle: a pod whose every status fetch failed reports that it was never observed, not a false "not RUNNING"', async () => {
   // Every GET to /pods/:id 500s — _getSshInfo never gets a successful read, so there is
-  // no observation to name. An absent reading must not render as desiredStatus=<absent>,
+  // no observation to name. An absent reading must not render as status=<absent>,
   // which would read as "the API answered and said nothing" rather than "never answered".
   const webhookPayloads: unknown[] = []
   const podId = 'pod-ssh-unreachable'
   const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'POST' && url.includes('rest.runpod.io') && url.includes('/pods') && !url.includes(podId)) {
+    if (method === 'POST' && url.includes('api.runpod.io/v2') && url.includes('/pods') && !url.includes(podId)) {
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
     }
     if (method === 'GET' && url.includes(`/pods/${podId}`)) {
@@ -349,7 +481,7 @@ test('pod lifecycle: a pod whose every status fetch failed reports that it was n
   const failed = (webhookPayloads as Array<{ status?: string; error?: string }>).find(p => p.status === 'FAILED')
   assert.ok(failed, 'expected a FAILED webhook')
   assert.match(failed!.error ?? '', /no successful status read/)
-  assert.doesNotMatch(failed!.error ?? '', /desiredStatus=/)
+  assert.doesNotMatch(failed!.error ?? '', /\bstatus=/)
 })
 
 test('pod lifecycle: terminates pod when comfyrunner never becomes ready', async () => {
@@ -445,7 +577,7 @@ test('zombie guard: aborts before provisioning a retry pod when the actum is alr
   await withTrace(makeTraceContext({ actumId: 'act-dead' }), () => client.submit({ input: {} }))
   await new Promise(r => setTimeout(r, 300))
 
-  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'))
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
   assert.equal(provisionCalls.length, 1, 'no retry provision for an actum already terminal')
   assert.equal(terminateSpy.calls.length, 1, 'only the attempt-1 pod was terminated — no retry pod was ever spun up')
 })
@@ -458,7 +590,7 @@ test('zombie guard: terminates a freshly-provisioned retry pod when the actum go
   await withTrace(makeTraceContext({ actumId: 'act-dies-mid-retry' }), () => client.submit({ input: {} }))
   await new Promise(r => setTimeout(r, 300))
 
-  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'))
+  const provisionCalls = calls.filter(c => c.method === 'POST' && c.url.includes('api.runpod.io/v2') && c.url.includes('/pods'))
   assert.equal(provisionCalls.length, 2, 'the retry pod WAS provisioned (actum still live at that check)')
   const jobPosts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/job'))
   assert.equal(jobPosts.length, 0, 'the job was never submitted for the now-terminal actum')
@@ -548,25 +680,50 @@ test("ComfyUI bootstrap: provisionStudio's clone is also pinned via --branch", a
   assert.match(cloneCmd!, /--branch/, 'clone must pin a ref via --branch (never unpinned HEAD)')
 })
 
-// ── RunPod gpuTypeIds enum (noema-103) ─────────────────────────────────────────
-// SECURE-tier provisioning (attempts 1-2) sends DEFAULT_GPU_TYPE_IDS as the pod's
-// `gpuTypeIds`. RunPod 400s an unknown id, degrading SECURE to a COMMUNITY fallback
-// (loses the private/TEE guarantee). These pin the sent list to RunPod's accepted enum
-// and prove the construct-time drift guard fails loud (naming the SKU) before any POST.
+// ── RunPod GPU type enum (noema-103) ───────────────────────────────────────────
+// SECURE-tier provisioning (attempts 1-2) walks DEFAULT_GPU_TYPE_IDS, one create per GPU
+// type (RunPod REST v2 places exactly the type named). A stale id costs a refused create,
+// and an all-stale list degrades SECURE to the COMMUNITY fallback (loses the private/TEE
+// guarantee). These pin the walked list to RunPod's accepted enum and prove the
+// construct-time drift guard fails loud (naming the SKU) before any POST.
 
-test('default-path provision sends DEFAULT_GPU_TYPE_IDS as gpuTypeIds when config omits it', async () => {
+test('default-path provision asks for DEFAULT_GPU_TYPE_IDS[0] first, as a single v2 gpu', async () => {
   const { fetch, calls } = makeFetchMock('pod-default-gpus')
   // No gpuTypeIds in config → resolves to DEFAULT_GPU_TYPE_IDS, mirroring the real
-  // wiring at src/index.ts:308-323 (SecurePodClient built with no gpuTypeIds).
+  // wiring in src/index.ts (SecurePodClient built with no gpuTypeIds).
   const client = makeClient(makeConfig({ gpuTypeIds: undefined }), () => makeSshTransport(), fetch)
   await client.submit({ input: {} })
-  const provision = calls.find(c =>
-    c.method === 'POST' && c.url.includes('rest.runpod.io') && c.url.includes('/pods'),
-  )
+  const provision = calls.find(c => c.method === 'POST' && c.url === 'https://api.runpod.io/v2/pods')
   assert.ok(provision, 'expected a provision POST')
-  const body = JSON.parse(provision!.body ?? '{}') as { gpuTypeIds?: string[] }
-  assert.deepEqual(body.gpuTypeIds, DEFAULT_GPU_TYPE_IDS,
-    'default provision must send exactly the pruned DEFAULT_GPU_TYPE_IDS')
+  const body = JSON.parse(provision!.body ?? '{}')
+  assert.deepEqual(body.gpu, { id: DEFAULT_GPU_TYPE_IDS[0], count: 1 })
+  assert.equal(body.image, 'runpod/pytorch:2.4.0')
+  assert.equal(body.cloud, 'SECURE')
+  assert.deepEqual(body.ports, ['22/tcp', '8188/http', '8080/http'])
+  assert.equal(body.startSsh, true, 'without startSsh v2 injects no PUBLIC_KEY and bootstrap cannot log in')
+  assert.equal(typeof body.disk, 'number')
+  for (const v1 of ['gpuTypeIds', 'gpuCount', 'imageName', 'cloudType', 'containerDiskInGb', 'supportPublicIp']) {
+    assert.equal(body[v1], undefined, `v1 field ${v1} must not be sent`)
+  }
+})
+
+test('a GPU type RunPod cannot place (400) moves the walk on to the next type, on the same attempt', async () => {
+  const tried: string[] = []
+  const base = makeFetchMock('pod-walk')
+  const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
+    if ((init?.method ?? 'GET').toUpperCase() === 'POST' && url === 'https://api.runpod.io/v2/pods') {
+      const id = JSON.parse(init!.body as string).gpu.id as string
+      tried.push(id)
+      if (id === DEFAULT_GPU_TYPE_IDS[0]) {
+        return new Response(JSON.stringify({ title: 'Bad Request', status: 400, detail: 'no capacity' }), { status: 400 })
+      }
+    }
+    return base.fetch(url, init)
+  }) as unknown as typeof globalThis.fetch
+  const client = makeClient(makeConfig({ gpuTypeIds: undefined }), () => makeSshTransport(), fetchFn)
+  const result = await client.submit({ input: {} })
+  assert.equal(result.id, 'pod-walk')
+  assert.deepEqual(tried, [DEFAULT_GPU_TYPE_IDS[0], DEFAULT_GPU_TYPE_IDS[1]])
 })
 
 test('DEFAULT_GPU_TYPE_IDS is a subset of RunPod\'s accepted enum (no stale SKUs)', () => {
@@ -947,7 +1104,7 @@ function makeMultiPodFetchMock(
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ url, method, body: init?.body as string | undefined })
 
-    if (method === 'POST' && url === 'https://rest.runpod.io/v1/pods') {
+    if (method === 'POST' && url === 'https://api.runpod.io/v2/pods') {
       const behaviour = behaviours[Math.min(provisioned, behaviours.length - 1)]
       provisioned++
       const podId = `pod-${provisioned}`
@@ -955,7 +1112,7 @@ function makeMultiPodFetchMock(
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
     }
 
-    const status = /\/v1\/pods\/(pod-\d+)$/.exec(url)
+    const status = /\/v2\/pods\/(pod-\d+)$/.exec(url)
     if (method === 'GET' && status) {
       const podId = status[1]
       const polls = (statusPolls.get(podId) ?? 0) + 1
@@ -963,13 +1120,13 @@ function makeMultiPodFetchMock(
       const behaviour = behaviourOf.get(podId) ?? { kind: 'healthy' as const }
       if (behaviour.kind === 'ipless') {
         // The shape of an ip-less host: the pod is up, but no direct address ever appears.
-        return new Response(JSON.stringify({ desiredStatus: 'RUNNING', portMappings: {} }), { status: 200 })
+        return new Response(JSON.stringify({ status: 'RUNNING', ssh: { proxy: null, direct: null } }), { status: 200 })
       }
       if (behaviour.kind === 'slowThenHealthy' && polls < behaviour.runningAfterCalls) {
-        return new Response(JSON.stringify({ desiredStatus: 'STARTING' }), { status: 200 })
+        return new Response(JSON.stringify({ status: 'STARTING' }), { status: 200 })
       }
       return new Response(JSON.stringify({
-        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 12345, '8080': 18080 },
+        status: 'RUNNING', ssh: { direct: { host: '1.2.3.4', port: 12345 } },
       }), { status: 200 })
     }
 
@@ -1003,7 +1160,7 @@ function makeIplessConfig(overrides: Partial<SecurePodConfig> = {}): SecurePodCo
 }
 
 function provisionPosts(calls: FetchCall[]): FetchCall[] {
-  return calls.filter(c => c.method === 'POST' && c.url === 'https://rest.runpod.io/v1/pods')
+  return calls.filter(c => c.method === 'POST' && c.url === 'https://api.runpod.io/v2/pods')
 }
 
 test('ip-less host: the pod is abandoned at the window and the job runs on a fresh pod', async () => {
@@ -1350,12 +1507,12 @@ test('substrate budgets: a LONGER declared readiness budget keeps polling past t
   let healthCalls = 0
   const fetchFn = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'POST' && url.includes('rest.runpod.io') && !url.includes(podId)) {
+    if (method === 'POST' && url.includes('api.runpod.io/v2') && !url.includes(podId)) {
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
     }
     if (method === 'GET' && url.includes(`/pods/${podId}`)) {
       return new Response(JSON.stringify({
-        desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 12345, '8080': 18080 },
+        status: 'RUNNING', ssh: { direct: { host: '1.2.3.4', port: 12345 } },
       }), { status: 200 })
     }
     if (method === 'GET' && url === `${runnerBase}/health`) {
@@ -1407,7 +1564,7 @@ function makeCpuFetchMock(opts: {
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ url, method, body: init?.body as string | undefined })
 
-    if (method === 'POST' && url === 'https://rest.runpod.io/v1/pods') {
+    if (method === 'POST' && url === 'https://api.runpod.io/v2/pods') {
       return new Response(JSON.stringify({ id: podId }), { status: 200 })
     }
     if (method === 'GET' && url === `${base}/health`) {
@@ -1424,15 +1581,16 @@ function makeCpuFetchMock(opts: {
   return { fetch, calls }
 }
 
-test('every default CPU instance id is one RunPod accepts', () => {
-  assert.doesNotThrow(() => assertCpuInstanceIdsAccepted(DEFAULT_CPU_INSTANCE_IDS))
+test('every default CPU flavor is one RunPod accepts', () => {
+  assert.doesNotThrow(() => assertCpuFlavorsAccepted(DEFAULT_CPU_FLAVORS))
 })
 
-test('a CPU instance id outside RunPod’s catalogue is named, not sent', () => {
+test('a CPU flavor outside RunPod’s catalogue, or a non-power-of-two size, is named, not sent', () => {
   assert.throws(
-    () => assertCpuInstanceIdsAccepted(['cpu3g-4-16', 'cpu9z-1-1'], ACCEPTED_CPU_INSTANCE_IDS),
-    /cpu9z-1-1/,
+    () => assertCpuFlavorsAccepted([{ id: 'cpu3g', vcpuCount: 4 }, { id: 'cpu9z', vcpuCount: 4 }], ACCEPTED_CPU_FLAVOR_IDS),
+    /cpu9z/,
   )
+  assert.throws(() => assertCpuFlavorsAccepted([{ id: 'cpu3g', vcpuCount: 6 }]), /'cpu3g' x6/)
 })
 
 test('provisionCpuPod asks for CPU compute and no GPU at all', async () => {
@@ -1442,13 +1600,14 @@ test('provisionCpuPod asks for CPU compute and no GPU at all', async () => {
   const podId = await client.provisionCpuPod({ imageName: 'noema/clip:1', env: { CLIP_JOB_TOKEN: 'tok' } })
 
   assert.equal(podId, 'pod-cpu')
-  const provision = calls.find(c => c.method === 'POST' && c.url === 'https://rest.runpod.io/v1/pods')
+  const provision = calls.find(c => c.method === 'POST' && c.url === 'https://api.runpod.io/v2/pods')
   assert.ok(provision, 'expected a provision POST')
   const body = JSON.parse(provision.body ?? '{}')
-  assert.equal(body.computeType, 'CPU')
-  assert.deepEqual(body.instanceIds, DEFAULT_CPU_INSTANCE_IDS)
-  assert.equal(body.gpuCount, undefined, 'a CPU pod asks for no GPU')
-  assert.equal(body.gpuTypeIds, undefined, 'and names no GPU SKU')
+  assert.deepEqual(body.cpu, { id: DEFAULT_CPU_FLAVORS[0]!.id, vcpuCount: DEFAULT_CPU_FLAVORS[0]!.vcpuCount })
+  assert.equal(body.image, 'noema/clip:1')
+  assert.equal(body.gpu, undefined, 'a CPU pod asks for no GPU')
+  assert.equal(body.computeType, undefined, 'v1 computeType is not sent')
+  assert.equal(body.instanceIds, undefined, 'v1 instanceIds is not sent')
   assert.deepEqual(body.env, { CLIP_JOB_TOKEN: 'tok' })
 })
 

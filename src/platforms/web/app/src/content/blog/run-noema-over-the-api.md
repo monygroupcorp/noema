@@ -1,6 +1,7 @@
 # Run noema over the API
 
 **Published:** 2026-09-05
+**Summary:** Call any flow from your own code with one HTTP request, then watch the run until it settles.
 
 Every flow on the platform is one HTTP call away, and they all follow the same three-step shape.
 
@@ -32,16 +33,20 @@ it.
 
 ## Credentials
 
-Running a flow needs a caller identity. There are five ways to present one, and you need exactly
+Running a flow needs a caller identity. There are four ways to present one, and you need exactly
 one of them:
 
 - an `X-API-Key` header,
 - an `Authorization: Bearer <jwt>` header,
 - an `x-bursa-token` header carrying a purse code,
-- an anonymous credit commitment — an `x-commitment` header, or a `commitment` field in the body,
-- a signed wallet bundle in the request body.
+- an anonymous credit commitment — an `x-commitment` header, or a `commitment` field in the body.
 
-Two of them come with a trap.
+A signed wallet bundle in the request body is a fifth shape the identity resolver's code already
+parses, but no verifier is wired to it in production yet — send one today and you get `401
+auth.invalid`, not a run. If you want to call as a wallet-linked account, sign in and use the
+`Authorization: Bearer <jwt>` method above instead.
+
+Two of the four come with a trap.
 
 **Send the commitment as a header if you intend to watch the run.** A `GET` carries no body, so an
 anonymous caller who put their commitment in the invoke body and nowhere else can start a run and
@@ -53,10 +58,9 @@ holder's balance and handed on — whoever holds it is the caller. That is also 
 working with nothing wrong at your end: whoever minted it can revoke it, and a code that has been
 redeemed into an account stops spending too.
 
-One honest note on the API key: **it is not minted from your account settings.** That pane says
-"coming soon" rather than showing you a button that does nothing. The key rides on partner
-approval instead — ask via [the partner form](/partners) — and once you are approved you generate
-and rotate it yourself from your [partner dashboard](/partner). The raw key is shown once, in the
+One honest note on the API key: **it is not minted from your account settings** — there is no
+key control there at all. The key rides on partner approval instead — ask via
+[the partner form](/partners) — and once you are approved you generate and rotate it yourself from your [partner dashboard](/partner). The raw key is shown once, in the
 response that mints it, and rotating retires the previous one the moment the new one appears.
 
 ## Invoke

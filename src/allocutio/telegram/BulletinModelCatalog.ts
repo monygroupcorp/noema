@@ -15,6 +15,7 @@ import type { Intellarum, Intella } from '../../types/intelligendi.js'
 import type { Fundamentorum, Fundamentum } from '../../types/fundamentum.js'
 import type { PendingModel, ModelDetail, StudioBase } from '../lexicon/bulletin/types.js'
 import { familiaOf } from '../../crystal/inferFamilia.js'
+import { hasDownloadAddress } from '../../crystal/weightAddress.js'
 import { COPY } from '../lexicon/copy.js'
 
 /** A studio's container image + the SET of on-pod runtimes it can serve. Compatibility is declared,
@@ -132,11 +133,19 @@ export class BulletinModelCatalog {
 
   constructor(private readonly deps: { intellarum?: Intellarum; fundamentorum?: Fundamentorum; sender: PromptSender }) {}
 
+  /** The records a host may add to a run: those the registry holds a download address for. A record
+   *  with none is a name without a file — the Compiler refuses it at run time, so offering it here
+   *  only sets up that refusal. Legacy LoRAs migrated without a URL are the common case. */
+  private async pickable(): Promise<Intella[]> {
+    if (!this.deps.intellarum) return []
+    const all = await this.deps.intellarum.list().catch(() => [])
+    return all.filter(hasDownloadAddress)
+  }
+
   /** Mod • → Add (category stage): the mount-location types present in the catalog, ordered
    *  popular-first (most-populated mount first). Absent intellarum → no categories. */
   async listCategories(): Promise<string[]> {
-    if (!this.deps.intellarum) return []
-    const all = await this.deps.intellarum.list().catch(() => [])
+    const all = await this.pickable()
     const counts = new Map<string, number>()
     for (const i of all) counts.set(mountOf(i), (counts.get(mountOf(i)) ?? 0) + 1)
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([mount]) => mount)
@@ -166,7 +175,7 @@ export class BulletinModelCatalog {
     const byId = new Map(all.map(i => [i.id, i]))
     // LoRA availability per family — surfaced on the card so a host sees what they can layer.
     const loraCount = new Map<string, number>()
-    for (const i of all) if (i.genus === 'lora') { const f = familyOf(i); if (f) loraCount.set(f, (loraCount.get(f) ?? 0) + 1) }
+    for (const i of all.filter(hasDownloadAddress)) if (i.genus === 'lora') { const f = familyOf(i); if (f) loraCount.set(f, (loraCount.get(f) ?? 0) + 1) }
 
     const flows: StudioBase[] = funds.map(f => {
       // Resolve the fundament's weight manifest to display names; derive its family from the base
@@ -232,7 +241,7 @@ export class BulletinModelCatalog {
    *  Default (no/unknown filter) = all bases — never presumes a single base. */
   async listMount(mount: string, opts: { baseFilter?: string }): Promise<{ items: PendingModel[]; baseFamilies?: Array<{ id: string; label: string }>; baseFilter?: string }> {
     if (!this.deps.intellarum) return { items: [] }
-    const all = await this.deps.intellarum.list().catch(() => [])
+    const all = await this.pickable()
     const inMount = all.filter(i => mountOf(i) === mount)
     const isLoraMount = inMount.length > 0 && inMount.every(i => i.genus === 'lora')
     if (!isLoraMount) return { items: inMount.map(toPendingModel) }
@@ -281,7 +290,7 @@ export class BulletinModelCatalog {
     if (!this.deps.intellarum) return []
     const q = query.trim().toLowerCase()
     if (q === '') return []
-    const all = await this.deps.intellarum.list().catch(() => [])
+    const all = await this.pickable()
     return all.filter(i => [i.nomen, i.slug, i.trigger].some(f => f?.toLowerCase().includes(q))).map(toPendingModel)
   }
 
@@ -305,9 +314,12 @@ export class BulletinModelCatalog {
     if (family) {
       // Crystal's trigger map is already alias-keyed (comma-split, lowercased) and familia-scoped.
       const map = await this.deps.intellarum.triggerMap(family).catch(() => new Map<string, Intella[]>())
-      for (const [alias, bucket] of map) if (bucket[0] && !index.has(alias)) index.set(alias, bucket[0])
+      for (const [alias, bucket] of map) {
+        const hit = bucket.find(hasDownloadAddress)
+        if (hit && !index.has(alias)) index.set(alias, hit)
+      }
     } else {
-      const all = await this.deps.intellarum.list().catch(() => [])
+      const all = await this.pickable()
       for (const i of all) {
         if (i.genus !== 'lora') continue
         for (const alias of (i.trigger ?? '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean)) {

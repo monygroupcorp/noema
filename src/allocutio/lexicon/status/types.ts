@@ -21,11 +21,32 @@ export interface StatusSnapshot {
    *  view for "no balance / not signed in" branches. */
   auctorKey: AuctorKey | null
 
-  /** Current spendable balance in impetus points (= signorum.balance). */
+  /** Current spendable balance in impetus points (= signorum.balance). Excludes anything
+   *  currently LOCKED against the user's own in-flight runs — see `heldImpetus` for that. */
   balanceImpetus: bigint
 
   /** USD equivalent of `balanceImpetus`, derived for display. */
   balanceUsd: number
+
+  /**
+   * Impetus currently held (locked) against the user's own in-flight runs — the sum of
+   * `gens[].heldImpetus`. Derived, not stored (same convention as `balanceImpetus` itself):
+   * a reservation is a HOLD, not a charge, and this is what tells the user that — without it
+   * a run's lock just reads as a chunk of `balanceImpetus` that silently vanished (noema
+   * reservation-reads-as-credits-gone). 0n when nothing is held.
+   */
+  heldImpetus: bigint
+
+  /** USD equivalent of `heldImpetus`, derived for display. */
+  heldUsd: number
+
+  /**
+   * The user's single most-recently-terminated run — whichever of a charge (settled) or a
+   * release (failed/cancelled) happened last — so the SAME screen that shows a hold also shows
+   * what became of it once it clears. Absent when the index isn't wired or the user has no
+   * terminal history yet. v1: one row, not a feed — `GET /v1/me/activity` is the full history.
+   */
+  recentSettlement?: RecentSettlement
 
   /** Active gens (queued + running) the user is currently in. */
   gens: GenEntry[]
@@ -43,11 +64,29 @@ export interface StatusSnapshot {
   takenAt: Date
 }
 
+/** The user's most-recently-terminated run — a charge (settled) or a release (fractus). */
+export interface RecentSettlement {
+  actumId: string
+  modusLabel: string
+  kind: 'charge' | 'release'
+  /** Impetus charged. 0n for a release (nothing charged — the hold was simply released). */
+  impetus: bigint
+  /** USD equivalent of `impetus`. */
+  usd: number
+  at: Date
+}
+
 /** One row under YOUR GENS. */
 export interface GenEntry {
   actumId: string
   /** Human-readable modus name ("Flux Schnell", "ChatGPT"…). */
   modusLabel: string
+  /**
+   * Impetus locked against THIS run (`Actum.impetus` while nascens/agens — the upper-bound
+   * reservation, not yet the settled cost). This is exactly the amount `balanceImpetus` looks
+   * short by right now; it reappears as spendable (minus the real cost) once the run settles.
+   */
+  heldImpetus: bigint
   /** Where it's running — null if cold-pending. */
   studio: { id: string; hostLabel: string; isOwn: boolean } | null
   /** Lifecycle: nascens=queued, agens=running. */

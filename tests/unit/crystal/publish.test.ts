@@ -96,10 +96,32 @@ function makeApi(opts?: { gate?: ModerationGate; noGate?: boolean; prefs?: Recor
     async put(key) { puts.push({ key }); return `https://cdn/${key}` },
     async del(key) { dels.push(key) },
   }
-  const fetcher: MediaFetcher = { async fetch(url) { return Buffer.from(`bytes:${url}`) } }
+  // `.safetensors` URLs get a REAL minimal safetensors buffer — `_hostModel` now verifies the
+  // header before upload (civitai-import-with-key), so the placeholder `bytes:<url>` content
+  // these fakes used to return for everything would be refused for a model weight.
+  const fetcher: MediaFetcher = {
+    async fetch(url) {
+      // A dedicated URL that always throws — a generic (non-civitai) adapter failure, for the
+      // "an adapter throw is never silent" coverage below.
+      if (url === 'https://x/throws.safetensors') throw new Error('ECONNRESET')
+      if (/\.safetensors(\?|#|$)/i.test(url)) {
+        const header = Buffer.from(JSON.stringify({ t: { dtype: 'F32', shape: [1], data_offsets: [0, 4] } }))
+        const len = Buffer.alloc(8)
+        len.writeBigUInt64LE(BigInt(header.length))
+        return Buffer.concat([len, header, Buffer.alloc(4)])
+      }
+      return Buffer.from(`bytes:${url}`)
+    },
+  }
   // A fake Intella store: one model the caller (anima-1) owns + a setAccess spy.
   const models = new Map<string, Intella>([
     ['lora-1', { id: 'lora-1', nomen: 'My LoRA', genus: 'lora', slug: 'my-lora', trigger: 'mld', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'miladystation', uri: 'https://x/lora.safetensors' }] } as unknown as Intella],
+    // A REAL civitai.com-origin source (the others below use a bare host-shaped placeholder
+    // `civitai/…` that `isCivitaiUrl` does not match) — exercises `_hostModel`'s civitai-aware
+    // download at an r2 promotion.
+    ['lora-civ', { id: 'lora-civ', nomen: 'Civ LoRA', genus: 'lora', slug: 'civ', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'civitai', uri: 'https://civitai.com/api/download/models/9' }] } as unknown as Intella],
+    // A weight source the shared fetcher always throws on — a generic (non-civitai) adapter failure.
+    ['lora-broken', { id: 'lora-broken', nomen: 'Broken LoRA', genus: 'lora', slug: 'broken', familia: 'flux', ownerAnimaId: 'anima-1', access: 'private', canonica: false, sources: [{ provenance: 'huggingface', uri: 'https://x/throws.safetensors' }] } as unknown as Intella],
     ['canon-1', { id: 'canon-1', nomen: 'Canon Model', genus: 'lora', slug: 'canon', familia: 'flux', auctor: 'anima-1', canonica: true, sources: [{ provenance: 'miladystation', uri: 'https://x/c.safetensors' }] } as unknown as Intella],
     // A NON-COMMERCIAL import (FLUX.1-dev derivative) the caller owns — usable privately, but
     // barred from the public (commercial) catalog by the license gate.
@@ -494,6 +516,47 @@ test('publish(): a model to r2 hosts its weights in our bucket + makes it resolv
   assert.equal(m.sources[0].uri, `https://cdn/models/${ed.id}/lora.safetensors`)
 })
 
+test('publish(): a civitai-origin r2 promotion with no CIVITAI_API_TOKEN fails LOUDLY — logged + recorded, never silent', async () => {
+  const { api, editiones, flush } = makeApi()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(null, { status: 401 })) as typeof fetch
+  try {
+    const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-civ' }, destination: 'r2', visibility: 'private' })
+    const entries = await collectLogs(flush)
+
+    const stored = await editiones.find(ed.id)
+    assert.equal(stored?.status, 'failed')
+    assert.equal(stored?.failure?.category, 'origin_auth')
+    assert.match(stored?.failure?.reason ?? '', /no CIVITAI_API_TOKEN is configured/)
+    assert.equal(typeof stored?.failure?.failedAt, 'string')
+
+    const line = entries.find((e) => e.msg === 'publish: adapter threw — publication failed')
+    assert.ok(line, 'an adapter throw must be logged, not swallowed')
+    assert.equal(line?.level, 'error')
+    assert.equal(line?.editioId, ed.id)
+    assert.equal(line?.destination, 'r2')
+
+    // The public projection gets a generic, author-safe sentence — never the raw reason.
+    const { toEdition } = await import('../../../src/allocutio/api/runProjection.js')
+    const projected = toEdition(stored!)
+    assert.match(projected.failureNote ?? '', /needs a connected credential/)
+    assert.doesNotMatch(projected.failureNote ?? '', /CIVITAI_API_TOKEN/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('publish(): a generic adapter throw (non-civitai) is categorized "adapter", logged + recorded', async () => {
+  const { api, editiones, flush } = makeApi()
+  const ed = await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-broken' }, destination: 'r2', visibility: 'private' })
+  await flush()
+
+  const stored = await editiones.find(ed.id)
+  assert.equal(stored?.status, 'failed')
+  assert.equal(stored?.failure?.category, 'adapter')
+  assert.equal(stored?.failure?.reason, 'ECONNRESET')
+})
+
 test('publish(): a private our-bucket model stays private (resolvable only by its owner)', async () => {
   const { api, accessCalls, flush } = makeApi()
   await api.publish(anima1, { artifact: { kind: 'intella', id: 'lora-1' }, destination: 'r2', visibility: 'private' })
@@ -644,6 +707,74 @@ test('A2 review queue: author sees only their OWN held items; admin sees all', a
 
   assert.equal((await api.listHeldEditions(anima2)).length, 0, 'another author sees none of it')
   assert.equal((await api.listHeldEditions(admin)).length, 1, 'admin queue sees all held')
+})
+
+// The review queue answers "what is a person still looking at". A publish SURFACE that
+// reopens needs a different question — "what happened to this artifact" — because every
+// terminal outcome has left that queue by then. `listMyEditions` is that read.
+test('my publications of one artifact: the author sees their own, another identity sees none', async () => {
+  const { gate } = holdGate()
+  const { api, flush } = makeApi({ gate })
+  const mine = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  const ref = { kind: 'actum' as const, id: OWNED_ACTUM }
+  const asAuthor = await api.listMyEditions(anima1, ref)
+  assert.equal(asAuthor.length, 1)
+  assert.equal(asAuthor[0].id, mine.id)
+
+  assert.deepEqual(
+    await api.listMyEditions(anima2, ref), [],
+    'the artifact id is not a capability: another identity asking about it gets the empty ' +
+      'list, indistinguishable from an artifact nobody published',
+  )
+})
+
+test('my publications of one artifact: a REFUSED publication is readable, unlike on the review queue', async () => {
+  // The gap this read closes. A refusal is terminal, so it leaves the `reviewOutcome:'pending'`
+  // queue — and the fail-closed default gate refuses rather than holds, so this is the common
+  // outcome, not an edge case. Without this the reason the server persisted for the publisher
+  // could be read exactly once, by the session that filed it.
+  const gate: ModerationGate = { async scan() { return { ok: false, category: 'unavailable', reason: 'no scanner configured' } } }
+  const { api, flush } = makeApi({ gate })
+  const ed = await api.publish(anima1, { artifact: { kind: 'actum', id: OWNED_ACTUM }, destination: 'feed' })
+  await flush()
+
+  assert.equal((await api.listHeldEditions(anima1)).length, 0, 'a refusal is not on the review queue')
+
+  const [mine] = await api.listMyEditions(anima1, { kind: 'actum', id: OWNED_ACTUM })
+  assert.equal(mine.id, ed.id)
+  assert.equal(mine.status, 'rejected')
+  assert.equal(
+    mine.moderationNote,
+    'Public publishing is closed right now, so this was never checked. Nothing was found in your content.',
+    'the author-safe note travels with it, so the publisher can be told why on a later visit',
+  )
+})
+
+test('my publications of one artifact: newest first, and only that artifact', async () => {
+  // Seeded directly with distinct `natum` values rather than published twice in a row:
+  // `Editionum.listByArtifact` promises no order at all, so what is under test is the API
+  // method's own sort, and two publishes in the same millisecond would not exercise it.
+  const { api, editiones } = makeApi({ noGate: true })
+  const seed = async (artifactRef: { kind: 'actum' | 'intella' | 'collectio'; id: string }, natum: Date) => {
+    const e = await editiones.create({
+      by: { animaId: 'anima-1' },
+      artifactRef,
+      destination: 'r2',
+      visibility: 'private',
+      custody: 'ours',
+    })
+    editiones.store.set(e.id, { ...e, natum, mutatum: natum })
+    return e.id
+  }
+  const older = await seed({ kind: 'actum', id: OWNED_ACTUM }, new Date('2026-09-01T00:00:00Z'))
+  const newer = await seed({ kind: 'actum', id: OWNED_ACTUM }, new Date('2026-09-02T00:00:00Z'))
+  const other = await seed({ kind: 'intella', id: 'lora-1' }, new Date('2026-09-03T00:00:00Z'))
+
+  const ids = (await api.listMyEditions(anima1, { kind: 'actum', id: OWNED_ACTUM })).map((e) => e.id)
+  assert.deepEqual(ids, [newer, older], 'newest first — the newest publication describes the artifact now')
+  assert.ok(!ids.includes(other), "another artifact's publication is not in this list")
 })
 
 test('A2 approve: an admin approval clears the hold → the item re-settles and publishes (gate bypassed)', async () => {

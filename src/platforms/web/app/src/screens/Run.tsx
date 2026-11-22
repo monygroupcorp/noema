@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
@@ -6,14 +6,52 @@ import { useIdentity } from '../state/identity';
 import { mediaFromOutput, textFromOutput } from '../lib/media';
 import { STAGE_LABELS, measure, useRunStream } from '../lib/runStream';
 import { Lightbox } from '../components/Lightbox';
+import { ReportOutput } from '../shell/ReportOutput';
+import { api, type SettledRun } from '../lib/api';
+import { flowSummaries } from '../lib/flows';
+import { toUI } from './Catalog';
 
 type StepState = 'done' | 'active' | 'pending';
+
+// A flow row on the /run landing — the catalogue's own projection of a FlowSummary, so the two
+// screens name a flow the same way.
+type StartRow = ReturnType<typeof toUI>;
+
+// How many flows the landing lists before pointing at the catalogue for the rest. The run
+// surface shows what can be started here (REFERENCES.md REF-15); narrowing the whole library is
+// the catalogue's job, so the list is short and ends in a door to it.
+export const START_MAX = 10;
+export function startList(flows: readonly StartRow[]): { shown: StartRow[]; more: number } {
+  return { shown: flows.slice(0, START_MAX), more: Math.max(0, flows.length - START_MAX) };
+}
+// The section's header states its shape before its rows (DESIGN.md D-55): how many flows are
+// listed here out of how many the catalogue holds, the way /projects and the feed count theirs.
+// Until the flows have loaded there is no count to state, and the header is the plain title.
+export function startShape(shown: number, total: number): string {
+  if (total === 0) return 'Start a run';
+  if (shown < total) return `Start a run · ${shown} of ${total} flows`;
+  return `Start a run · ${total} ${total === 1 ? 'flow' : 'flows'}`;
+}
 
 export function Run() {
   const { ident } = useIdentity();
   const [params] = useSearchParams();
   const id = params.get('id');
   const [lightbox, setLightbox] = useState(false);
+
+  // With no run open, the screen is a landing: the visitor's last runs, each a door back into
+  // its stream, and the flows they can start one from — the same list the catalogue reads
+  // (DESIGN.md D-60: an empty state gives the action that fills it, not a dashed box). Both
+  // reads are skipped while a run is open; a failed read leaves the band it feeds absent.
+  const [recent, setRecent] = useState<SettledRun[] | null>(null);
+  const [flows, setFlows] = useState<StartRow[] | null>(null);
+  useEffect(() => {
+    if (id) return;
+    let live = true;
+    api.listRuns({ limit: 8 }).then((p) => { if (live) setRecent(p.runs); }).catch(() => { if (live) setRecent([]); });
+    flowSummaries().then((list) => { if (live) setFlows(list.map(toUI)); }).catch(() => { if (live) setFlows([]); });
+    return () => { live = false; };
+  }, [id]);
 
   const {
     stageIdx, progressus, terminal, exitus, error, modusId,
@@ -43,7 +81,7 @@ export function Run() {
     <div className="csec">
       <div className="ctitle">Session</div>
       <div className="meta-line"><span>run</span><span className="v mono">{id ?? '—'}</span></div>
-      <div className="meta-line"><span>status</span><span className="v mono">{terminal ?? 'running'}</span></div>
+      <div className="meta-line"><span>status</span><span className="v mono">{id ? terminal ?? 'running' : 'none open'}</span></div>
       {cost.executionMs != null && (
         <div className="meta-line"><span>this run</span><span className="v mono">{(cost.executionMs / 1000).toFixed(1)}s</span></div>
       )}
@@ -55,13 +93,55 @@ export function Run() {
   );
 
   if (!id) {
+    const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+    const start = startList(flows ?? []);
     return (
-      <AppShell crumb={<>runs</>} context={context}>
+      <AppShell crumb={<>Runs</>} context={context}>
         <div className="page"><div className="pw narrow">
-          <div className="empty">
-            <div className="t">No run selected</div>
-            <div className="s">Start one from the <Link to="/catalog">catalog</Link> — a dispatched run lands here to watch it stream.</div>
+          <div className="pagehead">
+            <div><h1>Runs</h1><div className="sub">A dispatched run streams here, stage by stage, until its result lands.</div></div>
           </div>
+
+          {recent && recent.length > 0 && (
+            <>
+              <div className="sectionhead">Your last runs</div>
+              <div className="list">
+                {recent.map((r) => (
+                  <Link className="lrow" to={`/run?id=${r.id}`} key={r.id}>
+                    <div className="li-main">
+                      <div className="t">{r.modusLabel}</div>
+                      <div className="s">{fmtDate(r.settledAt)}</div>
+                    </div>
+                    <div className="li-right">{Number(r.cost).toLocaleString()} cr · ${r.costUsd.toFixed(2)}</div>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="sectionhead">{startShape(start.shown.length, flows?.length ?? 0)}</div>
+          {flows === null ? (
+            <div className="empty"><div className="t">Loading the flows you can start…</div></div>
+          ) : flows.length === 0 ? (
+            <div className="empty"><div className="t">Couldn’t reach the catalogue — <Link to="/catalog">open it ▸</Link></div></div>
+          ) : (
+            <>
+              <div className="list">
+                {start.shown.map((f) => (
+                  <Link className="lrow" to={`/card?id=${encodeURIComponent(f.id)}`} key={f.id}>
+                    <div className="li-main">
+                      <div className="t">{f.name}</div>
+                      <div className="s">{f.verb} · {f.media}</div>
+                    </div>
+                    <div className="li-right">run ▸</div>
+                  </Link>
+                ))}
+              </div>
+              <div className="sub" style={{ marginTop: 'var(--s3)' }}>
+                <Link to="/catalog">{start.more > 0 ? `All ${flows.length} in the catalogue ▸` : 'Browse the catalogue ▸'}</Link>
+              </div>
+            </>
+          )}
         </div></div>
       </AppShell>
     );
@@ -69,14 +149,14 @@ export function Run() {
 
   return (
     <AppShell
-      crumb={<>runs <span className="sep">/</span> <span className="mono">{id}</span></>}
+      crumb={<>Runs <span className="sep">/</span> <span className="mono">{id}</span></>}
       context={context}
     >
       <div className="page"><div className="pw narrow">
 
         <div className="pagehead">
           <div>
-            <h1>run</h1>
+            <h1>Run</h1>
             <div className={`sub mono`}>{status}</div>
           </div>
           <div className="right">
@@ -146,6 +226,7 @@ export function Run() {
                 <Link className="btn-ghost" to="/space"><Ic name="sparkles" /> View in Space</Link>
                 <Link className="btn-ghost" to="/canvas"><Ic name="workflow" /> Send to Canvas</Link>
                 <Link className="btn-ghost" to="/catalog"><Ic name="rotate-cw" /> New run</Link>
+                {imgDone && <ReportOutput runId={id} />}
               </div>
             </div>
           </div>

@@ -19,8 +19,8 @@ export function makeTelegramSender(tg: Telegram): TelegramSender {
     deleteMessage: (chatId, messageId) =>
       tg.deleteMessage(chatId, messageId).then(() => {}),
 
-    answerCallbackQuery: (id) =>
-      tg.answerCbQuery(id).then(() => {}),
+    answerCallbackQuery: (id, text) =>
+      tg.answerCbQuery(id, text).then(() => {}),
 
     // The media URL itself is not scrubbed — Telegram fetches it server-side and it
     // never appears in the chat. Only the caption, which viewers read, is scrubbed.
@@ -33,8 +33,8 @@ export function makeTelegramSender(tg: Telegram): TelegramSender {
     sendDocument: (chatId, url, extra) =>
       tg.sendDocument(chatId, url, redactExtra(extra) as never),
 
-    sendMediaGroup: (chatId, media) =>
-      tg.sendMediaGroup(chatId, media.map(m => redactExtra(m)) as never).then(() => {}),
+    sendMediaGroup: (chatId, media, extra) =>
+      tg.sendMediaGroup(chatId, media.map(m => redactExtra(m)) as never, extra as never).then(() => {}),
 
     setMessageReaction: (chatId, messageId, reaction) =>
       tg.setMessageReaction(chatId, messageId, reaction as never).then(() => {}),

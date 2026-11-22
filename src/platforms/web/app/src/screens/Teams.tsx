@@ -62,11 +62,11 @@ export function Teams() {
   }
 
   return (
-    <AppShell crumb="teams">
+    <AppShell crumb="Teams">
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Teams</h1>
-          <div className="sub">A fellowship of accounts that co-owns work. Create one — you’re the founder — and add members by their account id.</div>
+          <div className="sub">A team is a group of accounts that owns work together. Create one, then add members by their account id.</div>
         </div></div>
 
         {!ready && <div className="sub">Loading…</div>}

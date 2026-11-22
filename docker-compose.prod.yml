@@ -4,7 +4,7 @@
 # lifecycle (pull, keystore decrypt, health check, rollback).
 #
 # Usage from deploy.sh:
-#   ETHEREUM_SIGNER_PRIVATE_KEY="..." docker compose -f docker-compose.prod.yml up -d bot
+#   docker compose -f docker-compose.prod.yml up -d bot
 #   docker compose -f docker-compose.prod.yml up -d staging
 #   docker compose -f docker-compose.prod.yml up -d caddy
 
@@ -18,6 +18,11 @@ x-common: &common
     - ALL
   security_opt:
     - no-new-privileges
+  # Logs go to the host journal so they outlive the container; deploy.sh does the same.
+  logging:
+    driver: journald
+    options:
+      tag: noema
 
 services:
   clip:
@@ -45,9 +50,9 @@ services:
       clip:
         condition: service_healthy
     environment:
-      - ETHEREUM_SIGNER_PRIVATE_KEY=${ETHEREUM_SIGNER_PRIVATE_KEY:-}
       - MAINTENANCE_MODE_FILE=/var/run/hyperbot/maintenance.flag
       - CEREMONY_ZKEY_DIR=/var/lib/noema/ceremony
+      - ARCANUM_ROOT_ZKEY_PATH=/var/lib/noema/arcanum-artifacts/arcanum_0000.zkey
       - COLLECTION_EXPORT_PROCESSING_ENABLED=false
     volumes:
       - /var/run/hyperbot:/var/run/hyperbot
@@ -65,6 +70,11 @@ services:
       # sets the same CEREMONY_ZKEY_DIR; the two must stay in step. Empty is correct until a
       # ceremony opens.
       - ${CEREMONY_DIR:-/opt/noema/ceremony}:/var/lib/noema/ceremony
+      # arcanum_0000.zkey + arcanum.r1cs — too large to commit (gitignored), so CEREMONY_OPEN
+      # and CEREMONY_REOPEN read the root zkey from here at boot instead of the image. deploy.sh
+      # mounts the same path and sets the same ARCANUM_ROOT_ZKEY_PATH; the two must stay in
+      # step. Read-only: nothing here is ever written by the app.
+      - ${ARCANUM_ARTIFACTS_DIR:-/opt/noema/arcanum-artifacts}:/var/lib/noema/arcanum-artifacts:ro
     mem_limit: 900m
     networks:
       hyperbot:
@@ -76,6 +86,10 @@ services:
     container_name: hyperbot-staging
     image: ghcr.io/monygroupcorp/noema:staging
     env_file: .env.staging
+    logging:
+      driver: journald
+      options:
+        tag: noema-staging
     networks:
       hyperbot:
         aliases:

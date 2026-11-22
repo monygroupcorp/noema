@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  api, AuthApiError, getAccounts, upsertAccount, setActiveAnimaId, dropActiveAccount, clearAllAccounts,
+  api, AuthApiError, getAccounts, upsertAccount, setActiveAnimaId, dropAccount, dropActiveAccount, clearAllAccounts,
   setPendingToken, takeLegacySession, type AuthResult, type StoredAccount, type SessionStore,
 } from '../lib/api';
 import { connectWallet } from '../lib/wallet';
+import { takeTelegramLaunch, type LaunchWindow } from '../lib/telegramLaunch';
 
 // The REAL fiat session layer — now MULTI-ACCOUNT (the Twitter model). One browser
 // holds several named logins at once, keyed by animaId, with a single ACTIVE pointer.
@@ -17,6 +18,18 @@ import { connectWallet } from '../lib/wallet';
 // commitment and a named anima are DIFFERENT souls — anon work does not migrate on login.
 
 interface SessionState { token: string; animaId: string; username?: string }
+
+// A page opened from the bot as a Mini App carries a signed Telegram launch. It is read and
+// redeemed once per page load — the launch is single-use, and StrictMode mounts effects twice —
+// so the exchange is shared here rather than started per mount.
+let telegramLaunchSignIn: Promise<AuthResult | null> | undefined;
+function signInFromTelegramLaunch(): Promise<AuthResult | null> {
+  if (!telegramLaunchSignIn) {
+    const initData = typeof window === 'undefined' ? null : takeTelegramLaunch(window as unknown as LaunchWindow);
+    telegramLaunchSignIn = initData ? api.auth.telegramWebApp(initData).catch(() => null) : Promise.resolve(null);
+  }
+  return telegramLaunchSignIn;
+}
 
 // Refresh a live token this long before it lapses; also the "is this near expiry?" window
 // a switch uses to decide instant-activate vs refresh-then-activate.
@@ -40,6 +53,7 @@ interface SessionCtx {
   recoverWithTelegram: (code: string) => Promise<void>;   // paste a bot recovery code → add + activate
   switchAccount: (animaId: string) => Promise<void>;      // re-point the active account
   goAnonymous: () => void;            // deactivate to the anon slot, KEEPING held logins
+  forgetAccount: (animaId: string) => void;   // drop one held account from this browser (active or not)
   signOutActive: () => void;          // drop the active account → next held, else anon
   signOutAll: () => void;             // drop every account → anon
 }
@@ -75,15 +89,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, ms);
   }
 
-  // On mount: migrate a pre-multi-account single token (once), then validate the active
-  // account via refresh — hydrating its animaId and renewing the token.
+  // On mount: a Telegram launch signs in as the Telegram user who tapped (they are who is here),
+  // and the page is ready once it has. Otherwise migrate a pre-multi-account single token (once),
+  // then validate the active account via refresh — hydrating its animaId and renewing the token.
   useEffect(() => {
+    let live = true;
+    void signInFromTelegramLaunch().then((launched) => {
+      if (!live) return;
+      if (launched) { adopt(launched); api.recordEvent('sign_in', { method: 'telegram' }); setReady(true); return; }
+      restoreStored();
+    });
+    return () => {
+      live = false;
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    };
+
+    function restoreStored() {
     const legacy = takeLegacySession();     // pre-multi-account single token, if any
     if (legacy) setPendingToken(legacy.token);   // let refresh sign with it until it's adopted
     const initial = getAccounts();
     setStore(initial);
     if (!initial.activeAnimaId && !legacy) { setReady(true); return; }
-    let live = true;
     const priorName = legacy?.username ?? activeOf(initial)?.username;
     api.auth.refresh()
       .then((res) => { if (live) adopt(res, priorName); })
@@ -99,21 +125,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (legacy || rejected) setStore(dropActiveAccount());
       })
       .finally(() => { if (live) setReady(true); });
-    return () => {
-      live = false;
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const register = async (username: string, password: string) => {
     const res = await api.auth.register(username, password); // 201 — mints a session (no verify step)
     adopt(res, username);
+    api.recordEvent('sign_in', { method: 'password' });
   };
 
   const login = async (username: string, password: string) => {
     const res = await api.auth.login(username, password);
     adopt(res, username);
+    api.recordEvent('sign_in', { method: 'password' });
   };
 
   // Wallet-first signup: prove a wallet with no username/password. An unknown wallet MINTS a new
@@ -126,6 +151,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const signature = await wallet.signMessage(statement);
     const res = await api.auth.walletRegister(token, signature);
     adopt(res);
+    api.recordEvent('sign_in', { method: 'wallet' });
   };
 
   // Forgot-password recovery: prove control of a linked wallet, adopt that soul. The username
@@ -136,12 +162,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const signature = await wallet.signMessage(statement);
     const res = await api.auth.walletRecover(token, signature);
     adopt(res);
+    api.recordEvent('sign_in', { method: 'wallet' });
   };
 
   // Forgot-password recovery via Telegram: the user pastes a code the bot handed them.
   const recoverWithTelegram = async (code: string) => {
     const res = await api.auth.telegramRecover(code.trim());
     adopt(res);
+    api.recordEvent('sign_in', { method: 'telegram' });
   };
 
   // Switch the active account. Activate immediately (instant if the token is still live),
@@ -168,13 +196,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStore(setActiveAnimaId(null));
   };
 
-  // Sign out of the ACTIVE account only — activate the next held account, or fall to anon.
-  const signOutActive = () => {
-    const next = dropActiveAccount();
+  // Forget one held account on this browser — the row-level "remove" on /keyring. Only the
+  // client store changes: the account itself is untouched and signs back in as before. If it
+  // was the active one, the next held account takes over (or anon), and the refresh timer
+  // follows whichever is active now.
+  const forgetAccount = (animaId: string) => {
+    const next = dropAccount(animaId);
     setStore(next);
     const active = next.accounts.find((a) => a.animaId === next.activeAnimaId);
     if (active) scheduleRefresh(active.expiresAt);
     else if (refreshTimer.current) clearTimeout(refreshTimer.current);
+  };
+
+  // Sign out of the ACTIVE account only — activate the next held account, or fall to anon.
+  const signOutActive = () => {
+    const active = getAccounts().activeAnimaId;
+    if (active) forgetAccount(active);
+    else setStore(dropActiveAccount());
   };
 
   const signOutAll = () => {
@@ -185,7 +223,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{
       session, accounts: store.accounts, activeAnimaId: store.activeAnimaId, ready,
-      register, login, signUpWithWallet, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, signOutActive, signOutAll,
+      register, login, signUpWithWallet, recoverWithWallet, recoverWithTelegram, switchAccount, goAnonymous, forgetAccount, signOutActive, signOutAll,
     }}>
       {children}
     </Ctx.Provider>

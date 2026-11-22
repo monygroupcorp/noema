@@ -37,7 +37,6 @@ NOEMA is in active development. Data is stored in MongoDB and cloud storage. End
    DISCORD_TOKEN=your_discord_bot_token
    INTERNAL_API_KEY_SYSTEM=your_secret_key
    ETHEREUM_RPC_URL=https://your-rpc-endpoint
-   ETHEREUM_SIGNER_PRIVATE_KEY=0x...
    MONGO_PASS=mongodb+srv://user:pass@cluster/db
    ```
 

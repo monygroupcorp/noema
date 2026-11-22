@@ -78,6 +78,16 @@ export function AdminWorkspace() {
 
             <div className="byo-row">
               <div className="byo-head">
+                <span className="byo-prov">Reports</span>
+              </div>
+              <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s3)' }}>
+                <div className="sub">In-app bug/feature/feedback/abuse reports. A confirmed abuse violation strikes the subject and takes the reported run's output down.</div>
+                <Link className="btn" to="/admin/reports" style={{ alignSelf: 'flex-start' }}><Ic name="flag" /> Open reports</Link>
+              </div>
+            </div>
+
+            <div className="byo-row">
+              <div className="byo-head">
                 <span className="byo-prov">Partner requests</span>
               </div>
               <div className="byo-body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--s3)' }}>

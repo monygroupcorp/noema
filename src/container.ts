@@ -121,6 +121,10 @@ import { MongoScholium } from './crystal/MongoScholium.js'
 import { MongoColloquium } from './crystal/MongoColloquium.js'
 import { MongoDictum } from './crystal/MongoDictum.js'
 import { MongoQuerela } from './crystal/MongoQuerela.js'
+import { gateDispatch } from './crystal/useTerms.js'
+import { licenseUseTerms } from './crystal/modelLicense.js'
+import type { AuctorKey } from './flow/types.js'
+import { ownerKeyOf } from './crystal/ownerKey.js'
 import { MongoMemoria } from './crystal/MongoMemoria.js'
 import { MongoPartnerRequest } from './crystal/MongoPartnerRequest.js'
 import type { PartnerRequestStore } from './types/partnerRequest.js'
@@ -373,6 +377,12 @@ export interface ContainerConfig {
   huggingFaceOrg?: string
   /** HF_TOKEN — present → the HF registry gets a real LFS uploader; absent → projection-only. */
   huggingFaceToken?: string
+  /** CIVITAI_API_TOKEN — civitai gates its download endpoint even for public LoRAs
+   *  (2026-11-13); present → the `BucketAdapter` model-hosting path (public promotion)
+   *  attaches it as a Bearer header on a civitai-origin weight download. Absent → a
+   *  civitai-sourced promotion fails with a clear `CivitaiDownloadError` instead of
+   *  silently 401ing. Never sent to any other host (see `civitaiAwareFetcher`). */
+  civitaiApiToken?: string
   /** ARWEAVE_PRIVATE_KEY — funding wallet for the Irys bundler. Present → the `arweave`
    *  graduation destination is registered (LIVE-UNVERIFIED); absent → not offered. */
   arweavePrivateKey?: string
@@ -759,8 +769,9 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
       uploader,
       ...(privateOutputsStore ? { privateUploader: privateOutputsStore } : {}),
     }))
-    // Bucket custody (publishing #2): re-hosts an artifact's media to R2.
-    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader }))
+    // Bucket custody (publishing #2): re-hosts an artifact's media to R2. `civitaiToken`
+    // only affects a model (intella) publish whose weight source is civitai-origin.
+    publicationAdapters.push(new BucketAdapter({ fetcher: httpMediaFetcher, store: uploader, ...(config.civitaiApiToken ? { civitaiToken: config.civitaiApiToken } : {}) }))
     // Archive (editio-export): bundle a collection's approved pieces into a ZIP in
     // OUR bucket — the sovereign-download destination. Private/custody-ours, so it
     // never touches the moderation gate.
@@ -876,6 +887,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
     modorum,
     editiones,
     hospitia,
+    // Stamps `/me/activity`'s dispatch index terminal on every rail (webhook, sync cursor,
+    // the expiry reaper, the warm-pod line, owner cancel) — not just the webhook, which used
+    // to be the only caller that retired this row.
+    actumIndex,
   })
   const arcanumLeafCol = db.collection(config.arcanumLeavesCollection ?? 'arcanum_leaves')
   const arcanumNullifiersCol = db.collection(config.arcanumNullifiersCollection ?? 'arcanum_nullifiers')
@@ -919,10 +934,24 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const terminusOf = async (m: Modus, a: Record<string, unknown>): Promise<number> =>
     await cursorum.resolve(m).terminus?.(m, a) ?? DEFAULT_EXPIRAT_MS
   compositusCursor = new CompositusCursor(sharedDispatch, modorum, actorum, terminusOf)
+  // Every collection piece is a paid run under the funder, dispatched below the run entry point,
+  // so each one is held to its flow's licence terms (MiniMax H3) here as well: a funder suspended
+  // mid-collection gets no further pieces, and a collection fired before the terms existed
+  // dispatches none for a funder who has not accepted them. A refused piece throws before it is
+  // initiated, so it is booked as a failed piece (not held for later) and charged nothing.
+  // Weight-derived terms (noema/minimax-h3-terms-from-weights): a piece's licence obligation
+  // comes from what its flow's `intellae` binds, same store every other run-entry gate reads.
+  const collectioIntellae = new MongoIntella(db.collection('intellae'))
+  const collectioDispatch = gateDispatch(sharedDispatch, {
+    find: (id) => modorum.find(id),
+    findIntellaUseTerms: async (id) => licenseUseTerms((await collectioIntellae.find(id))?.license),
+    accepted: async (by) => (await config.consuetudinum?.resolveGeneratio(by as AuctorKey))?.termsAccepted,
+    strikes: (by, termsId) => querelae.countViolations(ownerKeyOf(by as AuctorKey), termsId),
+  })
   // Review ON by default: every completed piece waits for the creator's approve/reject
   // (curation) before it counts toward the collection and the next piece fires. This is
   // a GLOBAL flag today (not per-collection) — a per-collection review toggle is net-new.
-  const collectioCursor = new CollectioCursor(sharedDispatch, collectiones, actorum, { reviewEnabled: true })
+  const collectioCursor = new CollectioCursor(collectioDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
     actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,

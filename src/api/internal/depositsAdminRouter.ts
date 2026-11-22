@@ -13,6 +13,7 @@
 // =============================================================================
 
 import express, { type Router, type Request, type Response } from 'express'
+import { internalSecretMatches } from '../../lib/internalSecret.js'
 import { reconcileVaultDeposits, type DepositReconcilerDeps } from '../../crystal/DepositReconciler.js'
 
 export interface DepositsAdminDeps {
@@ -35,8 +36,7 @@ export function createDepositsAdminRouter(deps: DepositsAdminDeps): Router {
   const router = express.Router()
 
   router.use((req: Request, res: Response, next): void => {
-    const provided = req.headers['x-internal-secret'] ?? req.query.token
-    if (!deps.secret || provided !== deps.secret) {
+    if (!internalSecretMatches(deps.secret, req.headers['x-internal-secret'])) {
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid internal secret' } })
       return
     }

@@ -46,9 +46,9 @@ export class MemoryActumIndex implements ActumIndexStore {
     const out: ActumIndex[] = []
     for (const id of ids) {
       const e = this.byActum.get(id)
-      // IN-FLIGHT ONLY — mirror MongoActumIndex: never surface settled rows via findFor
-      // (the /status + GDPR-export surface). Settled history is listSettled-only.
-      if (e && !e.settledAt) out.push(e)
+      // IN-FLIGHT ONLY — mirror MongoActumIndex: never surface settled/released rows via
+      // findFor (the /status + GDPR-export surface). Terminal history is listSettled/listReleased-only.
+      if (e && !e.settledAt && !e.releasedAt) out.push(e)
     }
     return out
   }
@@ -59,5 +59,68 @@ export class MemoryActumIndex implements ActumIndexStore {
     this.byActum.delete(actumId)
     if (e.animaId)    this.byAnima.get(e.animaId)?.delete(actumId)
     if (e.commitment) this.byCommitment.get(e.commitment)?.delete(actumId)
+  }
+
+  async findByActumId(actumId: string): Promise<ActumIndex | null> {
+    return this.byActum.get(actumId) ?? null
+  }
+
+  async settle(actumId: string, patch: { settledAt: Date; impetus: string; modusLabel: string }): Promise<void> {
+    const e = this.byActum.get(actumId)
+    if (!e) return
+    this.byActum.set(actumId, { ...e, ...patch })
+  }
+
+  async listSettled(key: AuctorKey, opts: { limit: number; cursor?: string }): Promise<{ entries: ActumIndex[]; nextCursor?: string }> {
+    return this._listTerminal(key, 'settledAt', opts)
+  }
+
+  async sumSettledImpetus(key: AuctorKey): Promise<string> {
+    return this._sumTerminal(key, 'settledAt')
+  }
+
+  async release(actumId: string, patch: { releasedAt: Date; modusLabel: string }): Promise<void> {
+    const e = this.byActum.get(actumId)
+    if (!e) return
+    this.byActum.set(actumId, { ...e, ...patch })
+  }
+
+  async listReleased(key: AuctorKey, opts: { limit: number; cursor?: string }): Promise<{ entries: ActumIndex[]; nextCursor?: string }> {
+    return this._listTerminal(key, 'releasedAt', opts)
+  }
+
+  /** Shared newest-first, cursor-paginated listing over whichever terminal stamp
+   *  (`settledAt` or `releasedAt`) the caller asks for — same shape both callers need. */
+  private _listTerminal(
+    key: AuctorKey,
+    stamp: 'settledAt' | 'releasedAt',
+    opts: { limit: number; cursor?: string },
+  ): { entries: ActumIndex[]; nextCursor?: string } {
+    if ('bursaToken' in key) return { entries: [] }
+    const ids = 'animaId' in key
+      ? this.byAnima.get(key.animaId)
+      : this.byCommitment.get(key.commitment)
+    const limit = Math.min(Math.max(Math.trunc(opts.limit) || 0, 1), 100)
+    const all = [...(ids ?? [])]
+      .map(id => this.byActum.get(id))
+      .filter((e): e is ActumIndex => !!e && !!e[stamp])
+      .sort((a, b) => (b[stamp] as Date).getTime() - (a[stamp] as Date).getTime())
+    const startIdx = opts.cursor ? all.findIndex(e => e.actumId === opts.cursor) + 1 : 0
+    const page = all.slice(startIdx, startIdx + limit)
+    const nextCursor = startIdx + limit < all.length ? page[page.length - 1]?.actumId : undefined
+    return { entries: page, ...(nextCursor ? { nextCursor } : {}) }
+  }
+
+  private _sumTerminal(key: AuctorKey, stamp: 'settledAt' | 'releasedAt'): string {
+    if ('bursaToken' in key) return '0'
+    const ids = 'animaId' in key
+      ? this.byAnima.get(key.animaId)
+      : this.byCommitment.get(key.commitment)
+    let total = 0n
+    for (const id of ids ?? []) {
+      const e = this.byActum.get(id)
+      if (e?.[stamp] && e.impetus) total += BigInt(e.impetus)
+    }
+    return total.toString()
   }
 }

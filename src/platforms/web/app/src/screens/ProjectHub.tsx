@@ -80,7 +80,7 @@ export function ProjectHub() {
 
   const crumb = (
     <span className="ph-crumb">
-      <Link to="/app">Home</Link> <span className="sep">/</span> <Link to="/projects">projects</Link> <span className="sep">/</span> <b>{p.name}</b>
+      <Link to="/app">Home</Link> <span className="sep">/</span> <Link to="/projects">Projects</Link> <span className="sep">/</span> <b>{p.name}</b>
     </span>
   );
 
@@ -102,7 +102,8 @@ export function ProjectHub() {
               </div>
             ) : (
               <>
-                <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>rename ▸</button></h1>
+                <h1 className="ph-name">{p.name} <button className="hc-open" title="Rename this project" onClick={startEdit}>Rename ▸</button></h1>
+                <div className="ph-meta mono" style={{ marginTop: 6 }}>{p.shared ? `${p.shared} members · ` : ''}updated {p.updated} · mixed custody (TEE · local · public)</div>
                 <p className="ph-desc">{p.desc || 'No description yet.'}</p>
               </>
             )}
@@ -119,7 +120,7 @@ export function ProjectHub() {
                 </select>
               </label>
             ) : (
-              <Link className="btn" to="/teams"><Ic name="circle-user" /> share via a team ▸</Link>
+              <Link className="btn" to="/teams"><Ic name="circle-user" /> Share via a team ▸</Link>
             )}
           </div>
         </div>
@@ -131,16 +132,17 @@ export function ProjectHub() {
           ))}
         </div>
 
-        {/* tabs — asset tabs are LINKS into the canonical surface scoped to this project */}
+        {/* tabs — asset tabs are LINKS into the canonical surface scoped to this project.
+            A tab's count badge is only drawn when it is non-zero (DESIGN.md D-58). */}
         <div className="ph-tabs">
           {tabs.map((t) => (
             SCOPED[t.key] ? (
               <Link key={t.key} className="ph-tab" to={`${SCOPED[t.key]}?project=${p.id}`}>
-                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+                {t.key}{t.n ? <span className="tn">{t.n}</span> : null}
               </Link>
             ) : (
               <button key={t.key} className={`ph-tab${tab === t.key ? ' on' : ''}`} onClick={() => setTab(t.key)}>
-                {t.key}{t.n != null && <span className="tn">{t.n}</span>}
+                {t.key}{t.n ? <span className="tn">{t.n}</span> : null}
               </button>
             )
           ))}
@@ -149,41 +151,48 @@ export function ProjectHub() {
         {tab === 'Overview' ? (
           <>
             <div className="ph-overview">
-              <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={c.datasets ? `${c.datasets} filed` : 'no datasets yet'} to={`/datasets?project=${p.id}`}>
+              {/* Each empty holding carries one line saying what fills it; the count and the
+                  signal line appear only once there is something to count (DESIGN.md D-58). */}
+              <HoldingCard ico="database" name="Datasets" n={c.datasets} foot={`${c.datasets} filed`}>
                 {c.datasets
                   ? p.datasetIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(dsNames, x)}</div>)
                   : <div className="hc-empty">the core asset — start one to train from</div>}
               </HoldingCard>
-              <HoldingCard ico="box" name="Models" n={c.models} foot={<span className="gold"><span className="gem">◈</span> — royalties</span>} to={`/models?project=${p.id}`}>
+              <HoldingCard ico="box" name="Models" n={c.models} foot={<span className="gold"><span className="gem">◈</span> — royalties</span>}>
                 {c.models
                   ? p.modelIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(modelNames, x)}</div>)
                   : <div className="hc-empty">trained LoRAs land on the shelf</div>}
               </HoldingCard>
-              <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={c.collections ? `${c.collections} filed` : '0 minted · 0 draft'} to={`/collections?project=${p.id}`}>
+              <HoldingCard ico="hexagon" name="Collections" n={c.collections} foot={`${c.collections} filed`}>
                 {c.collections
                   ? p.collectionIds.slice(0, 2).map((x) => <div className="hc-line" key={x}>› {nameOf(collNames, x)}</div>)
                   : <div className="hc-empty">publishable drops → noesis</div>}
               </HoldingCard>
-              <HoldingCard ico="message-square" name="Chats" n={c.chats} foot={`last ${p.updated}`} onTo={() => setTab('Chats')}>
-                {p.chats.slice(0, 2).map((ch) => <div className="hc-line" key={ch.id}>› {ch.title}</div>)}
+              <HoldingCard ico="message-square" name="Chats" n={c.chats} foot={`last ${p.updated}`}>
+                {c.chats
+                  ? p.chats.slice(0, 2).map((ch) => <div className="hc-line" key={ch.id}>› {ch.title}</div>)
+                  : <div className="hc-empty">chats you start while this project is active land here</div>}
               </HoldingCard>
-              <HoldingCard ico="workflow" name="Canvases" n={c.canvases} foot={`last ${p.updated}`} onTo={() => setTab('Canvases')}>
-                {p.canvases.slice(0, 2).map((cv) => <div className="hc-line" key={cv.id}>› {cv.name} · {cv.nodes} nodes</div>)}
+              <HoldingCard ico="workflow" name="Canvases" n={c.canvases} foot={`last ${p.updated}`}>
+                {c.canvases
+                  ? p.canvases.slice(0, 2).map((cv) => <div className="hc-line" key={cv.id}>› {cv.name} · {cv.nodes} nodes</div>)
+                  : <div className="hc-empty">canvases you build while this project is active land here</div>}
               </HoldingCard>
-              <HoldingCard ico="star" name="Favorites" n={c.cards} foot="catalogue picks" onTo={() => setTab('Favorites')}>
-                {p.cards.slice(0, 2).map((cd) => <div className="hc-line" key={cd.id}>› {cd.name} · {cd.verb}</div>)}
+              <HoldingCard ico="star" name="Favorites" n={c.cards} foot="catalogue picks">
+                {c.cards
+                  ? p.cards.slice(0, 2).map((cd) => <div className="hc-line" key={cd.id}>› {cd.name} · {cd.verb}</div>)
+                  : <div className="hc-empty">pin a card from the catalogue to keep it here</div>}
               </HoldingCard>
             </div>
 
             {/* bottom band */}
             <div className="ph-band">
               <div className="ph-about">
-                <div className="ph-l">about this project</div>
+                <div className="ph-l">About this project</div>
                 <p>A project <b>groups</b> your work — it isn’t a wall. Anything here can be referenced from other projects; the only hard boundary is your account.</p>
-                <div className="ph-meta mono">{p.shared ? `${p.shared} members · ` : ''}updated {p.updated} · mixed custody (TEE · local · public)</div>
               </div>
               <div className="ph-activity">
-                <div className="ph-l">activity</div>
+                <div className="ph-l">Activity</div>
                 <div className="ph-ev"><span className="av" style={{ background: p.color }} /><span className="ev-t"><b>you</b> started a chat <span className="mono ev-meta"><span className="hemi2 lit" /> shared · {p.updated}</span></span></div>
                 {p.shared ? <div className="ph-ev"><span className="av" /><span className="ev-t"><b>a teammate</b> added work <span className="mono ev-meta"><span className="hemi2 ring" /> private · 1d</span></span></div> : null}
               </div>
@@ -233,17 +242,18 @@ function ScopedList({ rows, empty }: { rows: string[]; empty: string }) {
   );
 }
 
-function HoldingCard({ ico, name, n, foot, onTo, to, children }: {
-  ico: string; name: string; n: number; foot: React.ReactNode; onTo?: () => void; to?: string; children: React.ReactNode;
+// A holding with nothing in it prints no count and no signal line (DESIGN.md D-58: empty
+// counters are suppressed); its body carries the one line saying what fills it. The card is a
+// summary, not a door: the tab row above already opens each holding, and a second "Open" on
+// the card would be the same control twice (P-1d).
+function HoldingCard({ ico, name, n, foot, children }: {
+  ico: string; name: string; n: number; foot: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="holding">
-      <div className="hc-head"><span className="hc-ico"><Ic name={ico} /></span><b>{name}</b><span className="hc-n">{n}</span></div>
+      <div className="hc-head"><span className="hc-ico"><Ic name={ico} /></span><b>{name}</b>{n ? <span className="hc-n">{n}</span> : null}</div>
       <div className="hc-body">{children}</div>
-      <div className="hc-foot">
-        <span className="hc-sig">{foot}</span>
-        {to ? <Link className="hc-open" to={to}>open ▸</Link> : <button className="hc-open" onClick={onTo}>open ▸</button>}
-      </div>
+      {n ? <div className="hc-foot"><span className="hc-sig">{foot}</span></div> : null}
     </div>
   );
 }

@@ -26,6 +26,7 @@ import { CrystalApi, type CrystalApiDeps } from '../../../../src/allocutio/api/C
 import { ApiError } from '../../../../src/allocutio/api/errors.js'
 import { CANONICAL_ESSENTIAE } from '../../../../src/crystal/seeds/essentiae.js'
 import { hashModus } from '../../../../src/crystal/hashModus.js'
+import { USE_TERMS } from '../../../../src/crystal/useTerms.js'
 import type { Modus } from '../../../../src/types/modus.js'
 import type { Inceptio } from '../../../../src/types/cursus.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
@@ -51,6 +52,12 @@ function harness(modi: Modus[]): Harness {
     },
     cursorum: { resolve() { throw new Error('cursor must not resolve on a refused run') } },
     completor: {},
+    // The H3 flows carry licence terms; this caller has accepted them, so what these tests see
+    // is the frame rule and nothing in front of it (the terms gate has its own suite).
+    consuetudinum: {
+      async resolveAffines() { return undefined },
+      async resolveGeneratio() { return { termsAccepted: { 'minimax-h3': { versio: USE_TERMS['minimax-h3'].versio, acceptedAt: 0 } } } },
+    },
   }
   return { api: new CrystalApi(deps as unknown as CrystalApiDeps), dispatched: () => seen }
 }

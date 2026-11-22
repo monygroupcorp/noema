@@ -10,6 +10,11 @@ export default defineConfig({
     'process.browser': 'true',
     global: 'globalThis',
   },
+  build: {
+    // scripts/route-bytes-report.mjs and scripts/check-entry-budget.mjs read this to know,
+    // per route, exactly which chunks + stylesheets a fresh visit pulls in.
+    manifest: true,
+  },
   server: {
     port: 5174,
     host: true, // reachable over Tailscale

@@ -9,9 +9,9 @@ import { activityDoorHref, activityRowLabel, partitionHomeActivity } from '../li
 import { Ic } from '../lib/icons';
 
 // Home / dashboard (dashboard-spec.md, render noema-dashboard.png). Leads with the brand's
-// one question answered — "What NOEMA can see: the meter, nothing more." — then projects, then
-// the AWAITING YOU / RUNNING NOW activity bands. The instrument band is the one framed
-// element (.noema-frame, corner ticks earned).
+// one question answered — "What NOEMA can see: the meter, nothing more." — then the AWAITING
+// YOU / RUNNING NOW activity bands (the return surface, DESIGN.md D-64), then projects. The
+// instrument band is the one framed element (.noema-frame, corner ticks earned).
 //
 // noema-327 (crit V1): the old "recent" band read the client-local chat-title list, which
 // is never real activity. It's replaced here by two bands off the real `GET /v1/me/activity`
@@ -36,6 +36,18 @@ const EARNING_LABEL: Record<EarningKind, string> = {
   referral: 'referrals',
 };
 
+// An empty activity band is one plain line, not a dashed box (DESIGN.md D-60, D-64).
+const BAND_EMPTY = { color: 'var(--faint)', fontSize: 'var(--fs-s)' } as const;
+
+// The royalties tile's figure. Before the read lands it holds its place with a dash (D-61);
+// once the read has landed, a lifetime of nothing is not printed as a large 0 (DESIGN.md D-58,
+// P-1c) — the tile is then carried by its foot line alone, which says what would fill it.
+export function royaltyFigure(e: EarningsView | null): string | null {
+  if (!e) return '—';
+  const n = Number(e.lifetime.impetus);
+  return n > 0 ? n.toLocaleString() : null;
+}
+
 // What the royalties tile says under the number. Before the read lands there is nothing to
 // claim, so it says nothing. Once it has, the streams that actually paid are named; an
 // account that has earned nothing yet is told what would pay it, not promised a future.
@@ -53,11 +65,13 @@ export function computeRow(exec: string): { glyph: string; text: string; roadmap
   return { glyph: 'lit', text: 'shared — running on our compute', roadmap: 'hardware-sealed compute (TEE) is on the roadmap.' };
 }
 
-// the full project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
+// the project holdings row (spec): chats · canvases · datasets · models · collections · favorites.
 // Holdings are real now: datasets/models/collections read the project's filed id-reference
 // lengths, not a hardcoded 0. Chats/canvases/favorites stay client-local overlay (no backend
-// store yet).
-function holdings(p: Project) {
+// store yet). Only the non-zero holdings are returned (DESIGN.md D-58: a row of glyphs all
+// reading 0 is noise); a project with nothing in it gets EMPTY_HOLDINGS as its one line.
+export const EMPTY_HOLDINGS = 'nothing in it yet';
+export function holdings(p: Project): { ico: string; n: number }[] {
   const c = counts(p);
   return [
     { ico: 'message-square', n: c.chats },
@@ -66,19 +80,28 @@ function holdings(p: Project) {
     { ico: 'box', n: c.models },
     { ico: 'hexagon', n: c.collections },
     { ico: 'star', n: c.cards },
-  ];
+  ].filter((h) => h.n > 0);
 }
 
 export function Dashboard() {
   const { projects } = useProject();
   const { ident, execution } = useIdentity();
   const [credits, setCredits] = useState<string | null>(null);
+  // A reservation is a HOLD, not a charge — named here so the credits tile never reads as
+  // money that vanished the instant a run (e.g. a training) locks it (noema
+  // reservation-reads-as-credits-gone). null while loading or when nothing is held.
+  const [held, setHeld] = useState<{ n: string; runs: number } | null>(null);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
   const [earnings, setEarnings] = useState<EarningsView | null>(null);
 
   useEffect(() => {
     let live = true;
-    api.meStatus().then((s) => { if (live && s?.balanceImpetus != null) setCredits(Number(s.balanceImpetus).toLocaleString()); }).catch(() => {});
+    api.meStatus().then((s) => {
+      if (!live || s?.balanceImpetus == null) return;
+      setCredits(Number(s.balanceImpetus).toLocaleString());
+      const heldN = Number(s.heldImpetus ?? '0');
+      setHeld(heldN > 0 ? { n: heldN.toLocaleString(), runs: s.gens.length } : null);
+    }).catch(() => {});
     // The royalties tile: what this account has been paid for its own published work. One row
     // is page enough — the tile reads `lifetime`, which covers the whole history whatever the
     // page size; the payments themselves are the API's, at GET /v1/me/earnings.
@@ -110,49 +133,32 @@ export function Dashboard() {
             <div className="ib-cell">
               <div className="ib-l">credits</div>
               <div className="ib-n gold"><span className="gem">◈</span> {cr}</div>
-              <div className="ib-sub"><Link to="/funding">fund from a wallet ▸</Link></div>
+              {held && (
+                <div className="ib-sub">{held.n} held for {held.runs === 1 ? '1 run' : `${held.runs} runs`} — reserved, not spent</div>
+              )}
+              <div className="ib-sub"><Link to="/funding">Fund from a wallet ▸</Link></div>
             </div>
             <div className="ib-cell">
               <div className="ib-l">royalties · lifetime</div>
-              <div className="ib-n gold">
-                <span className="gem">◈</span> {earnings ? Number(earnings.lifetime.impetus).toLocaleString() : '—'}
-              </div>
+              {royaltyFigure(earnings) !== null && (
+                <div className="ib-n gold"><span className="gem">◈</span> {royaltyFigure(earnings)}</div>
+              )}
               <div className="ib-sub">{royaltyFoot(earnings)}</div>
             </div>
           </div>
         </div>
 
-        {/* Primary action — the one obvious way to start making (P0-2). New users land here with
-            no generate CTA otherwise; this routes straight to the Catalogue → Card path. */}
-        <div className="db-start" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center', flexWrap: 'wrap', margin: 'var(--s5) 0 var(--s6)' }}>
-          <Link className="btn" to="/catalog"><Ic name="sparkles" /> Create something</Link>
-          <Link className="btn ghost" to="/chat"><Ic name="message-square" /> Ask the Concierge</Link>
-          <span className="sub" style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>Pick a model to run, or just describe what you want.</span>
-        </div>
-
-        {/* your projects */}
-        <div className="sectionhead db-head">your projects · {projects.length}<Link className="db-all" to="/projects">all projects ▸</Link></div>
-        <div className="dbprojgrid">
-          {projects.map((p) => (
-            <Link key={p.id} className="dbproj" to={`/projects/${p.id}`}>
-              <div className="dbproj-mosaic"><span style={{ background: p.color }} /><span /><span /><span /></div>
-              <div className="dbproj-body">
-                <b>{p.name}</b>
-                <div className="dbproj-holdings mono">
-                  {holdings(p).map((h, i) => <span key={i} className="hc"><Ic name={h.ico} />{h.n}</span>)}
-                </div>
-              </div>
-              <div className="dbproj-foot"><span className="upd mono">{p.updated}</span></div>
-            </Link>
-          ))}
-          <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
-        </div>
-
-        {/* AWAITING YOU — finished work, each row a door to what it produced */}
+        {/* No start button of its own: the topbar's "Start" is the screen's one way to begin
+            (DESIGN.md D-50), and a second button here was the same action twice (P-1d). An empty
+            band below still carries the action that fills it (D-60). */}
+        {/* The return surface, first (DESIGN.md D-64): what finished while you were gone,
+            then what is still running, above the fold. A band with nothing in it is one line
+            that says what lands there and carries the action that fills it (D-60) — not a
+            box — so the projects below rise into the fold for a visitor with nothing yet. */}
         <div className="sectionhead">AWAITING YOU</div>
         <div className="dbrecent">
           {awaiting.length === 0 ? (
-            <div className="empty"><div className="t">nothing finished yet</div></div>
+            <div className="sub" style={BAND_EMPTY}>Nothing finished yet — a completed run lands here. <Link to="/catalog">Start one from the catalogue ▸</Link></div>
           ) : awaiting.map((r) => {
             const href = activityDoorHref(r);
             const row = (
@@ -175,7 +181,7 @@ export function Dashboard() {
         <div className="sectionhead">RUNNING NOW</div>
         <div className="dbrecent">
           {running.length === 0 ? (
-            <div className="empty"><div className="t">nothing running — start something</div></div>
+            <div className="sub" style={BAND_EMPTY}>Nothing running — <Link to="/catalog">start something ▸</Link></div>
           ) : running.map((r) => (
             <div className="dbrec-row" key={r.actumId}>
               <Ic name={ACTIVITY_ICON[r.kind]} />
@@ -183,6 +189,26 @@ export function Dashboard() {
               <span className="rp mono">running…</span>
             </div>
           ))}
+        </div>
+
+        {/* your projects */}
+        <div className="sectionhead db-head">your projects · {projects.length}<Link className="db-all" to="/projects">all projects ▸</Link></div>
+        <div className="dbprojgrid">
+          {projects.map((p) => (
+            <Link key={p.id} className="dbproj" to={`/projects/${p.id}`}>
+              <div className="dbproj-mosaic"><span style={{ background: p.color }} /><span /><span /><span /></div>
+              <div className="dbproj-body">
+                <b>{p.name}</b>
+                <div className="dbproj-holdings mono">
+                  {holdings(p).length
+                    ? holdings(p).map((h) => <span key={h.ico} className="hc"><Ic name={h.ico} />{h.n}</span>)
+                    : <span className="hc">{EMPTY_HOLDINGS}</span>}
+                </div>
+              </div>
+              <div className="dbproj-foot"><span className="upd mono">{p.updated}</span></div>
+            </Link>
+          ))}
+          <Link className="dbproj new" to="/projects?new=1"><Ic name="plus" /><span>new project</span></Link>
         </div>
 
       </div></div>

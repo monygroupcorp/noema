@@ -3,7 +3,7 @@
 // =============================================================================
 // Parallel to bulletin/affordances.ts but a richer surface: per-row Cancel for
 // each gen, per-row Bulletin link for each studio, per-row Join for each
-// joinable studio, plus a footer with Refresh / History / Settings.
+// joinable studio, plus a footer with Refresh.
 //
 // Action ids encode the target id when needed (cancel:<actumId>, etc.). The
 // callback prefix is `stat:` — added in exactly one place (packAffordances).
@@ -33,7 +33,10 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
 
   // Per-studio Bulletin link (jump-to-bulletin for the studio). Only owners see
   // this row — the scope is enforced at the callback dispatcher, not here.
+  // Terminated studios have no bulletin to jump to, and a long-running host can
+  // accumulate dozens of them — skip those rows along with their text-report lines.
   for (const st of s.studios) {
+    if (st.status === 'terminated') continue
     rows.push([
       { id: `bulletin:${st.studioId}`, label: `→ ${st.label}`, kind: 'action', scope: 'host' },
     ])
@@ -46,11 +49,10 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
     ])
   }
 
-  // Footer — always present.
+  // Footer — always present. Only what works: History and Settings were buttons that answered
+  // "coming soon", which is a dead end with a label.
   rows.push([
     { id: 'refresh',  label: '↻ Refresh',  kind: 'action', scope: 'any' },
-    { id: 'history',  label: 'History',    kind: 'action', scope: 'any' },
-    { id: 'settings', label: 'Settings',   kind: 'action', scope: 'any' },
   ])
 
   return rows
@@ -59,10 +61,4 @@ export function statusAffordancesFor(s: StatusSnapshot): Affordance[][] {
 /** Pack to UiKeyboard for Telegram. `data` is prefixed `stat:<id>`. */
 export function packStatusAffordances(rows: Affordance[][]): UiKeyboard {
   return rows.map(row => row.map(a => ({ label: a.label, data: `stat:${a.id}` })))
-}
-
-/** Strip the `stat:` prefix from a callback data string. Returns null if not a
- *  status callback (lets the dispatcher fall through to other handlers). */
-export function parseStatusData(data: string): string | null {
-  return data.startsWith('stat:') ? data.slice(5) : null
 }

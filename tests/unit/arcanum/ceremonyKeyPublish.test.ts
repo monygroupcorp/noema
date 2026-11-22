@@ -50,6 +50,8 @@ after(() => {
 
 interface Boot {
   config: () => Promise<Record<string, unknown>>
+  /** The route a client actually fetches the key from — status and parsed body. */
+  zkey: () => Promise<{ status: number; body: Record<string, unknown> | null }>
   close: () => Promise<void>
 }
 
@@ -89,15 +91,23 @@ async function boot(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, fin
     s.on('error', reject)
   })
   const { port } = server.address() as { port: number }
+  const fetchJson = (path: string) => new Promise<{ status: number; body: any }>((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c) => chunks.push(c as Buffer))
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8')
+        // A served key is 5MB of binary; only the refusal has a body worth reading.
+        const json = res.headers['content-type']?.includes('json') ? JSON.parse(raw) : null
+        resolve({ status: res.statusCode ?? 0, body: json })
+      })
+      res.on('error', reject)
+    }).on('error', reject)
+  })
+
   return {
-    config: () => new Promise((resolve, reject) => {
-      http.get(`http://127.0.0.1:${port}/arcanum/config`, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c) => chunks.push(c as Buffer))
-        res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))))
-        res.on('error', reject)
-      }).on('error', reject)
-    }),
+    config: async () => (await fetchJson('/arcanum/config')).body,
+    zkey: () => fetchJson('/arcanum/circuit/zkey'),
     close: () => new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()))
     }),
@@ -184,6 +194,97 @@ test('one byte off and it is refused — the hash decides, not the fact that a k
     assert.equal(config.zkeySource, 'none', 'a key that is not the named one is not served')
     assert.equal(config.ready, false)
     assert.equal(config.zkeyHash, nearly, 'and /config still names the key that belongs here')
+  } finally {
+    await rig.close()
+  }
+})
+
+// ── Which of the two failures is this box in? ─────────────────────────────────
+//
+// `zkeySource: 'none'` under a finished transcript is two different boxes wearing one
+// answer, and they want opposite work:
+//
+//   custody emptied by a deploy   — the bytes are gone from this box and nothing else is
+//                                   wrong. Publish the key here and it is over.
+//   a build older than the key    — this box is not missing a proving key at all. It is
+//                                   carrying one, and the ceremony finished after it was
+//                                   built, so no act on this box can help: the remedy is
+//                                   somewhere else entirely, in what is deployed here.
+//
+// The hash of the key the build carries is what separates them, and until now it existed
+// only in the boot log — the one surface nobody outside the box can read. That is how a
+// finished ceremony sat unserved: the site said "not published here yet" for ten days
+// while the answer, "you are running a build from before it", was never asked for because
+// nothing on any public surface could be asked it.
+
+test('a box holding a key the transcript does not name says which key it is holding', async () => {
+  // The live shape: the transcript names a key this build does not carry, and the build is
+  // carrying a different one.
+  const other = 'cd'.repeat(32)
+  const rig = await boot({}, other)
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'none', 'still refuses to serve it — that part is right')
+    assert.equal(config.zkeyHash, other, 'and still names the key that belongs here')
+    assert.equal(config.imageKeyHash, TRACKED_HASH,
+      'and now also names the key it IS holding, which is the whole diagnosis')
+    assert.notEqual(config.imageKeyHash, config.zkeyHash,
+      'two different keys, side by side, is the fact somebody had to go to the box for')
+  } finally {
+    await rig.close()
+  }
+})
+
+test('the refusal at /arcanum/circuit/zkey carries both hashes too', async () => {
+  // This is the route that fails, so it is where somebody looks first. An error that says
+  // only "not published on this server" sends them to publish a key on a box that cannot
+  // use one.
+  const other = 'cd'.repeat(32)
+  const rig = await boot({}, other)
+  try {
+    const { status, body } = await rig.zkey()
+    assert.equal(status, 503, 'a key we know the name of and do not have is a gap, not a 404')
+    assert.equal(body?.expectedHash, other)
+    assert.equal(body?.imageKeyHash, TRACKED_HASH)
+  } finally {
+    await rig.close()
+  }
+})
+
+test('a box that is serving the ceremony key names no image key — there is nothing to tell apart', async () => {
+  const rig = await boot({}, TRACKED_HASH)
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'ceremony')
+    assert.equal(config.imageKeyHash, null,
+      'the key it holds IS the key it serves, and zkeyHash already named it')
+  } finally {
+    await rig.close()
+  }
+})
+
+test('and neither does one serving it out of custody', async () => {
+  const rig = await boot({
+    CEREMONY_FINAL_ZKEY: REPO_ZKEY_PATH,
+    CEREMONY_FINALIZE: TRACKED_HASH,
+  }, TRACKED_HASH)
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'ceremony')
+    assert.equal(config.imageKeyHash, null)
+  } finally {
+    await rig.close()
+  }
+})
+
+test('an externally hosted key reports no image key either — we are not serving one', async () => {
+  // ARCANUM_ZKEY_URL means the bytes are somebody else's to serve. Naming what happens to
+  // be lying around in this image would invite a comparison against a key nobody fetches.
+  const rig = await boot({ ARCANUM_ZKEY_URL: 'https://example.invalid/arcanum_final.zkey' }, 'cd'.repeat(32))
+  try {
+    const config = await rig.config()
+    assert.equal(config.zkeySource, 'external')
+    assert.equal(config.imageKeyHash, null)
   } finally {
     await rig.close()
   }

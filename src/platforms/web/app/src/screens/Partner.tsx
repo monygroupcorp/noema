@@ -35,9 +35,9 @@ import { useSession } from '../state/session';
 // mints a fresh one; the response is the ONLY time the raw key is ever retrievable, so it lives
 // only in this component's state — never localStorage, never re-fetched on reload.
 //
-// Feedback/support: ReportModal (POST /v1/reports) is already mounted globally inside AppShell
-// (bottom-right flag button on every screen) — that already satisfies "a way to message us" for
-// this screen without a second, duplicate form.
+// Feedback/support: ReportModal (POST /v1/reports) is already mounted on every screen (the flag
+// in the concierge panel's head) — that already satisfies "a way to message us" for this screen
+// without a second, duplicate form.
 
 const IMPETUS_USD = 0.000337;
 
@@ -165,7 +165,7 @@ export function Partner() {
     <AppShell crumb="Partner">
       <div className="page"><div className="pw">
         <div className="pagehead">
-          <div><h1>Partner dashboard</h1><div className="sub">Your organization, balance, spend history, and API key status.</div></div>
+          <div><h1>Partner</h1><div className="sub">Your organization, balance, spend history, and API key status.</div></div>
         </div>
 
         {gate === 'loading' && <div className="sub">Loading…</div>}
@@ -183,8 +183,8 @@ export function Partner() {
             <div className="ico"><Ic name="users" /></div>
             <div className="t">You don't have partner access</div>
             <div className="s">
-              This account isn't an approved B2B partner. If you believe this is a mistake, use the
-              report button below to reach us.
+              This account isn't an approved B2B partner. If you believe this is a mistake, open the
+              concierge and choose "Report an issue" to reach us.
             </div>
           </div>
         )}
@@ -220,8 +220,8 @@ export function Partner() {
             <div className="s">
               We reviewed the application you filed {fmtDate(application?.natum)} and declined it
               {application?.decidedAt ? ` on ${fmtDate(application.decidedAt)}` : ''}. If your plans have
-              changed since, you're welcome to apply again; if you think we got it wrong, use the report
-              button below to reach us.
+              changed since, you're welcome to apply again; if you think we got it wrong, open the
+              concierge and choose "Report an issue" to reach us.
             </div>
             <Link className="btn" to="/partners"><Ic name="users" /> Apply again</Link>
           </div>
@@ -233,7 +233,7 @@ export function Partner() {
             <div className="t">Your partner access has ended</div>
             <div className="s">
               This account's application was approved, but its partner access is no longer active, and
-              any API key it issued has stopped working. Use the report button below to reach us.
+              any API key it issued has stopped working. Open the concierge and choose "Report an issue" to reach us.
             </div>
           </div>
         )}
@@ -340,7 +340,7 @@ export function Partner() {
             )}
 
             <div className="sub" style={{ marginTop: 'var(--s5)', color: 'var(--faint)', fontSize: 'var(--fs-xs)' }}>
-              Questions or feedback? Use the report button in the corner of this page to reach us.
+              Questions or feedback? Open the concierge and choose "Report an issue" to reach us.
             </div>
           </>
         )}

@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
-import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, type Readiness } from '../lib/datasets';
-import { api, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
+import { READINESS, MODALITY_TOKEN, custodyGlyph, CUSTODY_LABEL, datasetStatsLine, type Readiness } from '../lib/datasets';
+import { imagesFrom, imagesFromClipboard, imagesFromDrop, mergeFiles, partitionUploadable } from '../lib/fileIngest';
+import { runBatch, uploadAsset } from '../lib/upload';
+import { api, getSession, type Dataset, type DatasetModality, type Vestigium } from '../lib/api';
+import { doorPath } from '../lib/entry';
 import { useProject, useProjectScope } from '../state/project';
 import { ScopeBanner } from '../lib/ScopeBanner';
 import { HoldingToggle } from '../lib/HoldingToggle';
@@ -11,15 +14,6 @@ import { liveRecords } from '../lib/muse';
 
 const MODALITIES: DatasetModality[] = ['image', 'video', 'audio', '3d'];
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-// Upload a file to R2 via the signed-PUT path, return its permanent public URL
-// (same two-step contract Profile.tsx uses for avatar/banner/background uploads).
-async function uploadAsset(file: File): Promise<string> {
-  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
-  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
-  if (!put.ok) throw new Error(`upload failed (${put.status})`);
-  return permanentUrl;
-}
 
 // Datasets library (train-datasets-library-spec.md, render noema-train-datasets-library.png) —
 // the entry to the training stack: a recognizable shelf of raw material with each set's own
@@ -61,18 +55,27 @@ export function Datasets() {
 
   const refetch = () => api.listDatasetsFull().then(({ datasets: d }) => setDatasets(d)).catch(() => setDatasets([]));
 
+  // This list is the caller's OWN datasets, so there is nothing to ask for without an account.
+  // Asking anyway sent the anonymous commitment header at an owner-scoped route, which answers
+  // auth.missing every time; the failure was swallowed into an empty list, so a signed-out
+  // visitor was told they have no datasets rather than that they are not signed in.
+  const signedIn = getSession() !== null;
+
   useEffect(() => {
+    if (!signedIn) { setDatasets([]); return; }
     let live = true;
     api.listDatasetsFull()
       .then(({ datasets: d }) => { if (live) setDatasets(d); })
       .catch(() => { if (live) setDatasets([]); });
     return () => { live = false; };
-  }, []);
+  }, [signedIn]);
 
-  // The public catalog (GET /v1/data/datasets/public) — collapsed until asked for, mirroring
-  // Shelf.tsx's "your shelf" + "browse the catalog" split: this list above is YOUR OWN
-  // datasets, this one is everything the platform publishes for anyone to start Muse-ing on.
-  const [catOpen, setCatOpen] = useState(false);
+  // The public catalog (GET /v1/data/datasets/public) — mirroring Shelf.tsx's "your shelf" +
+  // "browse the catalog" split: this list above is YOUR OWN datasets, this one is everything
+  // the platform publishes for anyone to start Muse-ing on. A signed-in visitor opens it when
+  // asked; a signed-out one has no shelf of their own, and the sign-in note above says the
+  // catalog is open to anyone, so it is open from the first paint (REFERENCES.md REF-20).
+  const [catOpen, setCatOpen] = useState(!signedIn);
   const [catalog, setCatalog] = useState<Dataset[] | null>(null);
   const [catErr, setCatErr] = useState<string | null>(null);
 
@@ -103,6 +106,39 @@ export function Datasets() {
   const [pickedActa, setPickedActa] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const folderInput = useRef<HTMLInputElement>(null);
+
+  // Paste, drop and a folder choice are image-only here — an image is the modality this goal
+  // (dataset-ingest-is-starved) starves; a video or audio dataset keeps the plain file dialog
+  // it already had, unchanged.
+  function addFiles(incoming: File[]) {
+    if (incoming.length === 0) return;
+    setFiles((cur) => mergeFiles(cur, incoming));
+  }
+
+  // Storage signs only png/jpeg/webp (storageRouter's ALLOWED_CONTENT_TYPES); a GIF, an AVIF, or
+  // a HEIC straight off an iPhone is an image (isImageFile lets it through) but would reach the
+  // server and 400 there instead of here. Caught here instead, named and with a reason, rather
+  // than silently vanishing or waiting for the upload to fail.
+  function addImageFiles(incoming: File[]) {
+    const { ok, rejected } = partitionUploadable(imagesFrom(incoming));
+    addFiles(ok);
+    if (rejected.length > 0) {
+      setErr(`${rejected.length} file${rejected.length === 1 ? '' : 's'} can’t upload here — this app stores PNG, JPEG or WebP only: ${rejected.map((f) => f.name).join(', ')}`);
+    }
+  }
+
+  useEffect(() => {
+    if (!open || source !== 'upload' || modality !== 'image' || busy) return;
+    function onPaste(e: ClipboardEvent) {
+      const images = imagesFromClipboard(e);
+      if (images.length > 0) addImageFiles(images);
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, source, modality, busy]);
 
   const openModal = () => {
     setOpen(true); setSource('upload'); setName(''); setModality('image');
@@ -123,8 +159,15 @@ export function Datasets() {
     try {
       if (source === 'upload') {
         if (files.length === 0) throw new Error('drop at least one file');
-        const mediaUrls = await Promise.all(files.map(uploadAsset));
-        await api.createDataset({ source: 'upload', name: name.trim(), modality, mediaUrls });
+        // Bounded and settled per file. `Promise.all` threw the whole batch away on one
+        // rejection, so forty-nine good uploads were discarded to report the fiftieth.
+        const batch = await runBatch(files, (file) => uploadAsset(file));
+        if (batch.ok.length === 0) throw new Error('nothing uploaded');
+        await api.createDataset({ source: 'upload', name: name.trim(), modality, mediaUrls: batch.ok });
+        if (batch.failedIndexes.length > 0) {
+          const named = batch.failedIndexes.map((i, j) => `${files[i].name} (${batch.failureReasons[j]})`);
+          setErr(`${batch.failedIndexes.length} of ${files.length} did not upload and are not in the set: ${named.join(', ')}`);
+        }
       } else {
         const actumIds = Array.from(pickedActa);
         if (actumIds.length === 0) throw new Error('pick at least one generation');
@@ -151,16 +194,24 @@ export function Datasets() {
             <h1>Datasets</h1>
             <div className="sub">Your raw material — the core every model is trained from. Reusable, versioned, captioned many ways.</div>
           </div>
-          <div className="right"><button className="btn" onClick={openModal}><Ic name="plus" /> new dataset</button></div>
+          <div className="right"><button className="btn" onClick={openModal}><Ic name="plus" /> New dataset</button></div>
         </div>
 
         {scope && <ScopeBanner project={scope} noun="datasets" />}
 
         <div className="dsgrid">
+          {!signedIn && (
+            <div className="empty">
+              <div className="t">Your datasets live under an account</div>
+              <div className="s">
+                <Link to={doorPath('/datasets')}>Sign in</Link> to see the sets you have built. The
+                published catalogue below is open to anyone.
+              </div>
+            </div>
+          )}
           {list.map((d) => {
             const readiness = readinessOf(d);
             const r = READINESS[readiness];
-            const version = d.versions[d.versions.length - 1]?.v ?? '—';
             const media = liveRecords(d.media);
             const hasMedia = media.length > 0;
             const tiles = hasMedia ? media.slice(0, 4).map((m) => m.url) : TILE_FALLBACK;
@@ -177,7 +228,7 @@ export function Datasets() {
                     <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
                     <span className={`hemi2 ${custodyGlyph(d.custody)} ds-cust`} title={CUSTODY_LABEL[d.custody]} />
                   </div>
-                  <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'} · {d.captionsets.length} captionsets · {version}</div>
+                  <div className="ds-stats mono">{datasetStatsLine(d, media.length)}</div>
                   <div className="ds-meta mono">updated {relativeTime(d.mutatum)} · <span className={`hemi2 ${custodyGlyph(d.custody)}`} /> {CUSTODY_LABEL[d.custody]}</div>
                   <div className="ds-ready">
                     <span className="ds-state"><span className={`rdot ${r.dot}`} /> {r.label}</span>
@@ -188,11 +239,6 @@ export function Datasets() {
               </Link>
             );
           })}
-          <button className="dscard new" onClick={openModal}>
-            <Ic name="plus" />
-            <div className="t">new dataset</div>
-            <div className="s mono">drop media · or seed from a generation</div>
-          </button>
         </div>
 
         {/* ── The public catalog ───────────────────────────────────────────────
@@ -201,20 +247,32 @@ export function Datasets() {
             onto the fun part, with nothing here that isn't yours to click. */}
         <div className="pagehead" style={{ marginTop: 'var(--s6)' }}>
           <div>
-            <div className="noema-kicker" style={{ marginBottom: 8 }}>no set of your own yet?</div>
-            <h2>Browse the catalog</h2>
-            <div className="sub">Published boards, ready to Muse on right now.</div>
+            <h2>Browse the catalogue</h2>
+            {/* One sentence that says what the catalogue is and why a visitor with no set of
+                their own would open it (DESIGN.md P-1a) — not a question floating above it. */}
+            <div className="sub">Published sets anyone can muse on — no set of your own needed.</div>
           </div>
           <button className="btn ghost" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
-            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'hide catalog' : 'browse catalog'}
+            <Ic name={catOpen ? 'eye-off' : 'search'} /> {catOpen ? 'Hide catalogue' : 'Browse catalogue'}
           </button>
         </div>
 
         {catOpen && (
           <>
-            {catErr && <div className="warn">Couldn’t load the catalog — {catErr}</div>}
-            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalog…</div></div>}
-            {catalog && catalog.length === 0 && <div className="empty"><div className="t">Nothing published yet.</div></div>}
+            {catErr && <div className="warn">Couldn’t load the catalogue — {catErr}</div>}
+            {!catalog && !catErr && <div className="empty"><div className="t">Loading the catalogue…</div></div>}
+            {/* An empty catalogue offers the one action that fills it (DESIGN.md D-60). A set is
+                published from its own page, so the action is to make one. A visitor with no
+                account to hold it already has the one sign-in door on this screen, the account
+                box above (P-1d); here the empty state only says what will appear. */}
+            {catalog && catalog.length === 0 && (
+              <div className="empty">
+                <div className="t">Nothing published yet</div>
+                {signedIn
+                  ? <button className="btn ghost" onClick={openModal}><Ic name="plus" /> Make a dataset to publish</button>
+                  : <div className="s">Sets members publish from their own page appear here.</div>}
+              </div>
+            )}
 
             {catalog && catalog.length > 0 && (
               <div className="dsgrid">
@@ -234,7 +292,7 @@ export function Datasets() {
                           <b>{d.name}</b>
                           <span className="ds-badge" style={{ color: MODALITY_TOKEN[d.modality] }}><span className="dot" style={{ background: MODALITY_TOKEN[d.modality] }} /> {d.modality}</span>
                         </div>
-                        <div className="ds-stats mono">{media.length} {d.modality === 'video' ? 'clips' : 'images'}</div>
+                        <div className="ds-stats mono">{datasetStatsLine({ ...d, captionsets: [], versions: [] }, media.length)}</div>
                         <div className="ds-ready">
                           <span className="ds-action">muse on this →</span>
                         </div>
@@ -269,22 +327,52 @@ export function Datasets() {
               </div>
 
               <div className="seg custody-seg" style={{ marginBottom: 14 }}>
-                <button className={source === 'upload' ? 'on' : ''} disabled={busy} onClick={() => setSource('upload')}>drop media</button>
-                <button className={source === 'generation' ? 'on' : ''} disabled={busy} onClick={() => setSource('generation')}>from a generation</button>
+                <button className={source === 'upload' ? 'on' : ''} disabled={busy} onClick={() => setSource('upload')}>Drop media</button>
+                <button className={source === 'generation' ? 'on' : ''} disabled={busy} onClick={() => setSource('generation')}>From a generation</button>
               </div>
 
               {source === 'upload' ? (
-                <div>
+                <div
+                  className={dragOver ? 'drag-over' : undefined}
+                  style={modality === 'image' ? { borderRadius: 8, outline: dragOver ? '2px dashed var(--accent)' : undefined, outlineOffset: 4 } : undefined}
+                  onDragOver={modality !== 'image' ? undefined : (e) => { if (busy) return; e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={modality !== 'image' ? undefined : () => setDragOver(false)}
+                  onDrop={modality !== 'image' ? undefined : (e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (!busy) addImageFiles(imagesFromDrop(e.nativeEvent));
+                  }}
+                >
                   <input
-                    type="file" multiple accept="image/*,video/*,audio/*" disabled={busy}
-                    onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+                    type="file" multiple accept={modality === 'image' ? 'image/png,image/jpeg,image/webp' : 'video/*,audio/*'} disabled={busy}
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files ?? []);
+                      if (modality === 'image') { addImageFiles(picked); e.target.value = ''; } else setFiles(picked);
+                    }}
                   />
+                  {modality === 'image' && (
+                    <>
+                      <button type="button" className="btn ghost sm" disabled={busy} style={{ marginLeft: 8 }}
+                        onClick={() => folderInput.current?.click()}>
+                        choose a folder
+                      </button>
+                      <input
+                        ref={folderInput} type="file" multiple disabled={busy} hidden
+                        aria-label="a folder of images to add"
+                        // @ts-expect-error — `webkitdirectory` has no type in React's DOM typings but every
+                        // evergreen browser honors it; it flattens subfolders into one FileList.
+                        webkitdirectory=""
+                        onChange={(e) => { addImageFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
+                      />
+                      <div className="sub mono" style={{ marginTop: 8, opacity: 0.7 }}>or drag images here, or paste one</div>
+                    </>
+                  )}
                   {files.length > 0 && <div className="sub mono" style={{ marginTop: 8 }}>{files.length} file{files.length === 1 ? '' : 's'} selected</div>}
                 </div>
               ) : (
                 <div>
                   {vestigia === null ? (
-                    <div className="sub mono">loading your generations…</div>
+                    <div className="sub mono">Loading your generations…</div>
                   ) : eligibleActa.length === 0 ? (
                     <div className="sub mono">no completed {modality} generations to seed from yet.</div>
                   ) : (
@@ -309,7 +397,7 @@ export function Datasets() {
               {err && <div className="sub" style={{ color: 'var(--danger, #d66f6f)', marginTop: 10 }}>{err}</div>}
 
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-                <button className="btn ghost" disabled={busy} onClick={closeModal}>cancel</button>
+                <button className="btn ghost" disabled={busy} onClick={closeModal}>Cancel</button>
                 <button className="btn accent" disabled={busy} onClick={submitCreate}>{busy ? 'creating…' : 'create'}</button>
               </div>
             </div>

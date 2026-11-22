@@ -51,7 +51,7 @@ type MobileTile =
   | { to: string; ico: string; label: string }
   | { group: string; ico: string; label: string; items: NavLeaf[] };
 
-const MOBILE_PROJECTS: NavLeaf[] = [
+const MOBILE_BUILD: NavLeaf[] = [
   { to: '/datasets', ico: 'database', label: 'Datasets' },
   { to: '/models', ico: 'box', label: 'Models' },
   { to: '/collections', ico: 'hexagon', label: 'Collections' },
@@ -71,7 +71,9 @@ const MOBILE_TILES_BASE: MobileTile[] = [
   { to: '/chat', ico: 'message-square', label: 'Chat' },
   { to: '/catalog', ico: 'layout-grid', label: 'Catalogue' },
   { to: '/space', ico: 'footprints', label: 'Space' },
-  { group: 'projects', ico: 'folder', label: 'Projects', items: MOBILE_PROJECTS },
+  // Named "Build" to match the desktop sidebar's section for these same three items — "Projects"
+  // collides with the real, unrelated /projects route (Linear-style work containers).
+  { group: 'build', ico: 'folder', label: 'Build', items: MOBILE_BUILD },
 ];
 
 export function Rail() {
@@ -213,10 +215,10 @@ export function Rail() {
         <NavLink to="/account" onClick={guardedClick} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
           <span className="ico"><Ic name="settings-2" /></span> Settings
         </NavLink>
-        <Link to="/profile" onClick={guardedClick} className="railavatar" title={`${ident.funding === 'bearer' ? 'anonymous' : ident.name} · identity`}>
+        <Link to="/profile" onClick={guardedClick} className="railavatar" title={`${ident.funding === 'bearer' ? 'Anonymous' : ident.name} · identity`}>
           <Chip d={ident} />
           <span className="ra-main">
-            <span className="nm">{ident.funding === 'bearer' ? 'anonymous' : ident.name}</span>
+            <span className="nm">{ident.funding === 'bearer' ? 'Anonymous' : ident.name}</span>
             <span className="ra-sub"><Ic name={who[0]} /> {who[1]}</span>
           </span>
         </Link>

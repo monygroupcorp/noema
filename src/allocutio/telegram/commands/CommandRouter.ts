@@ -1,4 +1,4 @@
-import { inlineKeyboard, btn } from '../telegramRender.js'
+import { topUpMarkup, isPrivateChat } from '../telegramRender.js'
 import type { EnvelopeMediaType } from '../envelopeMedia.js'
 import { COPY, HELP_TEXT } from '../../lexicon/copy.js'
 import { SHARE_TOKEN_ALPHABET, SHARE_TOKEN_LENGTH } from '../../../crystal/shareToken.js'
@@ -70,6 +70,27 @@ export interface CommandDeps {
    * it on the web sign-in screen to log back in. Optional — same wiring as linkTelegram.
    */
   issueTelegramRecovery?(userId: string): Promise<string>
+  /** Where credits are bought on the web. Absent → /wallet still says the route, with no link. */
+  fundingUrl?: string
+  /**
+   * Current Telegram "collecting" state, as the status line bare `/collect` shows. Optional —
+   * absent, /collect reports the command as unavailable (same shape as /bind without
+   * bindVerb). Wired by TelegramAllocutio against the dataset + owner-keyed preference stores.
+   */
+  collectStatus?(userId: string): Promise<string>
+  /** Turn collecting on/off and return the confirmation line (`/collect on|off`). */
+  setCollecting?(userId: string, on: boolean): Promise<string>
+  /**
+   * The default-dataset status line bare `/dataset` shows: name + how much it holds, minting
+   * one if the caller has none yet. Optional — same availability gate as collectStatus.
+   */
+  datasetStatus?(userId: string): Promise<string>
+  /** Every dataset the caller owns, as a status line (`/dataset list`). */
+  datasetList?(userId: string): Promise<string>
+  /** Point the default at an existing dataset by name or id (`/dataset use <name>`). */
+  datasetUse?(userId: string, nameOrId: string): Promise<string>
+  /** Create a fresh dataset and set it as default (`/dataset new <name>`). */
+  datasetNew?(userId: string, name: string): Promise<string>
 }
 
 /** Deep-link account-link payload: `/start link_<code>` (code is base64url from makeLinkToken). */
@@ -79,6 +100,7 @@ const LINK_PAYLOAD_RE = /^link_([A-Za-z0-9_-]+)$/
 const KNOWN_COMMANDS = new Set([
   '/start', '/make', '/run', '/bind', '/chat', '/flows', '/arm',
   '/cancel', '/stop', '/status', '/wallet', '/recover', '/help',
+  '/collect', '/dataset',
 ])
 
 /** Parse a message's leading token into a bare command (`/MAKE@bot a cat` → `/make`). */
@@ -280,16 +302,16 @@ export class CommandRouter {
           await this.deps.showStatus(userId, chatId)
         } else {
           // Fallback for tests/contexts that don't wire the status aggregator.
-          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, {
-            reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('top up', 'a:topup')]]),
-          })
+          await this.deps.sendMessage(chatId, COPY.command.statusComingSoon, topUpMarkup(chatId, this.deps.fundingUrl))
         }
         return
 
       case '/wallet':
-        await this.deps.sendMessage(chatId, COPY.command.walletComingSoon, {
-          reply_markup: inlineKeyboard([[btn('connect wallet', 'a:connect_wallet'), btn('balance', 'a:balance')]]),
-        })
+        // The bot takes no payment. What it can do is say, in full, how this account tops up —
+        // with the link when the deployment knows it. (This used to say "coming soon" above two
+        // buttons that did nothing.)
+        await this.deps.sendMessage(chatId, COPY.command.topUp(this.deps.fundingUrl, isPrivateChat(chatId)), topUpMarkup(chatId, this.deps.fundingUrl))
+        ack()
         return
 
       case '/recover':
@@ -304,6 +326,61 @@ export class CommandRouter {
       case '/help':
         await this.deps.sendMessage(chatId, COPY.command.help)
         return
+
+      case '/collect': {
+        if (!this.deps.collectStatus || !this.deps.setCollecting) {
+          await this.deps.sendMessage(chatId, COPY.command.unknown)
+          return
+        }
+        const arg = text.replace(/^\/collect(?:@\S+)?\s*/i, '').trim().toLowerCase()
+        if (arg === '') {
+          await this.deps.sendMessage(chatId, await this.deps.collectStatus(userId))
+          ack()
+          return
+        }
+        if (arg !== 'on' && arg !== 'off') {
+          await this.deps.sendMessage(chatId, COPY.command.collectUsage)
+          ack()
+          return
+        }
+        await this.deps.sendMessage(chatId, await this.deps.setCollecting(userId, arg === 'on'))
+        ack()
+        return
+      }
+
+      case '/dataset': {
+        if (!this.deps.datasetStatus) {
+          await this.deps.sendMessage(chatId, COPY.command.unknown)
+          return
+        }
+        const rest = text.replace(/^\/dataset(?:@\S+)?\s*/i, '').trim()
+        if (rest === '') {
+          await this.deps.sendMessage(chatId, await this.deps.datasetStatus(userId))
+          ack()
+          return
+        }
+        const [sub, ...nameParts] = rest.split(/\s+/)
+        const name = nameParts.join(' ')
+        const subcommand = sub.toLowerCase()
+        if (subcommand === 'list' && this.deps.datasetList) {
+          await this.deps.sendMessage(chatId, await this.deps.datasetList(userId))
+          ack()
+          return
+        }
+        if (subcommand === 'use' && name && this.deps.datasetUse) {
+          await this.deps.sendMessage(chatId, await this.deps.datasetUse(userId, name))
+          ack()
+          return
+        }
+        if (subcommand === 'new' && name && this.deps.datasetNew) {
+          await this.deps.sendMessage(chatId, await this.deps.datasetNew(userId, name))
+          ack()
+          return
+        }
+        await this.deps.sendMessage(chatId, COPY.command.datasetUsage)
+        ack()
+        return
+      }
 
       default:
         // Not ours to answer unless we were addressed — see `silentOnUnknown`.

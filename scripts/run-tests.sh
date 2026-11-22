@@ -4,11 +4,35 @@
 # (see .github/workflows/ci.yml + Dockerfile). Quoted '**' patterns reach Node 20 as literal
 # paths and it exits with "Could not find '<path>'". Expanding here keeps one behaviour on
 # every runner. See POST-CUTOVER-CLEANUP P0-3.
+#
+# Patterns come from the argument list, or from a file with --from <file> (one pattern per line,
+# blank lines and # comments ignored). A long list lives in a file so that appending to it does
+# not collide: every branch that adds a test file appends, and on one line they all conflict.
 set -euo pipefail
 shopt -s globstar nullglob
 
+patterns=()
+while (( $# )); do
+  case "$1" in
+    --from)
+      [[ $# -ge 2 ]] || { echo "run-tests.sh: --from needs a file" >&2; exit 1; }
+      [[ -r "$2" ]] || { echo "run-tests.sh: cannot read pattern file: $2" >&2; exit 1; }
+      while IFS= read -r line || [[ -n $line ]]; do
+        line="${line%%#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n $line ]] && patterns+=( "$line" )
+      done < "$2"
+      shift 2
+      ;;
+    *) patterns+=( "$1" ); shift ;;
+  esac
+done
+
+(( ${#patterns[@]} )) || { echo "run-tests.sh: no patterns given" >&2; exit 1; }
+
 files=()
-for pattern in "$@"; do
+for pattern in "${patterns[@]}"; do
   matches=( $pattern )
   if (( ${#matches[@]} == 0 )); then
     echo "run-tests.sh: pattern matched no files: $pattern" >&2
@@ -21,5 +45,7 @@ done
 # 'tests/unit/crystal/**/*.test.ts'), and globstar matches the top level too — without this,
 # every top-level crystal suite would run twice.
 mapfile -t files < <(printf '%s\n' "${files[@]}" | awk '!seen[$0]++')
+
+if [[ ${LIST_ONLY:-} == 1 ]]; then printf '%s\n' "${files[@]}"; exit 0; fi
 
 exec npx tsx --test "${files[@]}"

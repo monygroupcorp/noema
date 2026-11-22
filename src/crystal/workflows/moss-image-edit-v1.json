@@ -1,0 +1,37 @@
+{
+  "templateId": "moss-image-edit",
+  "version": "1",
+  "displayName": "MOSS-Image — instruction edit",
+  "seedInputKey": "input_seed",
+  "loraCapable": false,
+  "inputTemplate": {
+    "76": { "class_type": "LoadImage",              "inputs": { "image": "PLACEHOLDER" } },
+    "80": { "class_type": "ImageScaleToTotalPixels", "inputs": { "image": ["76", 0], "upscale_method": "nearest-exact", "megapixels": 1, "resolution_steps": 64 } },
+    "99": { "class_type": "GetImageSize",           "inputs": { "image": ["80", 0] } },
+    "1": { "class_type": "UNETLoader",              "inputs": { "unet_name": "moss_image_sft_int8_convrot.safetensors", "weight_dtype": "default" } },
+    "10": { "class_type": "LoraLoaderModelOnly",    "inputs": { "model": ["1", 0], "lora_name": "moss_image_edit_lora_rank_64_bf16.safetensors", "strength_model": 1.0 } },
+    "2": { "class_type": "CLIPLoader",              "inputs": { "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors", "type": "moss_image", "device": "default" } },
+    "3": { "class_type": "VAELoader",               "inputs": { "vae_name": "flux2-vae_small.safetensors" } },
+    "12": { "class_type": "TextEncodeMOSSImageEdit", "inputs": { "clip": ["2", 0], "prompt": "PLACEHOLDER", "vae": ["3", 0], "edit_format": "Moss-Image-Edit", "image_1": ["80", 0] } },
+    "13": { "class_type": "TextEncodeMOSSImageEdit", "inputs": { "clip": ["2", 0], "prompt": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact", "vae": ["3", 0], "edit_format": "Moss-Image-Edit", "image_1": ["80", 0] } },
+    "6": { "class_type": "EmptyFlux2LatentImage",   "inputs": { "width": ["99", 0], "height": ["99", 1], "batch_size": 1 } },
+    "7": { "class_type": "KSampler",                "inputs": { "model": ["10", 0], "positive": ["12", 0], "negative": ["13", 0], "latent_image": ["6", 0], "seed": 88888888, "steps": 25, "cfg": 2.5, "sampler_name": "er_sde", "scheduler": "simple", "denoise": 1 } },
+    "8": { "class_type": "VAEDecode",               "inputs": { "samples": ["7", 0], "vae": ["3", 0] } },
+    "9": { "class_type": "SaveImage",                "inputs": { "images": ["8", 0], "filename_prefix": "moss_image_edit" } }
+  },
+  "slotMap": {
+    "/76/inputs/image": "image",
+    "/12/inputs/prompt": "prompt",
+    "/13/inputs/prompt": "negative_prompt",
+    "/7/inputs/seed":   "input_seed",
+    "/7/inputs/steps":  "steps",
+    "/7/inputs/cfg":    "guidance"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.moss-image-sft",         "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/diffusion_models/moss_image_sft_int8_convrot.safetensors", "dest": "diffusion_models/moss_image_sft_int8_convrot.safetensors" },
+    { "role": "clip", "id": "intella.qwen3-9b-moss-image",    "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", "dest": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors" },
+    { "role": "vae",  "id": "intella.moss-image-vae",         "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/vae/flux2-vae_small.safetensors", "dest": "vae/flux2-vae_small.safetensors" },
+    { "role": "lora", "id": "intella.moss-image-edit-lora",   "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/loras/moss_image_edit_lora_rank_64_bf16.safetensors", "dest": "loras/moss_image_edit_lora_rank_64_bf16.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24 }
+}

@@ -38,6 +38,7 @@
 
 import { readFileSync } from 'node:fs'
 import { CANONICAL_INTELLAE } from '../src/crystal/seeds/intellae.js'
+import { CANONICAL_FUNDAMENTA } from '../src/crystal/seeds/fundamenta.js'
 
 type Verdict = 'live' | 'dead' | 'gated' | 'unknown'
 
@@ -159,6 +160,19 @@ export async function run(argv: string[]): Promise<number> {
     console.error(`UNKNOWN ${r.id} (sources[${r.rank}]) ${r.detail}\n        ${r.uri}`)
   }
 
+  // A weight is fetchable when ANY of its ranked sources answers live. Gated at sources[1] behind
+  // a live mirror at sources[0] is the normal, working shape and warns for information only. Gated
+  // with nothing live at any rank is a different fact entirely: there is no address a pod can pull
+  // from, so the flow offering it cannot run at all, and a warning is too quiet for that.
+  const liveIds = new Set(live.map(r => r.id))
+  // Scoped to what a stack actually pulls. A registry record no fundamentum names is never
+  // fetched by anything, so an unreachable address on one is a stale entry to tidy and not a
+  // broken offer; a weight a fundamentum DOES name is downloaded onto a pod the user has already
+  // paid for, and that is what may not be left to a warning.
+  const offered = new Set(CANONICAL_FUNDAMENTA.flatMap(f => (f.intellae ?? []).map(i => i.id)))
+  const unfetchable = [...new Set(results.map(r => r.id))].filter(id => offered.has(id) && !liveIds.has(id))
+  const strandedIds = [...new Set(results.map(r => r.id))].filter(id => !offered.has(id) && !liveIds.has(id))
+
   console.error(
     `\nguard-weight-addresses: ${results.length} source(s) probed — ` +
     `${live.length} live, ${dead.length} dead, ${gated.length} gated, ${unknown.length} unanswered`,
@@ -167,6 +181,23 @@ export async function run(argv: string[]): Promise<number> {
   if (dead.length > 0) {
     console.error(`\n${dead.length} address(es) name no file. A pod sent to one dies at wget after the weights pull is already paid for.`)
     console.error('Check each against its own repo — never copy a path from a sibling repo, which is how these get written wrong.')
+    return 1
+  }
+  // Unconditional, and ahead of --strict-gated: this is not a matter of how strict the caller
+  // asked to be. Every source of these is unreachable, so a pod sent after one dies at wget with
+  // the machine already paid for — the same cost as a dead address, reached by a different door.
+  if (strandedIds.length > 0) {
+    console.error(
+      `\nNOTE: ${strandedIds.length} registry record(s) have no fetchable source and no fundamentum ` +
+      `names them, so nothing pulls them:\n${strandedIds.map(id => `        ${id}`).join('\n')}`,
+    )
+  }
+  if (unfetchable.length > 0) {
+    console.error(
+      `\n${unfetchable.length} weight(s) a fundamentum offers have NO source a pod can fetch — every ` +
+      `rank is gated, dead or unanswered:\n${unfetchable.map(id => `        ${id}`).join('\n')}`,
+    )
+    console.error('Mirror each to an auth-free source and make that sources[0], or take the flow that offers it out of the catalogue.')
     return 1
   }
   if (strictGated && gated.length > 0) return 1

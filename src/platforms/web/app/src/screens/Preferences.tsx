@@ -18,8 +18,9 @@ import { useProject } from '../state/project';
 // are deleted with the account. "land in (project)" is a live picker persisting
 // generatio.defaultProjectId (Provincia) — stored + portable; cast-time auto-filing is the
 // marked next step. The "default /make flow" picker is WIRED — it rebinds the `make` verb
-// (PUT /v1/me/bindings/make), resolved at cast time server-side. MARKED gap: /animate·/effect·
-// /upscale aren't canon verbs yet.
+// (PUT /v1/me/bindings/make), resolved at cast time server-side. Only verbs that exist are
+// shown: a card for a verb with no flow behind it is unbuilt capability, which is absent from
+// the interface rather than announced (DESIGN.md D-63).
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -107,55 +108,59 @@ export function Preferences() {
 
         <p className="pref-sub">Your defaults for every generation — they travel with you across <b>web · Telegram · API</b>.</p>
         <div className="pref-honesty mono"><span className="hemi2 dashed" /> custody stays a per-run choice · these are defaults, override inline anytime</div>
+
+        {/* Each card below is its own jump target (REF-34: GitHub's settings pages make every section
+            individually linkable, the dangerous ones last). Same row as the profile's; the restricted
+            section is last in the list because it is last on the page. */}
+        <nav className="section-jump" aria-label="Jump to a section">
+          <a href="#prefs-style">Style &amp; prompt</a>
+          <a href="#prefs-output">Output &amp; delivery</a>
+          <a href="#prefs-private">Private generation</a>
+          <a href="#prefs-memory">What the concierge remembers</a>
+          <a href="#prefs-restricted">Restricted</a>
+        </nav>
+
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
 
         {/* cross-cutting defaults — WIRED to generatio */}
         <div className="pref-grid">
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-style">
             <div className="pref-card-h"><Ic name="sparkles" /><b>Style &amp; prompt</b></div>
-            <label className="ac-row"><span className="ac-rk mono">default style</span>
+            <label className="ac-row"><span className="ac-rk mono">Default style</span>
               <input className="cer-input" placeholder="e.g. cinematic, cold" value={gen.style ?? ''} onChange={(e) => editLocal({ style: e.target.value || undefined })} onBlur={flush} /></label>
-            <label className="ac-row"><span className="ac-rk mono">negative prompt</span>
+            <label className="ac-row"><span className="ac-rk mono">Negative prompt</span>
               <input className="cer-input" placeholder="blurry, text, watermark" value={gen.negativePrompt ?? ''} onChange={(e) => editLocal({ negativePrompt: e.target.value || undefined })} onBlur={flush} /></label>
-            <label className="ac-row"><span className="ac-rk mono">default /make flow</span>
+            <label className="ac-row"><span className="ac-rk mono">Default flow</span>
               <select className="cer-input" value={makeModel} onChange={(e) => rebindMake(e.target.value)}>
                 {!flows.some((f) => f.id === makeModel) && <option value={makeModel}>{makeModel}</option>}
                 {flows.map((f) => <option key={f.id} value={f.id}>{f.nomen ?? f.id}</option>)}
               </select></label>
           </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-output">
             <div className="pref-card-h"><Ic name="send" /><b>Output &amp; delivery</b></div>
-            <label className="ac-row"><span className="ac-rk mono">format</span>
+            <label className="ac-row"><span className="ac-rk mono">Format</span>
               <select className="cer-input" value={gen.outputFormat ?? 'png'} onChange={(e) => commit({ ...gen, outputFormat: e.target.value })}>
                 <option value="png">PNG · max quality</option><option value="jpg">JPG</option><option value="webp">WebP</option>
               </select></label>
-            <label className="ac-row"><span className="ac-rk mono">telegram: deliver as</span>
+            <label className="ac-row"><span className="ac-rk mono">Telegram: deliver as</span>
               <select className="cer-input" value={gen.telegramDeliverAs ?? 'album'} onChange={(e) => commit({ ...gen, telegramDeliverAs: e.target.value as Generatio['telegramDeliverAs'] })}>
                 <option value="album">album</option><option value="individual">individual</option>
               </select></label>
-            <label className="ac-row"><span className="ac-rk mono">land in (project)</span>
+            <label className="ac-row"><span className="ac-rk mono">Land in (project)</span>
               <select className="cer-input" value={gen.defaultProjectId ?? ''} onChange={(e) => commit({ ...gen, defaultProjectId: e.target.value || undefined })}>
                 <option value="">— none (unfiled) —</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select></label>
           </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-private">
             <div className="pref-card-h"><Ic name="send" /><b>Private generation</b></div>
-            <label className="ac-row"><span className="ac-rk mono">private outputs</span>
+            <label className="ac-row ac-check"><span className="ac-rk mono">Private outputs</span>
               <input type="checkbox" checked={gen.privateOutputs ?? false} onChange={(e) => commit({ ...genRef.current, privateOutputs: e.target.checked })} /></label>
             <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
               <span className="hemi2 dashed" /> Outputs of new runs are visible only to you, through expiring links. Publishing or minting one later makes that copy public. Runs you have already made stay as they are.
             </div>
           </div>
-          <div className="pref-card">
-            <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
-            <label className="ac-row"><span className="ac-rk mono">adult content</span>
-              <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
-            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
-              <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
-            </div>
-          </div>
-          <div className="pref-card">
+          <div className="pref-card" id="prefs-memory">
             <div className="pref-card-h"><Ic name="sparkles" /><b>What the concierge remembers</b></div>
             {notes.length === 0 && (
               <div className="pref-note mono" style={{ color: 'var(--faint)' }}>Nothing yet. The concierge adds a line here when it learns something durable about how you work.</div>
@@ -178,22 +183,30 @@ export function Preferences() {
           </div>
         </div>
 
-        {/* per-command defaults — backend ready (affines); inline editor is next */}
+        {/* per-command defaults — persisted as affines, applied at cast time */}
         <div className="pref-note mono" style={{ color: 'var(--faint)', marginBottom: 'var(--s3)' }}>
-          <span className="hemi2 ring" /> Per-command param defaults (model · size · steps · cfg · count) persist as <b>affines</b> and apply at cast time — the inline editor lands next. <b>/animate · /effect · /upscale</b> aren't canon verbs yet.
+          <span className="hemi2 ring" /> Per-command param defaults (model · size · steps · cfg · count) persist as <b>affines</b> and apply at cast time.
         </div>
         <div className="pref-grid">
           <div className="pref-card">
             <div className="pref-card-h"><span className="accent mono">/make</span><span className="pref-kind">image</span></div>
-            <div className="pref-preview"><span className="pp-l mono">resolves to</span><span className="pp-v mono">{makeModel}</span></div>
-            <div className="pref-preview"><span className="pp-l mono">rebind</span><span className="pp-v mono">the <b>default /make flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
+            <div className="pref-preview"><span className="pp-l mono">Resolves to</span><span className="pp-v mono">{makeModel}</span></div>
+            <div className="pref-preview"><span className="pp-l mono">Rebind</span><span className="pp-v mono">the <b>Default flow</b> picker above · or /bind make &lt;flow&gt;</span></div>
           </div>
-          {['/animate', '/effect', '/upscale'].map((cmd) => (
-            <div key={cmd} className="pref-card" style={{ opacity: 0.6 }}>
-              <div className="pref-card-h"><span className="accent mono">{cmd}</span><span className="pref-kind">no canon verb yet</span></div>
-              <div className="pref-preview"><span className="pp-l mono">status</span><span className="pp-v mono"><span className="hemi2 dashed" /> needs a flow + canon binding</span></div>
+        </div>
+
+        {/* the one age-gated, policy-sensitive toggle on this screen — its own section, set apart
+            from the routine cosmetic cards above, last on the page (REF-34, mirrors .ac-danger). */}
+        <div className="pref-restricted" id="prefs-restricted">
+          <div className="pref-restricted-l mono">Restricted</div>
+          <div className="pref-card pref-card-restricted">
+            <div className="pref-card-h"><Ic name="sparkles" /><b>Spicy mode (18+)</b></div>
+            <label className="ac-row ac-check"><span className="ac-rk mono">Adult content</span>
+              <input type="checkbox" checked={gen.spicyMode ?? false} onChange={(e) => toggleSpicy(e.target.checked)} /></label>
+            <div className="pref-note mono" style={{ color: 'var(--faint)' }}>
+              <span className="hemi2 dashed" /> Unlocks adult-rated models, willing-model chat routing, and relaxed safe-content defaults. Requires a one-time 18+ attestation. Content moderation &amp; CSAM scanning always run regardless.
             </div>
-          ))}
+          </div>
         </div>
       </div></div>
     </AppShell>

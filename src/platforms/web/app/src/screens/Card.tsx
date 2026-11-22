@@ -4,7 +4,9 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
 import { Ic } from '../lib/icons';
 import { useIdentity } from '../state/identity';
-import { api, getActivePurse, setActivePurse, type FlowDescription, type ModelCard } from '../lib/api';
+import { api, getActivePurse, setActivePurse, withReadTimeout, type FlowDescription, type FlowSummary, type ModelCard } from '../lib/api';
+import { flowSummary } from '../lib/flows';
+import { describeLoadFailure, FlowLoadNotice, type FlowLoadFailure } from './CardLoad';
 import { mediaFromOutput } from '../lib/media';
 import { isPinned, togglePin } from '../lib/pins';
 import { usePromptAssist, useAssistField } from '../state/promptAssist';
@@ -158,7 +160,21 @@ export function Card() {
   const loraName = params.get('loraName') || undefined;
 
   const [flow, setFlow] = useState<FlowDescription | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  // Why the flow is not on screen, once the read has settled against it. Null while the read
+  // is still in flight — and the read is bounded (withReadTimeout), so null is never permanent.
+  const [loadFailure, setLoadFailure] = useState<FlowLoadFailure | null>(null);
+  // Bumped by "Try again": re-runs the flow read without leaving the screen.
+  const [attempt, setAttempt] = useState(0);
+  // The catalogue's entry for this flow — name, modality and description — from the public
+  // list, which is usually already in hand from the catalogue. The head renders from it while
+  // the schema loads, so the card has a name and a description from its first paint.
+  const [summary, setSummary] = useState<FlowSummary | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSummary(null);
+    flowSummary(id).then((s) => { if (live) setSummary(s ?? null); }).catch(() => { /* the schema read reports */ });
+    return () => { live = false; };
+  }, [id]);
   const [aditus, setAditus] = useState<Aditus>({});
   const [quote, setQuote] = useState<{ impetus?: string; error?: string } | null>(null);
   const [quoting, setQuoting] = useState(false);
@@ -255,10 +271,12 @@ export function Card() {
   // fetch the real flow schema + seed the form from defaults, then overlay saved affines
   useEffect(() => {
     let live = true;
-    setFlow(null); setLoadErr(null); setRunId(undefined); setDispatching(false); setDispatchErr(undefined); setQuote(null); setAffSave({ s: 'idle' });
+    setFlow(null); setLoadFailure(null); setRunId(undefined); setDispatching(false); setDispatchErr(undefined); setQuote(null); setAffSave({ s: 'idle' });
     skipNextAffSave.current = true;
     if (affSaveTimer.current) clearTimeout(affSaveTimer.current);
-    api.getFlow(id).then((f) => {
+    // Bounded: a read the server never answers becomes a failure the screen can show, with the
+    // way out, instead of a loading state that outlives the tab (D-62).
+    withReadTimeout((signal) => api.getFlow(id, signal)).then((f) => {
       if (!live) return;
       setFlow(f);
       const init: Aditus = {};
@@ -273,9 +291,11 @@ export function Card() {
       api.getAffines(id)
         .then((r) => { if (live) setAditus({ ...init, ...(r.affines ?? {}) }); })
         .catch(() => { if (live) setAditus(init); });
-    }).catch((e) => { if (live) setLoadErr(String(e)); });
+    }).catch((e) => { if (live) setLoadFailure(describeLoadFailure(e)); });
     return () => { live = false; };
-  }, [id]);
+    // `preloadPrompt` only seeds the form on load; a later change to it must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, attempt]);
 
   // Debounced autosave of the in-progress inputs, keyed to this flow's affines (same
   // key/endpoint the manual "save defaults" button and the hydrate-on-mount read use —
@@ -317,7 +337,12 @@ export function Card() {
     const t = setTimeout(() => {
       setQuoting(true);
       api.quote({ modusId: id, aditus: cleanAditus(aditus) })
-        .then((r) => setQuote({ impetus: r.impetus }))
+        .then((r) => {
+          setQuote({ impetus: r.impetus });
+          // noema/user-behaviour-corpus clause 2 — fires once per resolved quote, the
+          // moment it becomes visible (this is exactly where the JSX reads `quote`).
+          api.recordEvent('quote', { modusId: id });
+        })
         .catch((e) => setQuote({ error: String(e) }))
         .finally(() => setQuoting(false));
     }, 400);
@@ -338,6 +363,24 @@ export function Card() {
       setPub({ s: 'err', msg: e instanceof Error ? e.message : String(e) });
     }
   }
+
+  // The Run button's ⌘⏎ chip named a shortcut nothing listened for — no keydown handler
+  // existed anywhere in the app. Bind it, guarded the same way the button is (a quote in
+  // hand) plus a dispatching check the button itself gets for free from `disabled`: a ref
+  // carries the current closure so the listener is attached once and still reads live state.
+  const runHotkey = useRef<() => void>(() => {});
+  useEffect(() => {
+    runHotkey.current = () => { if (quote?.impetus && !dispatching) void doRun(); };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      runHotkey.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   async function doRun() {
     setPub({ s: 'idle' });
@@ -381,7 +424,14 @@ export function Card() {
     : `~${baseCredits} credits`;
   // Subline: honest consequence, or a fill-fields hint when the quote can't form yet.
   const subline = quote?.error ? 'fill required fields' : 'est · remote · we see the work';
-  const name = (flow?.nomen || id).split('—')[0].trim();
+  // The head reads from whichever of the schema and the catalogue entry is in hand, so it is
+  // the same head before and after the schema lands — the layout holds (D-61).
+  const nomen = flow?.nomen || summary?.nomen || id;
+  const name = nomen.split('—')[0].trim();
+  const nomenTail = nomen.includes('—') ? nomen.split('—').slice(1).join('—').trim() : '';
+  const description = flow?.descriptio || summary?.descriptio || nomenTail;
+  const categoria = flow?.categoria ?? summary?.categoria;
+  const versio = flow?.versio || summary?.versio;
 
   // Live run status, derived (SSE with polling fallback — see useRunStream).
   const runStatus =
@@ -399,9 +449,9 @@ export function Card() {
       <div className="csec">
         <div className="ctitle">Flow</div>
         <div className="meta-line"><span>id</span><span className="v mono">{id}</span></div>
-        <div className="meta-line"><span>version</span><span className="v mono">{flow?.versio ?? '—'}</span></div>
-        <div className="meta-line"><span>base model</span><span className="v mono">{String((flow as { fundamentumId?: unknown })?.fundamentumId ?? '—')}</span></div>
-        <div className="meta-line"><span>category</span><span className="v mono">{String((flow as { categoria?: unknown })?.categoria ?? '—')}</span></div>
+        <div className="meta-line"><span>version</span><span className="v mono">{versio ?? '—'}</span></div>
+        <div className="meta-line"><span>base model</span><span className="v mono">{flow?.fundamentumId ?? '—'}</span></div>
+        <div className="meta-line"><span>category</span><span className="v mono">{String(categoria ?? '—')}</span></div>
         {studioId && <div className="meta-line"><span>studio</span><span className="v mono">{studioId.slice(0, 8)} · warm</span></div>}
       </div>
       <div className="csec">
@@ -442,35 +492,36 @@ export function Card() {
         .lora-trigger-card .ltc-meta{display:block;margin-top:4px;opacity:.6;text-transform:capitalize}
       `}</style>
       <div className="cardscroll"><div className="card">
-        {loadErr && <div className="warn">Couldn’t load this flow from staging — {loadErr}</div>}
-        {!flow && !loadErr && <div className="empty"><div className="t">Loading flow…</div></div>}
-
-        {flow && <>
+        {/* The head is on screen from the first paint — name and description from the
+            catalogue entry, the ports once the schema is here — so the page reads as the
+            model's page while the run panel loads (REFERENCES.md REF-16, D-61). */}
           <div className="flow-head">
             <span className="fav" />
             <div>
-              <h1>{name} <span className="verbtag">{String((flow as { categoria?: unknown }).categoria ?? 'flow')}</span></h1>
-              <div className="desc">{(flow.nomen || '').includes('—') ? flow.nomen.split('—').slice(1).join('—').trim() : 'Live flow from staging.'}</div>
+              <h1>{name} <span className="verbtag">{String(categoria ?? 'flow')}</span></h1>
+              {description && <div className="desc">{description}</div>}
               {loraName && (
                 <div className="sub">
                   Using your <b>{loraName}</b> LoRA — trigger word <span className="mono accent">{preloadPrompt}</span> is included in the prompt below.
                 </div>
               )}
-              <div className="ports">
-                {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
-                {' → '}
-                {Object.entries(flow.output?.properties ?? {}).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
-              </div>
+              {flow && (
+                <div className="ports">
+                  {Object.entries(flow.input?.properties ?? {}).slice(0, 4).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
+                  {' → '}
+                  {Object.entries(flow.output?.properties ?? {}).map(([k, p]) => <span key={k} className="p">{p.title || humanizeKey(k)}</span>)}
+                </div>
+              )}
             </div>
-            <span className="ver mono">v{flow.versio}</span>
+            {versio && <span className="ver mono">v{versio}</span>}
             <button
               className={`make-default${makeDefault ? ' on' : ''}`}
               onClick={setAsMakeDefault}
               disabled={bindBusy || makeDefault}
-              title={makeDefault ? 'This is your /make default (web + Telegram)' : 'Set as /make default'}
+              title={makeDefault ? 'This flow is your default, on the web and in Telegram' : 'Use this flow as your default, on the web and in Telegram'}
               aria-pressed={makeDefault}
             >
-              <Ic name="wand-sparkles" /> {makeDefault ? '/make default' : 'set as /make default'}
+              <Ic name="wand-sparkles" /> {makeDefault ? 'My default' : 'Use as my default'}
             </button>
             <button
               className={`pin${pinned ? ' on' : ''}`}
@@ -488,6 +539,9 @@ export function Card() {
           </div>
           {bindErr && <div className="pub-err">{bindErr}</div>}
 
+        {!flow && <FlowLoadNotice failure={loadFailure} id={id} onRetry={() => setAttempt((a) => a + 1)} />}
+
+        {flow && <>
           {/* auto-generated from the live input JSON-Schema */}
           {Object.entries(flow.input?.properties ?? {}).map(([k, p]) => {
             const req = required.includes(k);

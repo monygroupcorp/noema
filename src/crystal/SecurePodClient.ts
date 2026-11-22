@@ -13,9 +13,10 @@ import { bus } from '../lib/bus.js'
 import { recordProgressus } from '../execution/progressusSink.js'
 import { coldStartProgressus } from '../execution/progressus.js'
 import { terminatePod as _terminatePodUtil } from './terminatePod.js'
-import { submitToRunner, awaitViaStream, isCompiledSpec, type R2Config } from './comfyrunnerClient.js'
+import { submitToRunner, awaitViaStream, isCompiledSpec, classifyJobAttemptFailure, ThrottleError, type R2Config, type JobAttemptOutcome } from './comfyrunnerClient.js'
 import { computeBootCostImpetus, impetusPerSecondFromHourly } from '../ledger/rates.js'
 import { DEFAULT_POD_DISK_GB } from './podDisk.js'
+import { createRunPodPod, runpodFetch, runpodPodUrl, describeRunPodError, directSshOf, type RunPodPod } from './runpodRest.js'
 
 const COMFYRUNNER_SCRIPT_PATH = path.resolve(__dirname, '../../scripts/pod/comfyrunner.py')
 // The multi-runtime runner (ADR-0007) — shipped for non-ComfyUI runtimes (vLLM). ComfyUI stays on
@@ -172,10 +173,11 @@ export type { R2Config } from './comfyrunnerClient.js'
 // Ordered roughly by expected speed (fastest/most available first).
 //
 // Every entry MUST be present in ACCEPTED_GPU_TYPE_IDS below (RunPod's current
-// gpuTypeIds enum). RunPod's REST API rejects an unknown gpuTypeId with a 400 on
-// POST rest.runpod.io/v1/pods — a stale/renamed SKU here silently degrades the
-// SECURE tier (both SECURE attempts 400 and the run falls back to COMMUNITY, losing
-// the private/TEE guarantee). `assertGpuTypeIdsAccepted` enforces this at construct
+// GPU type enum). RunPod's REST v2 places exactly one GPU type per create, so this
+// list is walked in order, one POST /v2/pods per id, until one is placed (see
+// `createRunPodPod`). A stale/renamed SKU here costs a refused create on every
+// provision and, if every entry is stale, degrades the SECURE tier to the COMMUNITY
+// fallback, losing the private/TEE guarantee. `assertGpuTypeIdsAccepted` enforces this at construct
 // time so a future enum drift fails loud and early instead of as a mid-provision 400.
 // (noema-103, 2026-07-14: pruned the A30 SKU — absent from RunPod's accepted enum.)
 export const DEFAULT_GPU_TYPE_IDS = [
@@ -261,53 +263,60 @@ export const ACCEPTED_GPU_TYPE_IDS = [
 // small), and renting a 24 GB GPU to compute 512-float vectors would pay GPU rates for
 // work no GPU accelerates.
 //
-// A CPU pod is the SAME RunPod pod API with a different shape of request: `computeType:
-// 'CPU'` and `instanceIds` in place of `gpuCount`/`gpuTypeIds`. Everything downstream —
-// the proxy hostname, termination, the 8080 http port — is unchanged.
+// A CPU pod is the SAME RunPod pod API with a different shape of request: `cpu: { id,
+// vcpuCount }` (a CPU flavor and a size) in place of `gpu`. Everything downstream — the
+// proxy hostname, termination, the 8080 http port — is unchanged.
+
+/** A CPU pod request: a flavor from RunPod's CPU catalogue and a power-of-two vCPU count. */
+export interface CpuFlavor {
+  id: string
+  vcpuCount: number
+}
 
 /**
- * CPU SKUs to ask for, in preference order. A CLIP pass is memory-bound rather than
+ * CPU flavors to ask for, in preference order. A CLIP pass is memory-bound rather than
  * core-bound (the model and its activations have to fit; four cores saturate the batch
- * sizes `clip_service` accepts), so the general-purpose 4-core/16 GB SKU leads and the
- * larger ones follow as availability fallbacks.
+ * sizes `clip_service` accepts), so the general-purpose 4-core flavor leads and the larger
+ * ones follow as availability fallbacks. These are the same machines REST v1 named as
+ * `cpu3g-4-16`, `cpu3g-8-32`, `cpu5g-4-16` and `cpu5g-8-32` (flavor-vcpus-GB).
  */
-export const DEFAULT_CPU_INSTANCE_IDS = [
-  'cpu3g-4-16',
-  'cpu3g-8-32',
-  'cpu5g-4-16',
-  'cpu5g-8-32',
+export const DEFAULT_CPU_FLAVORS: readonly CpuFlavor[] = [
+  { id: 'cpu3g', vcpuCount: 4 },
+  { id: 'cpu3g', vcpuCount: 8 },
+  { id: 'cpu5g', vcpuCount: 4 },
+  { id: 'cpu5g', vcpuCount: 8 },
 ]
 
 /**
- * RunPod's accepted `instanceIds` enum for CPU pods, snapshotted from its published CPU
- * catalogue (2026-09-07). Same role as `ACCEPTED_GPU_TYPE_IDS`: RunPod answers an unknown
- * instance id with a 400, and a stale SKU here would surface as an opaque provision failure
- * rather than as the enum drift it is. When RunPod changes the catalogue, refresh this
- * snapshot and `DEFAULT_CPU_INSTANCE_IDS` together — never suppress the guard.
+ * RunPod's CPU flavor ids, carried over from the v1 instance-id catalogue (2026-09-07)
+ * with the size suffix dropped, since v2 takes the size as `vcpuCount`. Same role as
+ * `ACCEPTED_GPU_TYPE_IDS`: a stale flavor here would surface as an opaque provision failure
+ * rather than as the drift it is.
+ *
+ * NOT yet confirmed against a live `GET /v2/catalog/cpus` — the published v2 spec's own
+ * examples disagree on the id form (`cpu5c` on the request, `cpu3c-2-4` in the catalogue
+ * sample). Check it against the live catalogue before relying on CPU pods, and refresh this
+ * list and `DEFAULT_CPU_FLAVORS` together — never suppress the guard.
  */
-export const ACCEPTED_CPU_INSTANCE_IDS = [
-  'cpu3c-2-4',  'cpu3c-4-8',  'cpu3c-8-16',
-  'cpu3g-2-8',  'cpu3g-4-16', 'cpu3g-8-32',
-  'cpu5c-2-4',  'cpu5c-4-8',  'cpu5c-8-16',
-  'cpu5g-2-8',  'cpu5g-4-16', 'cpu5g-8-32',
-]
+export const ACCEPTED_CPU_FLAVOR_IDS = ['cpu3c', 'cpu3g', 'cpu5c', 'cpu5g']
 
 /**
- * The same construct-time guard `assertGpuTypeIdsAccepted` is for the GPU tier, for CPU
- * instance ids. Throws naming the offending SKU(s) rather than letting a drifted catalogue
- * reach a live provision POST.
+ * The same guard `assertGpuTypeIdsAccepted` is for the GPU tier, for CPU flavors: every id
+ * must be a known flavor and every vCPU count a power of two of at least 2 (the v2 contract).
+ * Throws naming the offending entries rather than letting them reach a live provision POST.
  */
-export function assertCpuInstanceIdsAccepted(
-  ids: readonly string[],
-  accepted: readonly string[] = ACCEPTED_CPU_INSTANCE_IDS,
+export function assertCpuFlavorsAccepted(
+  flavors: readonly CpuFlavor[],
+  accepted: readonly string[] = ACCEPTED_CPU_FLAVOR_IDS,
 ): void {
-  const offending = ids.filter(id => !accepted.includes(id))
+  const isPow2 = (n: number) => Number.isInteger(n) && n >= 2 && (n & (n - 1)) === 0
+  const offending = flavors.filter(f => !accepted.includes(f.id) || !isPow2(f.vcpuCount))
   if (offending.length > 0) {
     throw new Error(
-      `SecurePodClient: CPU instance id(s) not in RunPod's accepted instanceIds enum: ` +
-      `${offending.map(s => `'${s}'`).join(', ')}. RunPod rejects unknown instanceIds with a 400 ` +
-      `on pod provision. Update DEFAULT_CPU_INSTANCE_IDS and/or the ACCEPTED_CPU_INSTANCE_IDS ` +
-      `snapshot to match RunPod's current catalogue.`,
+      `SecurePodClient: CPU flavor(s) RunPod will not accept: ` +
+      `${offending.map(f => `'${f.id}' x${f.vcpuCount}`).join(', ')}. A CPU pod needs a flavor ` +
+      `from RunPod's CPU catalogue and a power-of-two vcpuCount >= 2. Update DEFAULT_CPU_FLAVORS ` +
+      `and/or the ACCEPTED_CPU_FLAVOR_IDS snapshot to match RunPod's current catalogue.`,
     )
   }
 }
@@ -395,19 +404,10 @@ interface SshInfo {
   region?: string
 }
 
-interface RunPodPodStatus {
-  desiredStatus?: string
-  publicIp?: string
-  portMappings?: Record<string, number>
-  costPerHr?: number
-  gpuTypeIds?: string[]
-  machine?: { gpuDisplayName?: string; dataCenterId?: string; location?: string }
-}
-
 /** A status poll that returned successfully but the pod is not SSH-ready yet — the fields
  *  that distinguish "wrong values" from "never got a reading" (see SshPollResult). */
 interface SshPollObservation {
-  desiredStatus?: string
+  status?: string
   publicIp?: string
   port22?: number
 }
@@ -535,31 +535,15 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
 
     let activePodId = podId
-    // Tracks whether comfyrunner accepted the job. Once true, comfyrunner owns
-    // the failure webhook — Crystal must not fire a second one.
-    let runnerAcceptedJob = false
+    // Sticky across every attempt: has comfyrunner EVER accepted this run? Once true it owns
+    // the failure webhook, so Crystal must not fire a second one — derived from `JobAttemptOutcome.kind`
+    // (never duck-typed off the error) and never reset, matching the old closure boolean's lifetime.
+    let everAccepted = false
+
     const runWithRetry = async () => {
-      try {
-        await this._runBackground(podId!, imageName, params.input, params.webhook, undefined, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
-      } catch (firstErr) {
-        // Once comfyrunner accepted the job it OWNS the run and the webhook. A
-        // dropped SSE stream after that point means we lost visibility, not that
-        // the job failed — re-provisioning would spawn a redundant pod and
-        // re-download every model. Stop here and let comfyrunner fire the webhook.
-        // EXCEPTION: a throttle bail is a deliberate "this pod is fleecing us" abort
-        // — we DO want to re-provision on a fresh pod, so let it fall through to retry.
-        if (runnerAcceptedJob && !(firstErr as { isThrottleError?: boolean }).isThrottleError) {
-          log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId, error: (firstErr as Error).message })
-          return
-        }
-        // A permanent (4xx) error is deterministic — a fresh pod hits the same rejection. Fail fast
-        // instead of burning more provisions (each re-runs the heavy bootstrap + model download).
-        if ((firstErr as { permanent?: boolean }).permanent) {
-          log.warn('pod run failed permanently — not retrying', { podId, error: (firstErr as Error).message })
-          throw firstErr
-        }
-        log.warn(`pod run attempt 1/${maxAttempts} failed`, { podId, error: (firstErr as Error).message })
-        for (let attempt = 2; attempt <= maxAttempts; attempt++) {
+      let currentPodId = podId!
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (attempt > 1) {
           // Liveness gate — before spending a NEW pod on a retry, confirm the actum this
           // job belongs to hasn't already gone terminal (e.g. the expiry watchdog fired
           // mid-retry and refunded it). Without this, a slow retry cascade keeps
@@ -569,40 +553,51 @@ export class SecurePodClient implements RunPodClient, Procurator {
             return
           }
           log.info('retrying on new pod', { attempt })
-          let retryPodId: string
           try {
-            retryPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
+            currentPodId = await this._provisionPod(imageName, undefined, undefined, diskGb)
           } catch (provErr) {
             log.warn(`provision retry ${attempt}/${maxAttempts} failed`, { error: (provErr as Error).message })
             if (attempt === maxAttempts) throw provErr
             continue
           }
-          activePodId = retryPodId
+          activePodId = currentPodId
           // Second gate — the actum could have gone terminal during provisioning itself;
           // check again before submitting the job so we don't hand comfyrunner work for a
           // dead run, and terminate the pod we just spun up instead of leaking it.
           if (!(await this._actumStillLive())) {
             log.warn('retry aborted — actum already terminal', { actumId: getTrace()?.actumId, attempt })
-            await this._terminatePod(retryPodId).catch(() => {})
+            await this._terminatePod(currentPodId).catch(() => {})
             return
           }
-          // Update DB so the retry pod is tracked; webhook will fire with retryPodId
-          await params.onPodActive?.(retryPodId).catch(() => {})
-          try {
-            await this._runBackground(retryPodId, imageName, params.input, params.webhook, retryPodId, (accepted) => { runnerAcceptedJob = accepted }, params.onMetrics, params.provisioningContext, params.jobToken, params.r2)
+          // Update DB so the retry pod is tracked; webhook will fire with the retry pod's id
+          await params.onPodActive?.(currentPodId).catch(() => {})
+        }
+
+        const outcome = await this._runBackground(
+          currentPodId, imageName, params.input, params.webhook,
+          attempt > 1 ? currentPodId : undefined,
+          params.onMetrics, params.provisioningContext, params.jobToken, params.r2,
+        )
+        if (outcome.kind === 'ok') return
+        everAccepted = everAccepted || outcome.kind === 'accepted-lost' || outcome.kind === 'throttled'
+
+        switch (outcome.kind) {
+          case 'accepted-lost':
+            // Once comfyrunner accepted the job it OWNS the run and the webhook. A dropped SSE
+            // stream after that point means we lost visibility, not that the job failed —
+            // re-provisioning would spawn a redundant pod and re-download every model. Stop here
+            // and let comfyrunner fire the webhook.
+            log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: currentPodId, error: outcome.error.message })
             return
-          } catch (runErr) {
-            if (runnerAcceptedJob && !(runErr as { isThrottleError?: boolean }).isThrottleError) {
-              log.warn('lost SSE after comfyrunner accepted job — not retrying; comfyrunner owns the webhook', { podId: retryPodId, error: (runErr as Error).message })
-              return
-            }
-            if ((runErr as { permanent?: boolean }).permanent) {
-              log.warn('pod run failed permanently — not retrying', { podId: retryPodId, error: (runErr as Error).message })
-              throw runErr
-            }
-            log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: retryPodId, error: (runErr as Error).message })
-            if (attempt === maxAttempts) throw runErr
-          }
+          case 'rejected':
+            // Deterministic — a fresh pod hits the same rejection. Fail fast instead of burning
+            // more provisions (each re-runs the heavy bootstrap + model download).
+            log.warn('pod run failed permanently — not retrying', { podId: currentPodId, error: outcome.error.message })
+            throw outcome.error
+          case 'throttled':
+          case 'failed':
+            log.warn(`pod run attempt ${attempt}/${maxAttempts} failed`, { podId: currentPodId, error: outcome.error.message })
+            if (attempt === maxAttempts) throw outcome.error
         }
       }
     }
@@ -610,10 +605,14 @@ export class SecurePodClient implements RunPodClient, Procurator {
     runWithRetry().catch(async (err) => {
       log.error(`Pod ${activePodId} failed`, { podId: activePodId, error: (err as Error).message })
       // Only fire Crystal-side webhook when comfyrunner never accepted the job —
-      // EXCEPT when we exhausted throttle-retries: comfyrunner accepted but we
-      // deliberately bailed every pod, so no webhook is coming and the client must
-      // be told (and refunded) "no good pods available".
-      if (params.webhook && (!runnerAcceptedJob || (err as { isThrottleError?: boolean }).isThrottleError)) {
+      // EXCEPT when the error that actually ended the ladder was a throttle bail:
+      // comfyrunner accepted but we deliberately bailed every pod, so no webhook is coming
+      // and the client must be told (and refunded) "no good pods available". Reading the
+      // THROWN error's own type (not a separately-tracked "last outcome") matters: if an
+      // earlier attempt was throttled but the ladder was later exhausted by something else
+      // (e.g. a plain provisioning failure on the final attempt), that something-else is
+      // what actually ended the run and is what this check must answer for.
+      if (params.webhook && (!everAccepted || err instanceof ThrottleError)) {
         // Key the failure webhook by `activePodId` — retries advance the actum's
         // externusJobId (via onPodActive) to the LAST pod, so posting the FIRST pod's
         // id 404s and the run never reaches `fractus` (incident 2026-06-19).
@@ -1031,37 +1030,30 @@ export class SecurePodClient implements RunPodClient, Procurator {
     }
   }
 
-  // gpuTypeIds=null → omit from request (let RunPod pick any available GPU)
+  // gpuTypeIds=null → any GPU we accept: RunPod v2 has no "any GPU" create, so the full
+  // DEFAULT_GPU_TYPE_IDS preference list is walked instead.
   private async _provisionPod(imageName: string, cloudType?: string, gpuTypeIds?: string[] | null, diskGb?: number): Promise<string> {
-    const resolvedGpus = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
-    const body: Record<string, unknown> = {
+    const resolved = gpuTypeIds !== undefined ? gpuTypeIds : (this.config.gpuTypeIds ?? DEFAULT_GPU_TYPE_IDS)
+    const gpuIds = resolved ?? DEFAULT_GPU_TYPE_IDS
+    const base = {
       name: `noema-${Date.now()}`,
-      imageName,
-      gpuCount: 1,
-      cloudType: cloudType ?? this.config.cloudType ?? 'SECURE',
+      image: imageName,
+      cloud: cloudType ?? this.config.cloudType ?? 'SECURE',
       // The flow's own requirement wins: a 56 GB weight set on the flat default fills the
       // disk mid-fetch and surfaces as "model download failed" naming the mirror (noema-372).
-      containerDiskInGb: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
+      disk: diskGb ?? this.config.containerDiskGb ?? DEFAULT_POD_DISK_GB,
       ports: ['22/tcp', '8188/http', '8080/http'],
-      supportPublicIp: true,
+      // v2 injects the account's registered SSH keys as PUBLIC_KEY only when asked; without
+      // it the pod reports ssh.direct but refuses our key, and bootstrap can never log in.
+      startSsh: true,
     }
-    if (resolvedGpus !== null) body.gpuTypeIds = resolvedGpus
-    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, this.config.provisionTimeoutMs ?? 30_000)
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RunPod pod provision failed: ${res.status} ${text}`)
-    }
-
-    const data = await res.json() as { id: string }
-    return data.id
+    const pod = await createRunPodPod({
+      fetchFn: this.fetchFn,
+      apiKey: this.config.apiKey,
+      candidates: gpuIds.map(id => ({ label: id, body: { ...base, gpu: { id, count: 1 } } })),
+      timeoutMs: this.config.provisionTimeoutMs ?? 30_000,
+    })
+    return pod.id
   }
 
   /**
@@ -1089,7 +1081,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const abandon = (reason: string): void => {
       log.warn('abandoning pod', {
         podId, reason, polls: pollCount, elapsedMs: Date.now() - startedAt,
-        desiredStatus: lastObservation?.desiredStatus, publicIp: lastObservation?.publicIp,
+        status: lastObservation?.status, publicIp: lastObservation?.publicIp,
         port22: lastObservation?.port22,
       })
     }
@@ -1113,7 +1105,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
         lastObservation = result.observation
         lastError = undefined
         // The ip-less window only runs while the pod is RUNNING and reporting no public IP.
-        if (result.observation.desiredStatus === 'RUNNING' && !result.observation.publicIp) {
+        if (result.observation.status === 'RUNNING' && !result.observation.publicIp) {
           iplessSince ??= Date.now()
           const iplessMs = Date.now() - iplessSince
           if (iplessMs >= iplessBailoutMs) {
@@ -1140,7 +1132,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     if (lastObservation) {
       throw new Error(
         `Pod ${podId} SSH not ready within ${timeoutMs}ms — last seen after ${pollCount} polls:\n` +
-        `desiredStatus=${lastObservation.desiredStatus ?? '<absent>'} ` +
+        `status=${lastObservation.status ?? '<absent>'} ` +
         `publicIp=${lastObservation.publicIp ?? '<absent>'} ` +
         `port22=${lastObservation.port22 ?? '<absent>'}`,
       )
@@ -1154,7 +1146,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   private async _getSshInfo(podId: string): Promise<SshPollResult> {
     let res: Response
     try {
-      res = await this._fetchWithTimeout(`https://rest.runpod.io/v1/pods/${podId}`, {
+      res = await runpodFetch(this.fetchFn, runpodPodUrl(podId), {
         headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
       }, this.config.sshInfoTimeoutMs ?? 10_000)
     } catch (err) {
@@ -1162,52 +1154,45 @@ export class SecurePodClient implements RunPodClient, Procurator {
       // _waitForSsh deadline governs the overall give-up point.
       return { info: null, error: err instanceof Error ? err.message : String(err) }
     }
-    if (!res.ok) return { info: null, error: `HTTP ${res.status}` }
+    if (!res.ok) return { info: null, error: await describeRunPodError(res) }
 
-    const data = await res.json() as RunPodPodStatus
-    log.debug('pod status poll', {
-      podId,
-      desiredStatus: data.desiredStatus,
-      publicIp: data.publicIp,
-      portMappings: data.portMappings,
-    })
+    const data = await res.json() as RunPodPod
+    const ssh = directSshOf(data)
+    log.debug('pod status poll', { podId, status: data.status, sshHost: ssh.host, sshPort: ssh.port })
     // An observation is a status read that succeeded, whether or not the pod is ready yet —
     // this is what a give-up message names, kept distinct from never getting a read at all.
-    const observation: SshPollObservation = {
-      desiredStatus: data.desiredStatus,
-      publicIp: data.publicIp,
-      port22: data.portMappings?.['22'],
-    }
-    if (data.desiredStatus !== 'RUNNING') return { info: null, observation }
-    if (!data.publicIp) return { info: null, observation }
+    const observation: SshPollObservation = { status: data.status, publicIp: ssh.host, port22: ssh.port }
+    if (data.status !== 'RUNNING') return { info: null, observation }
+    if (!ssh.host || !ssh.port) return { info: null, observation }
 
-    const sshPort = data.portMappings?.['22']
-    if (!sshPort) return { info: null, observation }
-
-    const gpuType = data.machine?.gpuDisplayName ?? data.gpuTypeIds?.[0]
-    const region  = data.machine?.dataCenterId ?? data.machine?.location
-    return { info: { host: data.publicIp, port: sshPort, user: 'root', costPerHr: data.costPerHr, gpuType, region } }
+    const gpuType = data.gpu?.id
+    const region  = data.dataCenterId ?? undefined
+    return { info: { host: ssh.host, port: ssh.port, user: 'root', costPerHr: data.cost, gpuType, region } }
   }
 
   private async _terminatePod(podId: string): Promise<void> {
     await this.terminatePodFn(this.config.apiKey, podId)
   }
 
-  // externusJobId: the job ID stored on the actum (always the first pod's ID, even on retries)
-  // onRunnerAccepted: called with true once comfyrunner has accepted the job (owns the webhook from that point)
+  // externusJobId: the id the SSE/webhook job is addressed by on comfyrunner's side. Passed
+  // explicitly on a retry pod (where it equals `podId` anyway); absent on the first attempt,
+  // where it falls back to `podId` below.
+  //
+  // Returns the attempt's `JobAttemptOutcome` rather than throwing it — one classification,
+  // read identically by `submit()`'s first attempt and its retry loop, instead of each
+  // re-deriving "did comfyrunner accept this?" from a callback plus duck-typed error shapes.
   private async _runBackground(
     podId: string,
     imageName: string,
     input: unknown,
     webhook: string | undefined,
     externusJobId?: string,
-    onRunnerAccepted?: (accepted: boolean) => void,
     onMetrics?: (executio: ActumExecutio) => Promise<void>,
     provisioningContext?: ProvisioningContext,
     jobToken?: string,
     /** Per-run object-store override — see submit(). Replaces `this.config.r2` for this job. */
     r2Override?: R2Config,
-  ): Promise<void> {
+  ): Promise<JobAttemptOutcome> {
     const startMs = Date.now()
     let ssh: SshTransportLike | null = null
     let sshInfo: SshInfo | null = null
@@ -1224,6 +1209,9 @@ export class SecurePodClient implements RunPodClient, Procurator {
     const executio: ActumExecutio = { podId, coldStart: true }
     const reportMetrics = () => { void onMetrics?.({ ...executio }) }
     let jobSucceeded = false
+    // Whether `submitToRunner` succeeded — from that point comfyrunner owns the run and its
+    // failure webhook. Local to this attempt; `classifyJobAttemptFailure` reads it, nothing else does.
+    let accepted = false
 
     try {
       signal('provisioning')
@@ -1258,19 +1246,37 @@ export class SecurePodClient implements RunPodClient, Procurator {
 
       const jobId = externusJobId ?? podId
       await submitToRunner(this.fetchFn, runnerBase, jobId, input, webhook, r2Override ?? this.config.r2, jobToken)
-      onRunnerAccepted?.(true)  // comfyrunner now owns the failure webhook
+      accepted = true  // comfyrunner now owns the failure webhook
 
       const submitCtx = getTrace()
       if (submitCtx) submitCtx.jobSubmitMs = Date.now() - submitCtx.startTs
 
-      // comfyrunner fires the webhook; we subscribe to SSE only to know when done
-      // (so we can terminate/warm the pod). comfyrunner records its own Progressus timeline
-      // through the in-process recorder seam — no stage callback needed (#6e).
-      await awaitViaStream(
+      // comfyrunner fires its own completion webhook; we subscribe to SSE to know when done
+      // (so we can terminate/warm the pod) AND as the completion path itself. comfyrunner
+      // records its own Progressus timeline through the in-process recorder seam — no stage
+      // callback needed (#6e).
+      const streamResult = await awaitViaStream(
         this.fetchFn, runnerBase, jobId, this._streamTimeoutMs(budgets),
         (m) => { Object.assign(executio, m); reportMetrics() },
       )
       jobSucceeded = true
+      if (webhook) {
+        // comfyrunner's own completion POST crosses the pod's egress path, which can fail
+        // silently — the pod only logs the failure to its own local log, invisible to us —
+        // and strand the run: the reservation never unlocks and census eventually reaps the
+        // pod out from under it (noema pod-result-never-delivered). The `complete` SSE event
+        // we just observed carries the same `output` the webhook would have, so complete the
+        // actum ourselves through the SAME callback URL/nonce. `handleExecutionWebhook`'s
+        // terminal-status idempotency check makes this safe no matter which of the two —
+        // ours or the pod's own — lands first.
+        await this._postWebhook(webhook, {
+          id: jobId, status: 'COMPLETED',
+          output: streamResult.output, executionTime: streamResult.executionTimeMs,
+        }).catch(err => log.warn('SSE-driven completion POST failed', { jobId, error: (err as Error).message }))
+      }
+      return { kind: 'ok' }
+    } catch (err) {
+      return classifyJobAttemptFailure(err, accepted)
     } finally {
       await ssh?.close().catch(() => {})
       if (jobSucceeded && this.config.keepWarm && this.materiae && sshInfo) {
@@ -1379,45 +1385,33 @@ export class SecurePodClient implements RunPodClient, Procurator {
    */
   async provisionCpuPod(opts: {
     imageName: string
-    /** Overrides `DEFAULT_CPU_INSTANCE_IDS`. Validated against RunPod's accepted enum. */
-    instanceIds?: string[]
+    /** Overrides `DEFAULT_CPU_FLAVORS`, tried in order. Validated against RunPod's catalogue. */
+    flavors?: readonly CpuFlavor[]
     containerDiskGb?: number
     /** HTTP/TCP ports to expose. Default: the service port, 8080. */
     ports?: string[]
     env?: Record<string, string>
   }): Promise<string> {
-    const instanceIds = opts.instanceIds ?? DEFAULT_CPU_INSTANCE_IDS
-    // Checked before the POST, so a drifted SKU names itself instead of arriving as a 400.
-    assertCpuInstanceIdsAccepted(instanceIds)
+    const flavors = opts.flavors ?? DEFAULT_CPU_FLAVORS
+    // Checked before the POST, so a drifted flavor names itself instead of arriving as a 400.
+    assertCpuFlavorsAccepted(flavors)
 
-    const body: Record<string, unknown> = {
+    const base = {
       name: `noema-cpu-${Date.now()}`,
-      imageName: opts.imageName,
-      computeType: 'CPU',
-      instanceIds,
-      containerDiskInGb: opts.containerDiskGb ?? DEFAULT_CPU_POD_DISK_GB,
+      image: opts.imageName,
+      disk: opts.containerDiskGb ?? DEFAULT_CPU_POD_DISK_GB,
       ports: opts.ports ?? ['8080/http'],
-      supportPublicIp: true,
       ...(opts.env ? { env: opts.env } : {}),
     }
-
-    const res = await this._fetchWithTimeout('https://rest.runpod.io/v1/pods', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, this.config.provisionTimeoutMs ?? 30_000)
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RunPod CPU pod provision failed: ${res.status} ${text}`)
-    }
-
-    const data = await res.json() as { id: string }
-    log.info('cpu pod provisioned', { podId: data.id, imageName: opts.imageName })
-    return data.id
+    const pod = await createRunPodPod({
+      fetchFn: this.fetchFn,
+      apiKey: this.config.apiKey,
+      candidates: flavors.map(f => ({ label: `${f.id} x${f.vcpuCount}`, body: { ...base, cpu: { id: f.id, vcpuCount: f.vcpuCount } } })),
+      timeoutMs: this.config.provisionTimeoutMs ?? 30_000,
+      what: 'CPU pod',
+    })
+    log.info('cpu pod provisioned', { podId: pod.id, imageName: opts.imageName })
+    return pod.id
   }
 
   /**
@@ -1441,7 +1435,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
     /** The bearer the service will require. Generated per pod by the caller. */
     jobToken: string
     imageName: string
-    instanceIds?: string[]
+    flavors?: readonly CpuFlavor[]
     containerDiskGb?: number
     /** How long to wait for the service to answer /health. Default 10 min. */
     readyTimeoutMs?: number
@@ -1450,7 +1444,7 @@ export class SecurePodClient implements RunPodClient, Procurator {
   }): Promise<ClipPodHandle> {
     const podId = await this.provisionCpuPod({
       imageName: opts.imageName,
-      ...(opts.instanceIds ? { instanceIds: opts.instanceIds } : {}),
+      ...(opts.flavors ? { flavors: opts.flavors } : {}),
       ...(opts.containerDiskGb !== undefined ? { containerDiskGb: opts.containerDiskGb } : {}),
       env: { CLIP_JOB_TOKEN: opts.jobToken },
     })

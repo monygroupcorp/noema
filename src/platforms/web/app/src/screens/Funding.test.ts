@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildCheckoutRequest, canCheckout } from './Funding';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { buildCheckoutRequest, canCheckout, FundingHead, WAYS_IN } from './Funding';
 
 // No jsdom/@testing-library/react in this app's toolchain (see BuyCreditsModal.test.ts) —
 // so this exercises the fiat-pack rail's pure logic rather than a full DOM render. The pack
@@ -16,6 +18,16 @@ describe('buildCheckoutRequest', () => {
     const req = buildCheckoutRequest('starter_10', 'https://noema.example');
     expect(req.successUrl).toBe('https://noema.example/funding?checkout=success');
     expect(req.cancelUrl).toBe('https://noema.example/funding?checkout=cancel');
+  });
+});
+
+describe('the funding screen lists both ways in', () => {
+  it('is headed by its name, with the card and the wallet named in the line beneath', () => {
+    const html = renderToStaticMarkup(createElement(FundingHead));
+    expect(html).toContain('<h1>Funding</h1>');
+    expect(WAYS_IN.map((w) => w.title)).toEqual(['Card', 'On-chain wallet']);
+    for (const w of WAYS_IN) expect(html.toLowerCase()).toContain(w.title.toLowerCase());
+    expect(html.toLowerCase()).not.toContain('coming soon');
   });
 });
 

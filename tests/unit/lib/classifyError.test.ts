@@ -237,6 +237,18 @@ test('classifyError: CUDA OOM is an execution failure even without the word "fai
 })
 
 // ---------------------------------------------------------------------------
+// Test 21b — a terminal training failure is reported as terminal, never as try again
+// ---------------------------------------------------------------------------
+
+test('classifyError: a training failure says it is terminal, not "Generation failed — try again"', () => {
+  const raw = 'aitoolkit training error at step 0: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED'
+  const result = classifyError(new Error(raw))
+  assert.notEqual(result, 'Generation failed on the pod — try again.')
+  assert.doesNotMatch(result, /^Generation failed/, 'wrong noun for a training run')
+  assert.doesNotMatch(result, /try again/i, 'the same settings fail the same way — this is not a transient fluke')
+})
+
+// ---------------------------------------------------------------------------
 // Test 22 — the generic sentence still exists, for genuinely unidentified failures
 // ---------------------------------------------------------------------------
 
@@ -270,6 +282,7 @@ test('classifyError: no sentence claims credits were not charged — it cannot s
     'operation timed out',
     'model download failed: wget returned non-zero exit status 3',
     'Training pod launch exhausted 3 attempts without reaching an SSH-reachable host',
+    'aitoolkit training error at step 0: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED',
     'a brand new failure nobody has classified',
   ]
   for (const raw of corpus) {
@@ -279,4 +292,37 @@ test('classifyError: no sentence claims credits were not charged — it cannot s
       `"${sentence}" asserts an accounting outcome classifyError cannot verify (from: ${raw})`,
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// An unregistered model is a setup fault, not something a retry fixes
+// ---------------------------------------------------------------------------
+
+test('classifyError: a model with no download address is a setup error, not "try again"', () => {
+  const result = classifyError(new Error("No URL for model 'intella-with-no-address' — register it in the model registry"))
+  assert.equal(result, "This workflow isn't set up correctly. Please contact support.")
+})
+
+test('classifyError: the MODEL_NOT_RESOLVED code reads the same way', () => {
+  assert.equal(classifyError('CompilerError MODEL_NOT_RESOLVED'), "This workflow isn't set up correctly. Please contact support.")
+})
+
+// ---------------------------------------------------------------------------
+// A model the USER added whose registry record names no file: the Compiler refuses by the
+// model's name (MODEL_UNFETCHABLE), and the sentence hands the user their own way forward
+// rather than sending them to support for a LoRA they typed or pinned.
+// ---------------------------------------------------------------------------
+
+test('classifyError: a model with no downloadable file is named, with the way forward', () => {
+  const result = classifyError(new Error("'Drifella' has no downloadable file yet — leave out its trigger word or unpin it, then run again"))
+  assert.equal(result, "The model 'Drifella' has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.")
+})
+
+test('classifyError: the MODEL_UNFETCHABLE code alone reads the same way, without a name', () => {
+  assert.equal(classifyError('CompilerError MODEL_UNFETCHABLE'), "The model has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.")
+})
+
+test('classifyError: an addressless model is not mistaken for a mis-set-up workflow', () => {
+  const result = classifyError(new Error("'Drifella' has no downloadable file yet — leave out its trigger word or unpin it, then run again"))
+  assert.notEqual(result, "This workflow isn't set up correctly. Please contact support.")
 })

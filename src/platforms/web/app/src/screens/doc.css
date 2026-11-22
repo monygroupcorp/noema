@@ -7,12 +7,59 @@
 }
 .prose > :first-child { margin-top: 0; }
 .prose h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.03em; color: var(--text); margin: 0 0 10px; font-weight: 600; line-height: 1.1; }
-.prose h2 { font-size: 22px; letter-spacing: -.02em; color: var(--text); margin: 40px 0 12px; font-weight: 600; }
+/* A heading reached by its anchor stops clear of the sticky .topnav (86px tall on a phone), not under it. */
+.prose h2 { font-size: 22px; letter-spacing: -.02em; color: var(--text); margin: 40px 0 12px; font-weight: 600; scroll-margin-top: 100px; }
+/* "On this page": the document's h2 headings as in-page anchors, under the title (Doc.tsx
+   renders it for any document with three or more). Closed by default so a phone sees the title,
+   one row saying the list exists, and then the prose; the summary row is the touch hit height
+   (D-43) and the list items are the same height when open. */
+.doc-sections { margin: 0 0 var(--s6); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+/* On a phone the row stays put under the sticky .topnav (86px tall at that width) while the
+   document scrolls, so the list is reachable from the middle of a 5000px page and not only from
+   its top (REFERENCES.md REF-3). It carries the page background so prose does not show through
+   it, and sits above the prose but under the nav. It stays a <details> in flow: opened, the list
+   pushes the prose down rather than floating over it, and a heading jumped to from the list
+   clears the row as well as the nav. */
+@media (max-width: 640px) {
+  .doc-sections { position: sticky; top: 86px; z-index: 2; background: var(--bg); }
+  .prose h2 { scroll-margin-top: 146px; }
+}
+.doc-sections summary { display: flex; align-items: center; gap: var(--s2); min-height: 44px; padding: 0 var(--s1); cursor: pointer; list-style: none; font-size: var(--fs-s); font-weight: 600; letter-spacing: .02em; color: var(--text); }
+.doc-sections summary::-webkit-details-marker { display: none; }
+.doc-sections summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }
+.doc-sections[open] summary::before { transform: rotate(45deg); }
+.doc-sections summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.prose .doc-sections ol { list-style: none; margin: 0; padding: 0 0 var(--s2); columns: 1; }
+.prose .doc-sections li { margin: 0; }
+.prose .doc-sections a { display: flex; align-items: center; min-height: 44px; padding: 0 var(--s1); color: var(--muted); font-size: var(--fs-base); }
+.prose .doc-sections a:hover { color: var(--text); text-decoration: none; }
+.prose .doc-sections a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+/* With the width for it the list opens into two columns, so eight sections cost four rows. */
+@media (min-width: 641px) {
+  .prose .doc-sections ol { columns: 2; column-gap: var(--s6); }
+  .prose .doc-sections a { min-height: 36px; }
+}
 .prose h3 { font-size: 17px; color: var(--text); margin: 28px 0 8px; font-weight: 600; }
 .prose h4 { font-size: 14px; color: var(--text); margin: 22px 0 6px; font-weight: 600; }
 .prose p { margin: 0 0 16px; }
 .prose a { color: var(--accent-soft); text-decoration: none; }
 .prose a:hover { text-decoration: underline; }
+
+/* A button placed in prose is still a button.
+   `.prose a` above is (0,1,1) and `.btn`'s own `color` in app.css is (0,1,0), so every
+   <a class="btn"> inside a .prose article took the prose link colour instead of its own.
+   On /pricing that put --accent-soft (#a3adc4) text on the button's own --accent fill
+   (#7d8aa6): 1.54:1 measured in the browser against a required 4.5:1, and a visitor reads the
+   four Buy buttons — the only call to action on the page a stranger lands on — as disabled.
+   Each variant's own colour is restored here rather than excluding buttons from `.prose a`,
+   because narrowing that selector would raise its specificity and change how an ordinary prose
+   link resolves against every other rule that touches one. The colours are the ones app.css
+   sets on .btn, .btn.ghost / .btn-ghost and .btn.accent; they are stated and not inherited
+   because the cascade is exactly what went wrong here. */
+.prose a.btn { color: var(--btn-text); }
+.prose a.btn.ghost,
+.prose a.btn-ghost { color: var(--text); }
+.prose a.btn.accent { color: var(--accent-onaccent, #fff); }
 .prose ul, .prose ol { margin: 0 0 16px; padding-left: 22px; }
 .prose li { margin: 5px 0; }
 .prose strong { color: var(--text); font-weight: 600; }
@@ -22,8 +69,29 @@
 .prose pre code { background: none; border: 0; padding: 0; font-size: 12.5px; }
 .prose blockquote { border-left: 1px solid color-mix(in srgb, var(--accent) 50%, var(--hair)); margin: 0 0 16px; padding: 2px 0 2px 16px; color: var(--faint); }
 .prose hr { border: 0; border-top: 1px solid var(--hair); margin: 32px 0; }
-.prose table { width: 100%; border-collapse: collapse; margin: 4px 0 22px; font-size: 13.5px; display: block; overflow-x: auto; }
-.prose th, .prose td { border: 1px solid var(--hair); padding: 9px 12px; text-align: left; vertical-align: top; }
+/* A table wider than the measure scrolls sideways inside .table-wrap (Doc.tsx wraps every
+   table in one) rather than being clipped at the page edge. Cells keep a floor width so a
+   phone shows readable columns to scroll through, not one word per line. */
+.prose .table-wrap { max-width: 100%; overflow-x: auto; margin: var(--s1) 0 var(--s6); }
+.prose table { width: 100%; border-collapse: collapse; margin: 0; font-size: 13.5px; }
+.prose th, .prose td { border: 1px solid var(--hair); padding: 9px 12px; text-align: left; vertical-align: top; min-width: 8em; }
 .prose th { background: var(--panel); color: var(--text); font-weight: 600; white-space: nowrap; }
 .prose td { color: var(--muted); }
 .prose td strong { color: var(--text); }
+/* Below phone width the table reflows instead of scrolling: a scroller photographs, and reads,
+   as a table cut off at the page edge, and the hidden column is the one the reader came for.
+   Each body row becomes a stack of label + value lines; Doc.tsx carries the column header onto
+   every cell as `data-label`, so nothing the header said is lost. The header row stays in the
+   accessibility tree but leaves the layout. The first cell of a row is what the row is about,
+   so it carries no label (Doc.tsx) and reads as the entry's heading: text colour and weight. */
+@media (max-width: 640px) {
+  .prose .table-wrap { overflow: visible; }
+  .prose table, .prose tbody, .prose tr, .prose td { display: block; width: 100%; min-width: 0; }
+  .prose table { border: 1px solid var(--hair); border-radius: var(--r-sm); overflow: hidden; }
+  .prose thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .prose tr { border-top: 1px solid var(--hair); padding: var(--s2) 0; }
+  .prose tbody tr:first-child { border-top: 0; }
+  .prose td { border: 0; padding: var(--s1) var(--s3); overflow-wrap: anywhere; }
+  .prose td[data-label]::before { content: attr(data-label); display: block; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; color: var(--text); margin-bottom: 2px; }
+  .prose td:first-child { color: var(--text); font-weight: 600; }
+}

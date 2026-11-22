@@ -33,6 +33,7 @@ const SSH_COPY       = 'Pod started but SSH was unreachable — try again.'
 const BOOTSTRAP_COPY = 'Runtime startup timed out — try again.'
 const DOWNLOAD_COPY  = "Couldn't get the model weights onto the pod — try again."
 const EXECUTE_COPY   = 'Generation failed on the pod — try again.'
+const TRAINING_COPY  = 'Training failed and will not succeed by retrying as-is. Check /status for your balance, or contact support if you want to try the same settings again.'
 const GENERIC_COPY   = 'Something went wrong. Please try again.'
 
 /**
@@ -54,7 +55,20 @@ export function classifyError(err: unknown): string {
   if (/insufficient funds/i.test(msg))
     return "You don't have enough credits. Use /status to check your balance."
 
-  if (/modus.*not found/i.test(msg))
+  // A weight the USER added to the run — a LoRA their prompt triggered, a model they pinned —
+  // whose registry record names no file. The Compiler refuses before any pod exists and names
+  // the model as the user knows it; the way forward is theirs (drop the word, unpin it), so the
+  // sentence says that rather than sending them to support for their own loadout.
+  const unfetchable = /'([^']+)' has no downloadable file yet/.exec(msg)
+  if (unfetchable || /MODEL_UNFETCHABLE/.test(msg)) {
+    const name = unfetchable ? `'${unfetchable[1]}' ` : ''
+    return `The model ${name}has no downloadable file yet, so it can't be used in a run. Leave out its trigger word, or take it out of your loadout, and try again.`
+  }
+
+  // A flow whose modus is missing, or whose weights were never registered with a download
+  // address, fails before any pod exists and fails the same way next time. "Try again" would
+  // be a lie; this is the operator's to fix.
+  if (/modus.*not found/i.test(msg) || /No URL for model/i.test(msg) || /MODEL_NOT_RESOLVED/.test(msg))
     return "This workflow isn't set up correctly. Please contact support."
 
   if (
@@ -72,6 +86,14 @@ export function classifyError(err: unknown): string {
     /comfyrunner not reachable/i.test(msg)
   )
     return BOOTSTRAP_COPY
+
+  // A training run that died inside the job itself (aitktrainer.py's RuntimeError, e.g. a
+  // cuDNN init failure at step 0) ran and failed on its own terms — the identical retry
+  // fails the same way (R2, 2026-11-16). Named ahead of EXECUTE_COPY, whose "Generation
+  // failed … try again" is both the wrong noun for a training run and a false invitation:
+  // this is terminal, not a transient pod fluke.
+  if (/training (error|failed) at step/i.test(msg))
+    return TRAINING_COPY
 
   if (/comfyrunner.*job failed/i.test(msg) || /execution.*failed/i.test(msg))
     return EXECUTE_COPY

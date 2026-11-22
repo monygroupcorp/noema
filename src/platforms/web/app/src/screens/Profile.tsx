@@ -25,9 +25,11 @@ export function Profile() {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<Record<SecretProvider, 'connected' | 'absent'>>();
-  // undefined until /me loads (older servers omit it) → the panel assumes available; false = store
-  // unconfigured → the panel shows "unavailable" proactively without a failed connect (F3).
-  const [secretsAvailable, setSecretsAvailable] = useState<boolean>();
+  // Whether this deployment can seal a BYO token at all (`/me.secretsAvailable`; older servers omit
+  // it, which counts as available). When it cannot, the Connected-accounts section and its jump link
+  // are not rendered: an unavailable capability is absent from the interface, not announced (D-63).
+  // Also flipped reactively if a connect/disconnect reveals it on a server that omitted the field.
+  const [secretsUnavailable, setSecretsUnavailable] = useState(false);
   const { ident } = useIdentity();
   const { session } = useSession();
   const anon = ident.funding === 'bearer';
@@ -39,7 +41,7 @@ export function Profile() {
         if (!live) return;
         if (me.appearance) setAppr((a) => ({ ...a, ...me.appearance }));
         setSecrets(me.secrets);
-        setSecretsAvailable(me.secretsAvailable);
+        setSecretsUnavailable(me.secretsAvailable === false);
         setLoaded(true);
       })
       .catch(() => { if (live) setLoaded(true); });
@@ -56,28 +58,40 @@ export function Profile() {
 
   const accent = appr.accent || '#5b8cff';
   const pageStyle = { ['--accent' as keyof CSSProperties]: accent } as CSSProperties;
+  const connecting = loaded && !secretsUnavailable;
 
   return (
-    <AppShell crumb="profile">
+    <AppShell crumb="Profile">
       <div className="page" style={pageStyle}><div className="pw">
         <div className="pagehead"><div>
           <h1>Profile</h1>
           <div className="sub">This is how your identity looks across NOEMA. Saved to your account (works anonymously too).</div>
         </div></div>
 
+        {/* Each section below is its own jump target (REF-34: GitHub's settings pages make every
+            section individually linkable). Mobile-first app, so a compact anchor row stands in
+            for a sidebar/table of contents. The links are a tab row, not pills: a pill is a
+            filter, tag or status chip (DESIGN.md D-33), and these navigate. */}
+        <nav className="section-jump" aria-label="Jump to a section">
+          <a href="#profile-assets">Assets</a>
+          <a href="#profile-backup">Account backup &amp; recovery</a>
+          {connecting && <a href="#profile-connected">Connected accounts</a>}
+          <a href="#profile-purses">Purses</a>
+        </nav>
+
         {err && <div className="warn" style={{ marginBottom: 'var(--s4)' }}>{err}</div>}
 
-        <div className="sectionhead">Assets</div>
+        <div className="sectionhead" id="profile-assets">Assets</div>
         <div className="sub" style={{ marginBottom: 'var(--s4)' }}>Bring your own — drop an image to upload.</div>
-        <AssetSlot label="Banner — click to upload" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
+        <AssetSlot label="Banner" url={appr.bannerUrl} onUploaded={(u) => save({ bannerUrl: u })} onError={setErr} />
         <div style={{ display: 'flex', gap: 'var(--s4)', marginTop: 'var(--s4)', alignItems: 'flex-end' }}>
-          <AssetSlot className="pfp" label="PFP" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
+          <AssetSlot className="pfp" label="Avatar" url={appr.avatarUrl} onUploaded={(u) => save({ avatarUrl: u })} onError={setErr} />
           <AssetSlot style={{ flex: 1 }} label="Background" url={appr.backgroundUrl} onUploaded={(u) => save({ backgroundUrl: u })} onError={setErr} />
         </div>
 
         <BackupRecovery signedIn={!!session} />
 
-        {loaded && <ConnectedAccounts initial={secrets} available={secretsAvailable} anon={anon} />}
+        {connecting && <ConnectedAccounts initial={secrets} anon={anon} onUnavailable={() => setSecretsUnavailable(true)} />}
 
         <Purses signedIn={!!session} />
       </div></div>
@@ -92,7 +106,6 @@ export function Profile() {
 // leftover credits back to your balance; revoke drains + retires the token. Identified
 // accounts only — the backend refuses anonymous/purse callers, so we gate on a real session.
 function Purses({ signedIn }: { signedIn: boolean }) {
-  const door = useDoorHere();
   const [purses, setPurses] = useState<Purse[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [credits, setCredits] = useState('');
@@ -140,10 +153,12 @@ function Purses({ signedIn }: { signedIn: boolean }) {
   if (!signedIn) {
     return (
       <>
-        <div className="sectionhead">Purses</div>
+        <div className="sectionhead" id="profile-purses">Purses</div>
+        {/* The backup section above carries this screen's one sign-in link (DESIGN.md P-1d);
+            this one says what signing in unlocks and points back to it in prose. */}
         <div className="sub">
-          <Link to={door}>Sign in</Link> to a named account to mint shareable purses — a bearer
-          token others can spend on your credits. Anonymous sessions can’t own purses.
+          A named account mints shareable purses — a bearer token others can spend on your
+          credits. Anonymous sessions can’t own purses; sign in above to make one.
         </div>
       </>
     );
@@ -151,7 +166,7 @@ function Purses({ signedIn }: { signedIn: boolean }) {
 
   return (
     <>
-      <div className="sectionhead">Purses</div>
+      <div className="sectionhead" id="profile-purses">Purses</div>
       <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
         Turn some of your credits into a shareable <b>bearer token</b>. Anyone with the token spends it on runs —
         you keep a dashboard over the balance (you see it drain, never who spent it). Reclaim pulls leftover credits back; revoke retires it.
@@ -223,7 +238,7 @@ function BackupRecovery({ signedIn }: { signedIn: boolean }) {
   const anyLinked = signedIn;
   return (
     <>
-      <div className="sectionhead">Account backup &amp; recovery</div>
+      <div className="sectionhead" id="profile-backup">Account backup &amp; recovery</div>
       {!anyLinked ? (
         <div className="sub">
           <Link to={door}>Sign in</Link> to a username account to add a wallet or Telegram backup
@@ -333,31 +348,22 @@ function TelegramRow() {
   );
 }
 
-function ConnectedAccounts({ initial, available, anon }: {
-  initial?: Record<SecretProvider, 'connected' | 'absent'>; available?: boolean; anon: boolean;
+// Rendered only where the deployment can seal a token (the parent decides from `/me`); a server
+// that omitted the flag and then refuses a connect reports back through `onUnavailable`, and the
+// parent removes the section.
+function ConnectedAccounts({ initial, anon, onUnavailable }: {
+  initial?: Record<SecretProvider, 'connected' | 'absent'>; anon: boolean; onUnavailable: () => void;
 }) {
-  // Seeded from /me (`available === false` → store unconfigured, known before any attempt) and also
-  // flipped reactively if a connect/disconnect reveals it (belt-and-suspenders for older servers that
-  // omit `secretsAvailable`).
-  const [unavailable, setUnavailable] = useState(available === false);
-
   return (
     <>
-      <div className="sectionhead">Connected accounts</div>
-      {unavailable ? (
-        <div className="sub">Connecting Civitai / HuggingFace accounts isn’t available on this deployment.</div>
-      ) : (
-        <>
-          <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
-            Connect a Civitai or HuggingFace token to import gated models and LoRAs. Your token is
-            stored sealed — it is never shown again, only its connection state.
-          </div>
-          {SECRET_PROVIDERS.map((p) => (
-            <SecretRow key={p} provider={p} initialStatus={initial?.[p] ?? 'absent'} anon={anon}
-              onUnavailable={() => setUnavailable(true)} />
-          ))}
-        </>
-      )}
+      <div className="sectionhead" id="profile-connected">Connected accounts</div>
+      <div className="sub" style={{ marginBottom: 'var(--s4)' }}>
+        Connect a Civitai or HuggingFace token to import gated models and LoRAs. Your token is
+        stored sealed — it is never shown again, only its connection state.
+      </div>
+      {SECRET_PROVIDERS.map((p) => (
+        <SecretRow key={p} provider={p} initialStatus={initial?.[p] ?? 'absent'} anon={anon} onUnavailable={onUnavailable} />
+      ))}
     </>
   );
 }
@@ -461,9 +467,16 @@ function AssetSlot({ label, url, onUploaded, onError, className, style }: {
   }
   const bg = url ? { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
   return (
-    <div className={`assetslot${className ? ` ${className}` : ''}`} style={{ ...style, ...bg }} onClick={() => inputRef.current?.click()}>
-      {!url && (busy ? 'Uploading…' : label)}
+    <button
+      type="button"
+      className={`assetslot${className ? ` ${className}` : ''}`}
+      style={{ ...style, ...bg }}
+      aria-label={url ? label : undefined}
+      aria-busy={busy || undefined}
+      onClick={() => inputRef.current?.click()}
+    >
+      {!url && <><span className="assetslot-l">{label}</span><span className="assetslot-h">{busy ? 'Uploading…' : 'Click to upload'}</span></>}
       <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
-    </div>
+    </button>
   );
 }

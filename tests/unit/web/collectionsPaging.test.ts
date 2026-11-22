@@ -38,7 +38,11 @@ function serve(pages: Array<{ collections: Array<{ id: string }>; nextCursor?: s
   globalThis.fetch = (async (url: unknown) => {
     urls.push(String(url))
     const body = pages[Math.min(i++, pages.length - 1)]
-    return { ok: true, status: 200, json: async () => body } as unknown as Response
+    // A real Response, not an object shaped like the part of one the caller happened to use.
+    // This was `{ ok, status, json }`, which passed for as long as the client read responses
+    // with `.json()` and broke the moment it read them with `.text()` — a divergence between
+    // the double and the thing it stands for, not a change in what the walk does.
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   }) as typeof fetch
   return urls
 }

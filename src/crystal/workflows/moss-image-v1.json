@@ -1,0 +1,33 @@
+{
+  "templateId": "moss-image",
+  "version": "1",
+  "displayName": "MOSS-Image — text to image",
+  "seedInputKey": "input_seed",
+  "loraCapable": false,
+  "inputTemplate": {
+    "1": { "class_type": "UNETLoader",            "inputs": { "unet_name": "moss_image_sft_int8_convrot.safetensors", "weight_dtype": "default" } },
+    "2": { "class_type": "CLIPLoader",            "inputs": { "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors", "type": "moss_image", "device": "default" } },
+    "3": { "class_type": "VAELoader",             "inputs": { "vae_name": "flux2-vae_small.safetensors" } },
+    "4": { "class_type": "CLIPTextEncode",        "inputs": { "clip": ["2", 0], "text": "PLACEHOLDER" } },
+    "5": { "class_type": "CLIPTextEncode",        "inputs": { "clip": ["2", 0], "text": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact" } },
+    "6": { "class_type": "EmptyFlux2LatentImage", "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } },
+    "7": { "class_type": "KSampler",              "inputs": { "model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0], "seed": 88888888, "steps": 25, "cfg": 2.5, "sampler_name": "er_sde", "scheduler": "simple", "denoise": 1 } },
+    "8": { "class_type": "VAEDecode",             "inputs": { "samples": ["7", 0], "vae": ["3", 0] } },
+    "9": { "class_type": "SaveImage",             "inputs": { "images": ["8", 0], "filename_prefix": "moss_image" } }
+  },
+  "slotMap": {
+    "/7/inputs/seed":   "input_seed",
+    "/7/inputs/steps":  "steps",
+    "/7/inputs/cfg":    "guidance",
+    "/4/inputs/text":   "prompt",
+    "/5/inputs/text":   "negative_prompt",
+    "/6/inputs/width":  "width",
+    "/6/inputs/height": "height"
+  },
+  "requiredModels": [
+    { "role": "unet", "id": "intella.moss-image-sft",       "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/diffusion_models/moss_image_sft_int8_convrot.safetensors", "dest": "diffusion_models/moss_image_sft_int8_convrot.safetensors" },
+    { "role": "clip", "id": "intella.qwen3-9b-moss-image",  "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", "dest": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors" },
+    { "role": "vae",  "id": "intella.moss-image-vae",       "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/vae/flux2-vae_small.safetensors", "dest": "vae/flux2-vae_small.safetensors" }
+  ],
+  "platformHints": { "vramGb": 24 }
+}

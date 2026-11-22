@@ -46,8 +46,7 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
    ./deploy.sh <VERSION>     # e.g. ./deploy.sh 4.1.0, or ./deploy.sh for :latest
    ```
    `deploy.sh` is a blue-green swap: it pulls the image, enables a maintenance flag,
-   loads the Ethereum signer key interactively (`keystore/loadKeystore.js`, requires a
-   TTY), starts a new container (`hyperbotcontained-new`) alongside the old one, health
+   starts a new container (`hyperbotcontained-new`) alongside the old one, health
    -checks it against `http://hyperbot-new:4000/api/health` (80 retries × 5s by default),
    and only on success swaps the network alias from the old container to the new one,
    stops/removes the old container, and tags the deployed image `:previous` for rollback.
@@ -56,6 +55,12 @@ frontend (the app that `docs/ops/staging-deploy.md` documents on staging).
 4. **Rollback:** `./deploy.sh <previous-version>` (or `./deploy.sh previous` if the
    `:previous` tag was set by the last deploy) re-runs the same blue-green flow against
    the prior image.
+
+   **No signer key is provisioned here.** This step used to decrypt an Ethereum signer key
+   interactively and hand it to the container as a plain env var; nothing in this codebase
+   consumes that key today (`docs/spec/publishing.md` §10 — the real on-chain minter,
+   build-order #6, is unbuilt). When that minter ships, see that doc's "Signer custody for
+   build-order #6" note before reintroducing the key.
 
 ## OFAC deposit screening (compliance)
 
@@ -193,6 +198,89 @@ fi
 service, error tracking, dashboards, or any automated wiring of the above snippets into
 `deploy.sh` or a droplet-side scheduler. This item documents the pattern; it does not
 stand it up.
+
+## Logs
+
+The app writes one JSON object per line to stdout. Both app containers send stdout to the
+host's **systemd journal** (`--log-driver journald` in `deploy.sh` and `deploy-staging.sh`,
+`logging:` in `docker-compose.prod.yml`), tagged `noema` and `noema-staging`.
+
+Why not docker's default json-file driver: a json-file log is deleted with its container, and
+every deploy removes the old container. Under json-file, an issue reported a week later could
+not be read from logs once a deploy had happened since.
+
+Retention is journald's: the droplet keeps a persistent journal (`/var/log/journal`) with the
+default size cap (10% of the filesystem, at most 4G), and old entries rotate out first. As of
+2026-11 the journal held four months in 1.4G, and the app writes on the order of kilobytes per
+hour, so the window is months, not days. `journalctl --disk-usage` shows the current size.
+
+```bash
+journalctl -t noema --since "2026-11-01" --until "2026-11-03"            # prod, a date range
+journalctl -t noema -o cat | grep '"chatId":-1001234567890'              # one Telegram chat
+journalctl -t noema -o cat | grep '"msg":"telegram chat membership"'     # bot added/removed/promoted
+journalctl -t noema-staging -f                                           # follow staging
+```
+
+`docker logs <container>` still works for the current container.
+
+Telegram lines to look for: `telegram update` (every inbound message/callback, with `chatId`,
+`chatType`, `userId`, the command word; never message text), `telegram chat membership` (the
+bot added, removed, promoted, demoted or restricted in a chat, with `oldStatus`, `newStatus`,
+`at`), and `telegram chat migration` (a group upgraded to a supergroup, with both chat ids).
+
+## Backups
+
+**Audited 2026-11-06:** the droplet runs no app- or database-specific cron or systemd
+timer. `crontab -l` for root is empty, `/etc/cron.d` holds only Ubuntu's own
+`e2scrub_all` placeholder, and `systemctl list-timers --all` shows only stock Ubuntu
+timers (`dpkg-db-backup`, `logrotate`, `man-db`, `fstrim`, ...). No `mongod` runs on the
+host — the database is **MongoDB Atlas**, off-box, and its own backup/PITR policy is
+**not verified from this repo or this droplet**: there is no Atlas API key anywhere in
+this codebase or in `/opt/noema/.env`, so confirming the cluster's backup tier
+(dedicated M10+ clusters default Cloud Backup to *off* until explicitly toggled on; the
+old free/shared tiers had none or a reduced version with no PITR) requires logging into
+the Atlas project itself. **Operator: confirm Cloud Backup is toggled on for the
+production cluster and that its snapshot/PITR window meets your RPO/RTO bar** — this is
+one setting in the Atlas UI, not a code change.
+
+Everything else the app depends on is already off-box (Atlas for data, R2 for
+generations/exports/models) **except two directories that exist only on this droplet**:
+
+- `/opt/noema/arcanum-artifacts` — the compiled circuit (`arcanum.r1cs`) and the
+  ceremony's Phase-2-init key (`arcanum_0000.zkey`).
+- `/opt/noema/arcanum-ceremony` — contributors' `.zkey` files, named by their own
+  sha256 (4 files, ~21MB, as of this writing — the ceremony's contribution window
+  already happened, Aug 2026). These are **not reproducible**: nobody can re-derive a
+  contributor's `.zkey`, and losing it before the ceremony finalizes permanently
+  truncates the chain of contributions (see `deploy.sh`'s `CEREMONY_DIR` comment). The
+  ceremony's transcript lives in Mongo; the keys the transcript names do not.
+
+  (`arcanum-ceremony`'s 777 permissions are a separate, already-filed finding — this
+  item is about durability of what's in it, not who can write to it.)
+
+`scripts/backup-arcanum-artifacts.sh` tars both directories and pushes a timestamped
+copy to the existing `R2_PRIVATE_OUTPUTS_BUCKET` under `backups/arcanum/`, reusing the
+app's own R2 credentials from `.env` (no new cloud resource, no new secret). It needs
+`rclone` (`apt install rclone`) — the droplet has neither `rclone` nor `aws` cli by
+default. `ops/systemd/noema-backup-arcanum.{service,timer}` run it daily:
+
+```bash
+ssh noema
+apt-get install -y rclone
+cp /opt/noema/ops/systemd/noema-backup-arcanum.service /opt/noema/ops/systemd/noema-backup-arcanum.timer /etc/systemd/system/
+chmod +x /opt/noema/scripts/backup-arcanum-artifacts.sh
+systemctl daemon-reload
+systemctl enable --now noema-backup-arcanum.timer
+systemctl start noema-backup-arcanum.service   # first run, don't wait for 04:17
+journalctl -u noema-backup-arcanum.service --no-pager | tail -20
+```
+
+Nothing else on this droplet is stateful and off the backup list: the signer keystore
+(`/etc/account/STATIONTHIS`) and the RunPod secret (`/opt/noema/secrets/runpod/runpod`)
+are also local-only, but copying key material off-box is a custody decision, not a
+backup-automation one — left to the operator (see the 2026-11-02 ruling on staying in
+the approval loop for custody items). Caddy's `caddy_data`/`caddy_config` volumes hold
+only reissuable TLS certs.
 
 ## Launch checklist
 

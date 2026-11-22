@@ -10,6 +10,9 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('acta').createIndex({ id: 1 }, { unique: true }),
     db.collection('acta').createIndex({ externusJobId: 1 }, { sparse: true }),
     db.collection('acta').createIndex({ status: 1, expirat: 1 }),
+    // Census's drain-deadline arm: is a live (nascens/agens) actum paired to this pod
+    // right now? Queried once per billable Hospitium per tick.
+    db.collection('acta').createIndex({ materiamId: 1, status: 1 }, { sparse: true }),
 
     // loci — the warm-pod line. `actumId` unique: a run holds one place, which is what
     // makes `enqueue` idempotent. The compound key is what `claim` sorts on — the oldest
@@ -109,6 +112,9 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // vestigia — RAG traces (Atlas Vector Search index managed separately in Atlas UI)
     db.collection('vestigia').createIndex({ 'auctorKey.animaId': 1 }, { sparse: true }),
+    // findByActumId — the admin-takedown seam (minimax-h3-violation-takedown) looks up a
+    // reported run's trace by actumId.
+    db.collection('vestigia').createIndex({ actumId: 1 }, { sparse: true }),
 
     // modos — GPU sessions
     db.collection('modos').createIndex({ id: 1 }, { unique: true }),
@@ -120,6 +126,21 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
     // corpora — training datasets
     db.collection('corpora').createIndex({ id: 1 }, { unique: true }),
+
+    // datasets — the dataset documents behind /v1/data/datasets (MongoDataset). This collection
+    // carried NO index at all, not even the unique id every other one here has, so a lookup by
+    // id and every page of every listing was a scan of every tenant's datasets. One index per
+    // arm of the two access predicates, each carrying the (mutatum, id) page sort, so a page is
+    // a bounded index walk — the same shape and the same reason as collectiones below.
+    db.collection('datasets').createIndex({ id: 1 }, { unique: true }),
+    // `listOwned`: { $or: [ { owner }, { sodalitasId: { $in: teams } } ] }
+    db.collection('datasets').createIndex({ owner: 1, mutatum: -1, id: -1 }),
+    db.collection('datasets').createIndex({ sodalitasId: 1, mutatum: -1, id: -1 }, { sparse: true }),
+    // `listPublic`: { $or: [ { access: 'public' }, { 'access.kind': 'public' } ] } — two arms
+    // because `Dataset.access` is written as the { kind } union and older documents carry the
+    // flat string; both are read, so both are backed.
+    db.collection('datasets').createIndex({ access: 1, mutatum: -1, id: -1 }),
+    db.collection('datasets').createIndex({ 'access.kind': 1, mutatum: -1, id: -1 }, { sparse: true }),
 
     // collectiones — batch containers
     db.collection('collectiones').createIndex({ id: 1 }, { unique: true }),
@@ -182,10 +203,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('dicta').createIndex({ id: 1 }, { unique: true }),
     db.collection('dicta').createIndex({ colloquiumId: 1, natum: 1 }),
 
-    // querelae — bug/feature/feedback reports
+    // querelae — bug/feature/feedback/abuse reports
     db.collection('querelae').createIndex({ id: 1 }, { unique: true }),
     db.collection('querelae').createIndex({ ownerKey: 1, natum: -1 }),
     db.collection('querelae').createIndex({ ownerKey: 1, contentHash: 1 }),
+    // The strike count every run of a terms-bearing flow reads (`countViolations`).
+    db.collection('querelae').createIndex({ subjectOwnerKey: 1, kind: 1, verdict: 1, useTerms: 1 }, { sparse: true }),
     // Per-turn idempotency (noema-095, MONEY CODE): the AGENT Dictum is the atomic per-turn CHARGE
     // GATE. UNIQUE PARTIAL on (colloquiumId, turnKey) over AGENT dicta ONLY — the settle/debit runs
     // only AFTER this insert succeeds, so two concurrent `POST /dicta` sharing a caller-supplied

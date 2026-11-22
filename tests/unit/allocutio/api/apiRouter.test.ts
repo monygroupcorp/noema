@@ -4,7 +4,7 @@ import http from 'node:http'
 import express from 'express'
 
 import { createApiRouter, type ApiFacade, type Identity } from '../../../../src/allocutio/api/apiRouter.js'
-import { Errors } from '../../../../src/allocutio/api/errors.js'
+import { Errors, ApiError } from '../../../../src/allocutio/api/errors.js'
 import type { Run } from '../../../../src/allocutio/api/types.js'
 import type { AuctorKey } from '../../../../src/flow/types.js'
 import type { Credentials, ResolvedCaller } from '../../../../src/allocutio/api/IdentityResolver.js'
@@ -35,7 +35,10 @@ const fakeApi = {
     if (id === 'flux-schnell') return { id, input: { type: 'object' } }
     throw Errors.notFoundFlow(id)
   },
-  async quote(): Promise<{ impetus: string }> {
+  async quote(_auctor: AuctorKey, target: { modusId?: string }): Promise<{ impetus: string }> {
+    if (target.modusId === 'openai-bound') {
+      throw new ApiError('internal.unavailable', "No execution backend is configured for ministerium 'openai' on this deployment", 503, { retryable: true, details: { ministerium: 'openai' } })
+    }
     return { impetus: '42' }
   },
   async listFundamenta() {
@@ -59,6 +62,8 @@ const fakeApi = {
     return {
       balanceImpetus: '100',
       balanceUsd: 0.01,
+      heldImpetus: '0',
+      heldUsd: 0,
       gens: [],
       studios: [],
       joinable: [],
@@ -306,6 +311,21 @@ test('POST /v1/runs/quote with auth returns 200 { impetus }', async () => {
     })
     assert.equal(res.status, 200)
     assert.equal(res.body.impetus, '42')
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('POST /v1/runs/quote for a modus with no registered cursor returns a handled 503, never an unhandled 500', async () => {
+  const { server, url } = await createServer()
+  try {
+    const res = await request(`${url}/v1/runs/quote`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'k' },
+      body: { modusId: 'openai-bound', aditus: { prompt: 'hi' } },
+    })
+    assert.equal(res.status, 503)
+    assert.equal(res.body.error.code, 'internal.unavailable')
   } finally {
     await closeServer(server)
   }

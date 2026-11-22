@@ -90,7 +90,7 @@ const EXPORT = [
 
 const FOOTER = [
   { h: 'Make', links: [['Catalogue', '/catalog'], ['Run a workflow', '/run'], ['Collections', '/collections'], ['Canvas', '/canvas']] },
-  { h: 'Train', links: [['Datasets', '/datasets'], ['Model shelf', '/models'], ['Teams', '/teams'], ['Projects', '/projects']] },
+  { h: 'Train', links: [['Datasets', '/datasets'], ['Models', '/models'], ['Teams', '/teams'], ['Projects', '/projects']] },
   { h: 'Account', links: [['Funding', '/funding'], ['Keyring', '/keyring'], ['Preferences', '/preferences'], ['Status', '/status']] },
   { h: 'Read', links: [['About', '/about'], ['Ceremony', '/ceremony'], ['Privacy', '/legal/privacy'], ['Terms', '/legal/terms']] },
 ];
@@ -126,7 +126,10 @@ export interface LandingProps {
 export function Landing({
   face = 'fraunces',
   theme = 'editorial',
-  cta = 'ink',
+  // The public default is the accent fill: a screen has one primary action and it is the
+  // accent-filled button (DESIGN.md D-42). The ink and outline variants are lab experiments,
+  // and the ink one read as a pale pill that the ghost button beside it matched for weight.
+  cta = 'blue',
   mark = 'serif',
   crop = '1:1',
   stagger = 18,
@@ -173,7 +176,7 @@ export function Landing({
             <Link to="/pricing">Pricing</Link>
           </span>
           <span className="right">
-            <Link className="btn" to={entryPath()}>Open app</Link>
+            <Link className="btn-ghost" to={entryPath()}>Open app</Link>
           </span>
         </nav>
 
@@ -289,7 +292,7 @@ tokenURI  <your collection>/<tokenId>.json`}</code></pre>
               Everything on this page was put here by someone. Add the next thing.
             </p>
             <span className="lp-beat-cta">
-              <Link className="btn lg" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
+              <Link className="btn-ghost" to={entryPath()}>Get started <Ic name="arrow-right" /></Link>
             </span>
           </div>
         </section>

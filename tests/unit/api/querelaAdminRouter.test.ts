@@ -45,6 +45,13 @@ class MemoryQuerela implements QuerelaStore {
       (filter?.status === undefined || q.status === filter.status),
     )
   }
+  // Same semantics as MongoQuerela: distinct runs among confirmed violations.
+  async countViolations(subjectOwnerKey: string, useTerms: string): Promise<number> {
+    const runs = new Set(this.records
+      .filter(q => q.kind === 'abuse' && q.verdict === 'violation' && q.subjectOwnerKey === subjectOwnerKey && (q.useTerms ?? []).includes(useTerms))
+      .map(q => q.capturedState?.runId))
+    return runs.size
+  }
 }
 
 function makeQuerela(overrides: Partial<Omit<Querela, 'id' | 'natum' | 'mutatum'>> = {}): Omit<Querela, 'id' | 'natum' | 'mutatum'> {

@@ -260,6 +260,12 @@ export interface Vestigiorum {
 
   findById(id: string): Promise<Vestigium | null>
 
+  /** Every vestigium traced back to one Actum (FK `actumId`) — the admin-takedown seam
+   *  (minimax-h3-violation-takedown): a confirmed abuse report names a run, not a trace, so
+   *  this is how its gallery-listed/link-shared trace (if any) is found to privatize. Most
+   *  runs have none (a vestigium is created `privata` by default) or exactly one. */
+  findByActumId(actumId: string): Promise<Vestigia>
+
   forIdentity(
     auctorKey: { animaId: string } | { commitment: string },
     limit?: number

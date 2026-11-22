@@ -49,7 +49,19 @@ export type Primitive =
        */
       values?: Record<string, unknown>
     }
-  | { kind: 'Detail';      label: string; content: string; actions: Array<{ id: string; label: string }> }
+  | {
+      kind: 'Detail'
+      label: string
+      content: string
+      /**
+       * An action is a tap the flow answers (`id`), or, when `url` is set, a link the adapter
+       * opens for the user (Telegram: a URL button). A way out that lives on the web — paying
+       * for credits — is still an action on the primitive; a field, not a new primitive (ADR-0001).
+       * `asAccount` marks a link to our own site that should open signed in as the account the
+       * flow runs under, where the platform can prove who is tapping (Telegram: a Mini App).
+       */
+      actions: Array<{ id: string; label: string; url?: string; asAccount?: boolean }>
+    }
   | { kind: 'Stream';      label: string; actumId: string; status: 'running' | 'complete' | 'failed'; content?: string }
   | { kind: 'Prompt';      label: string; placeholder?: string }
   | {
@@ -155,16 +167,4 @@ export interface Flow {
    * Returns either the next Step or a Resolution (terminal state).
    */
   handle(ctx: FlowContext, event: PrimitiveEvent): Promise<Step | Resolution>
-}
-
-// ---------------------------------------------------------------------------
-// Type guards
-// ---------------------------------------------------------------------------
-
-export function isStep(value: Step | Resolution): value is Step {
-  return 'primitives' in value
-}
-
-export function isResolution(value: Step | Resolution): value is Resolution {
-  return 'kind' in value
 }

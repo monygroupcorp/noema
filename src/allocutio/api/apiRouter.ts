@@ -18,7 +18,7 @@ import express, { type Request, type Response, type Router } from 'express'
 
 import type { Run, RunOrder, Collection, Team, Edition, EditionModerationDetail, FeedItem, Project, RunsPage, ActivityPage, EarningsView } from './types.js'
 import type { AuctorKey } from '../../flow/types.js'
-import type { FeedFilter } from '../../types/editio.js'
+import type { ArtifactKind, FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
 import type { PackView } from '../../ledger/stripePacks.js'
@@ -134,6 +134,7 @@ export interface ApiFacade {
   getMe(auctor: AuctorKey): Promise<import('./CrystalApi.js').MeView>
   eraseMe(auctor: AuctorKey): Promise<import('../../types/erasure.js').ErasureReceipt>
   recordAttestation(auctor: AuctorKey): Promise<{ attestedAt: number }>
+  acceptUseTerms(auctor: AuctorKey, termsId: string): Promise<{ terms: string; versio: string; acceptedAt: number }>
   putSecret(auctor: AuctorKey, provider: string, token: string, idleDays?: number): Promise<import('./CrystalApi.js').SecretView>
   removeSecret(auctor: AuctorKey, provider: string): Promise<import('./CrystalApi.js').SecretView>
   setAppearance(auctor: AuctorKey, appearance: import('../../types/consuetudo.js').Appearance): Promise<import('../../types/consuetudo.js').Appearance>
@@ -150,18 +151,18 @@ export interface ApiFacade {
   endTeeSession(auctor: AuctorKey, sessionId: string): Promise<void>
   fetchTeeWglog(auctor: AuctorKey, sessionId: string, tail?: string): Promise<string | null>
   collect(auctor: AuctorKey, opts: CollectOpts): Promise<Collection>
-  fireCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  fireCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection>
   patchCollectionTractus(auctor: AuctorKey, id: string, tractus: import('../../types/collectio.js').Tractus[]): Promise<Collection>
-  patchCollectionDraft(auctor: AuctorKey, id: string, patch: { tractus?: import('../../types/collectio.js').Tractus[]; modusId?: string; numerus?: number }): Promise<Collection>
+  patchCollectionDraft(auctor: AuctorKey, id: string, patch: { tractus?: import('../../types/collectio.js').Tractus[]; modusId?: string; numerus?: number }, originCountry?: string): Promise<Collection>
   getCollection(auctor: AuctorKey, id: string): Promise<Collection>
   getCollectionRarity(auctor: AuctorKey, id: string): Promise<RarityReport>
-  extendCollection(auctor: AuctorKey, id: string, addCount: number): Promise<Collection>
+  extendCollection(auctor: AuctorKey, id: string, addCount: number, originCountry?: string): Promise<Collection>
   listCollections(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ collections: Collection[]; nextCursor?: string }>
   pauseCollection(auctor: AuctorKey, id: string): Promise<Collection>
-  resumeCollection(auctor: AuctorKey, id: string): Promise<Collection>
+  resumeCollection(auctor: AuctorKey, id: string, originCountry?: string): Promise<Collection>
   cancelCollection(auctor: AuctorKey, id: string): Promise<Collection>
   approveCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
-  rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string): Promise<void>
+  rejectCollectionPiece(auctor: AuctorKey, id: string, actumId: string, originCountry?: string): Promise<void>
   listCollectionPieces(auctor: AuctorKey, id: string, review?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<import('./types.js').CollectionPiece[]>
   listDatasets(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').Dataset[]; nextCursor?: string }>
   listDatasetSummaries(auctor: AuctorKey, opts?: { cursor?: string; limit?: number }): Promise<{ datasets: import('../../types/dataset.js').DatasetSummary[]; nextCursor?: string }>
@@ -198,6 +199,7 @@ export interface ApiFacade {
   feed(filter?: FeedFilter): Promise<FeedItem[]>
   retractEdition(auctor: AuctorKey, id: string): Promise<Edition>
   listHeldEditions(auctor: AuctorKey): Promise<Edition[]>
+  listMyEditions(auctor: AuctorKey, ref: { kind: ArtifactKind; id: string }): Promise<Edition[]>
   getEditionModeration(auctor: AuctorKey, id: string): Promise<EditionModerationDetail>
   previewHeldEdition(auctor: AuctorKey, id: string): Promise<import('./CrystalApi.js').EditionPreview>
   approveHeldEdition(auctor: AuctorKey, id: string): Promise<Edition>
@@ -226,7 +228,7 @@ export interface ApiFacade {
   // --- Fiat funding rail (Stripe) ---
   /** PUBLIC display catalog (no auth) — the single source the pricing + Funding UIs render from. */
   listPacks(): PackView[]
-  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
 }
 
@@ -262,6 +264,31 @@ function isPublicPublishTarget(destination: unknown, visibility: unknown): boole
         ? 'marketplace'
         : 'private'
   return vis === 'feed' || vis === 'marketplace'
+}
+
+const ARTIFACT_KINDS: ArtifactKind[] = ['actum', 'intella', 'collectio']
+
+/**
+ * `?artifact=<kind>:<id>` for `GET /v1/editiones`, as one `kind:id` token rather than a
+ * pair of params, so a request naming one without the other cannot be formed.
+ *
+ * The kind is closed and the id must be non-empty, both refused as `input.malformed`: an
+ * unfiltered "every publication I ever made" is a different read with a different cost,
+ * and silently answering it for a typo'd param would be the wrong one.
+ */
+export function parseArtifactQuery(raw: unknown): { kind: ArtifactKind; id: string } {
+  if (typeof raw !== 'string' || raw === '') {
+    throw Errors.inputMalformed("query parameter 'artifact' is required, as '<kind>:<id>'")
+  }
+  const sep = raw.indexOf(':')
+  const kind = raw.slice(0, sep === -1 ? raw.length : sep)
+  const id = sep === -1 ? '' : raw.slice(sep + 1)
+  if (!ARTIFACT_KINDS.includes(kind as ArtifactKind) || id === '') {
+    throw Errors.inputMalformed(
+      `query parameter 'artifact' must read '<kind>:<id>', kind one of ${ARTIFACT_KINDS.join(' | ')}`,
+    )
+  }
+  return { kind: kind as ArtifactKind, id }
 }
 
 /** Owner key for the publish rate limiter — mirrors `CrystalApi._editionBy` (animaId | commitment;
@@ -350,6 +377,11 @@ export function createApiRouter(deps: {
             // A deliberate 5xx (fail-closed gates included) is an operator-facing condition,
             // so the message is carried. `opts.details` is not: it is caller-shaped.
             log.error('api error', { ...base, message: err.message })
+          } else if (err.opts.expected) {
+            // Ordinary traffic, and named as such by the error itself: the caller asked a fair
+            // question and "no" is the true answer. A warn per occurrence buries the refusals
+            // that DO mean something — these were sixty a day and the largest single source.
+            log.debug('api refusal', base)
           } else {
             // 4xx carries the code and nothing else from the error — the message can quote
             // caller input. `warn`, not `error`: 401s on public routes are ordinary traffic.
@@ -400,6 +432,20 @@ export function createApiRouter(deps: {
   /** The identity-only view of `authCaller`, for every route that does not admit spend. */
   const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
+  /**
+   * The caller's origin, ISO 3166-1 alpha-2, for `InvokeOpts.originCountry` / `CollectOpts.
+   * originCountry` (`minimax-h3-territory-safeguard`). Cloudflare's `cf-ipcountry` is set on
+   * every request once traffic is proxied through it (the cutover this register's `docs/legal/
+   * compliance-landscape.md` records) — undefined for a request that reached this process some
+   * other way, and for Cloudflare's own `'XX'` (not resolvable) and `'T1'` (Tor) sentinels,
+   * which name no territory to check against. `_assertTerritory` fails open on undefined.
+   */
+  const originCountryOf = (req: Request): string | undefined => {
+    const raw = req.headers['cf-ipcountry']
+    const country = (Array.isArray(raw) ? raw[0] : raw)?.trim().toUpperCase()
+    return country && country !== 'XX' && country !== 'T1' ? country : undefined
+  }
+
   /** Best-effort spicyMode read for the PUBLIC catalog (noema-091): an authenticated caller with
    *  spicyMode on (which required a recorded 18+ attestation to persist) may see `contentRating`-adult
    *  models; an anonymous/unauthenticated browse stays SFW — the safe default. NEVER throws — a
@@ -434,6 +480,7 @@ export function createApiRouter(deps: {
           ...(maxImpetusPerRun !== undefined ? { keyMaxImpetusPerRun: maxImpetusPerRun } : {}),
           ...(studioId ? { studioId } : {}),
           ...(by ? { by } : {}),
+          originCountry: originCountryOf(req),
         },
       )
       const webhookUrl = req.body?.options?.webhookUrl
@@ -458,11 +505,12 @@ export function createApiRouter(deps: {
     '/payments/checkout',
     wrap(async (req, res) => {
       const auctor = await auth(req)
-      const { packId, successUrl, cancelUrl } = req.body ?? {}
+      const { packId, successUrl, cancelUrl, allocutio } = req.body ?? {}
       const out = await api.createCheckout(auctor, {
         packId,
         ...(typeof successUrl === 'string' ? { successUrl } : {}),
         ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+        ...(typeof allocutio === 'string' ? { allocutio } : {}),
       })
       res.status(200).json(out)
     }),
@@ -624,7 +672,7 @@ export function createApiRouter(deps: {
   router.post('/collectiones', wrap(async (req, res) => {
     const auctor = await auth(req)
     const { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId } = req.body ?? {}
-    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId }) })
+    res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId, originCountry: originCountryOf(req) }) })
   }))
 
   // PATCH /v1/collectiones/:id/tractus — edit a DRAFT's trait axes/values/rules, and (since a
@@ -636,12 +684,12 @@ export function createApiRouter(deps: {
       ...(tractus !== undefined ? { tractus } : {}),
       ...(modusId !== undefined ? { modusId: String(modusId) } : {}),
       ...(numerus !== undefined ? { numerus: Number(numerus) } : {}),
-    }) })
+    }, originCountryOf(req)) })
   }))
 
   // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).
   router.post('/collectiones/:id/fire', wrap(async (req, res) => {
-    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id)) })
+    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped), newest first and
@@ -675,7 +723,7 @@ export function createApiRouter(deps: {
   router.post('/collectiones/:id/extend', wrap(async (req, res) => {
     const auctor = await auth(req)
     const addCount = Number((req.body ?? {}).count)
-    res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount) })
+    res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount, originCountryOf(req)) })
   }))
 
   // POST /v1/collectiones/:id/{pause,resume,cancel}.
@@ -683,7 +731,7 @@ export function createApiRouter(deps: {
     res.json({ collection: await api.pauseCollection(await auth(req), String(req.params.id)) })
   }))
   router.post('/collectiones/:id/resume', wrap(async (req, res) => {
-    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id)) })
+    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
   }))
   router.post('/collectiones/:id/cancel', wrap(async (req, res) => {
     res.json({ collection: await api.cancelCollection(await auth(req), String(req.params.id)) })
@@ -695,7 +743,7 @@ export function createApiRouter(deps: {
     res.status(200).json({ ok: true })
   }))
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
-    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId))
+    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
     res.status(200).json({ ok: true })
   }))
 
@@ -725,6 +773,16 @@ export function createApiRouter(deps: {
   // declared before '/editiones/:id' so the literal path isn't captured as an id.
   router.get('/editiones/review', wrap(async (req, res) => {
     res.json({ editions: await api.listHeldEditions(await auth(req)) })
+  }))
+
+  // GET /v1/editiones?artifact=<kind>:<id> — the caller's OWN publications of one
+  // artifact, newest first. The review queue above carries held items only, so every
+  // terminal outcome — a gate refusal, a publication already live — was unreadable to
+  // its author once the session that filed it ended. A publish surface that reopens
+  // needs the record, not the memory of the tab that pressed the button.
+  router.get('/editiones', wrap(async (req, res) => {
+    const ref = parseArtifactQuery(req.query.artifact)
+    res.json({ editions: await api.listMyEditions(await auth(req), ref) })
   }))
 
   // GET /v1/editiones/:id — one publication (author-scoped). Polled to watch an async
@@ -1517,6 +1575,13 @@ export function createApiRouter(deps: {
   // be enabled. Anon-capable (keyed by AuctorKey — anon Bursa/commitment and named Anima both work).
   router.post('/me/attestation', wrap(async (req, res) => {
     res.status(200).json({ attestation: await api.recordAttestation(await auth(req)) })
+  }))
+
+  // POST /v1/me/terms/:id — accept the current version of a flow's upstream licence terms
+  // (`Modus.useTerms`, e.g. MiniMax H3's use restrictions). A flow that declares them refuses to
+  // run with `terms.required` until this is on file. Anon-capable, like the attestation above.
+  router.post('/me/terms/:id', wrap(async (req, res) => {
+    res.status(200).json({ acceptance: await api.acceptUseTerms(await auth(req), String(req.params.id)) })
   }))
 
   // PUT/DELETE /v1/me/secrets/:provider — connect/disconnect a BYO gated-origin credential

@@ -88,6 +88,12 @@ export interface Generatio {
    *  anon-capable AuctorKey that owns `spicyMode`, so it works for anon (Bursa/commitment) and named
    *  (Anima) callers alike. */
   ageAttestation?: { attestedAt: number }
+  /** Upstream licence terms the caller has accepted, by terms id (`crystal/useTerms.ts`), each
+   *  with the version accepted. A flow declaring `useTerms` runs only for a caller whose entry
+   *  matches the current version. Written ONLY by `CrystalApi.acceptUseTerms`: a Preferences
+   *  replace can neither set nor clear it, so acceptance is always a deliberate act on the
+   *  terms themselves. Anon-capable, keyed like `ageAttestation`. */
+  termsAccepted?: Record<string, { versio: string; acceptedAt: number }>
   /** Private generation (noema-347). When ON, the outputs of NEW runs are written to a dedicated
    *  bucket with no public binding; the run record stores an opaque marker instead of a URL, and
    *  the owner reads them through short-lived presigned links. Default-absent reads as OFF
@@ -104,6 +110,19 @@ export interface Generatio {
    *  holds against any caller), and — because they live here, on the anon-capable Generatio in
    *  `consuetudines` — hard-deleted with the account by `MeEraser`. */
   memoryNotes?: string[]
+  /** Default dataset (Dataset id) a Telegram photo collects into, and the account sees/changes
+   *  via `/dataset` (noema/telegram-photos-into-a-dataset). Mirrors `defaultProjectId`'s shape
+   *  for the same reason: the choice travels across web · Telegram · API. Absent -> no default
+   *  yet; `ensureDefaultDataset` mints one (and sets this) the first time collecting needs it. */
+  defaultDatasetId?: string
+  /** Telegram "collecting" mode (noema/telegram-photos-into-a-dataset). When ON, a bare photo
+   *  sent to an idle private chat is downloaded into our own storage and appended to
+   *  `defaultDatasetId` (minting it first if unset) instead of being silently dropped.
+   *  Default-absent reads as OFF everywhere — a bare photo must not silently change meaning.
+   *  Telegram-only today (`/collect`); the web Preferences screen does not surface either this
+   *  or `defaultDatasetId`, so `CrystalApi.setGeneratio` preserves both across a wholesale
+   *  Preferences replace the same way it preserves `ageAttestation`. */
+  collecting?: boolean
 }
 
 /** Longest single concierge memory note. A note is a line a person skims on /preferences,

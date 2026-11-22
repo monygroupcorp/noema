@@ -28,6 +28,9 @@ import {
 
 type Busy = { kind: 'idle' } | { kind: 'funding' } | { kind: 'minting'; nullifier: string };
 
+// What a purse is for, in one line — the empty Purses section leads with it.
+export const PURSE_PURPOSE = 'A purse is bearer credit: it spends without naming you.';
+
 function short(hex: string, head = 8, tail = 6) {
   return hex.length > head + tail ? `${hex.slice(0, head)}…${hex.slice(-tail)}` : hex;
 }
@@ -42,6 +45,19 @@ function Secret({ k, value, secret }: { k: string; value: string; secret?: boole
         : <span className="val hidden" onClick={() => setShown(true)} style={{ cursor: 'pointer' }}>•••• •••• tap to reveal</span>}
     </div>
   );
+}
+
+/**
+ * The config-fetch failure as one message (DESIGN.md D-62, D-68): what happened, the server's
+ * detail once (its own trailing period stripped so the two sentences do not meet as ".."), and
+ * what to do once. The API's not-JSON message already ends in "try again in a moment", so the
+ * instruction is only added when the detail does not carry it.
+ */
+export function configErrMessage(detail: string): string {
+  const d = detail.trim().replace(/\.+$/, '');
+  const saysRetry = /try again/i.test(d);
+  return `Couldn’t reach the anonymous-credit service${d ? ` — ${d}` : ''}. `
+    + `The anonymous purse reads as off until it answers${saysRetry ? '.' : '; try again in a moment.'}`;
 }
 
 export function Vault() {
@@ -331,15 +347,23 @@ export function Vault() {
       </div>
       <div className="csec">
         <div className="ctitle">Purse</div>
-        <div className="meta-line"><span>balance</span><span className="v mono">{totalPurseCredits.toString()} credits</span></div>
-        <div className="meta-line"><span>purses</span><span className="v mono">{purses.length}</span></div>
+        {/* A count of nothing is not printed (DESIGN.md D-58): with no purse held, one line
+            says so, and the balance and count appear once there is one to count. */}
+        {purses.length > 0 ? (
+          <>
+            <div className="meta-line"><span>balance</span><span className="v mono">{totalPurseCredits.toString()} credits</span></div>
+            <div className="meta-line"><span>purses</span><span className="v mono">{purses.length}</span></div>
+          </>
+        ) : (
+          <div className="meta-line"><span>none held yet</span></div>
+        )}
         <div className="meta-line"><span>paying with</span><span className="v mono">{active ? short(active, 6, 4) : 'identified balance'}</span></div>
       </div>
     </>
   );
 
   return (
-    <AppShell crumb="vault" context={context}>
+    <AppShell crumb="Vault" context={context}>
       <div className="page"><div className="pw">
         <div className="pagehead"><div>
           <h1>Vault</h1>
@@ -347,25 +371,23 @@ export function Vault() {
           <div className="sub" style={{ marginTop: 'var(--s2)' }}>
             A purse spends unlinkably. Whether the <i>funding</i> stays anonymous depends on how you
             funded: fund from a shielded or fresh wallet and there's no identity to link; fund from a
-            card or a doxxable wallet and the debit is linkable to that funder until we ship direct-to-commitment (blind) issuance.
+            card or a doxxable wallet and the debit is linkable to that funder.
           </div>
         </div></div>
 
         {err && <div className="warn" role="alert">{err}</div>}
         {notice && <div className="csec" style={{ borderColor: 'var(--accent)' }}>{notice}</div>}
-        {configErr && <div className="warn">Couldn’t reach the anonymous-credit service — {configErr}</div>}
-
-        {/* ANON_PURSE gate (noema-131): the anonymous purse is off for v1 (ships after the
-            trusted-setup ceremony). Funding, card, wallet, and shielded-wallet anonymity all
-            work now — only the ZK bearer purse waits. Coming-soon takes precedence over the
-            ceremony notice below (same root cause, one clear message). */}
-        {purseOff && (
-          <div className="warn">
-            The anonymous purse is <b>coming soon</b> — it unlocks after the trusted-setup ceremony.
-            Card and on-chain wallet funding work today, and spending from a shielded or fresh wallet
-            is already unlinkable. <Link to="/ceremony">See the ceremony ▸</Link>
-          </div>
+        {/* A request that failed is danger tier (DESIGN.md D-10), not the caution amber the
+            informational notices below wear; it says what happened and what to do (D-62). While
+            the config is unknown the purse reads as off (see purseOff above). */}
+        {configErr && (
+          <div className="warn bad" role="alert">{configErrMessage(configErr)}</div>
         )}
+
+        {/* ANON_PURSE gate (noema-131): while the anonymous purse is switched off, everything
+            that would mint or hand one over is absent rather than announced — the roadmap is
+            stated once, on the home screen's compute card (DESIGN.md D-63). The ceremony notice
+            below has the same root cause and is held back for the same reason. */}
 
         {/* Honesty gate: the ceremony must be finalized before any note can be minted. */}
         {config && !config.ready && !purseOff && (
@@ -376,7 +398,8 @@ export function Vault() {
         )}
 
         {/* ── Purses ─────────────────────────────────────────────────────────── */}
-        <div className="sectionhead">Purses</div>
+        {/* With the purse off and none held there is nothing to head, so no heading. */}
+        {!(purseOff && purses.length === 0) && <div className="sectionhead">Purses</div>}
 
         {!purseOff && (
           <div className="csec">
@@ -401,10 +424,17 @@ export function Vault() {
           </div>
         )}
 
+        {/* An empty section says what the thing is for and gives the one action that fills it
+            (DESIGN.md D-60), and promises no future (D-63). While the purse is gated off, what a
+            visitor can do about credits is fund them, so the line offers that door; with the
+            purse on, the note form below is the action, and the line points at it. */}
         {purses.length === 0 ? (
-          purseOff
-            ? null
-            : <div className="csec">No purses yet. Fund a note, then mint a purse to spend anonymously.</div>
+          <div className="csec">
+            {PURSE_PURPOSE}{' '}
+            {purseOff
+              ? <>None held yet — <Link to="/funding">add credits ▸</Link></>
+              : 'None held yet — fund a note below, then mint a purse from it.'}
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
             {purses.map((p) => {

@@ -36,6 +36,12 @@ export class ThrottleError extends Error {
   readonly isThrottleError = true
 }
 
+// A deterministic (4xx) rejection of `POST /job` — a fresh pod hits the exact same rejection,
+// so `classifyJobAttemptFailure` fails the run fast instead of burning a retry on it.
+export class PermanentSubmitError extends Error {
+  readonly permanent = true
+}
+
 // Aggregate download must sustain at least this rate, else the pod is considered
 // throttled and the run is bailed to a fresh pod. Tunable without redeploy.
 const THROTTLE_MIN_MBPS  = Number(process.env.THROTTLE_MIN_MBPS ?? 20)
@@ -130,11 +136,11 @@ export async function submitToRunner(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    const err = new Error(`comfyrunner POST /job returned ${res.status}: ${text}`) as Error & { permanent?: boolean }
+    const message = `comfyrunner POST /job returned ${res.status}: ${text}`
     // 4xx = a deterministic bad request (e.g. wrong form field) — re-provisioning a fresh pod will
-    // hit the exact same rejection, so mark it permanent so the caller fails fast (no retry waste).
-    if (res.status >= 400 && res.status < 500) err.permanent = true
-    throw err
+    // hit the exact same rejection, so this is PermanentSubmitError and the caller fails fast
+    // (no retry waste). A 5xx is the runner's own trouble, which a fresh pod may not share.
+    throw (res.status >= 400 && res.status < 500) ? new PermanentSubmitError(message) : new Error(message)
   }
 }
 
@@ -194,6 +200,44 @@ export class RunnerJobLost extends Error {
     super(`comfyrunner no longer has job ${jobId}`)
     this.name = 'RunnerJobLost'
   }
+}
+
+/**
+ * What one pod attempt's job submission resolved to — the ONE decision `SecurePodClient.submit()`
+ * reads to pick between its four possible moves, instead of each of its two call sites (the first
+ * attempt, the retry loop) re-deriving it from a closure boolean plus duck-typed error shapes
+ * (`(err as {isThrottleError?}).isThrottleError`, `(err as {permanent?}).permanent`).
+ *
+ *   'ok'            — the job ran to completion on this pod.
+ *   'accepted-lost' — comfyrunner accepted the job (`POST /job` succeeded) and something then
+ *                      went wrong watching it (a dropped SSE stream, an execution error, the
+ *                      runner losing the job). From the moment of acceptance comfyrunner owns the
+ *                      run's failure webhook, so the caller must NOT re-provision or post its own.
+ *   'throttled'     — comfyrunner accepted the job, but THIS pod's download was throttled below a
+ *                      usable rate and Crystal deliberately bailed it. Unlike 'accepted-lost', a
+ *                      fresh pod is a real second chance, so the caller SHOULD retry.
+ *   'rejected'      — `POST /job` itself was refused with a deterministic (4xx) rejection. A fresh
+ *                      pod hits the same wall, so the caller fails fast rather than retrying.
+ *   'failed'        — any other failure before or during the job. An ordinary retry candidate.
+ */
+export type JobAttemptOutcome =
+  | { readonly kind: 'ok' }
+  | { readonly kind: 'accepted-lost'; readonly error: Error }
+  | { readonly kind: 'throttled'; readonly error: Error }
+  | { readonly kind: 'rejected'; readonly error: Error }
+  | { readonly kind: 'failed'; readonly error: Error }
+
+/**
+ * Classify a failed pod attempt into the four outcomes above. `accepted` is whether this
+ * attempt's `POST /job` had already succeeded when `err` was thrown — the one fact the caller
+ * (not this function) is in a position to know, since it is the caller who called `submitToRunner`.
+ */
+export function classifyJobAttemptFailure(err: unknown, accepted: boolean): JobAttemptOutcome {
+  const error = err instanceof Error ? err : new Error(String(err))
+  if (err instanceof ThrottleError) return { kind: 'throttled', error }
+  if (accepted) return { kind: 'accepted-lost', error }
+  if (err instanceof PermanentSubmitError) return { kind: 'rejected', error }
+  return { kind: 'failed', error }
 }
 
 /** Ask the runner whether a job is still alive. `GET /job/<id>` (comfyrunner `job-poll`). */
@@ -265,6 +309,16 @@ export interface RunMetrics {
   executionMs?:      number
 }
 
+/**
+ * What a completed job resolves with — the SAME `output` the pod's own completion webhook
+ * carries (noema pod-result-never-delivered), so a caller can complete the actum from it
+ * without waiting on the pod's outbound POST.
+ */
+export interface StreamCompletion {
+  output?: unknown[]
+  executionTimeMs?: number
+}
+
 export async function awaitViaStream(
   fetchFn: typeof fetch,
   runnerBase: string,
@@ -274,7 +328,7 @@ export async function awaitViaStream(
   onMetrics?: (m: RunMetrics) => void,
   /** How long the stream may go quiet before we ask the runner whether the job is alive. */
   silenceMs = 60_000,
-): Promise<void> {
+): Promise<StreamCompletion> {
   let lastSeq = -1
   let inferringEmitted = false
   let installingRecorded = false
@@ -355,7 +409,8 @@ export async function awaitViaStream(
               log.info('stream quiet, runner reports job complete', { jobId })
               void reader.cancel().catch(() => {})
               await record({ phase: 'done' })
-              return
+              const body = liveness.body as { output?: unknown[]; executionTime?: number } | undefined
+              return { output: body?.output, executionTimeMs: body?.executionTime }
             }
             const errMsg = runnerFailureMessage(liveness.body)
             log.warn('stream quiet, runner reports job failed', { jobId, error: errMsg })
@@ -513,11 +568,21 @@ export async function awaitViaStream(
                 await record({ phase: 'uploading', target: 'output' })
                 break
               case 'complete': {
-                const { executionTimeMs } = event as { executionTimeMs?: number }
+                const { executionTimeMs, output, webhookError } = event as {
+                  executionTimeMs?: number
+                  output?: unknown[]
+                  /** Set when the pod's own completion webhook failed on its first attempt
+                   *  (noema pod-result-never-delivered) — surfaced here because the pod's own
+                   *  log is otherwise the only place that failure is visible. */
+                  webhookError?: string
+                }
                 log.info('job complete', { jobId, executionTimeMs })
+                if (webhookError) {
+                  log.warn('comfyrunner completion webhook failed on its first attempt', { jobId, webhookError })
+                }
                 if (typeof executionTimeMs === 'number') onMetrics?.({ executionMs: executionTimeMs })
                 await record({ phase: 'done' })   // terminal → rolls up phaseDurations
-                return
+                return { output, executionTimeMs }
               }
               case 'error': {
                 const errMsg = (event.error as string) || 'comfyrunner job failed'

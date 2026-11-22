@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { SiteFooter } from './SiteFooter';
-import { useDoorHere } from '../shell/AccountGate';
-import { entryPath } from '../lib/entry';
+import { doorPath, entryPath } from '../lib/entry';
 import { api } from '../lib/api';
 import { useSession } from '../state/session';
 import './landing.css'; // reuse .topnav / .btn chrome
@@ -38,7 +37,8 @@ export function RequestDemo() {
   // for anyone who has been through the door once — including a visitor browsing anonymously,
   // who is exactly who this notice is addressed to. Sending them there would skip the sign-in
   // the notice just asked for.
-  const door = useDoorHere();
+  const { pathname, search } = useLocation();
+  const here = pathname + search;
   const [nomen, setNomen] = useState('');
   const [org, setOrg] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -50,7 +50,13 @@ export function RequestDemo() {
   const canSubmit = contactEmail.trim() !== '' && useCase.trim() !== '' && phase !== 'submitting';
 
   async function submit() {
-    if (!canSubmit) return;
+    if (phase === 'submitting') return;
+    // Pressable even while incomplete (D-46): it names what is missing rather than sitting dimmed.
+    if (!canSubmit) {
+      setPhase('error');
+      setError('Add a contact email and a short description of how you want to use noema.');
+      return;
+    }
     setPhase('submitting');
     setError(null);
     try {
@@ -84,19 +90,9 @@ export function RequestDemo() {
       <article className="prose">
         <h1>Request a demo / become a partner</h1>
         <p>
-          Tell us a bit about what you want to build. This isn't a support form — for bugs or
-          feedback on an existing account, use the report button inside the app instead.
+          Tell us what you want to build. For bugs or feedback on an existing account, use the
+          report button inside the app instead.
         </p>
-
-        {phase !== 'success' && !session && (
-          <div className="warn" style={{ maxWidth: 480 }}>
-            <b>Sign in first if you can.</b> A request sent while signed in is tied to your
-            account, so approving it switches your partner access on by itself. Sent
-            anonymously, there's nothing for us to switch on — we'd have to onboard you by hand.
-            {' '}
-            <Link to={door}>Create an account or sign in</Link> — we bring you back here.
-          </div>
-        )}
 
         {phase === 'success' ? (
           <div className="byo-row">
@@ -138,6 +134,20 @@ export function RequestDemo() {
             onSubmit={(e) => { e.preventDefault(); void submit(); }}
             style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3, 12px)', maxWidth: 480 }}
           >
+            {/* Read before the first field, not between the last field and Submit: the advice
+                is to leave and come back, and a decision like that is made before filling the
+                form, not mid-pass (REF-5). One child: .warn is a flex row. */}
+            {!session && (
+              <div className="warn">
+                <span>
+                  <b>Sign in first if you can.</b> A request sent signed in switches your partner
+                  access on by itself when approved; sent anonymously, we'd have to onboard you by
+                  hand. <Link to={doorPath(here)}>Create an account or sign in</Link> — we bring
+                  you back here.
+                </span>
+              </div>
+            )}
+
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span className="sub">Name (optional)</span>
               <input
@@ -198,7 +208,7 @@ export function RequestDemo() {
 
             {phase === 'error' && <div className="warn">{error}</div>}
 
-            <button className="btn" type="submit" disabled={!canSubmit} style={{ alignSelf: 'flex-start' }}>
+            <button className="btn" type="submit" style={{ alignSelf: 'flex-start' }}>
               {phase === 'submitting' ? 'Submitting…' : 'Submit request'}
             </button>
           </form>
