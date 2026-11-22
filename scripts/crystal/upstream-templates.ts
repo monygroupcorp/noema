@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import {
-  UPSTREAM_REPO, loadUpstreamCatalog, runnableToday, upstreamTemplateTable,
+  UPSTREAM_DECLINED, UPSTREAM_REPO, loadUpstreamCatalog, runnableToday, upstreamTemplateTable,
   type UpstreamCatalog, type UpstreamKind, type UpstreamModel, type UpstreamTemplate,
 } from '../../src/crystal/upstreamTemplates.js'
 
@@ -394,8 +394,9 @@ async function main(): Promise<number> {
 
   if (cmd === 'gap') {
     // Every template whose weights we already hold, minus the ones a crystal
-    // workflow already names in its `upstream` field. What is left is the work
-    // this feed exists to surface: flows that are one conversion from running.
+    // workflow already names in its `upstream` field, minus the ones crystal
+    // has decided not to convert (UPSTREAM_DECLINED, with why). What is left
+    // is the work this feed exists to surface: flows one conversion from running.
     const claimed = new Set(
       readCrystalWorkflows()
         .map(w => JSON.parse(readFileSync(path.join(WORKFLOWS, w.file), 'utf8')) as {
@@ -404,14 +405,23 @@ async function main(): Promise<number> {
         .map(d => d.upstream?.template)
         .filter((t): t is string => !!t),
     )
-    const open = runnableToday().filter(r => !claimed.has(r.name))
-    if (has('json')) { console.log(JSON.stringify(open, null, 1)); return 0 }
     const all = runnableToday()
-    console.log(`${all.length} templates the registry already covers; ${all.length - open.length} claimed by a crystal workflow\n`)
+    const unclaimed = all.filter(r => !claimed.has(r.name))
+    const declined = unclaimed.filter(r => UPSTREAM_DECLINED[r.name])
+    const open = unclaimed.filter(r => !UPSTREAM_DECLINED[r.name])
+    if (has('json')) {
+      console.log(JSON.stringify({ open, declined: declined.map(r => ({ ...r, reason: UPSTREAM_DECLINED[r.name] })) }, null, 1))
+      return 0
+    }
+    console.log(`${all.length} templates the registry already covers; ${all.length - unclaimed.length} claimed by a crystal workflow, ${declined.length} declined\n`)
     for (const r of open) {
       console.log(`  ${r.category.padEnd(16)} ${r.name.padEnd(46)} ${r.title}`)
     }
-    if (open.length === 0) console.log('  nothing unclaimed — every covered template has a flow')
+    if (open.length === 0) console.log('  nothing unclaimed — every covered template has a flow or a declared reason not to')
+    if (declined.length) {
+      console.log('\ndeclined — covered, but not a new capability:')
+      for (const r of declined) console.log(`  ${r.name.padEnd(46)} ${UPSTREAM_DECLINED[r.name]}`)
+    }
     return 0
   }
 

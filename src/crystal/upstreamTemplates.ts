@@ -237,3 +237,20 @@ export function upstreamTemplateTable(opts: TableOptions = {}): UpstreamTemplate
 export function runnableToday(rows = upstreamTemplateTable()): UpstreamTemplateRow[] {
   return rows.filter(r => r.coverage === 'all')
 }
+
+/**
+ * Templates the pod could run today that crystal has deliberately decided not
+ * to convert, with why — the null+note a workflow's own `upstream` field
+ * carries when there is no equivalent (clause 2), mirrored here for a template
+ * that has no workflow of its own to carry the field.
+ */
+export const UPSTREAM_DECLINED: Record<string, string> = {
+  llm_qwen3vl_text_gen:
+    't2t/i2t are already live via modus.chatgpt; a second, local-only chat flow over different weights is not a new capability.',
+  llm_qwen3_text_gen:
+    't2t is already live via modus.chatgpt; a second, local-only chat flow over different weights is not a new capability.',
+  utility_text_lists_select_prompt:
+    'a Node Basics tutorial on list iteration over z-image-turbo, not a new generation capability — batching belongs in Actum/runtime, not a flow.',
+  templates_purz_batch_generation:
+    'a Node Basics tutorial on batch/queue mechanics over z-image-turbo, not a new generation capability — batching belongs in Actum/runtime, not a flow.',
+}
