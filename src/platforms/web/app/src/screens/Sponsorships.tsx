@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { doorPath } from '../lib/entry';
 import { AppShell } from '../shell/AppShell';
+import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { api, type Sponsorship, type SubsidyCadence } from '../lib/api';
 import { useSession } from '../state/session';
@@ -14,11 +13,6 @@ const fmt = (v?: string) => (v == null ? '—' : Number(v).toLocaleString());
 
 export function Sponsorships() {
   const { session, ready } = useSession();
-  // Where the door hands this visitor back once their session is live: the page they were
-  // already on. Turning someone away for want of an account should not also cost them the
-  // walk back to what they were doing.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [list, setList] = useState<Sponsorship[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,7 +27,7 @@ export function Sponsorships() {
 
   useEffect(() => {
     if (!ready) return;
-    if (!session) { setList([]); return; }  // gated — the sign-in prompt covers it, skip the 403
+    if (!session) { setList(null); return; }  // account-bound: the gate is the whole screen, skip the 403
     let live = true;
     api.listSponsorships()
       .then((r) => { if (live) setList(r.sponsorships); })
@@ -75,74 +69,72 @@ export function Sponsorships() {
           <div className="sub">Keep another account topped up on a cadence, drawn from your balance. Pause or resume any time; caps keep it bounded.</div>
         </div></div>
 
-        {!session && ready && (
-          <div className="warn">Sponsorships need an identified account with a fundable pool.</div>
+        {!ready && <div className="sub">Loading…</div>}
+
+        {ready && !session && (
+          <AccountGate why="A pledge is drawn from a fundable pool and paid to a named beneficiary, so it needs an identified account on both ends." />
         )}
 
-        <div className="sectionhead">New pledge</div>
-        <div className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s5)', display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-          <input className="inp mono" placeholder="beneficiary account id" value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} disabled={!session} />
-          {/* F-13: no account-identity lookup exists anywhere in this codebase (Teams' "add
-              member by account id" is the same bare-id pattern) — an avatar/display-name card
-              would mean inventing a new backend endpoint. This is the honest substitute: echo
-              the id back so the payer can at least re-read what they typed before committing. */}
-          {beneficiary.trim() && <div className="s mono">→ pledging to {beneficiary.trim()}</div>}
-          <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
-            <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="1" placeholder="points per cycle" value={grant} onChange={(e) => setGrant(e.target.value)} disabled={!session} />
-            <select className="inp mono" style={{ maxWidth: 140 }} value={cadence} onChange={(e) => setCadence(e.target.value as SubsidyCadence)} disabled={!session}>
-              {CADENCES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          {/* F-14: Sponsio (src/types/sponsio.ts) carries no reward/tier concept — a pledge is
-              a bare balance top-up, nothing more. Say that plainly rather than imply a perk. */}
-          <div className="s">What this buys: nothing but the top-up itself — each cycle moves the points above from your balance to theirs, no reward tiers or perks attached.</div>
-          <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
-            <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="balance cap (optional)" value={balanceCap} onChange={(e) => setBalanceCap(e.target.value)} disabled={!session} />
-            <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="lifetime cap (optional)" value={capTotal} onChange={(e) => setCapTotal(e.target.value)} disabled={!session} />
-          </div>
-          {/* A signed-out visitor gets the control that fixes what is missing, not a dimmed
-              button they cannot press (DESIGN.md D-46). It is the one sign-in door here. */}
-          <div>
-            {session ? (
+        {ready && session && <>
+          <div className="sectionhead">New pledge</div>
+          <div className="noema-frame" style={{ padding: 'var(--s4)', marginBottom: 'var(--s5)', display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+            <input className="inp mono" placeholder="beneficiary account id" value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} />
+            {/* F-13: no account-identity lookup exists anywhere in this codebase (Teams' "add
+                member by account id" is the same bare-id pattern) — an avatar/display-name card
+                would mean inventing a new backend endpoint. This is the honest substitute: echo
+                the id back so the payer can at least re-read what they typed before committing. */}
+            {beneficiary.trim() && <div className="s mono">→ pledging to {beneficiary.trim()}</div>}
+            <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
+              <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="1" placeholder="grant (points / cycle)" value={grant} onChange={(e) => setGrant(e.target.value)} />
+              <select className="inp mono" style={{ maxWidth: 140 }} value={cadence} onChange={(e) => setCadence(e.target.value as SubsidyCadence)}>
+                {CADENCES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {/* F-14: Sponsio (src/types/sponsio.ts) carries no reward/tier concept — a pledge is
+                a bare balance top-up, nothing more. Say that plainly rather than imply a perk. */}
+            <div className="s">What this buys: nothing but the top-up itself — each cycle moves the points above from your balance to theirs, no reward tiers or perks attached.</div>
+            <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
+              <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="balance cap (optional)" value={balanceCap} onChange={(e) => setBalanceCap(e.target.value)} />
+              <input className="inp mono" style={{ flex: '1 1 160px' }} type="number" min="0" placeholder="lifetime cap (optional)" value={capTotal} onChange={(e) => setCapTotal(e.target.value)} />
+            </div>
+            <div>
               <button className="btn accent" onClick={create} disabled={creating || !beneficiary.trim() || !grant.trim()}>
                 <Ic name="hand-coins" /> {creating ? 'Creating…' : 'Create pledge'}
               </button>
-            ) : ready && (
-              <Link className="btn accent" to={doorPath(here)}><Ic name="hand-coins" /> Sign in to pledge</Link>
-            )}
+            </div>
           </div>
-        </div>
 
-        {err && <div className="warn">{err}</div>}
+          {err && <div className="warn">{err}</div>}
 
-        <div className="sectionhead">Your pledges</div>
-        {!list && !err && <div className="empty"><div className="t">Loading…</div></div>}
-        {list && list.length === 0 && <div className="empty"><div className="t">No pledges yet</div><div className="s">Create one above to keep an account topped up.</div></div>}
+          <div className="sectionhead">Your pledges</div>
+          {!list && !err && <div className="empty"><div className="t">Loading…</div></div>}
+          {list && list.length === 0 && <div className="empty"><div className="t">No pledges yet</div><div className="s">Create one above to keep an account topped up.</div></div>}
 
-        {list && list.length > 0 && (
-          <div className="list">
-            {list.map((s) => (
-              <div className="lrow" key={s.id}>
-                <div className="li-main">
-                  <div className="t mono">→ {s.beneficiarius.animaId}</div>
-                  <div className="s">
-                    {fmt(s.subsidia.grant)} pts · {s.subsidia.cadence}
-                    {s.subsidia.balanceCap && <> · cap {fmt(s.subsidia.balanceCap)}</>}
-                    {' · '}dripped {fmt(s.drippedTotal)}{s.capTotal && <> / {fmt(s.capTotal)}</>}
+          {list && list.length > 0 && (
+            <div className="list">
+              {list.map((s) => (
+                <div className="lrow" key={s.id}>
+                  <div className="li-main">
+                    <div className="t mono">→ {s.beneficiarius.animaId}</div>
+                    <div className="s">
+                      {fmt(s.subsidia.grant)} pts · {s.subsidia.cadence}
+                      {s.subsidia.balanceCap && <> · cap {fmt(s.subsidia.balanceCap)}</>}
+                      {' · '}dripped {fmt(s.drippedTotal)}{s.capTotal && <> / {fmt(s.capTotal)}</>}
+                    </div>
+                  </div>
+                  <div className="li-right" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+                    <span className={`badge${s.status === 'active' ? ' accent' : ''}`}>{s.status}</span>
+                    {s.status !== 'exhausted' && (
+                      <button className="btn ghost" onClick={() => toggle(s)} disabled={busy === s.id}>
+                        <Ic name={s.status === 'active' ? 'pause' : 'play'} /> {s.status === 'active' ? 'pause' : 'resume'}
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="li-right" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-                  <span className={`badge${s.status === 'active' ? ' accent' : ''}`}>{s.status}</span>
-                  {s.status !== 'exhausted' && (
-                    <button className="btn ghost" onClick={() => toggle(s)} disabled={busy === s.id}>
-                      <Ic name={s.status === 'active' ? 'pause' : 'play'} /> {s.status === 'active' ? 'pause' : 'resume'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </>}
       </div></div>
     </AppShell>
   );

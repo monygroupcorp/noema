@@ -24,6 +24,33 @@ export function liveLine(liveStudios: number): string {
   return `the meter · ${liveStudios} live ${liveStudios === 1 ? 'session' : 'sessions'}`;
 }
 
+/**
+ * Which sovereignty rights this visitor actually holds.
+ *
+ * The screen used to offer all three on either footing and let the wording apologize for two of
+ * them: an anonymous visitor got a live "Go anonymous" (they already were), a live "go anonymous ▸"
+ * link beside the identity cell that already read "anonymous", and a permanently dead "Delete
+ * account & data". That is the app's two-designs problem in one card — a surface drawn for a
+ * visitor who cannot use it.
+ *
+ * `export` is real on either footing: POST /v1/me/export takes the bearer token or the anonymous
+ * commitment. `goAnonymous` and `erase` both act on a NAMED account, so an anonymous visitor is
+ * offered neither: the first is where they already stand, the second has nothing to erase. Not
+ * disabled — ABSENT. A dead control is the second design, whichever spelling turned it off.
+ *
+ * Pure and exported so it can be tested: this app carries no jsdom, so the way a rendering rule
+ * gets a machine check here is to be a function first and JSX second (see Funding's canCheckout).
+ */
+export type SovereignRight = 'export' | 'goAnonymous' | 'erase';
+
+export function sovereignRights(anon: boolean): SovereignRight[] {
+  return anon ? ['export'] : ['export', 'goAnonymous', 'erase'];
+}
+
+export function holdsRight(anon: boolean, right: SovereignRight): boolean {
+  return sovereignRights(anon).includes(right);
+}
+
 export function AccountSettings() {
   const { section } = useParams();
   const { ident, idents } = useIdentity();
@@ -126,7 +153,7 @@ export function AccountSettings() {
               account to step off — pressed from the anonymous slot it would do nothing. */}
           <div className="noema-frame ac-posture">
             <div className="ac-pcell">
-              <div className="ac-l">Identity</div>
+              <div className="ac-l">identity</div>
               <div className="ac-v"><span className={`hemi2 ${anon ? 'dashed' : 'lit'}`} /> {anon ? 'anonymous' : 'you · signed in'}</div>
             </div>
             <div className="ac-pcell">
@@ -139,12 +166,51 @@ export function AccountSettings() {
             </div>
           </div>
 
-          {/* sovereignty — a right, shown up front. Go anonymous + Export are real. Delete is
-              real too, but destructive, so it sits last on the page (REF-34). */}
+          {/* Sovereignty — rights, shown up front, and only the ones this visitor holds.
+              `sovereignRights` above is the rule; this row asks it rather than deciding again. */}
           <div className="ac-sov">
-            <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
-            {!anon && <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>}
+            {holdsRight(anon, 'export') && (
+              <button className="btn ghost" onClick={exportEverything} disabled={exporting} title="Download a complete JSON export of your account data"><Ic name="arrow-up" /> {exporting ? 'Preparing export…' : 'Export everything'}</button>
+            )}
+            {holdsRight(anon, 'goAnonymous') && (
+              <button className="btn ghost amber" onClick={leaveToAnon}><span className="hemi2 dashed" /> Go anonymous</button>
+            )}
+            {holdsRight(anon, 'erase') && (
+              <button className="btn ghost bad" onClick={() => { setDeleteOpen((o) => !o); setDeleteErr(null); setDeleteText(''); }} aria-expanded={deleteOpen} title="Permanently erase your identity & content"><Ic name="x" /> Delete account &amp; data</button>
+            )}
           </div>
+          {deleteOpen && holdsRight(anon, 'erase') && (
+            <div className="ac-note mono" style={{ marginTop: 'var(--s3)', borderLeft: '2px solid var(--bad, #c0392b)', paddingLeft: 'var(--s3)' }}>
+              <div><b>This is permanent and cannot be undone.</b></div>
+              <div style={{ marginTop: 'var(--s2)' }}>
+                We will erase your identity and content — your profile, credentials, saved preferences,
+                projects, conversations and memory. For legal reasons we must <b>retain your financial
+                records</b> (deposits, credits and payouts); those are kept in <b>anonymized</b> form,
+                no longer linked to your name, and your published work stays live under an anonymous
+                author. You’ll be signed out immediately and this account can never sign in again.
+              </div>
+              <div style={{ marginTop: 'var(--s3)' }}>
+                Type <b>{DELETE_PHRASE}</b> to confirm:
+                <input
+                  className="input mono"
+                  style={{ marginTop: 'var(--s2)', width: '100%' }}
+                  value={deleteText}
+                  onChange={(e) => setDeleteText(e.target.value)}
+                  placeholder={DELETE_PHRASE}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label={`Type "${DELETE_PHRASE}" to confirm account deletion`}
+                />
+              </div>
+              <div style={{ marginTop: 'var(--s3)', display: 'flex', gap: 'var(--s2)' }}>
+                <button className="btn bad" onClick={deleteAccount} disabled={!deleteArmed || deleting}>
+                  {deleting ? 'Erasing…' : 'Permanently delete my account'}
+                </button>
+                <button className="btn ghost" onClick={() => { setDeleteOpen(false); setDeleteText(''); setDeleteErr(null); }} disabled={deleting}>Cancel</button>
+              </div>
+              {deleteErr && <div style={{ marginTop: 'var(--s2)' }}><span className="hemi2 dashed" /> {deleteErr}</div>}
+            </div>
+          )}
           {exportUrl && (
             <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
               <span className="hemi2 lit" /> Your export is ready — <a className="accent" href={exportUrl} target="_blank" rel="noreferrer" download>download it ▸</a> (link expires shortly).
@@ -155,6 +221,11 @@ export function AccountSettings() {
               <span className="hemi2 dashed" /> {exportErr}
             </div>
           )}
+          <div className="ac-note mono" style={{ marginTop: 'var(--s3)' }}>
+            <span className="hemi2 dashed" /> {holdsRight(anon, 'erase')
+              ? <>Data export &amp; account deletion are your legal rights — both are here. Deletion erases your identity &amp; content; financial records are retained in anonymized form for legal reasons.</>
+              : <>Data export is your legal right and it is here. Deletion is the other one, and it belongs to a named account — an anonymous slot carries no identity to erase.</>}
+          </div>
 
           {/* section cards — the honesty bar: rows with a real backend (credits via meStatus,
               live studios, saved logins) show real data. Each card's manage link goes where the
@@ -184,53 +255,6 @@ export function AccountSettings() {
               <Row k="Saved logins" v={savedLogins ? <>{savedLogins} in this browser</> : <Link className="accent" to="/onboard?add=1">none yet — add one ▸</Link>} />
               <div className="ac-note mono">switch between saved logins or add one — each keeps its own projects, history and settings.</div>
             </SectionCard>
-          </div>
-
-          {/* the destructive section — last on the page, after everything the user came to do
-              (REF-34). Delete is wired (DELETE /v1/me), gated behind a typed confirmation. */}
-          <div className="ac-danger">
-            <div className="ac-note mono">
-              <span className="hemi2 dashed" /> Data export &amp; account deletion are your legal rights — both are here. Deletion erases your identity &amp; content; financial records are retained in anonymized form for legal reasons.
-            </div>
-            <div className="ac-sov">
-              {anon ? (
-                <button className="btn ghost bad" disabled title="Sign in to erase a named account — an anonymous slot holds no identified data to erase"><Ic name="x" /> Delete account &amp; data</button>
-              ) : (
-                <button className="btn ghost bad" onClick={() => { setDeleteOpen((o) => !o); setDeleteErr(null); setDeleteText(''); }} aria-expanded={deleteOpen} title="Permanently erase your identity & content"><Ic name="x" /> Delete account &amp; data</button>
-              )}
-            </div>
-            {deleteOpen && !anon && (
-              <div className="ac-panel ac-danger-confirm mono">
-                <div><b>This is permanent and cannot be undone.</b></div>
-                <div style={{ marginTop: 'var(--s2)' }}>
-                  We will erase your identity and content — your profile, credentials, saved preferences,
-                  projects, conversations and memory. For legal reasons we must <b>retain your financial
-                  records</b> (deposits, credits and payouts); those are kept in <b>anonymized</b> form,
-                  no longer linked to your name, and your published work stays live under an anonymous
-                  author. You’ll be signed out immediately and this account can never sign in again.
-                </div>
-                <div style={{ marginTop: 'var(--s3)' }}>
-                  Type <b>{DELETE_PHRASE}</b> to confirm:
-                  <input
-                    className="input mono"
-                    style={{ marginTop: 'var(--s2)', width: '100%' }}
-                    value={deleteText}
-                    onChange={(e) => setDeleteText(e.target.value)}
-                    placeholder={DELETE_PHRASE}
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-label={`Type "${DELETE_PHRASE}" to confirm account deletion`}
-                  />
-                </div>
-                <div style={{ marginTop: 'var(--s3)', display: 'flex', gap: 'var(--s2)' }}>
-                  <button className="btn bad" onClick={deleteAccount} disabled={!deleteArmed || deleting}>
-                    {deleting ? 'Erasing…' : 'Permanently delete my account'}
-                  </button>
-                  <button className="btn ghost" onClick={() => { setDeleteOpen(false); setDeleteText(''); setDeleteErr(null); }} disabled={deleting}>Cancel</button>
-                </div>
-                {deleteErr && <div style={{ marginTop: 'var(--s2)' }}><span className="hemi2 dashed" /> {deleteErr}</div>}
-              </div>
-            )}
           </div>
         </div></div>
       </AppShell>

@@ -49,8 +49,11 @@ describe('the datasets catalogue when nothing is published (DESIGN.md D-60)', ()
 
 describe('a signed-out visitor on sponsorships (DESIGN.md D-46)', () => {
   const src = read('./Sponsorships.tsx');
-  it('is offered the control that fixes what is missing, not a dimmed "Create pledge"', () => {
-    expect(src).toContain('Sign in to pledge</Link>');
+  // A pledge needs an identified account on both ends (the backend 401s an anon caller either
+  // way), so this screen is account-bound under the one rule in AccountGate.tsx: the gate card
+  // and nothing else, never a form nobody can submit — see signedOut.test.ts.
+  it('is account-bound: the shared gate, not a dimmed "Create pledge"', () => {
+    expect(src).toContain('<AccountGate ');
     expect(src).not.toMatch(/disabled=\{[^}]*!session[^}]*\}>\s*<Ic name="hand-coins"/);
   });
 });

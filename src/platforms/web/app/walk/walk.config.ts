@@ -24,6 +24,9 @@ export const fixtures: Record<string, Record<string, string>> = {
   '/collections/:id/curation': { id: 'sample-collection' },
   '/collections/:id/export': { id: 'sample-collection' },
   '/projects/:id': { id: 'sample-project' },
-  '/account/:section': { section: 'compute' },
+  // A REAL slug (src/content/blog/): the guide pages render from bundled markdown, so an
+  // invented one photographs the not-found stub instead of the page. `/blog/:slug` landed
+  // without its fixture and the census has refused to run ever since — loudly, as designed.
   '/blog/:slug': { slug: 'train-a-model' },
+  '/account/:section': { section: 'compute' },
 };
