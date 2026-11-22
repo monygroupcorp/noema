@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.38.1](https://github.com/monygroupcorp/noema/compare/v5.38.0...v5.38.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **allocutio:** wire /train as a Telegram command ([aa02b4f](https://github.com/monygroupcorp/noema/commit/aa02b4f3d169c065a3cfb89e125088b61872ec28))
+* **crystal:** queue a run against a busy warm pod instead of losing or duplicating it ([#777](https://github.com/monygroupcorp/noema/issues/777)) ([1e264d2](https://github.com/monygroupcorp/noema/commit/1e264d2cd1b5891f62b63c524ca5e57a6971354d))
+
 ## [5.38.0](https://github.com/monygroupcorp/noema/compare/v5.37.0...v5.38.0) (2026-11-22)
 
 
