@@ -259,6 +259,13 @@ export interface MateriaStore {
    * its `drainUntil` hard deadline (the stranded-`active` case — see `drainUntil`).
    * Transitions each to 'terminated' (one findOneAndUpdate per pod, so a concurrent
    * claim via findWarm can't lose) and returns them so the caller can destroy the pods.
+   *
+   * `hasLiveActum`, when given, gates the idle+draining immediate-reap case: a warm
+   * pod's status flips to 'idle' the instant its runner reports the job done, which
+   * is BEFORE the completion webhook has settled the actum (WarmPodClient has no
+   * actum/webhook dependency, only Materia). Reaping on sight there races that
+   * webhook and strands the result (noema stuck-actum-drain-reaper-race). Omitted →
+   * today's behavior unchanged (reap on sight).
    */
-  reapIdle(now: Date): Promise<Materia[]>
+  reapIdle(now: Date, hasLiveActum?: (materiaId: string) => Promise<boolean>): Promise<Materia[]>
 }

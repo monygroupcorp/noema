@@ -91,35 +91,55 @@ export class MongoMateria implements MateriaStore {
     return docs.map(fromDoc)
   }
 
-  async reapIdle(now: Date): Promise<Materia[]> {
+  async reapIdle(now: Date, hasLiveActum?: (materiaId: string) => Promise<boolean>): Promise<Materia[]> {
     const reaped: Materia[] = []
-    // One atomic claim per pod, matching either of two arms. A concurrent findWarm
-    // (idle→active) wins the race and neither arm matches it any more.
+    // One atomic claim per pod, matching either of two unconditional arms. A
+    // concurrent findWarm (idle→active) wins the race and neither arm matches it
+    // any more.
     //
-    // Idle arm: reap an idle pod when EITHER it's past its warm deadline OR it's
-    // been drained (`drainOnly` — budget/balance exhausted, see Census). Draining
-    // makes `maxImpetus` a HARD cap: a budget-exhausted idle studio dies on the next
-    // sweep instead of billing on to `warmUntil`. A pod running a gen is
-    // `status:'active'`, so this arm never takes one mid-job — it drains, finishes,
-    // goes idle, and then this matches.
+    // Idle-expired arm: an idle pod past its plain warm deadline — unrelated to
+    // draining, no liveness check needed (warmUntil itself is the grace).
     //
-    // Drain-deadline arm: that hand-off back to idle requires the release path to
-    // run. When it doesn't — process died mid-job, runner gone, completion webhook
-    // lost — the pod is stranded `active`, which Census still bills and the provider
-    // still charges, and the idle arm can never reach it. `drainUntil` (stamped with
-    // `drainOnly`) bounds that: past the deadline the pod is reaped whatever its
-    // status. The grace window is the whole point of matching on the deadline rather
-    // than on `drainOnly` alone — a real in-flight gen gets it all to finish in.
+    // Drain-deadline arm: a draining pod of ANY status past its `drainUntil` hard
+    // deadline. That bounds the pod whose release path never ran — process died
+    // mid-job, runner gone, completion webhook lost — and which would otherwise
+    // stay `active` forever, still billed by Census. Past the deadline it is
+    // reaped whatever its status; the grace window is the whole point of matching
+    // on the deadline rather than on `drainOnly` alone — a real in-flight gen gets
+    // it all to finish in.
     const stranded = { drainOnly: true, drainUntil: { $lte: now }, status: { $ne: 'terminated' } }
-    const idle = { status: 'idle', $or: [{ warmUntil: { $lte: now } }, { drainOnly: true }] }
+    const idleExpired = { status: 'idle', warmUntil: { $lte: now } }
     for (;;) {
       const doc = await this.col.findOneAndUpdate(
-        { $or: [idle, stranded] },
+        { $or: [idleExpired, stranded] },
         { $set: { status: 'terminated', terminatum: now } },
         { returnDocument: 'after' },
       )
       if (!doc) break
       reaped.push(fromDoc(doc))
+    }
+
+    // Idle + draining, no deadline passed yet: `maxImpetus` makes draining a HARD
+    // cap, so this is reaped on sight rather than left billing on to `warmUntil` —
+    // but "idle" is NOT reliable proof the actum it was running settled. A warm
+    // pod's release path (WarmPodClient) flips Materia to 'idle' the moment its
+    // runner reports the job done, which is BEFORE the completion webhook has
+    // reached ActumCompletor — WarmPodClient has no actum/webhook dependency, only
+    // Materia. Reaping on sight there races that webhook and strands the result
+    // (noema stuck-actum-drain-reaper-race): the terminated pod can never deliver
+    // it. `hasLiveActum` closes that race — a pod with a still-live (nascens/agens)
+    // actum is left for the `stranded` arm's grace instead of reaped here; one with
+    // none, or no dependency wired at all, is reaped immediately as before.
+    const idleDraining = await this.col.find({ status: 'idle', drainOnly: true }).toArray()
+    for (const doc of idleDraining) {
+      const m = fromDoc(doc)
+      if (hasLiveActum && await hasLiveActum(m.id).catch(() => true)) continue
+      const claimed = await this.col.findOneAndUpdate(
+        { id: m.id, status: 'idle', drainOnly: true },
+        { $set: { status: 'terminated', terminatum: now } },
+        { returnDocument: 'after' },
+      )
+      if (claimed) reaped.push(fromDoc(claimed))
     }
     return reaped
   }

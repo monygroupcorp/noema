@@ -42,6 +42,22 @@ test('startIdleReaper does nothing when no pods are reapable', async () => {
   assert.equal(calls, 0)
 })
 
+test('startIdleReaper forwards hasLiveActum through to the store on every sweep', async () => {
+  const seen: unknown[] = []
+  const store: MateriaStore = {
+    async reapIdle(_now: Date, hasLiveActum?: (materiaId: string) => Promise<boolean>) {
+      seen.push(hasLiveActum)
+      return []
+    },
+  } as unknown as MateriaStore
+  const hasLiveActum = async (_id: string) => false
+  const stop = startIdleReaper(store, async () => {}, 40, hasLiveActum)
+  await wait(90)
+  stop()
+  assert.ok(seen.length > 0, 'expected at least one sweep')
+  for (const got of seen) assert.equal(got, hasLiveActum, 'the same predicate reaches reapIdle each sweep')
+})
+
 test('startIdleReaper keeps sweeping even if a terminate call throws', async () => {
   let sweepCount = 0
   const store: MateriaStore = {

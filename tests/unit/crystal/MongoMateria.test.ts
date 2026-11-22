@@ -257,6 +257,27 @@ test('reapIdle does not re-reap an already-terminated drained pod', async () => 
   assert.equal(reaped.length, 0, 'terminated is terminal — no second terminatum, no second pod destroy')
 })
 
+test('reapIdle leaves a drainOnly idle pod alone while hasLiveActum reports a still-live actum', async () => {
+  // Reproduces noema stuck-actum-drain-reaper-race: WarmPodClient flips status to
+  // 'idle' the instant its runner reports the job done, before the completion
+  // webhook has settled the actum. Without the liveness check this pod would be
+  // reaped on sight, stranding the result.
+  const future = new Date(Date.now() + 60 * 60_000)
+  const m = await store.create(makeInput({ status: 'idle', warmUntil: future, drainOnly: true }))
+  const reaped = await store.reapIdle(new Date(), async () => true)
+  assert.equal(reaped.length, 0, 'a live actum still bound to this pod holds off the reap')
+  assert.equal((await store.findById(m.id))?.status, 'idle')
+})
+
+test('reapIdle reaps a drainOnly idle pod once hasLiveActum reports no live actum', async () => {
+  const future = new Date(Date.now() + 60 * 60_000)
+  const m = await store.create(makeInput({ status: 'idle', warmUntil: future, drainOnly: true }))
+  const reaped = await store.reapIdle(new Date(), async () => false)
+  assert.equal(reaped.length, 1, 'the actum settled — the drained pod is reaped as before')
+  assert.equal(reaped[0].id, m.id)
+  assert.equal((await store.findById(m.id))?.status, 'terminated')
+})
+
 test('findWarm by materiaId atomically claims THAT specific idle pod (studio pinning)', async () => {
   const a = await store.create(makeInput({ status: 'idle', imageRef: 'img:v1' }))
   await store.create(makeInput({ status: 'idle', imageRef: 'img:v1' }))   // a second same-image pod
