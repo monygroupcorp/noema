@@ -1,5 +1,11 @@
 declare module 'snarkjs'
 declare module 'circomlibjs'
+// heic2any is a web-app-only dependency (src/platforms/web/app/package.json), installed in its
+// own nested node_modules — invisible to this root program, which typechecks upload.ts (one of
+// the web lib files tsconfig.tests.json pulls in) without ever running npm install there. The
+// web app's own tsconfig resolves the package's real, shipped types directly and never sees this
+// ambient declaration (its `include` is scoped to its own `src`, not this file).
+declare module 'heic2any'
 
 // Minimal jsonwebtoken surface — only what the API acceptors + JWKS verifier use.
 // The legacy JS uses the full lib untyped; we type just the bits the TS side touches.
