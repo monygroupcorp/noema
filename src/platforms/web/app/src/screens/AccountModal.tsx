@@ -3,6 +3,8 @@ import { Ic } from '../lib/icons';
 import { useSession } from '../state/session';
 import { AuthApiError } from '../lib/api';
 import { markOnboarded } from '../lib/entry';
+import { PasswordField } from './Onboard';
+import './onboard.css';
 
 // AccountModal — the in-place account gate an anonymous Muse session hits at execution
 // (rth's ruling, 2026-09-02: browse and configure freely with no account; the account, then a
@@ -22,7 +24,6 @@ export function AccountModal({ open, onClose, onSuccess }: { open: boolean; onCl
   const [mode, setMode] = useState<'register' | 'signin'>('register');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,7 +37,6 @@ export function AccountModal({ open, onClose, onSuccess }: { open: boolean; onCl
     reset();
     if (username.trim().length < MIN_USERNAME) { setErr(`Username must be at least ${MIN_USERNAME} characters.`); return; }
     if (password.length < MIN_PASSWORD) { setErr(`Password must be at least ${MIN_PASSWORD} characters.`); return; }
-    if (password !== confirm) { setErr('Passwords do not match.'); return; }
     setBusy(true);
     try { await register(username.trim(), password); done(); }
     catch (e) {
@@ -77,8 +77,7 @@ export function AccountModal({ open, onClose, onSuccess }: { open: boolean; onCl
           <form onSubmit={onRegister} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {err && <div className="sub" style={{ color: 'var(--danger, #d66f6f)' }}>{err}</div>}
             <input className="byo-input" type="text" required placeholder={`username (min ${MIN_USERNAME} chars)`} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" disabled={busy} />
-            <input className="byo-input" type="password" required placeholder={`password (min ${MIN_PASSWORD} chars)`} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-label="password" disabled={busy} />
-            <input className="byo-input" type="password" required placeholder="confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" aria-label="confirm password" disabled={busy} />
+            <PasswordField value={password} onChange={setPassword} placeholder={`password (min ${MIN_PASSWORD} chars)`} autoComplete="new-password" disabled={busy} />
             <button className="btn accent" type="submit" disabled={busy}>{busy ? 'creating…' : 'Create account & continue'}</button>
             <button type="button" className="linkish" style={{ alignSelf: 'center' }} disabled={busy} onClick={() => { reset(); setMode('signin'); }}>I already have an account</button>
           </form>
@@ -86,7 +85,7 @@ export function AccountModal({ open, onClose, onSuccess }: { open: boolean; onCl
           <form onSubmit={onSignin} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {err && <div className="sub" style={{ color: 'var(--danger, #d66f6f)' }}>{err}</div>}
             <input className="byo-input" type="text" required placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" aria-label="username" disabled={busy} />
-            <input className="byo-input" type="password" required placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-label="password" disabled={busy} />
+            <PasswordField value={password} onChange={setPassword} placeholder="password" autoComplete="current-password" disabled={busy} />
             <button className="btn accent" type="submit" disabled={busy}>{busy ? 'signing in…' : 'Sign in & continue'}</button>
             <button type="button" className="linkish" style={{ alignSelf: 'center' }} disabled={busy} onClick={() => { reset(); setMode('register'); }}>Create an account instead</button>
           </form>
