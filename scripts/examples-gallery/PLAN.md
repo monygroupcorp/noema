@@ -53,3 +53,33 @@ modi are the heaviest by wall-clock.
 - Write the 8 rows into `SHOWCASE_EXAMPLES`, pick `style` tags per row (the third facet axis).
 - Re-run `exampleGallery.test.ts`/`Card.test.ts` against the populated set.
 - rth's verdict on the finished set (clause 6).
+
+## Second blocker found this session (2026-11-22): `fire-example.ts` can't fire any of the 7 RunPod rows yet, credentials or not
+
+Checked each of the three cursors the RunPod-bound rows above actually dispatch to:
+`RunPodCursor.ts` (image/video pod rows), `RemoteAitoolkitTrainingCursor`/`AitoolkitTrainingCursor`
+(model-02's training), `DatasetCaptionCursor.ts` (muse-01's captioning). All three return
+`{ kind: 'async', externusJobId }` — the pod runs in the background and a completion webhook
+finalizes the actum later. `fire-example.ts` only handles the synchronous path (`dispatchInceptio`
+returning `exitus` immediately, true for `modus.gpt-image` and the host-side ffmpeg/composite
+cursors) — it throws `exitus missing` on every async row today, and `compile` is still the
+not-needed stub from the first draft.
+
+Firing an async row for real needs the shape `scripts/spike-koh-remote.ts` already proves for
+training: a reachable public webhook endpoint (that script tunnels one with ngrok), the real
+`Compiler` wired the way `src/index.ts` wires it (`templateRegistry`, `fundamentorum`,
+`WEIGHT_PROXY_BASE`), and `createContainer` given `runpodClient` + `runpodWebhookUrl` (+
+`runpodR2`/`aitoolkitRemote` for the training and captioning rows) so it registers
+`RunPodCursor`/`RemoteAitoolkitTrainingCursor`/`DatasetCaptionCursor` instead of leaving them
+unregistered. None of that exists in this script yet, and every feature clause 3 needs
+(muse, collections, a trained/forked model) plus every video row is async — there is no cheaper
+sync-path substitute for any of them in the current modus set (no video modus here runs anywhere
+but a `-comfyui` RunPod fundament).
+
+I did not build this blind: it needs a live RunPod account, a network-reachable webhook (or a
+tunnel), and real pod minutes to prove it works at all, none of which this sandboxed worktree can
+reach (`OPENAI_API_KEY`/`MONGODB_URI`/`RUNPOD_*`/`.env` access is refused here — same guard as
+`g-4c355a68`). Writing the harness without ever firing it against a real pod would be a guess
+dressed as code. This needs rth, or a seat rth hands real credentials AND a reachable host to
+directly (his own machine, or a droplet) — the sandboxed worktree path is not the way any of the
+8 rows get fired.
