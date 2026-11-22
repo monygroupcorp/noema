@@ -496,3 +496,43 @@ test('a single large reward note is split: the run locks its reservation, the re
   assert.deepEqual(new Set(lockedAfter.map(s => s.actumId)), new Set([actum.id, second.id]))
   assert.equal(await signorum.balance({ animaId: 'anima-1' }), 46179n)
 })
+
+// The legacy commitment path selects from a `history()` snapshot and then calls the unguarded
+// `lock()` — a TOCTOU window: a winner can lock the same note between this caller's read and its
+// own lock() call. Pin that the loser throws instead of creating an actum whose `signaConsumed`
+// names a note it never actually holds.
+test('commitment path: a note a race already locked between the read and the lock never ends up in signaConsumed', async () => {
+  const modus = makeModus()
+  const commitment = 'race-commit'
+  const signorum = new MemorySignorum()
+  const note = await signorum.issue({ forma: 'arcanum', valor: 500n, auctor: 'test', testis: commitment })
+
+  // The snapshot this caller already read — the note was still valid at the time.
+  const staleHistory = await signorum.history({ commitment })
+
+  // A concurrent winner locks the SAME note for real, closing the window this caller read past.
+  await signorum.lock([note.id], 'actum-winner')
+
+  // This caller keeps acting on its now-stale read (balance agreed at read time too).
+  signorum.balance = async () => 500n
+  signorum.history = async () => staleHistory
+
+  const acta = makeActa()
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(modus),
+    cursorum: makeCursorum(makeRunner(500n)),
+    signorum,
+    acta,
+  })
+
+  await assert.rejects(
+    () => inceptor.initiate(makeParams({ by: { commitment } })),
+    /not valid/i,
+  )
+  assert.equal(acta.records.length, 0, 'the losing call must not record an actum for a note it never actually locked')
+
+  // The real store still shows only the winner holding the note.
+  const real = await MemorySignorum.prototype.history.call(signorum, { commitment })
+  assert.equal(real[0].status, 'locked')
+  assert.equal(real[0].actumId, 'actum-winner')
+})

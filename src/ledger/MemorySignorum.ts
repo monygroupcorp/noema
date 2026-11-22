@@ -121,9 +121,16 @@ export class MemorySignorum implements Signorum {
   }
 
   async lock(signaIds: string[], actumId: string): Promise<void> {
-    // Validate all exist before mutating any (atomicity)
+    // Validate all exist AND are still 'valid' before mutating any (atomicity). A signum a
+    // racing caller already locked or spent fails the WHOLE call rather than being silently
+    // skipped — the caller must never end up recording a signum as consumed that this call
+    // did not actually win. No `await` separates this check from the writes below, so (single-
+    // writer here, same contract MongoSignorum's guarded updateMany enforces over the network)
+    // no other call can interleave between them.
     for (const id of signaIds) {
-      if (!this.store.has(id)) throw new Error(`Signum '${id}' not found`)
+      const s = this.store.get(id)
+      if (!s) throw new Error(`Signum '${id}' not found`)
+      if (s.status !== 'valid') throw new Error(`Signum '${id}' is not valid (status: ${s.status})`)
     }
     for (const id of signaIds) {
       const s = this.store.get(id)!
