@@ -129,7 +129,7 @@ test('fail: releases locked signa back to balance', async () => {
 
   await modorum.register(buildModus())
   cursorum.register('test', makeFakeCursor(600n))
-  // Issue two signa; greedy selects both to cover 600n (400 + 600 = 1000 ≥ 600)
+  // Issue two signa; greedy selects both to cover 600n, locking the 400 whole and splitting the 600
   await signorum.issue({ animaId: 'anima-user', forma: 'minted', valor: 400n, auctor: 'test' })
   await signorum.issue({ animaId: 'anima-user', forma: 'minted', valor: 600n, auctor: 'test' })
 
@@ -139,8 +139,8 @@ test('fail: releases locked signa back to balance', async () => {
     by: { animaId: 'anima-user' },
   })
 
-  // Both signa are locked during execution — balance is 0
-  assert.equal(await signorum.balance({ animaId: 'anima-user' }), 0n)
+  // Exactly the 600n reservation is locked during execution; the split's 400n change stays spendable
+  assert.equal(await signorum.balance({ animaId: 'anima-user' }), 400n)
 
   await completor.fail(actum, 'pod crashed')
 
