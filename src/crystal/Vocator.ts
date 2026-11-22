@@ -6,7 +6,7 @@ import type { QueueGate } from '../execution/dispatchInceptio.js'
 import { dispatchQueuedActum } from '../execution/dispatchInceptio.js'
 import { MAX_TERMINUS_MS, DEFAULT_EXPIRAT_MS } from '../execution/ActumInceptor.js'
 import { recordProgressus } from '../execution/progressusSink.js'
-import { EconomyUnavailableError } from './RunPodCursor.js'
+import { EconomyUnavailableError, WarmPodBusyError } from './RunPodCursor.js'
 import { bus } from '../lib/bus.js'
 import { makeLogger } from '../lib/logger.js'
 
@@ -69,9 +69,14 @@ export class Vocator implements QueueGate {
 
   // ── QueueGate — what the dispatch asks ────────────────────────────────────
 
-  /** An empty economy pool is the one refusal that means "wait"; everything else fails. */
+  /**
+   * An empty economy pool, or a standard-tier image match that's busy rather than absent,
+   * are the refusals that mean "wait"; everything else fails.
+   */
   imageAwaited(err: unknown): string | null {
-    return err instanceof EconomyUnavailableError ? err.imageRef : null
+    if (err instanceof EconomyUnavailableError) return err.imageRef
+    if (err instanceof WarmPodBusyError) return err.imageRef
+    return null
   }
 
   /**
@@ -128,7 +133,7 @@ export class Vocator implements QueueGate {
         await this._announceLine(imageRef)
         return
       } catch (err) {
-        if (err instanceof EconomyUnavailableError) {
+        if (err instanceof EconomyUnavailableError || err instanceof WarmPodBusyError) {
           // The pod was claimed by someone else between the event and the dispatch.
           // Nothing is wrong with this run — put it back at the front where it was.
           await this.deps.locorum.release(locus.id)

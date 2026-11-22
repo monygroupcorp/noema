@@ -17,6 +17,9 @@ tests/unit/architecture/**/*.test.ts
 tests/unit/flow/ExecuteFlow.test.ts
 tests/unit/flow/FlowRouter.test.ts
 tests/unit/flow/FlowContextStore.test.ts
+tests/unit/flow/MongoFlowContextStore.test.ts
+tests/unit/crystal/RunPodCursor.test.ts
+tests/unit/crystal/Praefectus.test.ts
 tests/unit/crystal/workflowTemplates.test.ts
 tests/unit/crystal/WorkflowTemplateRegistry.test.ts
 tests/unit/crystal/upstreamTemplates.test.ts

@@ -255,6 +255,59 @@ test('entering a flow in a different chat does NOT abandon another chat\'s conte
   assert.equal(store.get('telegram', 'user-1', 'chat-B')?.intent, 'train')
 })
 
+test('a run superseded by a second /make while still pending still delivers on completion, without clobbering the newer flow', async () => {
+  // Reproduces noema warm-pod-second-make-lost-and-reprovisions: rth fires two /make in the
+  // same chat back to back. The first is still waiting on its actum when the second one
+  // enters, taking over the chat's active flow slot. When the first's pod finishes, its
+  // result must still reach the user — and must not stomp the second, now-active flow.
+  const steps: Array<{ ctx: FlowContext; step: Step }> = []
+  const store = new MemoryFlowContextStore()
+
+  const flow: Flow & {
+    handleCompletion(
+      ctx: FlowContext,
+      result: { kind: 'complete'; exitus: Record<string, unknown> } | { kind: 'failed'; error: string }
+    ): Promise<Step | Resolution>
+  } = {
+    intent: 'execute',
+    enter: async (ctx) => {
+      const { actumId } = ctx.state as { actumId: string }
+      ctx.pendingActumId = actumId
+      return makeStep(`waiting:${actumId}`)
+    },
+    handle: async () => makeStep('handle'),
+    handleCompletion: async (ctx) => {
+      const id = ctx.pendingActumId
+      ctx.pendingActumId = undefined
+      return makeStep(`delivered:${id}`)
+    },
+  }
+
+  const router = new FlowRouter({
+    store,
+    onStep: (ctx, step) => { steps.push({ ctx, step }) },
+    onResolution: () => {},
+  })
+  router.register(flow)
+
+  // First /make — its actum is still running on the pod.
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' }, { state: { actumId: 'actum-first' } })
+  // Second /make, same chat, BEFORE the first resolves — takes over the chat's active slot.
+  await router.enter('execute', 'telegram', 'user-1', 'chat-1', { animaId: 'anima-1' }, { state: { actumId: 'actum-second' } })
+  steps.length = 0
+
+  // The first run's pod finishes. Its result must still reach the user.
+  await router.handleActumComplete('actum-first', { kind: 'complete', exitus: {} })
+  assert.equal(steps.length, 1, 'the superseded run still delivers to the user')
+  assert.equal(steps[0].step.primitives[0].label, 'delivered:actum-first')
+
+  // The second, still-active flow must be untouched by the first's late delivery.
+  assert.equal(
+    store.get('telegram', 'user-1', 'chat-1')?.pendingActumId, 'actum-second',
+    'the newer, still-pending run is untouched by the older one resolving',
+  )
+})
+
 test('handle in chat B does not see (or advance) a context opened in chat A for the same user', async () => {
   const { router, store, steps } = makeRouter()
   router.register(makeStubFlow('execute', makeStep('enter'), makeStep('next')))

@@ -8,7 +8,12 @@ const log = makeLogger('flow:context-store')
 export class MongoFlowContextStore implements FlowContextStore {
   private readonly collection
   private readonly primary = new Map<string, FlowContext>()
-  private readonly actumIndex = new Map<string, string>()
+  // actumIndex holds the CONTEXT ITSELF, not a key into `primary` — mirrors
+  // MemoryFlowContextStore: a context vacated by `abandon()` (superseded by a newer
+  // command) is no longer reachable through any key in `primary`, so a pending actum has to
+  // stay findable independent of whichever context currently owns its chat's slot.
+  private readonly actumIndex = new Map<string, FlowContext>()
+  private readonly actumTouchedAt = new Map<string, number>()
   // When each cached context was last written (or, after hydrate, last persisted). The TTL
   // index below expires the document; this expires the cache, so the two agree on what is live.
   private readonly touchedAt = new Map<string, number>()
@@ -34,13 +39,21 @@ export class MongoFlowContextStore implements FlowContextStore {
   set(platform: Platform, userId: string, chatId: string, ctx: FlowContext): void {
     const k = this.key(platform, userId, chatId)
 
-    // Maintain actumIndex
+    // Self-overwrite at the same slot — the active flow advancing its own state — retires
+    // whatever actum it was tracking before (see MemoryFlowContextStore for the external-
+    // takeover case, handled by `abandon()` instead).
     const existing = this.primary.get(k)
-    if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
+    if (existing?.pendingActumId) {
+      this.actumIndex.delete(existing.pendingActumId)
+      this.actumTouchedAt.delete(existing.pendingActumId)
+    }
 
     this.primary.set(k, ctx)
     this.touchedAt.set(k, this.now())
-    if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, k)
+    if (ctx.pendingActumId) {
+      this.actumIndex.set(ctx.pendingActumId, ctx)
+      this.actumTouchedAt.set(ctx.pendingActumId, this.now())
+    }
 
     // Fire-and-forget Mongo upsert
     this._upsert(k, ctx).catch((err: unknown) => log.error('upsert error', { error: String(err) }))
@@ -52,9 +65,56 @@ export class MongoFlowContextStore implements FlowContextStore {
     this._delete(k).catch((err: unknown) => log.error('delete error', { error: String(err) }))
   }
 
+  abandon(platform: Platform, userId: string, chatId: string): FlowContext | undefined {
+    const k = this.key(platform, userId, chatId)
+    const existing = this.primary.get(k)
+    this.primary.delete(k)
+    this.touchedAt.delete(k)
+    // No actumIndex cleanup, and no persisted delete: the slot's OWN document still needs to
+    // exist for `findByPendingActumId`'s eventual `settlePending` to resolve against, and a
+    // process restart before that must still be able to re-hydrate it (hydrate() re-derives
+    // the actumIndex from `pendingActumId` on every persisted doc, not from which chat slot
+    // currently claims it).
+    return existing
+  }
+
   findByPendingActumId(actumId: string): FlowContext | undefined {
-    const k = this.actumIndex.get(actumId)
-    return k ? this._live(k) : undefined
+    const ctx = this.actumIndex.get(actumId)
+    if (!ctx) return undefined
+    const touched = this.actumTouchedAt.get(actumId)
+    if (touched !== undefined && this.now() - touched >= this.ttlMs) {
+      this.actumIndex.delete(actumId)
+      this.actumTouchedAt.delete(actumId)
+      return undefined
+    }
+    return ctx
+  }
+
+  settlePending(actumId: string, nextCtx: FlowContext | null): void {
+    const ctx = this.actumIndex.get(actumId)
+    this.actumIndex.delete(actumId)
+    this.actumTouchedAt.delete(actumId)
+    if (!ctx) return
+
+    const k = this.key(ctx.platform, ctx.platformUserId, ctx.platformChatId)
+    // Only touch the chat's primary slot if it still holds THIS context — a newer command
+    // that has since taken the slot must never be overwritten by a stale completion landing
+    // after it.
+    if (this.primary.get(k) !== ctx) return
+
+    if (nextCtx) {
+      this.primary.set(k, nextCtx)
+      this.touchedAt.set(k, this.now())
+      if (nextCtx.pendingActumId) {
+        this.actumIndex.set(nextCtx.pendingActumId, nextCtx)
+        this.actumTouchedAt.set(nextCtx.pendingActumId, this.now())
+      }
+      this._upsert(k, nextCtx).catch((err: unknown) => log.error('upsert error', { error: String(err) }))
+    } else {
+      this.primary.delete(k)
+      this.touchedAt.delete(k)
+      this._delete(k).catch((err: unknown) => log.error('delete error', { error: String(err) }))
+    }
   }
 
   /** The cached context under `k`, unless it has sat idle past the TTL — then it is dropped
@@ -72,7 +132,10 @@ export class MongoFlowContextStore implements FlowContextStore {
 
   private _evict(k: string): void {
     const existing = this.primary.get(k)
-    if (existing?.pendingActumId) this.actumIndex.delete(existing.pendingActumId)
+    if (existing?.pendingActumId) {
+      this.actumIndex.delete(existing.pendingActumId)
+      this.actumTouchedAt.delete(existing.pendingActumId)
+    }
     this.primary.delete(k)
     this.touchedAt.delete(k)
   }
@@ -108,7 +171,10 @@ export class MongoFlowContextStore implements FlowContextStore {
       // a fresh 24h from the restart. A document with no stamp is treated as written now.
       const updatedAt = doc.updatedAt instanceof Date ? doc.updatedAt.getTime() : this.now()
       this.touchedAt.set(k, updatedAt)
-      if (ctx.pendingActumId) this.actumIndex.set(ctx.pendingActumId, k)
+      if (ctx.pendingActumId) {
+        this.actumIndex.set(ctx.pendingActumId, ctx)
+        this.actumTouchedAt.set(ctx.pendingActumId, updatedAt)
+      }
     }
   }
 

@@ -436,6 +436,13 @@ export class RunPodCursor implements Cursor {
         // Economy jobs must not silently fall back to a cold-start pod —
         // the user elected to wait for warm capacity, not to be billed full price.
         if (forEconomy) throw new EconomyUnavailableError(imageRef)
+
+        // Standard tier: a pod running this image already exists — it's just busy with
+        // another job right now. Queue for it (the warm-pod line calls the run forward the
+        // instant it frees) instead of cold-starting a second, redundant pod. A miss with
+        // NO pod of this image at all falls through below and cold-starts as always — there
+        // is nothing to wait for (noema warm-pod-second-make-lost-and-reprovisions).
+        if (await praefectus.hasBusy?.(imageRef)) throw new WarmPodBusyError(imageRef)
       }
     }
 
@@ -457,5 +464,21 @@ export class EconomyUnavailableError extends Error {
   constructor(readonly imageRef: string) {
     super(`No economy-pool pod available for image '${imageRef}' — job not dispatched`)
     this.name = 'EconomyUnavailableError'
+  }
+}
+
+/**
+ * Thrown when a standard-tier job's image match is busy with another run rather than
+ * genuinely absent. `Vocator` holds the run and calls it forward onto that exact pod the
+ * moment it frees, instead of the dispatch cold-starting a second pod to run it on — which is
+ * what happened before this error existed (noema warm-pod-second-make-lost-and-reprovisions).
+ *
+ * `imageRef` is carried as a FIELD for the same reason `EconomyUnavailableError`'s is: it is
+ * the match key the run waits under, read as data rather than parsed back out of a sentence.
+ */
+export class WarmPodBusyError extends Error {
+  constructor(readonly imageRef: string) {
+    super(`The warm pod for image '${imageRef}' is busy — job queued to reuse it`)
+    this.name = 'WarmPodBusyError'
   }
 }

@@ -251,6 +251,15 @@ export interface MateriaStore {
    * Returns null when no matching pod is available.
    */
   findWarm(spec: { imageRef?: string; podPolicy?: PodPolicy; shareToken?: string; materiaId?: string }): Promise<Materia | null>
+  /**
+   * Optional: whether a non-idle, non-terminated pod for this image currently exists —
+   * i.e. "one exists, it's just busy" as distinct from "nothing of this image has ever
+   * warmed". Lets a standard-tier dispatch that misses `findWarm` tell those two apart: the
+   * first should queue for the busy pod instead of cold-starting a redundant second one; the
+   * second has nothing to wait for and cold-starts as always. Absent → always cold-starts on
+   * a miss (today's behaviour, unchanged).
+   */
+  hasBusy?(imageRef: string): Promise<boolean>
   /** Return all Materiae that are not terminated — used for graceful shutdown teardown. */
   findActive(): Promise<Materia[]>
   /**
