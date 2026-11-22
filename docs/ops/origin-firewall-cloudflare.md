@@ -7,6 +7,30 @@ site directly — valid Let's Encrypt cert, `server: Caddy` — with no Cloudfla
 path. Confirmed live again 2026-11-21 (`https 443: 200`, `http 80: 308`). This item closes that
 bypass by allowing 80/443 only from Cloudflare's published IP ranges.
 
+**2026-11-21: applied, and did not hold.** The ufw rules below were applied on the droplet
+(44 `cf-origin-lock` rules, the old blanket 80/443 allows gone, SSH untouched, daily timer
+enabled) — but the direct-origin curl checks still returned `200`/`308`. Root cause: Caddy's
+80/443 are **Docker-published** (`0.0.0.0:80`/`0.0.0.0:443` -> the Caddy container), so inbound
+connections to them are DNAT'd and traverse the **FORWARD** chain, never **INPUT** — ufw only
+filters INPUT, so none of the rules above ever see this traffic at all. The script now also
+rewrites the **DOCKER-USER** chain (iptables + ip6tables) — the chain Docker itself reserves for
+operators to filter forwarded/published-port traffic before Docker's own wide-open rules accept
+it — which is the layer that actually gates this. See the script's own header comment for the
+full mechanism. Both goal clauses stay open until a direct-origin curl genuinely fails.
+
+**2026-11-22: first DOCKER-USER cut was itself wrong, caught in review before landing.**
+`--ctorigdstport` matches a connection's *original* destination port no matter which direction
+the current packet is travelling. A reply packet answering the app container's own **outbound**
+call to some external `:443` service (the RunPod API, Stripe, Mongo Atlas, ...) still carries
+`ctorigdstport=443`, and that reply lands on the public interface — it would have matched the
+DROP meant only for inbound traffic, breaking every outbound HTTPS call the app makes. Fixed two
+ways, per Docker's own documented `DOCKER-USER` pattern: every chain now gets an unscoped `-m
+conntrack --ctstate ESTABLISHED,RELATED -j RETURN` first (so already-tracked traffic, including
+replies to connections the container itself opened, short-circuits past the Cloudflare check
+entirely), and the Cloudflare ACCEPT/DROP rules also add `--ctdir ORIGINAL` as a second,
+independent guard. `scripts/firewall-cloudflare-only.selftest.sh` regression-tests both — no root,
+no live firewall, no network.
+
 **Not executed by this item.** This repo's realm rule is that a seat does not apply firewall/
 deploy changes to production — only the operator does. Everything below is ready to apply; the
 operator runs the "Apply" section.
@@ -14,11 +38,26 @@ operator runs the "Apply" section.
 ## What's here
 
 - `scripts/firewall-cloudflare-only.sh` — fetches Cloudflare's current IPv4 (`cloudflare.com/
-  ips-v4`) and IPv6 (`/ips-v6`) ranges and rewrites this host's ufw rules for 80/443 to allow only
-  those ranges, denying everyone else. Never touches any other port (SSH stays as-is). Idempotent
-  — re-running it refreshes the allow-list to whatever Cloudflare currently publishes. Aborts
-  without changing anything if a range fetch fails, is empty, or doesn't parse as CIDRs. Supports
-  `--dry-run` (prints the `ufw` commands it would run, changes nothing).
+  ips-v4`) and IPv6 (`/ips-v6`) ranges and rewrites **two** layers to allow only those ranges on
+  80/443, denying everyone else: this host's ufw rules (INPUT), and the `DOCKER-USER` chain in
+  both `iptables` and `ip6tables` (FORWARD, for Docker-published ports — see the "applied, and
+  did not hold" note above for why this layer is required). Never touches any other port or
+  container egress (SSH stays as-is; the `DOCKER-USER` rules are scoped to the public interface
+  only, autodetected via the default route, so a container's own outbound traffic — which arrives
+  via the bridge interface, not the public NIC — never matches). Idempotent — re-running it
+  refreshes both allow-lists to whatever Cloudflare currently publishes. Aborts without changing
+  anything if a range fetch fails, is empty, or doesn't parse as CIDRs. Supports `--dry-run`
+  (prints the commands it would run, changes nothing, and does **not** require root — reading the
+  live `DOCKER-USER` chain to preview what stale rules would be removed does need root, so a
+  non-root `--dry-run` shows only the insert plan, not the removal half; run it with `sudo` to see
+  both). If `DOCKER-USER` doesn't exist in either `iptables` or `ip6tables` (Docker not installed,
+  or its iptables integration disabled), it warns and skips that layer rather than failing — the
+  ufw layer still applies. The IPv6 rules use the host's IPv6 default-route interface if one
+  exists (`ip -6 route show default`), falling back to the IPv4 interface with a warning if not.
+- `scripts/firewall-cloudflare-only.selftest.sh` — no-root, no-network regression test for the
+  `DOCKER-USER` rule generation (ordering, the `ESTABLISHED,RELATED`/`--ctdir ORIGINAL` fix,
+  idempotency) against a simulated chain. Run it directly; nothing wires it into `npm run
+  test:hermetic` (it's a standalone shell script, not part of the TS suite).
 - `ops/systemd/noema-firewall-cloudflare.{service,timer}` — runs the script daily (03:41 UTC +
   jitter), since Cloudflare's ranges change occasionally and a stale allow-list would eventually
   either reject real Cloudflare traffic or leave a range Cloudflare no longer uses still open.
@@ -38,6 +77,9 @@ applying.
 ssh noema
 sudo ufw status verbose          # see what's live today
 sudo ufw app list                # any custom profiles? check each with: ufw app info "<name>"
+sudo iptables -nL DOCKER-USER    # confirm the chain exists (it should, Caddy's ports are Docker-published)
+docker ps --format '{{.Names}}\t{{.Ports}}'   # confirm which container(s) actually publish 80/443
+ip route show default            # the interface the script will scope DOCKER-USER rules to
 ```
 
 Confirm SSH is allowed (it should already be, and this script never touches it) before doing
@@ -51,6 +93,8 @@ cd /opt/noema
 ./scripts/firewall-cloudflare-only.sh --dry-run    # review the plan first
 sudo ./scripts/firewall-cloudflare-only.sh          # apply
 sudo ufw status numbered                            # confirm: allows tagged "cf-origin-lock", then a deny 80/tcp and deny 443/tcp
+sudo iptables -L DOCKER-USER -n --line-numbers | grep cf-origin-lock    # confirm the FORWARD-chain rules landed
+sudo ip6tables -L DOCKER-USER -n --line-numbers | grep cf-origin-lock
 ```
 
 Install the daily refresh timer:
@@ -92,14 +136,36 @@ done
 
 Both loops should print nothing.
 
+**3. No regression — the app's own outbound calls still work** (this is exactly what the
+2026-11-22 DOCKER-USER bug would have broken — see the fix note above). Run on the droplet right
+after applying:
+
+```bash
+curl -sS -m 10 https://noema.art/api/health   # app's own health check
+docker logs --since 5m hyperbotcontained 2>&1 | grep -iE 'ECONNREFUSED|ETIMEDOUT|RunPod|Mongo' | tail -20
+```
+
+`/api/health` should still return `{ ok: true, ... }`, and the log tail should show no new
+connection-refused/timeout errors for RunPod, Mongo Atlas, R2, or any other outbound dependency
+immediately after applying — those calls leave via the bridge interface and were never meant to
+cross the Cloudflare-only rules, but this is the live check that they actually didn't.
+
 ## Rollback
 
 ```bash
 ssh noema
+sudo systemctl disable --now noema-firewall-cloudflare.timer
+
+# ufw (INPUT) layer
 sudo ufw status numbered                 # find the rules tagged "# cf-origin-lock"
 sudo ufw --force delete <N>               # remove each one, highest number first
 sudo ufw allow 80,443/tcp                 # reopen to everyone if reverting fully
-sudo systemctl disable --now noema-firewall-cloudflare.timer
+
+# DOCKER-USER (FORWARD) layer — same idea, reverse order
+sudo iptables -L DOCKER-USER -n --line-numbers | grep cf-origin-lock   # find the line numbers
+sudo iptables -D DOCKER-USER <N>                                       # highest number first
+sudo ip6tables -L DOCKER-USER -n --line-numbers | grep cf-origin-lock
+sudo ip6tables -D DOCKER-USER <N>
 ```
 
 ## Known gap
