@@ -293,3 +293,27 @@ test('webhook: does NOT fire FAILED when comfyrunner accepted the job (comfyrunn
   await new Promise(r => setTimeout(r, 200))
   assert.equal((webhookPayloads as Array<{ status?: string }>).some(p => p.status === 'FAILED'), false)
 })
+
+// A warm pod's completion POST crosses the same pod egress path a cold-started one does, and can
+// fail the same way (noema pod-result-never-delivered — caught live on a warm-reuse run whose
+// comfyrunner webhook was rejected). WarmPodClient must complete the actum from the SSE `complete`
+// event's output itself, exactly like SecurePodClient does.
+test('webhook: completes the actum from the SSE complete event, not just from the pod webhook', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+    webhookPayloads,
+    sseEvents: [{ type: 'complete', output: [{ url: 'https://cdn.example.com/warm-out.png' }], executionTimeMs: 1234 }],
+  })
+  const client = new WarmPodClient(materia, store, fetch)
+  const { id: jobId } = await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 200))
+
+  const completed = (webhookPayloads as Array<{ id?: string; status?: string; output?: unknown; executionTime?: number }>)
+    .find(p => p.status === 'COMPLETED')
+  assert.ok(completed, 'expected a COMPLETED webhook posted from the SSE complete event, even though the pod never sent one')
+  assert.equal(completed!.id, jobId)
+  assert.deepEqual(completed!.output, [{ url: 'https://cdn.example.com/warm-out.png' }])
+  assert.equal(completed!.executionTime, 1234)
+})
