@@ -28,6 +28,9 @@ CLAUDE.md
 # Operational / generated
 logs/
 *.log
+# A duty's ledger (duties/<id>/ledger.log) is the standing record pinfactory's `duty act` appends to and
+# commits on the duty's branch — tracked state, not a generated log, so it must survive the *.log blanket rule.
+!duties/**/ledger.log
 reports/
 output/
 tmp/
