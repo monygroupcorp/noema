@@ -85,27 +85,21 @@ export class ArcanumIssuer {
 
     const nullifierHash = await computeNullifierHash(nullifier)
 
-    // 3. Select valid signa (smallest first, greedy cover)
-    const history = await signorum.history({ animaId: from.animaId })
-    const valid = history
-      .filter(s => s.status === 'valid')
-      .sort((a, b) => (a.valor < b.valor ? -1 : 1))
-    const selected: string[] = []
-    let covered = 0n
-    for (const s of valid) {
-      if (covered >= amount) break
-      selected.push(s.id)
-      covered += s.valor
-    }
-
-    // 4. Lock → settle identified signa (debit without storing commitment pointer)
+    // 3+4. Reserve exactly `amount` of the payer's identified signa, then settle it.
+    // `reserve()` splits a note that is larger than `amount` at lock time (locked child =
+    // the shortfall, valid child = the remainder) instead of locking the whole note and
+    // waiting for settle()'s delta refund — the remainder must stay spendable for the
+    // whole conversion, not just once it completes.
     const { randomUUID } = await import('node:crypto')
     const conversionId = randomUUID()
-    await signorum.lock(selected, conversionId)
+    const reservation = await signorum.reserve({ animaId: from.animaId }, amount, conversionId)
+    if (!reservation.ok) {
+      throw new Error(`Insufficient identified balance: ${reservation.available} < ${amount}`)
+    }
     try {
-      await signorum.settle(selected, amount, conversionId)
+      await signorum.settle(reservation.signaIds, amount, conversionId)
     } catch (err) {
-      await signorum.release(selected)
+      await signorum.release(reservation.signaIds)
       throw err
     }
 
