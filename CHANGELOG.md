@@ -1,5 +1,27 @@
 # Changelog
 
+## [5.37.0](https://github.com/monygroupcorp/noema/compare/v5.36.0...v5.37.0) (2026-11-22)
+
+
+### Features
+
+* **ops:** restrict origin 80/443 to Cloudflare's published IP ranges ([#756](https://github.com/monygroupcorp/noema/issues/756)) ([a38310c](https://github.com/monygroupcorp/noema/commit/a38310c309ffc6d0bb170d1564ac8643c0d2f066))
+
+
+### Bug Fixes
+
+* **crystal:** complete the warm-pod reuse actum from the SSE stream too ([#763](https://github.com/monygroupcorp/noema/issues/763)) ([d9059bb](https://github.com/monygroupcorp/noema/commit/d9059bb3d9d73758cba8ba310a930815c03b14f4))
+* **ledger:** reserve an identified run's exact cost instead of locking whole notes ([#765](https://github.com/monygroupcorp/noema/issues/765)) ([868bc51](https://github.com/monygroupcorp/noema/commit/868bc510788bbe59d107d10d0cf515c69652a8ff))
+* **migrations:** move tsx to a production dependency ([#757](https://github.com/monygroupcorp/noema/issues/757)) ([9dc5f33](https://github.com/monygroupcorp/noema/commit/9dc5f33eb4a2e4c9f3a81c7c317cade928f5c072))
+* **ops:** gate Docker-published 80/443 in DOCKER-USER, not just ufw ([#762](https://github.com/monygroupcorp/noema/issues/762)) ([68fdc0d](https://github.com/monygroupcorp/noema/commit/68fdc0da58c9ca10fd0d3fdfffa70555dc0805cd))
+* **ops:** give Caddy an access log for noema.art, www, and app ([#759](https://github.com/monygroupcorp/noema/issues/759)) ([dd339f6](https://github.com/monygroupcorp/noema/commit/dd339f626421a4cae6c9cb1a9cc2d16fa0a1b419))
+* **ops:** repoint staging CI build at main, not the frozen chainengine-migration/staging chain ([#754](https://github.com/monygroupcorp/noema/issues/754)) ([882e715](https://github.com/monygroupcorp/noema/commit/882e715187c8ad813bc47c4c9fcf5e36ade85696))
+* **pod:** name the HTTP client on pod and warm-pod completion POSTs ([#764](https://github.com/monygroupcorp/noema/issues/764)) ([b4c46c8](https://github.com/monygroupcorp/noema/commit/b4c46c86f5c0e368ec2334f90a938358e6d7fd52))
+* **repo:** unignore duty ledger logs so duty act can commit them ([#766](https://github.com/monygroupcorp/noema/issues/766)) ([3bf5734](https://github.com/monygroupcorp/noema/commit/3bf5734496b3428c71ac2f94f068b52a6c0b9fc3))
+* **web:** drop the confirm-password field the in-run account gate kept ([#758](https://github.com/monygroupcorp/noema/issues/758)) ([c9d9f36](https://github.com/monygroupcorp/noema/commit/c9d9f3645719321a4edc276e0d81a612ed8ace94))
+* **web:** one rule for what a signed-out visitor sees ([#755](https://github.com/monygroupcorp/noema/issues/755)) ([b4bfb28](https://github.com/monygroupcorp/noema/commit/b4bfb285a525dbe01494312c88eea470385be5b5))
+* **widget:** close the widget-security gate's last two gaps ([#751](https://github.com/monygroupcorp/noema/issues/751)) ([707cb6d](https://github.com/monygroupcorp/noema/commit/707cb6da75804d9c1e43b82c45af2797c610ab10))
+
 ## [5.36.0](https://github.com/monygroupcorp/noema/compare/v5.35.0...v5.36.0) (2026-11-21)
 
 
