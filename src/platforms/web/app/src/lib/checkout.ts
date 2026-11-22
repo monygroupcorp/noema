@@ -60,3 +60,20 @@ export function signInThenBuy(packId: string, returnTo?: string | null): string 
   const back = safeReturn(returnTo) ? `&back=${encodeURIComponent(returnTo as string)}` : '';
   return doorPath(`/funding?pack=${packId}${back}`);
 }
+
+// The Pro Monthly subscribe request sent to POST /v1/payments/promonthly/checkout. Points
+// Stripe back at wherever the subscribe button was pressed (the pricing page), with a flag so
+// that page knows to show the "subscribed" state on return.
+export function buildProMonthlySubscribeRequest(origin: string): { successUrl: string; cancelUrl: string } {
+  return {
+    successUrl: `${origin}/pricing?promonthly=success`,
+    cancelUrl: `${origin}/pricing?promonthly=cancel`,
+  };
+}
+
+// Where the front door should return a visitor who tried to subscribe without an account —
+// they asked to subscribe, so sign-in hands them back to the exact same subscribe action
+// instead of a generic landing.
+export function signInThenSubscribe(returnTo: string = '/pricing'): string {
+  return doorPath(`${returnTo}?promonthly=1`);
+}

@@ -14,8 +14,14 @@ import { ownerKeyOf } from '../../../crystal/ownerKey.js'
 import { classifyModelLicense, activeConditionalLicenses, bindingCapUsd } from '../../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd } from '../../../crystal/licenseTripwire.js'
 import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../../api/webhooks/stripeWebhook.js'
-import { stripeConfigFromEnv, makeStripeGateway } from '../../../api/webhooks/stripeGateway.js'
-import { packViews, type PackView } from '../../../ledger/stripePacks.js'
+import {
+  handleProMonthlyCheckout,
+  handleProMonthlyWebhook,
+  type ProMonthlyGateway,
+  type ProMonthlyWebhookResult,
+} from '../../../api/webhooks/stripeProMonthlyWebhook.js'
+import { stripeConfigFromEnv, makeStripeGateway, makeProMonthlyGateway } from '../../../api/webhooks/stripeGateway.js'
+import { packViews, proMonthlyView, type PackView, type ProMonthlyView } from '../../../ledger/stripePacks.js'
 import { lookupUseTerms, acceptUseTerms as recordUseTermsAcceptance } from '../../../crystal/useTerms.js'
 import { normalizeAddress } from '../../../crystal/walletAuth.js'
 import type {
@@ -202,6 +208,70 @@ export abstract class CrystalApiAccount extends CrystalApiEditions {
         signorum: this.deps.signorum,
         redituum: this.deps.redituum,
         animae: this.deps.animae,
+        gateway,
+      },
+    )
+  }
+
+  // ── Pro Monthly subscription rail (Option B, card fkhqv3) ──────────────────
+
+  protected _proMonthlyGateway: ProMonthlyGateway | null | undefined
+
+  /** The live Pro Monthly gateway: the injected dep, else built from the SAME env config the
+   *  pack rail reads, else `null` (unconfigured). */
+  protected resolveProMonthlyGateway(): ProMonthlyGateway | null {
+    if (this._proMonthlyGateway === undefined) {
+      if (this.deps.stripeProMonthly) {
+        this._proMonthlyGateway = this.deps.stripeProMonthly
+      } else {
+        const config = stripeConfigFromEnv()
+        this._proMonthlyGateway = config ? makeProMonthlyGateway(config) : null
+      }
+    }
+    return this._proMonthlyGateway
+  }
+
+  /** The PUBLIC Pro Monthly plan for DISPLAY (pricing page). Read-only, no auth. */
+  listProMonthlyPlan(): ProMonthlyView {
+    return proMonthlyView()
+  }
+
+  /**
+   * Open a Checkout Session (mode: subscription) for the Pro Monthly plan. Identified-only —
+   * a fiat subscription cannot fund an anonymous purse, same invariant as a credit pack.
+   */
+  async createProMonthlyCheckout(
+    auctor: AuctorKey,
+    opts: { successUrl?: string; cancelUrl?: string },
+  ): Promise<{ url: string; sessionId: string }> {
+    const gateway = this.resolveProMonthlyGateway()
+    if (!gateway) throw Errors.paymentsUnavailable()
+    const animaId = 'animaId' in auctor ? auctor.animaId : undefined
+    const result = await handleProMonthlyCheckout(
+      {
+        animaId,
+        ...(opts.successUrl ? { successUrl: opts.successUrl } : {}),
+        ...(opts.cancelUrl ? { cancelUrl: opts.cancelUrl } : {}),
+      },
+      { gateway },
+    )
+    if (!result.ok) throw new ApiError(result.code, result.message, result.status)
+    return { url: result.url, sessionId: result.sessionId }
+  }
+
+  /**
+   * Handle a Pro Monthly webhook delivery — signature-gated; grants are idempotent per invoice
+   * and throttle at the fair-use rollover cap. Throws only for a deployment that has no
+   * subscription rail configured (503).
+   */
+  async handleProMonthlyWebhook(input: { rawBody: string; signature?: string }): Promise<ProMonthlyWebhookResult> {
+    const gateway = this.resolveProMonthlyGateway()
+    if (!gateway || !this.deps.proMonthlySubscriptions) throw Errors.paymentsUnavailable()
+    return handleProMonthlyWebhook(
+      { rawBody: input.rawBody, ...(input.signature ? { signature: input.signature } : {}) },
+      {
+        signorum: this.deps.signorum,
+        subscriptions: this.deps.proMonthlySubscriptions,
         gateway,
       },
     )

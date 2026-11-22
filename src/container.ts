@@ -49,6 +49,8 @@ import { MongoModorum } from './crystal/MongoModorum.js'
 import { MongoFundamentorum } from './crystal/MongoFundamentorum.js'
 import { MongoSignorum } from './crystal/MongoSignorum.js'
 import { MongoRedituum } from './crystal/MongoRedituum.js'
+import { MongoProMonthlySubscriptions } from './crystal/MongoProMonthlySubscriptions.js'
+import type { ProMonthlySubscriptionStore } from './api/webhooks/stripeProMonthlyWebhook.js'
 import { MongoMerces } from './crystal/MongoMerces.js'
 import type { Mercedum } from './types/merces.js'
 import { MongoTripwireBandStore } from './crystal/MongoTripwireBand.js'
@@ -160,6 +162,9 @@ export interface Ring {
   signorum: Signorum
   /** USD revenue book (ADR-0013) — the second ledger, distinct from `signorum` (credits). */
   redituum: Redituum
+  /** Pro Monthly subscription registry (Option B, card fkhqv3) — maps a Stripe subscription to
+   *  its anima; `signorum` stays the money ledger, this is only the activation/cancel state. */
+  proMonthlySubscriptions: ProMonthlySubscriptionStore
   /** Payee-payout book (ADR-0013 §4c) — money OUT, per-payee, gated at the $600 line. */
   mercedum: Mercedum
   /** Conditional-license revenue tripwire's persisted band (edge-triggered across restarts). */
@@ -501,6 +506,10 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   // (incl. the unique partial index on depositumId that guarantees idempotent deposit booking)
   // are created centrally in ensureIndexes(). See src/types/reditus.ts.
   const redituum = new MongoRedituum(db.collection(config.reditusCollection ?? 'reditus'))
+
+  // Pro Monthly subscription registry (Option B, card fkhqv3) — maps a Stripe subscription id
+  // to its anima; indexes ensured at wiring time (index.ts), mirroring linkTokens/mandata.
+  const proMonthlySubscriptions = new MongoProMonthlySubscriptions(db.collection('pro_monthly_subscriptions'))
 
   // Payee-payout book (ADR-0013 §4c) — money OUT to a person (agent cut / royalty / referral),
   // per-payee/per-year, gated at the $600 reporting line. Indexes in ensureIndexes().
@@ -954,7 +963,7 @@ export function createContainer(mongo: MongoClient, config: ContainerConfig): Ri
   const collectioCursor = new CollectioCursor(collectioDispatch, collectiones, actorum, { reviewEnabled: true })
 
   return {
-    actorum, modorum, signorum, redituum, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
+    actorum, modorum, signorum, redituum, proMonthlySubscriptions, mercedum, tripwireBand, animae, personae, issuers, legati, x402Log, sponsiones, vestigiorum, modos,
     mandatores, corpora, collectiones, datasets, museSessions, editiones, publicationAdapters, sodalitates, provinciae, tabulae, testimonia,
     deposita, solutiones, petitiones, scholia,
     colloquia, dicta, querelae, memoriae, partnerRequests, partners,

@@ -21,7 +21,7 @@ import type { AuctorKey } from '../../flow/types.js'
 import type { ArtifactKind, FeedFilter } from '../../types/editio.js'
 import type { InvokeTarget, InvokeOpts, ModelCard, SaveFlowOpts, StatusView, ProvisionStudioOpts, StudioView, ProvisionTeeSessionOpts, TeeSessionView, CollectOpts, PublishOpts, DepositConfig, DepositQuote, MyDeposit } from './CrystalApi.js'
 import type { RarityReport } from '../../crystal/rarityReport.js'
-import type { PackView } from '../../ledger/stripePacks.js'
+import type { PackView, ProMonthlyView } from '../../ledger/stripePacks.js'
 import { ApiError, Errors } from './errors.js'
 import { makeLogger } from '../../lib/logger.js'
 import { credentialsFromHeaders, type Credentials, type ResolvedCaller } from './IdentityResolver.js'
@@ -230,6 +230,10 @@ export interface ApiFacade {
   listPacks(): PackView[]
   createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
+  // --- Pro Monthly subscription rail (Option B) ---
+  listProMonthlyPlan(): ProMonthlyView
+  createProMonthlyCheckout(auctor: AuctorKey, opts: { successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
+  handleProMonthlyWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; granted?: string; throttled?: boolean; message?: string } }>
 }
 
 /** The slice of IdentityResolver this router needs. */
@@ -530,6 +534,45 @@ export function createApiRouter(deps: {
         res.status(err.httpStatus).json({ error: err.toBody() })
       } else {
         log.error('unhandled stripe webhook error', { error: String((err as Error)?.stack ?? err) })
+        res.status(500).json({ error: Errors.internal().toBody() })
+      }
+    }
+  })
+
+  // GET /v1/payments/promonthly — the PUBLIC Pro Monthly plan for display (pricing page).
+  router.get('/payments/promonthly', wrap(async (_req, res) => {
+    res.json({ plan: api.listProMonthlyPlan() })
+  }))
+
+  // POST /v1/payments/promonthly/checkout — an IDENTIFIED caller subscribes to Pro Monthly
+  // (Stripe Checkout, mode: subscription). Returns the hosted-checkout URL to redirect to.
+  router.post(
+    '/payments/promonthly/checkout',
+    wrap(async (req, res) => {
+      const auctor = await auth(req)
+      const { successUrl, cancelUrl } = req.body ?? {}
+      const out = await api.createProMonthlyCheckout(auctor, {
+        ...(typeof successUrl === 'string' ? { successUrl } : {}),
+        ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+      })
+      res.status(200).json(out)
+    }),
+  )
+
+  // POST /v1/payments/promonthly/webhook — Stripe → server, same signature-gated boundary as
+  // the pack rail's webhook (shares one Stripe endpoint secret; a second URL just demuxes by
+  // event type inside the facade so a config error on one rail can't silently swallow the other).
+  router.post('/payments/promonthly/webhook', async (req, res): Promise<void> => {
+    const rawBody = (req as { rawBody?: string }).rawBody ?? JSON.stringify(req.body ?? {})
+    const signature = req.headers['stripe-signature'] as string | undefined
+    try {
+      const result = await api.handleProMonthlyWebhook({ rawBody, ...(signature ? { signature } : {}) })
+      res.status(result.status).json(result.body)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        res.status(err.httpStatus).json({ error: err.toBody() })
+      } else {
+        log.error('unhandled promonthly webhook error', { error: String((err as Error)?.stack ?? err) })
         res.status(500).json({ error: Errors.internal().toBody() })
       }
     }

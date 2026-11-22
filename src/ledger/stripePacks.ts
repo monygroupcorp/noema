@@ -111,3 +111,72 @@ export function packViews(): PackView[] {
     ...(p.id === bestId ? { bestRate: true } : {}),
   }))
 }
+
+// =============================================================================
+// PRO_MONTHLY -- the recurring subscription product (Option B, pricing-margin-and-packaging
+// goal; ruled 2026-11-13, requeued on the redo-dropped-rulings table, row 30).
+// =============================================================================
+//
+// $25/month, priced at parity with standard_25 (the healthiest-margin pack) rather than
+// discounted -- plus_50/studio_100 have too little margin headroom to fund a subscriber discount
+// once a recurring $0.30 Stripe flat fee hits every cycle. Value-add over a one-time pack is
+// rollover (up to 2 months) and queue priority, not a cheaper unit price. Margin ~= 8.3%/cycle --
+// clears its own cost from month 1, unlike the one-time option's multi-month break-even.
+export const PRO_MONTHLY = {
+  id: 'pro_monthly',
+  usd: 25,
+  amountCents: 2500,
+  /** Bundled impetus per cycle -- EXACTLY standard_25.impetus (parity, not a discount). */
+  monthlyImpetus: 57200n,
+  /** This cycle's grant + up to this many PRIOR cycles may stand unspent before the fair-use
+   *  cap throttles the next grant (3 total = "rollover up to 2 months", the ruled terms). */
+  rolloverCycles: 3,
+  label: 'Pro Monthly — 57,200 impetus/mo',
+} as const
+
+/** The standing-balance ceiling the fair-use cap throttles a renewal grant against: this
+ *  cycle's allowance plus up to 2 rolled-over cycles (the ruled terms). */
+export function proMonthlyFairUseCap(): bigint {
+  return PRO_MONTHLY.monthlyImpetus * BigInt(PRO_MONTHLY.rolloverCycles)
+}
+
+/**
+ * How much a renewal should grant, given the subscriber's impetus balance at the moment of
+ * renewal. Grants the full monthly allowance unless that would push the standing balance past
+ * the fair-use cap, in which case it grants only the remaining headroom (0 once already at or
+ * over cap) -- the subscriber is never charged more impetus than the cap just for hoarding.
+ * This reads the GENERAL wallet balance as a proxy for "unspent subscription impetus" (the
+ * ledger is fully fungible -- a spend doesn't carry which mint it drew down from), so a
+ * subscriber who is also sitting on a large credit-pack balance is throttled sooner than a
+ * precise subscription-only accounting would; that is the deliberate, documented approximation
+ * this first slice ships with, not an oversight.
+ */
+export function proMonthlyRenewalGrant(currentBalance: bigint): { grant: bigint; throttled: boolean } {
+  const cap = proMonthlyFairUseCap()
+  if (currentBalance >= cap) return { grant: 0n, throttled: true }
+  const headroom = cap - currentBalance
+  const grant = headroom < PRO_MONTHLY.monthlyImpetus ? headroom : PRO_MONTHLY.monthlyImpetus
+  return { grant, throttled: grant < PRO_MONTHLY.monthlyImpetus }
+}
+
+/** The PUBLIC, display-only projection of the Pro Monthly plan -- the pricing-page analogue of
+ *  `packViews()`. Carries no authority: the charged amount and the per-cycle grant stay
+ *  server-authoritative (`PRO_MONTHLY` + `proMonthlyRenewalGrant`), never anything derived here. */
+export interface ProMonthlyView {
+  id: string
+  usd: number
+  /** Display credits = `monthlyImpetus / 10`, matching `PackView.credits`. */
+  creditsPerMonth: number
+  rolloverCycles: number
+  label: string
+}
+
+export function proMonthlyView(): ProMonthlyView {
+  return {
+    id: PRO_MONTHLY.id,
+    usd: PRO_MONTHLY.usd,
+    creditsPerMonth: Number(PRO_MONTHLY.monthlyImpetus) / 10,
+    rolloverCycles: PRO_MONTHLY.rolloverCycles,
+    label: PRO_MONTHLY.label,
+  }
+}

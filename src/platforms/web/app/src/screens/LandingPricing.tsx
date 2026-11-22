@@ -31,9 +31,9 @@ export function LandingPricing() {
       <div className="lp-price-in">
         <h2>Buy a pack. Spend it whenever.</h2>
         <p className="lp-price-sub">
-          No subscription and no monthly seat — credits are a prepaid compute balance, they work
-          across every modality, and they do not expire. Read from the pack catalogue when this
-          page loads, never written into it.
+          Credits are a prepaid compute balance — they work across every modality and they do not
+          expire. Read from the pack catalogue when this page loads, never written into it. (Prefer
+          a standing monthly balance instead? See Pro Monthly on the full pricing page.)
         </p>
 
         <ol className="lp-price-ladder">

@@ -1306,6 +1306,105 @@ Buy a fixed credit pack with fiat: create a Stripe Checkout session for the chos
 }
 ```
 
+### GET /v1/payments/promonthly
+
+The public Pro Monthly subscription plan (Option B) for display on the pricing page.
+
+- **Auth:** public
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The public Pro Monthly subscription plan (Option B), for display on the pricing page.",
+  "properties": {
+    "plan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "usd": {
+          "type": "number",
+          "description": "Monthly price in whole USD."
+        },
+        "creditsPerMonth": {
+          "type": "number",
+          "description": "Display credits granted each cycle (impetus / 10) — parity with the standard_25 pack, not a discount."
+        },
+        "rolloverCycles": {
+          "type": "number",
+          "description": "How many cycles of standing allowance (this one plus rolled-over) the fair-use cap permits before a renewal throttles."
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "usd",
+        "creditsPerMonth",
+        "rolloverCycles",
+        "label"
+      ]
+    }
+  },
+  "required": [
+    "plan"
+  ]
+}
+```
+
+### POST /v1/payments/promonthly/checkout
+
+Subscribe to Pro Monthly: create a Stripe Checkout session (mode: subscription) and return the hosted-checkout URL. Requires an identified account; impetus is granted each cycle only by the signature-verified webhook, never at checkout time.
+
+- **Auth:** required
+
+**Request body:**
+
+```json
+{
+  "type": "object",
+  "description": "Subscribe to Pro Monthly via Stripe Checkout (mode: subscription). Server-priced; requires an identified account (a card de-anonymizes; an anon purse is rejected). The first and every later cycle grant impetus only via the signature-verified webhook, never at checkout time.",
+  "properties": {
+    "successUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on completed checkout; falls back to the server default."
+    },
+    "cancelUrl": {
+      "type": "string",
+      "description": "Optional redirect URL on abandoned checkout; falls back to the server default."
+    }
+  },
+  "required": []
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "type": "object",
+  "description": "The hosted Stripe Checkout session to redirect the caller to.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "The Stripe-hosted checkout URL to redirect the caller to."
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "The Stripe Checkout Session id."
+    }
+  },
+  "required": [
+    "url",
+    "sessionId"
+  ]
+}
+```
+
 ### POST /v1/models/import
 
 Import a model/LoRA by URL (Civitai/HuggingFace/direct) as a private, owner-scoped model — usable in your flows immediately; promoting it to the public catalogue is a separate publish.

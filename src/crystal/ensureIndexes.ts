@@ -81,6 +81,16 @@ export async function ensureIndexes(db: Db): Promise<void> {
       { testis: 1 },
       { name: 'testis_migration_legacy', unique: true, partialFilterExpression: { auctor: 'migration:legacy' } },
     ),
+    // Pro Monthly subscription grant (card fkhqv3 / helm/redo-dropped-rulings row 30) idempotency:
+    // UNIQUE + PARTIAL on `testis` over subscription-grant signa ONLY. `testis` =
+    // 'stripe:promonthly:<invoiceId>' — one per billed cycle (first charge + every renewal share
+    // this one path). Same durable cross-instance guard as the other stripe:* auctors above: a
+    // redelivered `invoice.paid` collides on the second issue() → the webhook replays the winner's
+    // grant instead of double-crediting the cycle. Scoped to auctor:'stripe:subscription'.
+    db.collection('signa').createIndex(
+      { testis: 1 },
+      { name: 'testis_stripe_subscription', unique: true, partialFilterExpression: { auctor: 'stripe:subscription' } },
+    ),
 
     // animae — soul / identity
     db.collection('animae').createIndex({ id: 1 }, { unique: true }),
