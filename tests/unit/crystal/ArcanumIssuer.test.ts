@@ -90,6 +90,36 @@ test('issue() throws for zero amount', async () => {
   )
 })
 
+// ── issue() — locks only the converted amount, not the whole note ──────────
+
+test('issue() leaves the remainder of a single note spendable while the conversion is in flight', async () => {
+  // One 500n note, converting 100n — the other 400n must never become unspendable,
+  // not even for the moment it takes the conversion to settle.
+  const { signorum, issuer } = await makeSetup(500n)
+
+  let releaseSettle: () => void = () => {}
+  const gate = new Promise<void>(resolve => { releaseSettle = resolve })
+  let notifySettleStarted: () => void = () => {}
+  const settleStarted = new Promise<void>(resolve => { notifySettleStarted = resolve })
+  const realSettle = signorum.settle.bind(signorum)
+  signorum.settle = async (...args: Parameters<typeof realSettle>) => {
+    notifySettleStarted()
+    await gate
+    return realSettle(...args)
+  }
+
+  const issuance = issuer.issue({ animaId: 'anima-1' }, 100n)
+  // Wait until settle() is actually entered — issue() only calls it once the
+  // note-selection/lock step has fully resolved, however many ticks that takes.
+  await settleStarted
+
+  const spendable = await signorum.balance({ animaId: 'anima-1' })
+  assert.equal(spendable, 400n, 'the unconverted 400n must stay spendable while settle() is pending')
+
+  releaseSettle()
+  await issuance
+})
+
 // ── issue() — Merkle proof returned ──────────────────────────────────────────
 
 test('issue() returns merkleRoot matching tree root', async () => {

@@ -40,6 +40,7 @@ tests/unit/crystal/collectPhoto.test.ts
 tests/unit/crystal/inferFamilia.test.ts
 tests/unit/crystal/MemoryFundamentorum.test.ts
 tests/unit/crystal/Census.test.ts
+tests/unit/crystal/ArcanumIssuer.test.ts
 tests/unit/crystal/MongoSignorum.reserveSplitAbort.test.ts
 tests/unit/crystal/Conductor.test.ts
 tests/unit/execution/dispatchInceptio.test.ts
