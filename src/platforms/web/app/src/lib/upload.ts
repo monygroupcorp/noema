@@ -1,4 +1,5 @@
 import { api } from './api';
+import { isHeicFile } from './fileIngest';
 
 /**
  * How many uploads are allowed in flight at once.
@@ -10,10 +11,27 @@ import { api } from './api';
  */
 export const UPLOAD_CONCURRENCY = 4;
 
+const HEIC_NAME_RE = /\.(heic|heif)$/i;
+
+/**
+ * A HEIC/HEIF straight off an iPhone, re-encoded to a JPEG `File` storage will actually sign.
+ * The one place this runs: every upload path (dataset, moodboard, avatar/banner) calls
+ * `uploadAsset`, so converting here covers all three without each needing its own copy of this.
+ * `heic2any` is dynamically imported so a batch with no HEIC in it never pays for the library.
+ */
+async function toUploadableFile(file: File): Promise<File> {
+  if (!isHeicFile(file)) return file;
+  const heic2any = (await import('heic2any')).default;
+  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  return new File([blob], file.name.replace(HEIC_NAME_RE, '.jpg'), { type: 'image/jpeg' });
+}
+
 /** Upload one file through the signed-PUT path and return its permanent public URL. */
 export async function uploadAsset(file: File): Promise<string> {
-  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
-  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
+  const toSend = await toUploadableFile(file);
+  const { signedUrl, permanentUrl } = await api.signUpload({ filename: toSend.name, contentType: toSend.type });
+  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': toSend.type }, body: toSend });
   if (!put.ok) throw new Error(`upload failed (${put.status})`);
   return permanentUrl;
 }

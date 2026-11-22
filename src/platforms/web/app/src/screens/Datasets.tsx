@@ -117,10 +117,11 @@ export function Datasets() {
     setFiles((cur) => mergeFiles(cur, incoming));
   }
 
-  // Storage signs only png/jpeg/webp (storageRouter's ALLOWED_CONTENT_TYPES); a GIF, an AVIF, or
-  // a HEIC straight off an iPhone is an image (isImageFile lets it through) but would reach the
-  // server and 400 there instead of here. Caught here instead, named and with a reason, rather
-  // than silently vanishing or waiting for the upload to fail.
+  // Storage signs only png/jpeg/webp (storageRouter's ALLOWED_CONTENT_TYPES); a GIF or an AVIF
+  // is an image (isImageFile lets it through) but would reach the server and 400 there instead
+  // of here. Caught here instead, named and with a reason, rather than silently vanishing or
+  // waiting for the upload to fail. A HEIC passes this gate too — uploadAsset converts it to a
+  // JPEG before it ever reaches storage.
   function addImageFiles(incoming: File[]) {
     const { ok, rejected } = partitionUploadable(imagesFrom(incoming));
     addFiles(ok);
@@ -344,7 +345,7 @@ export function Datasets() {
                   }}
                 >
                   <input
-                    type="file" multiple accept={modality === 'image' ? 'image/png,image/jpeg,image/webp' : 'video/*,audio/*'} disabled={busy}
+                    type="file" multiple accept={modality === 'image' ? 'image/png,image/jpeg,image/webp,image/heic,image/heif' : 'video/*,audio/*'} disabled={busy}
                     onChange={(e) => {
                       const picked = Array.from(e.target.files ?? []);
                       if (modality === 'image') { addImageFiles(picked); e.target.value = ''; } else setFiles(picked);
