@@ -2062,6 +2062,7 @@ async function main(): Promise<void> {
     { command: 'run',     description: 'Run any flow by name'                 },
     { command: 'chat',    description: 'Chat with an AI model'                },
     { command: 'flows',   description: 'Browse all available tools'           },
+    { command: 'train',   description: 'Train a LoRA on a dataset'            },
     { command: 'arm',     description: 'Set up a warm studio'                 },
     { command: 'status',  description: 'Balance and running gens'             },
     { command: 'wallet',  description: 'How to top up credits'                },
