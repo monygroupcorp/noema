@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.38.0](https://github.com/monygroupcorp/noema/compare/v5.37.0...v5.38.0) (2026-11-22)
+
+
+### Features
+
+* **crystal:** move the hosted image lanes onto gpt-image-2.6, meter by token usage ([#773](https://github.com/monygroupcorp/noema/issues/773)) ([d217345](https://github.com/monygroupcorp/noema/commit/d217345b15b48ed2291cc6f26729f9ebdfea26f6))
+* **crystal:** pin Comfy-Org's workflow-template library and query it for coverage ([#775](https://github.com/monygroupcorp/noema/issues/775)) ([cdce053](https://github.com/monygroupcorp/noema/commit/cdce0532fd40b41abf9e000a4c4f56fc2365acd2))
+* **web:** convert a HEIC photo to JPEG before it uploads ([#769](https://github.com/monygroupcorp/noema/issues/769)) ([763b605](https://github.com/monygroupcorp/noema/commit/763b60553929cc53515a9611ee33d3125e7d085a))
+* **web:** examples gallery, launchable and browsable, as a manifest for prod to fire ([#774](https://github.com/monygroupcorp/noema/issues/774)) ([ef20920](https://github.com/monygroupcorp/noema/commit/ef209207b56185e8a39178bdbbf500f6434737e6))
+
+
+### Bug Fixes
+
+* **allocutio:** drop the Try again button on a terminal training failure ([#767](https://github.com/monygroupcorp/noema/issues/767)) ([0199ab0](https://github.com/monygroupcorp/noema/commit/0199ab071cd18f4cc17728301d43b4ee0f1fb54d))
+* **arcanum:** reserve exact amount instead of locking a whole note ([#770](https://github.com/monygroupcorp/noema/issues/770)) ([1d0704f](https://github.com/monygroupcorp/noema/commit/1d0704fa350177d45f4a152226d3f6adaad7ed6d))
+* **crystal:** run test:crystal against an ephemeral mongo by default ([#772](https://github.com/monygroupcorp/noema/issues/772)) ([2960280](https://github.com/monygroupcorp/noema/commit/296028006bba62e02db5662b019c73759abdd270))
+* **ledger:** guard lock() against a contended signum ([#768](https://github.com/monygroupcorp/noema/issues/768)) ([a51659e](https://github.com/monygroupcorp/noema/commit/a51659e316275a2a5e971256d4c262896fd8f64e))
+
 ## [5.37.0](https://github.com/monygroupcorp/noema/compare/v5.36.0...v5.37.0) (2026-11-22)
 
 
