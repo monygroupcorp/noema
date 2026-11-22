@@ -93,6 +93,11 @@ _ws_connected   = threading.Event()  # set when WS listener has an active connec
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
 
+# urllib's default signature ("Python-urllib/3.x") is refused outright by the edge proxy in
+# front of the webhook URL (HTTP 403, "error code: 1010"), so a completion that rendered fine
+# would never reach the server. Every POST names itself explicitly instead.
+USER_AGENT = "noema-comfyrunner/1 (+https://noema.art)"
+
 def _http_get(url: str, timeout: int = 5) -> dict:
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.loads(r.read())
@@ -102,7 +107,7 @@ def _http_post(url: str, body: dict, timeout: int = 15) -> dict:
     data = json.dumps(body).encode()
     req = urllib.request.Request(
         url, data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
         method="POST",
     )
     try:

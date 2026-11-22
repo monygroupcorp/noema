@@ -31,6 +31,10 @@ interface WarmPodConfig {
   warmTtlMs?: number
 }
 
+/** Sent on every POST to the run's callback URL. That URL is public and sits behind an edge
+ *  proxy that refuses requests whose client signature looks like an unidentified script. */
+const CALLBACK_USER_AGENT = 'noema-crystal/1 (+https://noema.art)'
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
@@ -106,7 +110,7 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       try {
         const res = await this.fetchFn(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'User-Agent': CALLBACK_USER_AGENT },
           body: JSON.stringify(body),
         })
         if (res.ok) return

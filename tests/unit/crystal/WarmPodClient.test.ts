@@ -60,12 +60,18 @@ function makeComfyrunnerFetch(externusId: string, opts: {
   jobAccepted?: boolean
   sseEvents?: Array<Record<string, unknown>>
   webhookPayloads?: unknown[]
+  /** Headers of each webhook POST, in order (parallel to webhookPayloads). */
+  webhookHeaders?: Array<Record<string, string>>
+  /** HTTP status the webhook URL answers with (default 200). */
+  webhookStatus?: number
 } = {}): { fetch: typeof fetch; calls: FetchCall[]; webhookPayloads: unknown[] } {
   const {
     healthStatus = 'ready',
     jobAccepted = true,
     sseEvents = [{ type: 'complete' }],
     webhookPayloads = [],
+    webhookHeaders = [],
+    webhookStatus = 200,
   } = opts
   const runnerBase = `https://${externusId}-8080.proxy.runpod.net`
   const calls: FetchCall[] = []
@@ -85,7 +91,8 @@ function makeComfyrunnerFetch(externusId: string, opts: {
     }
     if (method === 'POST') {
       webhookPayloads.push(JSON.parse((init?.body as string) ?? '{}'))
-      return new Response('{}', { status: 200 })
+      webhookHeaders.push({ ...(init?.headers as Record<string, string> | undefined) })
+      return new Response(webhookStatus === 200 ? '{}' : 'error code: 1010', { status: webhookStatus })
     }
     return new Response('Not found', { status: 404 })
   // `typeof globalThis.fetch`, not `typeof fetch`: this binding is itself named `fetch`, so the
@@ -316,4 +323,56 @@ test('webhook: completes the actum from the SSE complete event, not just from th
   assert.equal(completed!.id, jobId)
   assert.deepEqual(completed!.output, [{ url: 'https://cdn.example.com/warm-out.png' }])
   assert.equal(completed!.executionTime, 1234)
+})
+
+// The callback URL is public and sits behind an edge proxy that refused the pod's own POST with
+// 403 "error code: 1010" for its anonymous client signature. Our own completion POST crosses the
+// same proxy, so it must name its client explicitly too.
+test('webhook: the SSE-driven completion POST names its client', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  const webhookHeaders: Array<Record<string, string>> = []
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+    sseEvents: [{
+      type: 'complete', output: [], executionTimeMs: 1,
+      webhookError: 'HTTP 403 from https://hook.example.com/done: error code: 1010',
+    }],
+    webhookPayloads, webhookHeaders,
+  })
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 200))
+
+  const i = (webhookPayloads as Array<{ status?: string }>).findIndex(p => p.status === 'COMPLETED')
+  assert.ok(i >= 0, 'expected a COMPLETED post')
+  const ua = webhookHeaders[i]['User-Agent']
+  assert.ok(ua && ua.length > 0, 'the completion POST must send an explicit User-Agent')
+})
+
+test('webhook: no callback URL → no completion POST', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', { sseEvents: [{ type: 'complete', output: [] }], webhookPayloads })
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {} })
+  await new Promise(r => setTimeout(r, 200))
+  assert.equal(webhookPayloads.length, 0)
+})
+
+test('webhook: a refused completion POST neither fails the run nor retires a healthy pod', async () => {
+  const materia = makeMateria()
+  const store = makeMateriaStore(materia)
+  const webhookPayloads: unknown[] = []
+  const { fetch } = makeComfyrunnerFetch('pod-xyz', {
+    sseEvents: [{ type: 'complete', output: [] }], webhookPayloads, webhookStatus: 403,
+  })
+  const client = new WarmPodClient(materia, store, fetch)
+  await client.submit({ input: {}, webhook: 'https://hook.example.com/done' })
+  await new Promise(r => setTimeout(r, 3_500))   // three attempts, 1s + 2s apart
+  const statuses = (webhookPayloads as Array<{ status?: string }>).map(p => p.status)
+  assert.ok(statuses.length >= 1 && statuses.every(st => st === 'COMPLETED'), `expected only COMPLETED attempts, saw ${statuses}`)
+  const last = store.updates.at(-1)?.patch as { status?: string } | undefined
+  assert.equal(last?.status, 'idle', 'the job succeeded on a healthy pod; it goes back to idle')
 })

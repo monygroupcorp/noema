@@ -141,6 +141,30 @@ test('COMPLETED payload calls completor.complete and returns 200', async () => {
   assert.deepEqual(completor.completed[0].exitus.exitus, { image: 'https://example.com/out.png' })
 })
 
+// 1a. Two completions for one job, the server's own (from the pod's SSE `complete` event) and
+// the pod's late webhook retry, must settle the run exactly once. Whichever lands second is
+// a 200 no-op, never a second settle and never an error the sender would keep retrying.
+test('a second COMPLETED for an already-completed actum is a 200 no-op (late pod webhook)', async () => {
+  const actum = makeActum()
+  const completor = makeCompletor()
+  const realComplete = completor.complete
+  completor.complete = async (a, exitus, auctor) => {
+    const done = await realComplete(a, exitus, auctor)
+    actum.status = 'completus'   // the store now reads terminal, as the real completor leaves it
+    return done
+  }
+  const deps: ExecutionWebhookDeps = { actorum: makeActorum(actum), completor }
+  const body = { id: 'job-abc-123', status: 'COMPLETED', output: [{ url: 'https://example.com/out.png' }], executionTime: 5000 }
+
+  const first = await handleExecutionWebhook(makeReq(body), deps)
+  const late = await handleExecutionWebhook(makeReq(body), deps)
+
+  assert.equal(first.status, 200)
+  assert.equal(late.status, 200)
+  assert.equal(late.body.success, true)
+  assert.equal(completor.completed.length, 1, 'the late webhook must not settle the run a second time')
+})
+
 // 1b. A training completion runs finality (host LoRA + register Intella) instead of projectExitus.
 test('COMPLETED training payload runs finality and bills real pod-seconds', async () => {
   const actum = makeActum({ modusId: 'modus.aitoolkit-training', aditus: { steps: 600, triggerWord: 'milady', familia: 'flux', ownerAnimaId: 'anima-3' } })
