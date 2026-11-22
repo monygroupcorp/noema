@@ -8,6 +8,7 @@ import {
   distinctStyles,
   applyExampleFilters,
   launchTarget,
+  isFired,
   type ShowcaseExample,
   type ExampleFeature,
   type ExampleKind,
@@ -18,6 +19,14 @@ const FEATURES: (ExampleFeature | 'All')[] = ['All', 'make', 'muse', 'collection
 const KINDS: (ExampleKind | 'All')[] = ['All', 'image', 'video'];
 
 function Media({ example }: { example: ShowcaseExample }) {
+  if (!isFired(example)) {
+    return (
+      <div className="empty" style={{ height: '100%' }}>
+        <div className="t">Not generated yet</div>
+        <div className="s">This row is real and launchable — its preview lands once it's fired.</div>
+      </div>
+    );
+  }
   if (example.kind === 'video') {
     return <video src={example.mediaUrl} poster={example.thumbUrl} muted loop playsInline preload="metadata" />;
   }
@@ -92,35 +101,22 @@ export function Examples() {
           </div>
         </div>
 
-        {SHOWCASE_EXAMPLES.length === 0 ? (
+        <div className="cat-toolbar cat-narrow" role="group" aria-label="Narrow the examples">
+          <FacetRow label="What it is" options={FEATURES} value={feature} onChange={setFeature}
+            display={(v) => (v === 'All' ? 'All' : FEATURE_LABEL[v as ExampleFeature])} />
+          <FacetRow label="Kind" options={KINDS} value={kind} onChange={setKind} />
+          <FacetRow label="Style" options={styles} value={style} onChange={setStyle} />
+        </div>
+
+        {shown.length === 0 ? (
           <div className="empty">
-            <div className="t">Nothing curated yet</div>
-            <div className="s">
-              This gallery is a deliberately small, hand-picked set — none has been added yet.
-              Browse the <Link to="/catalog">catalogue</Link> or start from the <Link to="/card">blank card</Link> in
-              the meantime.
-            </div>
+            <div className="t">No example matches that combination</div>
+            <div className="s">Clear a facet above to see more.</div>
           </div>
         ) : (
-          <>
-            <div className="cat-toolbar cat-narrow" role="group" aria-label="Narrow the examples">
-              <FacetRow label="What it is" options={FEATURES} value={feature} onChange={setFeature}
-                display={(v) => (v === 'All' ? 'All' : FEATURE_LABEL[v as ExampleFeature])} />
-              <FacetRow label="Kind" options={KINDS} value={kind} onChange={setKind} />
-              <FacetRow label="Style" options={styles} value={style} onChange={setStyle} />
-            </div>
-
-            {shown.length === 0 ? (
-              <div className="empty">
-                <div className="t">No example matches that combination</div>
-                <div className="s">Clear a facet above to see more.</div>
-              </div>
-            ) : (
-              <div className="feed-grid">
-                {shown.map((example) => <ExampleTile key={example.id} example={example} />)}
-              </div>
-            )}
-          </>
+          <div className="feed-grid">
+            {shown.map((example) => <ExampleTile key={example.id} example={example} />)}
+          </div>
         )}
       </div></div>
     </AppShell>
