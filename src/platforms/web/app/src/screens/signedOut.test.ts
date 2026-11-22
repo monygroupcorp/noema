@@ -42,8 +42,15 @@ describe('one rule for the signed-out visitor', () => {
   //    called `doorPath(...)` inline in the JSX — but `useDoorHere()` is a hook, so it is hoisted
   //    to the top of the component and the door is named ABOVE the card it belongs to. Every copy
   //    written in the idiom this app now uses went straight past it. `to={door` catches both.
+  //
+  //    A door link inside an `empty` panel is also how an ANON-CAPABLE screen points its own
+  //    local, partial empty state at the door (Datasets' "Your datasets live under an account",
+  //    beside a public catalogue the same screen still renders) — a different, allowed thing
+  //    from the whole-screen card, and `to={door` alone cannot tell them apart. The card is the
+  //    one panel that also carries the title AccountGate writes once, so requiring that exact
+  //    title is what keeps a sectional empty-state with its own door link from reading as a copy.
   it('builds the whole-screen sign-in card only in AccountGate', () => {
-    const card = /className="empty"[\s\S]{0,600}?to=\{door/;
+    const card = /className="empty"(?=[\s\S]{0,600}?to=\{door)[\s\S]{0,600}?Sign in to continue/;
     const dirs = [SCREENS, COMPONENTS, UI].flatMap(sources);
     const offenders = [...dirs, ...sources(SHELL).filter(([f]) => f !== GATE)]
       .filter(([, src]) => card.test(src))

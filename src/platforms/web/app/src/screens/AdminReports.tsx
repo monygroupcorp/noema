@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { doorPath } from '../lib/entry';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../shell/AppShell';
+import { AccountGate } from '../shell/AccountGate';
 import { Ic } from '../lib/icons';
 import { api, type QuerelaReport, type QuerelaKind, type QuerelaStatus, type QuerelaStanding, type QuerelaTakedown } from '../lib/api';
 import { useSession } from '../state/session';
@@ -41,11 +41,6 @@ function fmtDate(iso: string): string {
 
 export function AdminReports() {
   const { session, ready } = useSession();
-  // Where the door hands this visitor back once their session is live: the page they were
-  // already on. Turning someone away for want of an account should not also cost them the
-  // walk back to what they were doing.
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
   const [admin, setAdmin] = useState(false);
   const [kindTab, setKindTab] = useState<QuerelaKind | 'all'>('abuse');
   const [statusTab, setStatusTab] = useState<QuerelaStatus | 'all'>('new');
@@ -94,11 +89,7 @@ export function AdminReports() {
         {!ready && <div className="sub">Loading…</div>}
 
         {ready && !session && (
-          <div className="empty">
-            <div className="t">Sign in to continue</div>
-            <div className="s">This surface is restricted to the platform administrator.</div>
-            <Link className="btn" to={doorPath(here)}><Ic name="circle-user" /> Sign in</Link>
-          </div>
+          <AccountGate why="This surface is restricted to the platform administrator." />
         )}
 
         {ready && session && !admin && (
