@@ -39,4 +39,15 @@ export class Praefectus {
   async findByShareToken(shareToken: string): Promise<Materia | null> {
     return this.materiae.findWarm({ shareToken })
   }
+
+  /**
+   * Whether a pod running this image exists right now but is busy (not idle) — "one
+   * exists, it's just occupied" as distinct from "nothing of this image has ever warmed".
+   * `findWarm` already reports a miss for both; this is how a standard-tier dispatch tells
+   * which kind of miss it got, so it can queue for the busy pod instead of cold-starting a
+   * redundant second one. Defaults to false when the store has no `hasBusy` wired.
+   */
+  async hasBusy(imageRef: string): Promise<boolean> {
+    return (await this.materiae.hasBusy?.(imageRef)) ?? false
+  }
 }

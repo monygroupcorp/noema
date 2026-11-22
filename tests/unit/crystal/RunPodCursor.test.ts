@@ -569,6 +569,59 @@ test('economy strategy throws EconomyUnavailableError when no warm pod available
   )
 })
 
+// Reproduces noema warm-pod-second-make-lost-and-reprovisions clause 3: a standard-tier
+// request lands while the only matching warm pod is busy with another job. `findWarm`
+// correctly misses (it only matches idle pods), but the pod EXISTS — just occupied — so the
+// dispatch must queue for it rather than cold-start a redundant second pod.
+test('standard strategy throws WarmPodBusyError (queues) when the image match is busy, not absent', async () => {
+  const { WarmPodBusyError } = await import('../../../src/crystal/RunPodCursor.js')
+  const coldClient = makeClient('cold-should-not-run')
+  const fakePraefectus = {
+    findWarm: async () => null,          // the one warm pod of this image is busy, not idle
+    hasBusy: async () => true,           // ...but it exists
+  } as unknown as Praefectus
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  await assert.rejects(
+    () => cursor.run(makeActum()),
+    (err: Error) => err instanceof WarmPodBusyError && err.imageRef === 'stationthis/flux-comfyui:v1',
+  )
+  assert.equal(coldClient.calls.length, 0, 'must not cold-start a redundant pod while the warm one is just busy')
+})
+
+test('standard strategy still cold-starts when no pod of this image has ever warmed (hasBusy false)', async () => {
+  const coldClient = makeClient('cold-ok')
+  const fakePraefectus = {
+    findWarm: async () => null,
+    hasBusy: async () => false,          // nothing of this image exists at all
+  } as unknown as Praefectus
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: fakePraefectus,
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum())
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'cold-ok')
+  assert.equal(coldClient.calls.length, 1, 'nothing to wait for, so this cold-starts as always')
+})
+
+test('standard strategy cold-starts on a miss when the store has no hasBusy wired (today\'s behavior, unchanged)', async () => {
+  // makePraefectus() below builds a MateriaStore with no hasBusy method at all — this is
+  // the existing 'run() falls back to cold client when Praefectus returns null' shape.
+  const coldClient = makeClient('cold-job-2')
+  const cursor = new RunPodCursor(coldClient, makeCompile(), makeModorum(), makeActorum(), {
+    ...BASE_CONFIG,
+    praefectus: makePraefectus(null),
+    imageRefOf: () => 'stationthis/flux-comfyui:v1',
+  })
+  const result = await cursor.run(makeActum())
+  assert.equal((result as { kind: 'async'; externusJobId: string }).externusJobId, 'cold-job-2')
+  assert.equal(coldClient.calls.length, 1)
+})
+
 test('standard strategy (and absent) uses warm-then-cold behavior', async () => {
   // standard: finds warm pod → uses it
   const warmCalls: unknown[] = []

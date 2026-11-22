@@ -145,3 +145,19 @@ test('findByShareToken() returns null when pod is not idle', async () => {
   const result = await praefectus.findByShareToken('tok-abc')
   assert.equal(result, null)
 })
+
+// ── hasBusy() ─────────────────────────────────────────────────────────────────
+
+test('hasBusy() defaults to false when the store has no hasBusy wired', async () => {
+  const praefectus = new Praefectus(makeStore([]))
+  assert.equal(await praefectus.hasBusy('stationthis/flux-comfyui:v1'), false)
+})
+
+test('hasBusy() delegates to the store when wired', async () => {
+  const store = makeStore([])
+  ;(store as MateriaStore & { hasBusy: (imageRef: string) => Promise<boolean> }).hasBusy =
+    async (imageRef: string) => imageRef === 'stationthis/flux-comfyui:v1'
+  const praefectus = new Praefectus(store)
+  assert.equal(await praefectus.hasBusy('stationthis/flux-comfyui:v1'), true)
+  assert.equal(await praefectus.hasBusy('stationthis/sdxl:v2'), false)
+})

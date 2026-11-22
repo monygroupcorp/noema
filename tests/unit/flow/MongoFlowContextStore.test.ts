@@ -90,6 +90,64 @@ test('delete removes from actumIndex', () => {
   assert.equal(store.findByPendingActumId('actum-42'), undefined)
 })
 
+// NOTE: `abandon`/`settlePending` recompute the chat's storage key from the context's OWN
+// `platform`/`platformUserId`/`platformChatId` fields (there is no other way to find it back
+// at settle time) — so, unlike the plain get/set/delete tests above, these calls use the SAME
+// ids the context itself carries, matching how `FlowRouter` actually calls `set()` in
+// production (always with the ids it just put on the context).
+
+test('abandon vacates the slot but leaves the pending actum index intact', () => {
+  const { store } = makeStore()
+  const ctx = makeCtx({ pendingActumId: 'actum-99' })
+  store.set('telegram', 'user-1', 'chat-1', ctx)
+
+  const returned = store.abandon('telegram', 'user-1', 'chat-1')
+
+  assert.deepEqual(returned, ctx)
+  assert.equal(store.get('telegram', 'user-1', 'chat-1'), undefined)
+  assert.deepEqual(store.findByPendingActumId('actum-99'), ctx)
+})
+
+test('a context set after abandon does not disturb the abandoned actum index entry', () => {
+  const { store } = makeStore()
+  const first = makeCtx({ pendingActumId: 'actum-A' })
+  store.set('telegram', 'user-1', 'chat-1', first)
+  store.abandon('telegram', 'user-1', 'chat-1')
+
+  const second = makeCtx({ pendingActumId: 'actum-B' })
+  store.set('telegram', 'user-1', 'chat-1', second)
+
+  assert.deepEqual(store.findByPendingActumId('actum-A'), first, 'the abandoned run is still tracked')
+  assert.deepEqual(store.findByPendingActumId('actum-B'), second)
+})
+
+test('settlePending never clobbers a newer context that has since taken the slot', () => {
+  const { store } = makeStore()
+  const first = makeCtx({ pendingActumId: 'actum-first' })
+  store.set('telegram', 'user-1', 'chat-1', first)
+  store.abandon('telegram', 'user-1', 'chat-1')
+
+  const second = makeCtx({ pendingActumId: 'actum-second' })
+  store.set('telegram', 'user-1', 'chat-1', second)
+
+  store.settlePending('actum-first', { ...first, pendingActumId: undefined })
+
+  assert.equal(store.findByPendingActumId('actum-first'), undefined)
+  assert.deepEqual(store.get('telegram', 'user-1', 'chat-1'), second)
+})
+
+test('settlePending writes the next context back when the slot still holds the original', () => {
+  const { store } = makeStore()
+  const ctx = makeCtx({ pendingActumId: 'actum-99' })
+  store.set('telegram', 'user-1', 'chat-1', ctx)
+
+  const resolved = { ...ctx, pendingActumId: undefined }
+  store.settlePending('actum-99', resolved)
+
+  assert.equal(store.findByPendingActumId('actum-99'), undefined)
+  assert.deepEqual(store.get('telegram', 'user-1', 'chat-1'), resolved)
+})
+
 test('different chats with same platform+userId are independent', () => {
   const { store } = makeStore()
   const ctxA = makeCtx({ platformChatId: 'chat-A', intent: 'execute' })

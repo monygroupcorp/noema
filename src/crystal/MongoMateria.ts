@@ -86,6 +86,11 @@ export class MongoMateria implements MateriaStore {
     return doc ? fromDoc(doc) : null
   }
 
+  async hasBusy(imageRef: string): Promise<boolean> {
+    const doc = await this.col.findOne({ imageRef, status: { $nin: ['idle', 'terminated'] } })
+    return doc !== null
+  }
+
   async findActive(): Promise<Materia[]> {
     const docs = await this.col.find({ status: { $ne: 'terminated' } }).toArray()
     return docs.map(fromDoc)

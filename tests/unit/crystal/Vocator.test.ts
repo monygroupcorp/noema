@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { Vocator } from '../../../src/crystal/Vocator.js'
-import { EconomyUnavailableError } from '../../../src/crystal/RunPodCursor.js'
+import { EconomyUnavailableError, WarmPodBusyError } from '../../../src/crystal/RunPodCursor.js'
 import { MemoryLocorum } from '../../../src/execution/MemoryLocorum.js'
 import { MemoryActorum } from '../../../src/execution/MemoryActorum.js'
 import { MemoryModorum } from '../../../src/execution/MemoryModorum.js'
@@ -343,11 +343,41 @@ test('a run waiting on another image is in another line', async () => {
   assert.deepEqual((await rig.locorum.images()).sort(), [IMAGE, 'stationthis/wan-comfyui:v1'].sort())
 })
 
-test('only an empty-pool refusal waits — every other error is a failure', async () => {
+test('only an empty-pool or a busy-pod refusal waits — every other error is a failure', async () => {
   const rig = await makeRig()
   assert.equal(rig.vocator.imageAwaited(new EconomyUnavailableError(IMAGE)), IMAGE)
+  assert.equal(rig.vocator.imageAwaited(new WarmPodBusyError(IMAGE)), IMAGE)
   assert.equal(rig.vocator.imageAwaited(new Error('pod exploded')), null)
   assert.equal(rig.vocator.imageAwaited('not an error at all'), null)
+})
+
+// A standard-tier run that finds its warm pod genuinely busy (not absent) throws
+// WarmPodBusyError the same way an economy run throws EconomyUnavailableError — the line
+// treats both refusals identically: hold the run, call it forward when the pod frees
+// (noema warm-pod-second-make-lost-and-reprovisions, clause 3).
+test('a WarmPodBusyError refusal is queued and dispatched exactly like an empty economy pool', async () => {
+  const rig = await makeRig()
+  // Swap the cursor's refusal for the standard-tier "busy, not absent" error.
+  ;(rig.vocator as unknown as { deps: { cursorum: Cursorum } }).deps.cursorum = {
+    register: () => {},
+    resolve: () => ({
+      reserve: async () => 100n,
+      terminus: async () => TERMINUS_MS,
+      run: async (actum) => {
+        if (!rig.podFree.value) throw new WarmPodBusyError(IMAGE)
+        rig.podFree.value = false
+        rig.dispatched.push(actum.id)
+        return { kind: 'async', externusJobId: `job-${actum.id}` }
+      },
+    }),
+  }
+
+  const actumId = await rig.cast('anima-1')
+  assert.equal(rig.dispatched.length, 0, 'held, not dispatched, while the pod is busy')
+
+  rig.podFree.value = true
+  await rig.vocator.callNext(IMAGE)
+  assert.deepEqual(rig.dispatched, [actumId], 'dispatched onto the pod the moment it freed')
 })
 
 test('a dispatch that fails for a real reason settles the run and frees the pod for the next', async () => {

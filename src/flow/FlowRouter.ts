@@ -65,10 +65,13 @@ export class FlowRouter {
     const { store, onStep, onResolution } = this.deps
 
     // Abandon any existing context (in THIS chat only — other chats' contexts for the
-    // same user are untouched)
+    // same user are untouched). `abandon()` (not `delete()`) vacates the slot without
+    // touching the pending-actum index: if `existing` is still waiting on an async actum
+    // (e.g. a `/make` already running on a pod), that run stays deliverable through
+    // `handleActumComplete` even though a newer command now owns this chat's slot.
     const existing = store.get(platform, userId, chatId)
     if (existing) {
-      store.delete(platform, userId, chatId)
+      store.abandon(platform, userId, chatId)
       const abandonResolution: Resolution = { kind: 'abandon' }
       onResolution(existing, abandonResolution)
     }
@@ -163,12 +166,17 @@ export class FlowRouter {
 
     const outcome = await flow.handleCompletion(ctx, result)
 
+    // `settlePending` drops this actum from the pending index and, only if the chat's slot
+    // still holds THIS context, writes the outcome back there — a newer command that has
+    // since taken the slot (via `enter()`/`abandon()`) is never clobbered by this late
+    // completion. Delivery (`onStep`/`onResolution` below) always happens regardless, off
+    // `ctx`'s own captured platform/chat — it does not depend on the store's current state.
     if ('primitives' in outcome) {
-      // Update store — ctx.pendingActumId was cleared by handleCompletion
-      store.set(ctx.platform, ctx.platformUserId, ctx.platformChatId, ctx)
+      // ctx.pendingActumId was cleared by handleCompletion
+      store.settlePending(actumId, ctx)
       onStep(ctx, outcome)
     } else {
-      store.delete(ctx.platform, ctx.platformUserId, ctx.platformChatId)
+      store.settlePending(actumId, null)
       onResolution(ctx, outcome)
     }
 
