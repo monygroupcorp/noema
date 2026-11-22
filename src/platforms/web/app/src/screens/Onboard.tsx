@@ -116,7 +116,7 @@ export function Onboard() {
 // A password field with a reveal toggle. The toggle is not decoration: there is no email reset
 // here, so a password typed with a typo is a lost account. Being able to READ what you typed is
 // what a second "confirm" box was standing in for, in one field instead of two.
-function PasswordField({ value, onChange, placeholder, autoComplete, disabled }: {
+export function PasswordField({ value, onChange, placeholder, autoComplete, disabled }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
