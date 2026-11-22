@@ -9,16 +9,9 @@ import {
 import { useIdentity } from '../state/identity';
 import { useSession } from '../state/session';
 import { connectWallet } from '../lib/wallet';
+import { uploadAsset } from '../lib/upload';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-// Upload a file to R2 via the signed-PUT path, return its permanent public URL.
-async function uploadAsset(file: File): Promise<string> {
-  const { signedUrl, permanentUrl } = await api.signUpload({ filename: file.name, contentType: file.type });
-  const put = await fetch(signedUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file });
-  if (!put.ok) throw new Error(`upload failed (${put.status})`);
-  return permanentUrl;
-}
 
 export function Profile() {
   const [appr, setAppr] = useState<Appearance>({ accent: '#5b8cff', look: 'clean' });

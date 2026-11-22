@@ -30,21 +30,33 @@ const UPLOADABLE_IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
 
 /**
  * An image file the server will actually accept — narrower than `isImageFile`, which only
- * tells a real photo apart from folder junk. A GIF, an AVIF, or a HEIC straight off an iPhone
- * passes `isImageFile` (it IS an image) but fails this: storage signs only png/jpeg/webp, so an
- * upload of one of these would reach the server and 400 there instead of here, with nothing in
- * the UI to say why.
+ * tells a real photo apart from folder junk. A GIF or an AVIF passes `isImageFile` (it IS an
+ * image) but fails this: storage signs only png/jpeg/webp, so an upload of one of these would
+ * reach the server and 400 there instead of here, with nothing in the UI to say why.
  */
 export function isUploadableImageFile(file: File): boolean {
   if (file.type) return UPLOADABLE_IMAGE_TYPES.has(file.type);
   return UPLOADABLE_IMAGE_EXT_RE.test(file.name);
 }
 
-/** Partitions an already-image-filtered list into what storage will accept and what it won't. */
+const HEIC_TYPES = new Set(['image/heic', 'image/heif']);
+const HEIC_EXT_RE = /\.(heic|heif)$/i;
+
+/** A HEIC/HEIF photo — what an iPhone camera shoots by default. Storage never signs these
+ *  (same reason a GIF or AVIF isn't in `UPLOADABLE_IMAGE_TYPES`), so `uploadAsset` converts one
+ *  to a JPEG blob in the browser before it ever reaches the server; the picker just needs to
+ *  stop treating it as a dead end the way it treats a GIF. */
+export function isHeicFile(file: File): boolean {
+  if (file.type) return HEIC_TYPES.has(file.type);
+  return HEIC_EXT_RE.test(file.name);
+}
+
+/** Partitions an already-image-filtered list into what reaches storage — directly or, for a
+ *  HEIC, via the browser-side conversion `uploadAsset` does — and what storage will never take. */
 export function partitionUploadable(files: readonly File[]): { ok: File[]; rejected: File[] } {
   const ok: File[] = [];
   const rejected: File[] = [];
-  for (const f of files) (isUploadableImageFile(f) ? ok : rejected).push(f);
+  for (const f of files) (isUploadableImageFile(f) || isHeicFile(f) ? ok : rejected).push(f);
   return { ok, rejected };
 }
 
