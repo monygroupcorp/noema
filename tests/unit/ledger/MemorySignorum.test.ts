@@ -104,6 +104,25 @@ test('lock is atomic — no signa locked if any id is missing', async () => {
   assert.equal(hist[0].status, 'valid')
 })
 
+test('lock rejects a signum a competing actum already holds, touching nothing it was asked to lock', async () => {
+  const s = new MemorySignorum()
+  const a = await s.issue(makeSignum({ valor: 100n }))
+  const b = await s.issue(makeSignum({ valor: 200n }))
+
+  await s.lock([a.id], 'actum-winner')  // a is already spoken for
+
+  await assert.rejects(
+    () => s.lock([a.id, b.id], 'actum-loser'),
+    /not valid/i,
+  )
+
+  const hist = await s.history({ animaId: 'anima-1' })
+  const histA = hist.find(x => x.id === a.id)!
+  const histB = hist.find(x => x.id === b.id)!
+  assert.equal(histA.actumId, 'actum-winner', 'the winner keeps its lock untouched by the losing call')
+  assert.equal(histB.status, 'valid', 'b was never actually locked — the losing call must not claim it')
+})
+
 // ── release ──────────────────────────────────────────────────────────────────
 
 test('release restores locked signa to valid', async () => {

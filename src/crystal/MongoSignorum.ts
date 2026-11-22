@@ -122,10 +122,28 @@ export class MongoSignorum implements Signorum {
   }
 
   async lock(signaIds: string[], actumId: string): Promise<void> {
+    if (signaIds.length === 0) return
+    // Guarded write — mirrors `reserve`'s per-signum lock: only docs still `status:'valid'` flip.
+    // A racing caller that already took one of these ids leaves it unmatched here.
     await this.col.updateMany(
       { id: { $in: signaIds }, status: 'valid' },
       { $set: { status: 'locked', actumId } }
     )
+    // Re-read what this call actually won. Fewer than signaIds.length means contention (or an
+    // id that never existed) — fail the WHOLE call rather than let the caller record a signum
+    // as consumed that it did not actually lock.
+    const won = await this.col.find({ id: { $in: signaIds }, actumId, status: 'locked' }).toArray()
+    if (won.length < signaIds.length) {
+      const wonIds = won.map(d => d.id as string)
+      if (wonIds.length > 0) {
+        await this.col.updateMany(
+          { id: { $in: wonIds }, status: 'locked', actumId },
+          { $set: { status: 'valid' }, $unset: { actumId: '' } },
+        )
+      }
+      const lost = signaIds.filter(id => !wonIds.includes(id))
+      throw new Error(`lock contended: signum(s) not available: ${lost.join(', ')}`)
+    }
   }
 
   async release(signaIds: string[]): Promise<void> {

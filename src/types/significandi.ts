@@ -209,7 +209,9 @@ export interface Signorum {
   /**
    * Reserve signa for a pending actum — status: valid → locked.
    * Prevents double-spend between balance check and completion.
-   * Atomic — all or nothing.
+   * Atomic — all or nothing: if any signum has already left `valid` (locked or spent by a
+   * racing caller, or never existed), nothing this call locked is left locked and it rejects.
+   * A caller must never record a signum as consumed that this call did not actually win.
    */
   lock(signaIds: string[], actumId: string): Promise<void>
   /**
