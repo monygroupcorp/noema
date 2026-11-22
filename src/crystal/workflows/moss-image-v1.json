@@ -4,6 +4,7 @@
   "displayName": "MOSS-Image — text to image",
   "seedInputKey": "input_seed",
   "loraCapable": false,
+  "upstream": {"template": null, "note": "built from Comfy-Org's MOSS-Image: Text to Image template, which landed upstream after this repo's pin (src/crystal/upstream/, commit aaac56dd5cc5) — the catalogue does not carry it yet. Re-pin and name it image_moss_image_t2i once it does."},
   "inputTemplate": {
     "1": { "class_type": "UNETLoader",            "inputs": { "unet_name": "moss_image_sft_int8_convrot.safetensors", "weight_dtype": "default" } },
     "2": { "class_type": "CLIPLoader",            "inputs": { "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors", "type": "moss_image", "device": "default" } },

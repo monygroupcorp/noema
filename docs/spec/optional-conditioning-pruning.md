@@ -1,8 +1,11 @@
 # Optional conditioning inputs → compile-time branch pruning
 
-**Status:** design note (enabler for the unified `sdxl-plus` effect flow). Main-thread / Compiler work.
+**Status:** design note (enabler for a unified multi-control effect flow). Main-thread / Compiler work.
 **Depends on:** the i2i image-input primitive (ADR-0008 follow-up — runner-side download keyed on `Porta.type`).
-**Motivates:** `src/crystal/workflows/drafts/sdxl-plus-v1.draft.json`.
+**Motivates:** a single multi-control flow. The SDXL draft that first asked for this (`sdxl-plus`) is gone —
+the upstream template library carries no SDXL ControlNet flow to feed it from. The live subject is the
+Z-Image Fun Union ControlNet (`z-image-control-v1`), whose one patch already covers Canny, HED, Depth,
+Pose and MLSD: the same combinatorics, one weight, and the same need to prune a branch the user left empty.
 
 ## The user-facing goal
 

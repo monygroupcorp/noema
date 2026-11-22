@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": null, "note": "upstream carries no FLUX Schnell img2img template — its img2img flows are all on FLUX Dev, whose licence we do not hold. Hand-maintained until upstream ships a Schnell i2i or the Dev licence changes."},
   "inputTemplate": {
     "95": { "class_type": "LoadImage",            "inputs": { "image": "PLACEHOLDER" } },
     "96": { "class_type": "VAEEncode",            "inputs": { "vae": ["10", 0], "pixels": ["95", 0] } },

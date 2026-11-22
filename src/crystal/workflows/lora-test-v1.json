@@ -4,6 +4,7 @@
   "displayName": "Test fixture — loraCapable workflow for the trigger resolver path",
   "seedInputKey": "input_seed",
   "loraCapable": true,
+  "upstream": {"template": null, "note": "test fixture for the LoRA trigger resolver, not a flow: a three-node stub whose weight is a name and not a download."},
   "inputTemplate": {
     "6":  { "class_type": "EmptyLatentImage",   "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
     "13": { "class_type": "KSampler",           "inputs": { "seed": 88888888, "steps": 4 } },

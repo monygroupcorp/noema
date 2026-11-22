@@ -19,6 +19,7 @@ tests/unit/flow/FlowRouter.test.ts
 tests/unit/flow/FlowContextStore.test.ts
 tests/unit/crystal/workflowTemplates.test.ts
 tests/unit/crystal/WorkflowTemplateRegistry.test.ts
+tests/unit/crystal/upstreamTemplates.test.ts
 tests/unit/crystal/Compiler.sd15.test.ts
 tests/unit/crystal/Compiler.ltx.test.ts
 tests/unit/crystal/Compiler.wan22.test.ts

@@ -250,6 +250,60 @@ export const ESSENTIA_RUNMAKE_ZIMAGE_TURBO: Essentia = {
   mutatum: new Date('2026-06-26'),
 }
 
+// Z-Image Turbo — Canny control. The same substrate as the text-to-image flow, with Alibaba PAI's Fun
+// Union ControlNet patch applied over the DiT: the input image is edge-detected on the pod and the
+// generation follows those edges. The patch covers Canny, HED, Depth, Pose and MLSD from ONE weight;
+// this flow exposes Canny, which is the one the upstream template demonstrates, and the others become
+// siblings by swapping the preprocessor. Output size follows the control image, so there is no
+// width/height — an aspect the user did not choose would fight the control.
+export const ESSENTIA_RUNMAKE_ZIMAGE_CONTROL: Essentia = {
+  id: 'z-image-control',
+  nomen: 'Z-Image Turbo — edge control',
+  descriptio: 'Z-Image Turbo following the edges of an image you supply: the composition is taken from your picture, everything else from the prompt. Pick it over plain Z-Image when the layout matters — a pose, a building, a product silhouette you need kept.',
+  genus: 'atomicus',
+  versio: '1.0.0',
+  contentHash: '',        // set on registration via hashModus()
+  ministerium: 'runpod',
+  canonica: true,
+  categoria: 'image',
+
+  fundamentumId: 'z-image-turbo-comfyui',
+  fundamentumVersio: '1.1.0',
+
+  // The substrate carries the DiT, encoder and VAE; the control patch is this flow's alone.
+  intellae: [{ id: 'intella.z-image-fun-controlnet-union', role: 'model_patch' }],
+
+  aditus: {
+    prompt:           { type: 'text',  required: true,  description: 'Text prompt for image generation' },
+    image:            { type: 'image', required: true,  description: 'Image whose edges the generation follows' },
+    control_strength: { type: 'float', required: false, default: 1,    description: 'How strictly the edges are followed (0 = ignored, 1 = upstream default)' },
+    canny_low:        { type: 'float', required: false, default: 0.1,  description: 'Canny low threshold — lower finds more edges' },
+    canny_high:       { type: 'float', required: false, default: 0.32, description: 'Canny high threshold — lower finds more edges' },
+    max_dimension:    { type: 'int',   required: false, default: 1024, description: 'Longest side the control image is scaled to; the output matches it' },
+    steps:            { type: 'int',   required: false, default: 8,    description: 'Sampling steps (Turbo is distilled — few steps)' },
+    guidance:         { type: 'float', required: false, default: 1,    description: 'CFG guidance scale (Turbo runs near 1)' },
+    input_seed:       { type: 'int',   required: false,               description: 'Random seed — omit to shuffle' },
+  },
+
+  exitus: {
+    image: { type: 'image', description: 'Generated image' },
+  },
+
+  workflowTemplate: 'z-image-control',
+  workflowTemplateVersion: '1',
+  seedInputKey: 'input_seed',
+  defaultGenFlags: {
+    batchSize: 1,
+    seedStrategy: 'shuffle',
+    seedPlaceholder: 88888888,
+    privateMode: false,
+    vramGb: 24,
+  },
+
+  natum: new Date('2026-09-13'),
+  mutatum: new Date('2026-09-13'),
+}
+
 // Krea 2 Turbo — text to image (8-step distilled). The 12.9B single_mmdit_large_wide DiT on the
 // krea-turbo-comfyui substrate (Krea 2 Turbo unet + Qwen3-VL-4B encoder + Qwen-Image VAE). LoRA-capable
 // via the Coziness MultiLoraLoader: a LoRA trained on Krea 2 RAW (familia 'krea2') stacks from its
@@ -1419,6 +1473,7 @@ export const CANONICAL_ESSENTIAE: Essentia[] = [
   ESSENTIA_RUNMAKE_SDXL,
   ESSENTIA_RUNMAKE_CHROMA,
   ESSENTIA_RUNMAKE_ZIMAGE_TURBO,
+  ESSENTIA_RUNMAKE_ZIMAGE_CONTROL,
   ESSENTIA_RUNMAKE_KREA_TURBO,
   ESSENTIA_FLUXI2I,
   ESSENTIA_KONTEXTEDIT,

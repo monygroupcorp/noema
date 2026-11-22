@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": "image_flux2_klein_text_to_image"},
   "inputTemplate": {
     "70": { "class_type": "UNETLoader",             "inputs": { "unet_name": "flux-2-klein-4b-fp8.safetensors", "weight_dtype": "default" } },
     "71": { "class_type": "CLIPLoader",             "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "flux2", "device": "default" } },

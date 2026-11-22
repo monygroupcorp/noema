@@ -6,6 +6,7 @@
   "customNodes": [
     { "url": "https://github.com/john-mnz/ComfyUI-Inspyrenet-Rembg", "name": "ComfyUI-Inspyrenet-Rembg" }
   ],
+  "upstream": {"template": null, "note": "upstream's background removal is utility_birefnet_remove_background, a different model (BiRefNet) behind a different node; this one runs Inspyrenet, which downloads its own weights. Converting means adopting BiRefNet, not editing this graph."},
   "inputTemplate": {
     "95": { "class_type": "LoadImage",        "inputs": { "image": "PLACEHOLDER" } },
     "74": { "class_type": "InspyrenetRembg",  "inputs": { "image": ["95", 0], "torchscript_jit": "default" } },

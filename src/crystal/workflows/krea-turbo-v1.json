@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": "image_krea2_turbo_t2i", "note": "upstream also loads the krea2_darkbrush style LoRA, which we do not hold; the flow is the template without it."},
   "inputTemplate": {
     "6":  { "class_type": "EmptySD3LatentImage", "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } },
     "8":  { "class_type": "VAEDecode",           "inputs": { "samples": ["13", 0], "vae": ["10", 0] } },

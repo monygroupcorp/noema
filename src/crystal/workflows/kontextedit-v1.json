@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/skfoo/ComfyUI-Coziness", "name": "ComfyUI-Coziness" }
   ],
+  "upstream": {"template": "flux_kontext_dev_basic", "note": "upstream loads the fp8 encoder (t5xxl_fp8_e4m3fn_scaled); this graph loads the fp16 we already hold."},
   "inputTemplate": {
     "170": { "class_type": "LoadImage",            "inputs": { "image": "PLACEHOLDER" } },
     "37":  { "class_type": "UNETLoader",           "inputs": { "unet_name": "flux1-kontext-dev.safetensors", "weight_dtype": "default" } },

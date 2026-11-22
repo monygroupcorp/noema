@@ -7,6 +7,7 @@
   "customNodes": [
     { "url": "https://github.com/Lightricks/ComfyUI-LTXVideo", "name": "ComfyUI-LTXVideo" }
   ],
+  "upstream": {"template": "video_ltx2_3_i2v"},
   "inputTemplate": {
     "1":  { "class_type": "CheckpointLoaderSimple",   "inputs": { "ckpt_name": "ltx-2.3-22b-distilled.safetensors" } },
     "2":  { "class_type": "LTXAVTextEncoderLoader",   "inputs": { "text_encoder": "gemma_3_12B_it.safetensors", "ckpt_name": "ltx-2.3-22b-distilled.safetensors", "device": "default" } },

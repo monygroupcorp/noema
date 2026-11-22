@@ -495,6 +495,42 @@ export const INTELLA_QWEN3_4B_ZIMAGE: Intella = {
   natum: new Date('2026-06-26'),
 }
 
+// The Fun Union ControlNet patch for Z-Image Turbo (Alibaba PAI). One patch covers Canny, HED,
+// Depth, Pose and MLSD — the control image is preprocessed on the pod and the patch reads whichever
+// it is given, so the five control modes are one weight and not five. It loads through
+// ModelPatchLoader (models/model_patches/, NOT models/controlnet/) and applies over the base DiT via
+// QwenImageDiffsynthControlnet, which is Z-Image's loader too — the node is named for the
+// architecture it was written against, not for Qwen. Apache-2.0, ungated; URL verified 200 (3.1 GB)
+// on 2026-09-13. NOT mirrored to R2 yet, so HuggingFace is the only source.
+export const INTELLA_ZIMAGE_FUN_CONTROLNET: Intella = {
+  id: 'intella.z-image-fun-controlnet-union',
+  nomen: 'Z-Image Turbo Fun ControlNet Union',
+  license: 'apache-2.0',
+  commercialUse: 'yes',
+  genus: 'model',
+  architectura: 'controlnet',
+  familia: 'zimage',
+  parametri: 1_500_000_000,
+  sources: [
+    {
+      provenance: 'huggingface',
+      uri: 'https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors',
+      format: 'safetensors',
+      meta: {
+        repo: 'alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union',
+        branch: 'main',
+        filename: 'Z-Image-Turbo-Fun-Controlnet-Union.safetensors',
+      },
+    },
+  ],
+  dest: 'model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors',
+  sizeGb: 3.1,
+  versio: '1.0.0',
+  canonica: true,
+  contentRating: 'sfw',
+  natum: new Date('2026-09-13'),
+}
+
 // ── Krea 2 Turbo stack (12.9B single_mmdit_large_wide, Krea 2 Community License) ──────────────
 // The 8-step distilled turbo. Qwen3-VL-4B text encoder + the Qwen-Image VAE (qwen_image_vae.safetensors).
 // CLIPLoader type MUST be 'krea2': ComfyUI detects the qwen3vl_4b encoder as TEModel QWEN3VL_4B and only
@@ -1423,6 +1459,7 @@ export const CANONICAL_INTELLAE: Intella[] = [
   INTELLA_IMPRESSTATION_KLEIN,
   INTELLA_ZIMAGE_TURBO,
   INTELLA_QWEN3_4B_ZIMAGE,
+  INTELLA_ZIMAGE_FUN_CONTROLNET,
   INTELLA_KREA2_TURBO,
   INTELLA_QWEN3_VL_4B_KREA,
   INTELLA_QWEN_IMAGE_VAE,

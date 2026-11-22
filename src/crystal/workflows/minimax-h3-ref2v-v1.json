@@ -9,6 +9,7 @@
       "name": "ComfyUI-Coziness"
     }
   ],
+  "upstream": {"template": "video_minimax_h3_r2v"},
   "inputTemplate": {
     "1": {
       "class_type": "UNETLoader",

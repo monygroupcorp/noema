@@ -3,6 +3,7 @@
   "version": "1",
   "displayName": "FLUX Schnell — registry-only (no hardcoded URLs)",
   "seedInputKey": "input_seed",
+  "upstream": {"template": null, "note": "test fixture, not a flow: the same graph as flux-schnell with no baked url, to prove weights resolve from the Intella registry alone. Nothing upstream answers to it."},
   "inputTemplate": {
     "6":  { "class_type": "EmptyLatentImage",   "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
     "13": { "class_type": "KSampler",           "inputs": { "seed": 88888888, "steps": 4 } },
