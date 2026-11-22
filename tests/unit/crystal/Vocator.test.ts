@@ -133,8 +133,8 @@ test('a run submitted with no warm pod is queued rather than refused', async () 
 test('a queued run keeps its reservation — waiting is not a refund', async () => {
   const rig = await makeRig()
   await rig.cast('anima-1')
-  assert.equal(await lockedFor(rig, 'anima-1'), 1000n, 'the signum stays locked while it waits')
-  assert.equal(await rig.signorum.balance({ animaId: 'anima-1' }), 0n)
+  assert.equal(await lockedFor(rig, 'anima-1'), 100n, 'the reservation stays locked while it waits')
+  assert.equal(await rig.signorum.balance({ animaId: 'anima-1' }), 900n)
 })
 
 test('the place is reported on the ordinary progress rail, in order of arrival', async () => {

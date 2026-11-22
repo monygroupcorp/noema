@@ -105,20 +105,36 @@ export class ActumInceptor {
       throw new InsufficientFundsError(balance, reservation)
     }
 
-    // 4. Select valid signa to cover the reservation (greedy, smallest first)
-    const history = await signorum.history(by)
-    const valid = history.filter(s => s.status === 'valid').sort((a, b) => (a.valor < b.valor ? -1 : 1))
-    const selected: string[] = []
-    let covered = 0n
-    for (const s of valid) {
-      if (covered >= reservation) break
-      selected.push(s.id)
-      covered += s.valor
-    }
+    // 4. Pre-generate actum id so we can lock against it before writing
+    const actumId = randomUUID()
 
-    // 4a. Legacy commitment path: stamp nullifier, reject double-spend
+    let selected: string[] = []
     let nullifier: string | undefined
-    if ('commitment' in by) {
+    if ('animaId' in by) {
+      // 5. Identified path: reserve exactly `reservation`. `reserve` splits the note that
+      // over-covers into a locked child for the shortfall and a spendable child for the rest,
+      // so a single large note no longer locks the payer's whole balance against one run.
+      // Its guarded lock also closes the race between the balance read above and the lock.
+      const reserved = await signorum.reserve(by, reservation, actumId)
+      if (reserved.ok) {
+        selected = reserved.signaIds
+      } else if (!process.env.DEV_FREE_EXECUTION) {
+        log.warn('insufficient funds', { balance: reserved.available.toString(), required: reservation.toString() })
+        throw new InsufficientFundsError(reserved.available, reservation)
+      }
+    } else {
+      // 5. Legacy commitment path: select whole notes (greedy, smallest first), stamp the
+      // nullifier as the selected arcanum note's id, reject double-spend, then lock. Not routed
+      // through `reserve`: a split would consume the very note whose id is the nullifier.
+      const history = await signorum.history(by)
+      const valid = history.filter(s => s.status === 'valid').sort((a, b) => (a.valor < b.valor ? -1 : 1))
+      let covered = 0n
+      for (const s of valid) {
+        if (covered >= reservation) break
+        selected.push(s.id)
+        covered += s.valor
+      }
+
       const selectedSigna = valid.filter(s => selected.includes(s.id))
       const arcanumSignum = selectedSigna.find(s => s.forma === 'arcanum')
       if (arcanumSignum) {
@@ -128,13 +144,10 @@ export class ActumInceptor {
           throw new Error(`Arcanum already spent: nullifier ${nullifier} recorded on actum ${existing.id}`)
         }
       }
+
+      // 6. Lock selected signa against the pending actum
+      await signorum.lock(selected, actumId)
     }
-
-    // 5. Pre-generate actum id so we can lock against it before writing
-    const actumId = randomUUID()
-
-    // 6. Lock selected signa against the pending actum
-    await signorum.lock(selected, actumId)
 
     // 7. Create the actum record — release locks if this fails (atomicity)
     try {

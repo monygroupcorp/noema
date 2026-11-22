@@ -4,6 +4,7 @@ import type { Modus } from '../../../src/types/modus.js'
 import type { Actum } from '../../../src/types/actum.js'
 import type { Signum, Signa } from '../../../src/types/significandi.js'
 import type { Cursor, Actorum, Cursorum, Inceptio } from '../../../src/types/cursus.js'
+import { MemorySignorum } from '../../../src/ledger/MemorySignorum.js'
 import { ActumInceptor, InsufficientFundsError, DEFAULT_EXPIRAT_MS, MAX_TERMINUS_MS } from '../../../src/execution/ActumInceptor.js'
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,20 @@ function makeSignorum(signa: Signa = [makeSignum(500n)]) {
     listEarnings: async () => ({ entries: [] }),
     lockedBalance: unmodelled('Signorum', 'lockedBalance'),
     sessionBudget: unmodelled('Signorum', 'sessionBudget'),
-    reserve: unmodelled('Signorum', 'reserve'),
+    // Whole-note greedy cover, smallest first; splitting is MemorySignorum's to model (see the
+    // single-note test below, which runs against the real in-memory ledger).
+    reserve: async (_by: { animaId: string } | { commitment: string }, amount: bigint) => {
+      const ids: string[] = []
+      let covered = 0n
+      for (const s of [...signa].filter(x => x.status === 'valid').sort((a, b) => (a.valor < b.valor ? -1 : 1))) {
+        if (covered >= amount) break
+        ids.push(s.id)
+        covered += s.valor
+      }
+      if (covered < amount) return { ok: false as const, available: covered }
+      locked.push(...ids)
+      return { ok: true as const, signaIds: ids, locked: covered }
+    },
     findByTestis: unmodelled('Signorum', 'findByTestis'),
     ownsAny: unmodelled('Signorum', 'ownsAny'),
     settle: unmodelled('Signorum', 'settle'),
@@ -448,4 +462,37 @@ test('the bursa payment path stamps the same resolved deadline as the identified
     const lowerMs = a.expirat!.getTime() - before
     assert.ok(upperMs <= declared && lowerMs > declared - 60_000, `${label} path: expected ~${declared}ms, got ${upperMs}ms`)
   }
+})
+
+// A settle folds the payer's remainder into one note, so an identified payer routinely holds a
+// single large note. A run must lock only its reservation and leave the rest spendable, or a
+// second run on the same account reads a zero balance.
+test('a single large reward note is split: the run locks its reservation, the rest stays spendable', async () => {
+  const signorum = new MemorySignorum()
+  const note = await signorum.issue({ animaId: 'anima-1', forma: 'reward', valor: 47979n, auctor: 'settle:delta' })
+  const inceptor = new ActumInceptor({
+    modorum: makeModorum(makeModus()),
+    cursorum: makeCursorum(makeRunner(900n)),
+    signorum,
+    acta: makeActa(),
+  })
+
+  const actum = await inceptor.initiate(makeParams())
+
+  const rows = await signorum.history({ animaId: 'anima-1' })
+  const parent = rows.find(s => s.id === note.id)!
+  const locked = rows.filter(s => s.status === 'locked')
+  const valid = rows.filter(s => s.status === 'valid')
+  assert.equal(parent.status, 'spent', 'the parent note is consumed by the split, not locked whole')
+  assert.deepEqual(locked.map(s => [s.valor, s.actumId]), [[900n, actum.id]])
+  assert.deepEqual(valid.map(s => [s.valor, s.forma]), [[47079n, 'reward']])
+  assert.deepEqual(actum.signaConsumed, [locked[0]!.id])
+  assert.equal(await signorum.balance({ animaId: 'anima-1' }), 47079n)
+
+  // A second run on the same account starts against the spendable remainder.
+  const second = await inceptor.initiate(makeParams())
+  const lockedAfter = (await signorum.history({ animaId: 'anima-1' })).filter(s => s.status === 'locked')
+  assert.deepEqual(lockedAfter.map(s => s.valor).sort(), [900n, 900n])
+  assert.deepEqual(new Set(lockedAfter.map(s => s.actumId)), new Set([actum.id, second.id]))
+  assert.equal(await signorum.balance({ animaId: 'anima-1' }), 46179n)
 })
