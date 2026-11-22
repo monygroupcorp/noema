@@ -1,13 +1,32 @@
 # Live copy: /opt/noema/Caddyfile on the staging droplet (ssh host `noema`). Source of truth
 # is on the box, not here. See docs/ops/staging-deploy.md. (/root/hyperbot/Caddyfile is stale.)
+#
+# All four sites share one access log at /var/log/caddy/access.log (bind-mounted — see
+# deploy.sh's start_caddy, which must recreate the caddy_proxy container, not just reload it,
+# the first time this ships; see docs/ops/production-deploy.md "Logs"). Each request's `host`
+# field in that file tells the sites apart, so one rolled file is enough to count a day of
+# arrivals on any of them.
+(access_log) {
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 10
+            roll_keep_for 2160h
+        }
+    }
+}
+
 noema.art, www.noema.art {
+    import access_log
     reverse_proxy hyperbot:4000
 }
 
 app.noema.art {
+    import access_log
     reverse_proxy hyperbot:4000
 }
 
 staging.noema.art {
+    import access_log
     reverse_proxy hyperbot-staging:4000
 }
