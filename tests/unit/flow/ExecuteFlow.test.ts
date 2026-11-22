@@ -446,6 +446,26 @@ test('a failed run lands on CONFIGURE: Try again re-submits the same aditus, ✕
   assert.deepEqual(initiated, [{ prompt: 'a cat' }])
 })
 
+test('a training failure at step 0 lands on CONFIGURE with no Try again button', async () => {
+  const flow = new ExecuteFlow(makeDeps())
+  const ctx = makeCtx({
+    state: { step: 'AWAITING_COMPLETION', modusId: 'mod-1', aditus: { prompt: 'a cat' }, actumId: 'actum-1', browsePageIndex: 0 },
+    pendingActumId: 'actum-1',
+  })
+
+  const failed = await flow.handleCompletion(ctx, {
+    kind: 'failed',
+    error: 'aitoolkit training error at step 0: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED',
+  })
+  assertStep(failed)
+  const card = failed.primitives[0]
+  assert.equal(card.kind, 'Detail')
+  if (card.kind === 'Detail') {
+    assert.deepEqual(card.actions.map(a => a.id), ['cancel'], 'no Try again — the identical retry fails the same way')
+    assert.match(card.content, /will not succeed by retrying/i)
+  }
+})
+
 test('SELECT_CATEGORY + a stray message re-asks WITH the categories (never an empty keyboard)', async () => {
   const flow = new ExecuteFlow(makeDeps())
   const ctx = makeCtx()

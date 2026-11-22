@@ -48,6 +48,18 @@ const STAGE_COPY: Record<FailureStage, string> = {
   execute:   EXECUTE_COPY,
 }
 
+/** The pattern classifyError itself matches to name a training run that ran and failed on
+ *  its own terms (e.g. a cuDNN init error at step 0) — exported so a caller can tell this
+ *  one failure mode apart from the rest without re-deriving the regex. */
+const TRAINING_FAILURE_PATTERN = /training (error|failed) at step/i
+
+/** True when this failure is the terminal training case TRAINING_COPY describes: the
+ *  identical retry fails the same way, so a caller must not offer to retry it. */
+export function isTerminalTrainingFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return TRAINING_FAILURE_PATTERN.test(msg)
+}
+
 /** Maps low-level infra error messages to user-facing copy. */
 export function classifyError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
@@ -92,7 +104,7 @@ export function classifyError(err: unknown): string {
   // fails the same way (R2, 2026-11-16). Named ahead of EXECUTE_COPY, whose "Generation
   // failed … try again" is both the wrong noun for a training run and a false invitation:
   // this is terminal, not a transient pod fluke.
-  if (/training (error|failed) at step/i.test(msg))
+  if (TRAINING_FAILURE_PATTERN.test(msg))
     return TRAINING_COPY
 
   if (/comfyrunner.*job failed/i.test(msg) || /execution.*failed/i.test(msg))

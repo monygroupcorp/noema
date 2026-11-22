@@ -6,7 +6,7 @@ import { ownedAditusVerdict, type OwnedResourceStores } from '../../execution/ow
 import type { Signorum } from '../../types/significandi.js'
 import type { Actorum, ActumCompletor, Cursorum } from '../../types/cursus.js'
 import type { ActumInceptor } from '../../execution/ActumInceptor.js'
-import { classifyError } from '../../lib/classifyError.js'
+import { classifyError, isTerminalTrainingFailure } from '../../lib/classifyError.js'
 import { dispatchInceptio } from '../../execution/dispatchInceptio.js'
 import { isMediaRef } from '../../crystal/MediaFetcher.js'
 import { useTermsVerdict, type TermsAcceptance } from '../../crystal/useTerms.js'
@@ -323,15 +323,21 @@ export class ExecuteFlow implements Flow {
       // was never coming — the only exits were /cancel and /make.
       state.step = 'CONFIGURE'
       state.actumId = undefined
+      // A training run that died inside the job itself (e.g. a cuDNN error at step 0) fails
+      // identically on retry. Offering "Try again" there would contradict the terminal copy
+      // classifyError just gave the user, so it is left out for this one failure mode.
+      const terminal = isTerminalTrainingFailure(result.error)
       return {
         primitives: [{
           kind: 'Detail',
-          label: 'Generation failed',
+          label: terminal ? 'Failed' : 'Generation failed',
           content: classifyError(result.error),
-          actions: [
-            { id: 'run_again', label: 'Try again' },
-            { id: 'cancel',    label: '✕'         },
-          ],
+          actions: terminal
+            ? [{ id: 'cancel', label: '✕' }]
+            : [
+                { id: 'run_again', label: 'Try again' },
+                { id: 'cancel',    label: '✕'         },
+              ],
         }],
       }
     }
