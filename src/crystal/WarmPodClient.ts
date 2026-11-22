@@ -74,17 +74,8 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
         log.error(`Materia ${externusId} job failed`, { materiaId: id, externusId, error: (err as Error).message })
         if (params.webhook && !runnerAcceptedJob) {
           // comfyrunner never received the job — Crystal is the only one that can fire this webhook
-          for (let attempt = 0; attempt < 3; attempt++) {
-            if (attempt) await new Promise(r => setTimeout(r, 1000 * attempt))
-            try {
-              const res = await this.fetchFn(params.webhook, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: jobId, status: 'FAILED', error: (err as Error).message }),
-              })
-              if (res.ok) break
-            } catch (_) { /* retry */ }
-          }
+          await this._postWebhook(params.webhook, { id: jobId, status: 'FAILED', error: (err as Error).message })
+            .catch(() => {})
         }
       })
 
@@ -107,6 +98,25 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
   }
 
   // ── private ──────────────────────────────────────────────────────────────
+
+  private async _postWebhook(url: string, body: unknown): Promise<void> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await sleep(1000 * attempt)
+      try {
+        const res = await this.fetchFn(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (res.ok) return
+        lastError = new Error(`webhook POST returned ${res.status}`)
+      } catch (err) {
+        lastError = err
+      }
+    }
+    throw lastError
+  }
 
   private _runnerBase(): string {
     return SecurePodClient.runnerBase(this.materia.externusId)
@@ -142,7 +152,7 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
       onRunnerAccepted(true)
       log.info('job submitted to comfyrunner', { materiaId: id, externusId, jobId })
 
-      await awaitViaStream(
+      const streamResult = await awaitViaStream(
         this.fetchFn,
         runnerBase,
         jobId,
@@ -150,6 +160,17 @@ export class WarmPodClient implements RunPodClient, ModelInstallClient {
         (m) => { Object.assign(executio, m); void onMetrics?.({ ...executio }) },
         this.config.jobSilenceMs ?? 60_000,
       )
+      if (webhook) {
+        // Mirrors SecurePodClient's fix (noema pod-result-never-delivered): comfyrunner's own
+        // completion POST crosses the pod's egress path, which can fail invisibly and strand the
+        // run. The `complete` SSE event we just observed carries the same output the webhook
+        // would, so complete the actum ourselves through the same callback URL — idempotent with
+        // a late/successful pod webhook via the handler's existing terminal-status check.
+        await this._postWebhook(webhook, {
+          id: jobId, status: 'COMPLETED',
+          output: streamResult.output, executionTime: streamResult.executionTimeMs,
+        }).catch(err => log.warn('SSE-driven completion POST failed', { jobId, error: (err as Error).message }))
+      }
     } catch (err) {
       jobFailed = true
       failure = err
