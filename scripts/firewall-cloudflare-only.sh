@@ -15,6 +15,24 @@
 # rules for 80/443 to allow only those ranges, denying everyone else. SSH
 # (or any other port) is never touched.
 #
+# Applied 2026-11-21 and found NOT to hold: Caddy's 80/443 are Docker-
+# published (0.0.0.0:80->container, 0.0.0.0:443->container), so inbound
+# connections to those ports are DNAT'd and traverse the FORWARD chain, not
+# INPUT — ufw only filters INPUT, so none of the rules above ever see this
+# traffic. Docker inserts a jump to the DOCKER-USER chain at the top of
+# FORWARD specifically so operators can filter forwarded/published-port
+# traffic before Docker's own (wide-open, by design) rules accept it; this
+# script also rewrites DOCKER-USER (iptables + ip6tables) the same way it
+# rewrites ufw — Cloudflare ranges ACCEPTed, everything else to 80/443
+# DROPped — which is the layer that actually gates Docker-forwarded traffic.
+# Matched on `-m conntrack --ctorigdstport` (the port the client originally
+# dialed, before any DNAT) rather than `--dport`, so this holds regardless of
+# what internal port Caddy's container maps 80/443 onto. Every such rule is
+# scoped to `-i <public interface>` (autodetected via the default route), so
+# it can only match traffic arriving from the internet, never a container's
+# own outbound/return traffic (which arrives via the bridge interface,
+# docker0/br-*, not the public NIC) — container egress is never touched.
+#
 # Idempotent / safe to re-run: on each run it removes only
 #   (a) rules it previously added itself (tagged "cf-origin-lock"), and
 #   (b) any pre-existing rule that blanket-allows a *raw numeric* 80/443
@@ -187,6 +205,71 @@ done
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
   run ufw reload
+fi
+
+# --- DOCKER-USER: the chain that actually gates Docker-forwarded ports ---
+# (see the file header — ufw's INPUT rules above never see Docker-published
+# 80/443 traffic at all).
+
+IFACE="$(ip route show default 2>/dev/null | awk '/^default/ {print $5; exit}')"
+if [[ -z "${IFACE}" ]]; then
+  echo "[firewall-cloudflare] could not determine the public interface (ip route show default) — skipping the DOCKER-USER layer; ufw rules alone do not gate Docker-published ports" >&2
+else
+  # Rules for one chain, in desired TOP-TO-BOTTOM order (one spec per line):
+  # Cloudflare ACCEPTs for a port, then a catch-all DROP for that port, then
+  # the next port. `-i ${IFACE}` keeps this to inbound-from-the-internet only.
+  docker_user_rule_specs() {
+    local cidr_file="$1"
+    local port cidr
+    for port in "${PORTS[@]}"; do
+      while IFS= read -r cidr; do
+        [[ -z "${cidr}" ]] && continue
+        echo "-i ${IFACE} -p tcp -m conntrack --ctorigdstport ${port} -s ${cidr} -j ACCEPT"
+      done < "${cidr_file}"
+      echo "-i ${IFACE} -p tcp -m conntrack --ctorigdstport ${port} -j DROP"
+    done
+  }
+
+  # DOCKER-USER always ends in a Docker-managed RETURN (and may hold other
+  # rules); every insert here uses "-I DOCKER-USER 1", so to land in the
+  # desired top-to-bottom order we must issue the inserts in the REVERSE of
+  # that order — the last command run ends up physically first.
+  insert_docker_user_rules() {
+    local bin="$1" cidr_file="$2"
+    local specs=()
+    mapfile -t specs < <(docker_user_rule_specs "${cidr_file}")
+    local i
+    for ((i = ${#specs[@]} - 1; i >= 0; i--)); do
+      # Safe to word-split: every token here is an iface name, a flag, a
+      # port number, or a CIDR — none contain spaces or glob characters.
+      # shellcheck disable=SC2086
+      run "${bin}" -I DOCKER-USER 1 ${specs[$i]} -m comment --comment "${TAG}"
+    done
+  }
+
+  remove_docker_user_rules() {
+    local bin="$1"
+    local nums
+    nums="$("${bin}" -L DOCKER-USER -n --line-numbers 2>/dev/null | grep -F "${TAG}" | awk '{print $1}' | sort -rn || true)"
+    [[ -z "${nums}" ]] && return 0
+    local n
+    for n in ${nums}; do
+      run "${bin}" -D DOCKER-USER "${n}"
+    done
+  }
+
+  apply_docker_user_chain() {
+    local bin="$1" cidr_file="$2" family="$3"
+    if ! command -v "${bin}" >/dev/null 2>&1 || ! "${bin}" -nL DOCKER-USER >/dev/null 2>&1; then
+      echo "[firewall-cloudflare] WARNING: no DOCKER-USER chain for ${bin} — ${family} traffic to a Docker-published 80/443 is not gated by this script" >&2
+      return 0
+    fi
+    remove_docker_user_rules "${bin}"
+    insert_docker_user_rules "${bin}" "${cidr_file}"
+  }
+
+  apply_docker_user_chain iptables "${V4_FILE}" "IPv4"
+  apply_docker_user_chain ip6tables "${V6_FILE}" "IPv6"
 fi
 
 echo "[firewall-cloudflare] done$([ "${DRY_RUN}" -eq 1 ] && echo ' (dry run, nothing changed)')"
