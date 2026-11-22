@@ -1,0 +1,11 @@
+# Installed on the production droplet at /etc/systemd/system/.
+[Unit]
+Description=Daily refresh of the Cloudflare-only origin firewall rules
+
+[Timer]
+OnCalendar=*-*-* 03:41:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

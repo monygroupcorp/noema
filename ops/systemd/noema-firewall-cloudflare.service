@@ -1,0 +1,12 @@
+# Installed on the production droplet at /etc/systemd/system/.
+# Runs scripts/firewall-cloudflare-only.sh against the deploy checkout at
+# /opt/noema. See docs/ops/origin-firewall-cloudflare.md.
+[Unit]
+Description=Restrict tcp/80+443 to Cloudflare's published IP ranges
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/noema
+ExecStart=/opt/noema/scripts/firewall-cloudflare-only.sh
