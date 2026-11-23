@@ -67,5 +67,30 @@ class OutboundUserAgentTests(unittest.TestCase):
         self.assertEqual(_Recorder.received[0]["body"]["status"], "FAILED")
 
 
+class LoraDownloadRaceTests(unittest.TestCase):
+    """A lora this job just downloaded onto a cold pod can still miss ComfyUI's own
+    model listing by the time the Coziness MultiLoraLoader resolves it — the node
+    raises "Unable to find lora with name '...'" even though the file landed on disk
+    correctly. That's worth one retry; a lora that was already present before this
+    job (or any other comfy error) is not."""
+
+    def test_flags_a_lora_miss_right_after_a_fresh_download(self):
+        err = "Unable to find lora with name 'FLUX-Vintage_Abstract_Film'"
+        self.assertTrue(r._is_fresh_download_lora_race(err, downloaded_count=5))
+
+    def test_does_not_flag_a_lora_miss_when_nothing_was_downloaded_this_job(self):
+        # All 5 required models were already on the pod — a genuinely missing/misnamed
+        # lora, not a download race. Retrying would just fail again.
+        err = "Unable to find lora with name 'FLUX-Vintage_Abstract_Film'"
+        self.assertFalse(r._is_fresh_download_lora_race(err, downloaded_count=0))
+
+    def test_does_not_flag_an_unrelated_comfy_error(self):
+        err = "CUDA out of memory"
+        self.assertFalse(r._is_fresh_download_lora_race(err, downloaded_count=5))
+
+    def test_does_not_flag_success(self):
+        self.assertFalse(r._is_fresh_download_lora_race(None, downloaded_count=5))
+
+
 if __name__ == "__main__":
     unittest.main()

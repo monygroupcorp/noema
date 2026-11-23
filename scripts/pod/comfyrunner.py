@@ -30,6 +30,7 @@ Job POST body:
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -436,9 +437,12 @@ def _install_models(models: list, job_id: str = "live-install") -> dict:
     }
 
 
-def _ensure_models(models: list, job_id: str) -> None:
+def _ensure_models(models: list, job_id: str) -> int:
+    """Downloads any missing models. Returns how many were actually downloaded this
+    call — `_process_job` uses this to tell a genuinely-absent lora from one that
+    just raced its own download onto this pod."""
     if not models:
-        return
+        return 0
 
     missing = [m for m in models if not _model_present(m)]
     present = len(models) - len(missing)
@@ -446,7 +450,7 @@ def _ensure_models(models: list, job_id: str) -> None:
 
     if not missing:
         _append_event(job_id, {"type": "models-ready", "downloaded": 0, "reused": present})
-        return
+        return 0
 
     errors: list[str] = []
     threads: list[threading.Thread] = []
@@ -492,6 +496,24 @@ def _ensure_models(models: list, job_id: str) -> None:
         raise RuntimeError(f"model download failed: {'; '.join(errors)}")
 
     _append_event(job_id, {"type": "models-ready", "downloaded": len(missing), "reused": present})
+    return len(missing)
+
+# ── Lora-availability race ──────────────────────────────────────────────────────
+# ComfyUI-Coziness's MultiLoraLoader resolves `<lora:name:weight>` tags against
+# ComfyUI's own `folder_paths.get_filename_list("loras")`, taken at execution time —
+# not against what comfyrunner just wrote to disk. On a cold pod, a lora this job
+# downloaded seconds earlier can still miss that listing, and the node raises instead
+# of the generic "missing model" ComfyUI gives for everything else — seen on a fresh
+# pod's first job, failing on a lora whose download had already finished.
+# One retry, a few seconds later, is enough: ComfyUI rescans on the next request.
+_LORA_MISSING_RE = re.compile(r"Unable to find lora with name '[^']*'")
+
+
+def _is_fresh_download_lora_race(comfy_error: "str | None", downloaded_count: int) -> bool:
+    """True when `comfy_error` is a Coziness "lora not found" raised in a job that
+    just downloaded at least one model — the signature of the race above, worth one
+    retry rather than failing the actum outright."""
+    return bool(comfy_error) and downloaded_count > 0 and _LORA_MISSING_RE.search(comfy_error) is not None
 
 # ── R2 upload ──────────────────────────────────────────────────────────────────
 
@@ -644,6 +666,59 @@ def _ensure_media_inputs(media_inputs: list, job_id: str) -> None:
             raise RuntimeError(f"media input fetch failed ({m['destFilename']}): {e}")
 
 
+def _submit_and_await_comfy(job_id: str, workflow: dict, start: float) -> "tuple[str, str | None]":
+    """Submits `workflow` to ComfyUI and waits for it to finish. Returns (prompt_id,
+    comfy_error) — comfy_error is None on success. Unlike a timeout (a genuinely dead
+    substrate, raised directly), a reported comfy_error is returned rather than raised
+    so the caller can decide whether it's worth one retry (see `_is_fresh_download_lora_race`)."""
+    result = _http_post(f"{COMFYUI_URL}/prompt", {"prompt": workflow, "client_id": CLIENT_ID})
+    prompt_id = result.get("prompt_id")
+    if not prompt_id:
+        raise RuntimeError(f"ComfyUI /prompt returned no prompt_id: {result}")
+
+    with _lock:
+        _jobs[job_id]["prompt_id"] = prompt_id
+        _prompt_to_job[prompt_id] = job_id
+
+    log.info(f"job {job_id} submitted to ComfyUI as {prompt_id}")
+    # Signal that ComfyUI accepted the prompt and execution has begun — lets the
+    # client distinguish a download stall from a ComfyUI execution/load stall.
+    _append_event(job_id, {"type": "workflow-submitted", "promptId": prompt_id})
+
+    # Wait for completion via WS push event, emitting a heartbeat while we
+    # wait. nodesExecuted staying 0 across heartbeats = stuck loading models
+    # (before any node runs); climbing = executing but slow.
+    comfy_event = _jobs[job_id]["comfy_event"]
+    deadline = time.time() + JOB_TIMEOUT
+    while not comfy_event.wait(timeout=15):
+        if time.time() >= deadline:
+            # Name the budget, the substrate it was sized for, and whether ANY node ran.
+            # nodesExecuted == 0 after the whole budget means the graph never started —
+            # stuck loading models, not sampling slowly — and that is the difference between
+            # "raise the budget" and "the substrate is broken" (noema-390/392).
+            with _lock:
+                stalled_nodes = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
+            where = "stalled loading models (no node ran)" if stalled_nodes == 0 \
+                else f"executing ({stalled_nodes} nodes ran)"
+            raise RuntimeError(
+                f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI "
+                f"(substrate {SUBSTRATE_REF or 'unknown'}; {where}). "
+                f"comfyui.log tail:\n{_tail_comfy_log()}"
+            )
+        # Backstop: the WS execution_success/error event can be missed (it's
+        # scoped to a clientId / lost across a reconnect), leaving the job hung
+        # while ComfyUI has actually finished. Poll /history authoritatively.
+        if _check_history_complete(job_id, prompt_id):
+            break
+        with _lock:
+            nodes_executed = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
+        _append_event(job_id, {"type": "waiting", "elapsedS": int(time.time() - start), "nodesExecuted": nodes_executed})
+
+    with _lock:
+        comfy_error = _jobs[job_id].get("comfy_error")
+    return prompt_id, comfy_error
+
+
 def _process_job(job_spec: dict) -> None:
     global _current_job
     job_id      = job_spec["jobId"]
@@ -669,58 +744,32 @@ def _process_job(job_spec: dict) -> None:
             _append_event(job_id, {"type": "comfy-ready"})
 
         # 2. Model preflight
-        _ensure_models(models, job_id)
+        downloaded_count = _ensure_models(models, job_id)
 
         # 2b. Media-input preflight — fetch i2i input files into ComfyUI's input/ dir
         # so the graph's LoadImage node finds them by filename.
         _ensure_media_inputs(media_inputs, job_id)
 
-        # 3. Submit workflow to ComfyUI
-        result = _http_post(f"{COMFYUI_URL}/prompt", {"prompt": workflow, "client_id": CLIENT_ID})
-        prompt_id = result.get("prompt_id")
-        if not prompt_id:
-            raise RuntimeError(f"ComfyUI /prompt returned no prompt_id: {result}")
+        # 3-4. Submit workflow to ComfyUI and wait for it to finish.
+        prompt_id, comfy_error = _submit_and_await_comfy(job_id, workflow, start)
 
-        with _lock:
-            _jobs[job_id]["prompt_id"] = prompt_id
-            _prompt_to_job[prompt_id] = job_id
-
-        log.info(f"job {job_id} submitted to ComfyUI as {prompt_id}")
-        # Signal that ComfyUI accepted the prompt and execution has begun — lets the
-        # client distinguish a download stall from a ComfyUI execution/load stall.
-        _append_event(job_id, {"type": "workflow-submitted", "promptId": prompt_id})
-
-        # 4. Wait for completion via WS push event, emitting a heartbeat while we
-        #    wait. nodesExecuted staying 0 across heartbeats = stuck loading models
-        #    (before any node runs); climbing = executing but slow.
-        comfy_event = _jobs[job_id]["comfy_event"]
-        deadline = time.time() + JOB_TIMEOUT
-        while not comfy_event.wait(timeout=15):
-            if time.time() >= deadline:
-                # Name the budget, the substrate it was sized for, and whether ANY node ran.
-                # nodesExecuted == 0 after the whole budget means the graph never started —
-                # stuck loading models, not sampling slowly — and that is the difference between
-                # "raise the budget" and "the substrate is broken" (noema-390/392).
-                with _lock:
-                    stalled_nodes = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
-                where = "stalled loading models (no node ran)" if stalled_nodes == 0 \
-                    else f"executing ({stalled_nodes} nodes ran)"
-                raise RuntimeError(
-                    f"job {job_id} timed out after {JOB_TIMEOUT}s waiting for ComfyUI "
-                    f"(substrate {SUBSTRATE_REF or 'unknown'}; {where}). "
-                    f"comfyui.log tail:\n{_tail_comfy_log()}"
-                )
-            # Backstop: the WS execution_success/error event can be missed (it's
-            # scoped to a clientId / lost across a reconnect), leaving the job hung
-            # while ComfyUI has actually finished. Poll /history authoritatively.
-            if _check_history_complete(job_id, prompt_id):
-                break
+        # A lora this job just downloaded can race ComfyUI's own model listing on a
+        # cold pod (see `_is_fresh_download_lora_race`) — one resubmit, a few seconds
+        # later, is enough for ComfyUI to see it. Not retried on a second miss: a
+        # real missing/misnamed lora should fail the actum, not loop.
+        if _is_fresh_download_lora_race(comfy_error, downloaded_count):
+            log.warning(f"job {job_id}: {comfy_error!r} right after downloading {downloaded_count} "
+                        f"model(s) this job — retrying once in case ComfyUI's lora listing raced it")
+            _append_event(job_id, {"type": "retrying", "reason": "lora-not-yet-visible"})
+            time.sleep(3)
             with _lock:
-                nodes_executed = sum(1 for e in _jobs[job_id]["events"] if e.get("type") == "node")
-            _append_event(job_id, {"type": "waiting", "elapsedS": int(time.time() - start), "nodesExecuted": nodes_executed})
+                job = _jobs[job_id]
+                _prompt_to_job.pop(prompt_id, None)
+                job["comfy_event"] = threading.Event()
+                job["comfy_complete"] = False
+                job["comfy_error"] = None
+            prompt_id, comfy_error = _submit_and_await_comfy(job_id, workflow, start)
 
-        with _lock:
-            comfy_error = _jobs[job_id].get("comfy_error")
         if comfy_error:
             raise RuntimeError(comfy_error)
 
