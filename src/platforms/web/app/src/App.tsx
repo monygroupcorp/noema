@@ -101,6 +101,13 @@ const MinimaxH3LicenseDoc = lazy(async () => {
   const [{ Doc }, { default: md }] = await Promise.all([import('./screens/Doc'), import('./content/minimax-h3-license.md?raw')]);
   return { default: () => <Doc md={md} /> };
 });
+// The B2B API Customer Agreement — the version a partner signs before a key is issued. Its
+// version id is `PARTNER_CONTRACT_VERSION` (src/crystal/partnerContract.ts), held equal to this
+// page's own `Version:` line by a hermetic guard.
+const ApiTermsDoc = lazy(async () => {
+  const [{ Doc }, { default: md }] = await Promise.all([import('./screens/Doc'), import('./content/api-terms.md?raw')]);
+  return { default: () => <Doc md={md} /> };
+});
 
 export function App() {
   return (
@@ -187,6 +194,10 @@ export function App() {
       <Route path="/legal/cookies" element={lazyEl(<CookiesDoc />)} />
       <Route path="/legal/terms" element={lazyEl(<TermsDoc />)} />
       <Route path="/legal/minimax-h3-license" element={lazyEl(<MinimaxH3LicenseDoc />)} />
+      {/* The B2B API Customer Agreement — the version a partner signs before a key is
+          issued. Its version id is `PARTNER_CONTRACT_VERSION` (src/crystal/partnerContract.ts),
+          held equal to this page's own `Version:` line by a hermetic guard. */}
+      <Route path="/legal/api-terms" element={lazyEl(<ApiTermsDoc />)} />
       <Route path="*" element={lazyEl(<Stub crumb="404" title="Not found" />)} />
     </Routes>
     </>

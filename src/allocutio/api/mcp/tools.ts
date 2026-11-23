@@ -14,7 +14,8 @@
 import type { CrystalApi, SaveFlowOpts, CollectOpts, ListRunsOpts, ListActivityOpts } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
 import type { IntelligensGenus } from '../../../types/intelligendi.js'
-import { ApiError } from '../errors.js'
+import type { PartnerUsageStore } from '../../../types/partnerUsage.js'
+import { ApiError, Errors } from '../errors.js'
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -70,6 +71,14 @@ export async function runFlowTool(
   /** The caller's origin (`cf-ipcountry`), threaded from the request by `mcpRouter` — same
    *  reason and same non-argument status as `keyMaxImpetusPerRun` (minimax-h3-territory-safeguard). */
   originCountry?: string,
+  /** The B2B meter (types/partnerUsage.ts), threaded from `mcpRouter` same as `keyPrefix` below.
+   *  Undefined on a deployment with no B2B program wired — same as `apiRouter`'s `deps.partnerUsage`. */
+  partnerUsage?: Pick<PartnerUsageStore, 'record'>,
+  /** The API key's stored prefix, present only when this session authenticated with a partner API
+   *  key — see `IdentityResolver.ResolvedCaller.keyPrefix`. `run_flow` is `invokeFlow` by another
+   *  door, so it meters the same way `POST /v1/runs` does (apiRouter.ts): without this, a partner
+   *  key's calls over MCP would run and bill but never land on the meter an invoice reads. */
+  keyPrefix?: string,
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
   try {
@@ -87,6 +96,12 @@ export async function runFlowTool(
         originCountry,
       },
     )
+    // The B2B meter's first half — see apiRouter.ts's identical block on `POST /v1/runs`.
+    if (partnerUsage && keyPrefix && 'animaId' in auctor) {
+      await partnerUsage
+        .record({ actumId: run.id, animaId: auctor.animaId, keyPrefix, modusId: run.modusId, calledAt: new Date() })
+        .catch(() => {})
+    }
     return ok({ run })
   } catch (e) {
     if (e instanceof ApiError) return errResult(e.code, e.message)
@@ -254,8 +269,17 @@ export async function collectTool(
   /** The caller's origin (`cf-ipcountry`), threaded from the request by `mcpRouter` — never a
    *  tool argument, same reasoning as `runFlowTool`'s (minimax-h3-territory-safeguard). */
   originCountry?: string,
+  /** Present only for a partner API key — see `runFlowTool`. `collect` dispatches through
+   *  `CollectioCursor`, which the B2B meter is not wired into (apiRouter.ts's `authNotPartner`
+   *  refuses the same REST routes for the same reason), so this tool refuses it too rather than
+   *  let a partner key generate somewhere the meter can't see it. */
+  keyPrefix?: string,
 ): Promise<McpResult> {
   if (!auctor) return errResult('auth.missing', 'authentication required')
+  if (keyPrefix !== undefined) {
+    const e = Errors.partnerCollectionsUnmetered()
+    return errResult(e.code, e.message)
+  }
   try {
     return ok({ collection: await api.collect(auctor, { ...args, originCountry }) })
   } catch (e) {

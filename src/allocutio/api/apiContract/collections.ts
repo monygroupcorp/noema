@@ -184,7 +184,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'POST',
       path: '/collectiones',
-      summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).',
+      summary: 'Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id). Not available on a partner API key (`partner.unmetered_surface`) — use POST /v1/runs, which is metered.',
       auth: true,
       request: CollectRequestSchema,
       response: CollectionEnvelopeSchema,
@@ -192,7 +192,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'PATCH',
       path: '/collectiones/:id/tractus',
-      summary: 'Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.',
+      summary: 'Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`) — changing `modusId` here redirects a fired collection\'s dispatch, same as `extend`/`fire`.',
       auth: true,
       request: PatchTractusRequestSchema,
       response: CollectionEnvelopeSchema,
@@ -200,7 +200,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'POST',
       path: '/collectiones/:id/fire',
-      summary: 'Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.',
+      summary: 'Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft. Not available on a partner API key (`partner.unmetered_surface`).',
       auth: true,
       response: CollectionEnvelopeSchema,
     },
@@ -255,7 +255,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'POST',
       path: '/collectiones/:id/extend',
-      summary: 'Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.',
+      summary: 'Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).',
       auth: true,
       request: {
         type: 'object',
@@ -275,7 +275,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'POST',
       path: '/collectiones/:id/resume',
-      summary: 'Resume a paused Collection — continue dispatching toward the target. Owner-scoped.',
+      summary: 'Resume a paused Collection — continue dispatching toward the target. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).',
       auth: true,
       response: CollectionEnvelopeSchema,
     },
@@ -302,7 +302,7 @@ export const collectionsRoutes: RouteSpec[] = [
     {
       method: 'POST',
       path: '/collectiones/:id/pieces/:actumId/reject',
-      summary: 'Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.',
+      summary: 'Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).',
       auth: true,
       response: OkSchema,
     },

@@ -13,7 +13,8 @@ import { isSecretProvider, SECRET_PROVIDERS, DEFAULT_SECRET_IDLE_DAYS } from '..
 import { ownerKeyOf } from '../../../crystal/ownerKey.js'
 import { classifyModelLicense, activeConditionalLicenses, bindingCapUsd } from '../../../crystal/modelLicense.js'
 import { band, bindingCapMicroUsd } from '../../../crystal/licenseTripwire.js'
-import { handleStripeCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../../api/webhooks/stripeWebhook.js'
+import { handleStripeCheckout, handleInvoiceCheckout, handleStripeWebhook, type StripeGateway, type StripeWebhookResult } from '../../../api/webhooks/stripeWebhook.js'
+import type { PartnerInvoice } from '../../../types/partnerInvoice.js'
 import {
   handleProMonthlyCheckout,
   handleProMonthlyWebhook,
@@ -194,6 +195,29 @@ export abstract class CrystalApiAccount extends CrystalApiEditions {
   }
 
   /**
+   * Create a Stripe Checkout Session that SETTLES A B2B INVOICE. The amount is the invoice's own,
+   * frozen at issue from the meter; the client sends nothing but the redirect URLs.
+   *
+   * The caller (`apiRouter`) has already established that this invoice belongs to this partner —
+   * this facade takes the invoice itself rather than an id precisely so there is no second,
+   * unscoped lookup here that could be reached with somebody else's id.
+   */
+  async createInvoiceCheckout(
+    invoice: PartnerInvoice,
+    opts: { successUrl?: string; cancelUrl?: string } = {},
+  ): Promise<{ url: string; sessionId: string }> {
+    const gateway = this.resolveStripeGateway()
+    if (!gateway) throw Errors.paymentsUnavailable()
+    const result = await handleInvoiceCheckout(invoice, {
+      gateway,
+      ...(opts.successUrl ? { successUrl: opts.successUrl } : {}),
+      ...(opts.cancelUrl ? { cancelUrl: opts.cancelUrl } : {}),
+    })
+    if (!result.ok) throw new ApiError(result.code, result.message, result.status)
+    return { url: result.url, sessionId: result.sessionId }
+  }
+
+  /**
    * Handle a Stripe webhook delivery — signature-gated + idempotent per payment. Returns the
    * HTTP status + body for the router. A bad signature or a non-completed/malformed event is a
    * 400 (never a credit); a redelivery of an already-credited payment is a no-op that replays
@@ -209,6 +233,7 @@ export abstract class CrystalApiAccount extends CrystalApiEditions {
         redituum: this.deps.redituum,
         animae: this.deps.animae,
         gateway,
+        ...(this.deps.partnerInvoices ? { partnerInvoices: this.deps.partnerInvoices } : {}),
       },
     )
   }

@@ -1,4 +1,4 @@
-import type { Partner, PartnerStore } from '../types/partner.js'
+import type { Partner, PartnerBilling, PartnerStore } from '../types/partner.js'
 
 /** In-memory partner registry — the hermetic mirror of `MongoPartner`. Keyed by animaId. */
 export class MemoryPartner implements PartnerStore {
@@ -22,5 +22,10 @@ export class MemoryPartner implements PartnerStore {
   async setStatus(animaId: string, status: Partner['status']): Promise<void> {
     const p = this.store.get(animaId)
     if (p) this.store.set(animaId, { ...p, status })
+  }
+
+  async setBilling(animaId: string, billing: PartnerBilling): Promise<void> {
+    const p = this.store.get(animaId)
+    if (p) this.store.set(animaId, { ...p, billing })
   }
 }

@@ -176,6 +176,27 @@ export const Errors = {
   /** No `Partner` record for the caller's animaId, OR one exists but is `status: 'revoked'` —
    *  both look identical from the caller's side: "you don't have partner access". */
   notFoundPartner: () => new ApiError('not_found.partner', 'No partner record found for this account', 404, { expected: true }),
+  /** The caller is an approved partner but has not signed the CURRENT API Customer Agreement, so
+   *  no key can be issued. 422 — the request is well-formed and a precondition is unmet, which is
+   *  the caller's to fix (sign at `POST /v1/me/partner/contract`). `details.version` is the version
+   *  that needs signing, so a client can link straight to it rather than guess. */
+  partnerContractUnsigned: (version: string) =>
+    new ApiError('partner.contract_unsigned', `The API Customer Agreement (version ${version}) must be signed before a key is issued`, 422, { details: { version } }),
+  /** The caller is an approved partner with a signed agreement but no billing account, so there is
+   *  nowhere to send the invoice the key would run up. 422, same reasoning as above. */
+  partnerBillingRequired: () =>
+    new ApiError('partner.billing_required', 'A billing account must be on file before a key is issued', 422),
+  /** No invoice with this id belongs to the caller. A foreign invoice and a missing one are the
+   *  same answer — an invoice id must not confirm another customer's billing exists. */
+  notFoundPartnerInvoice: (id: string) => new ApiError('not_found.partner_invoice', `Invoice '${id}' not found`, 404),
+  /** An invoice already exists for this partner and period. 409: the period is billed once, and
+   *  re-issuing goes through voiding the first invoice, deliberately. */
+  conflictPeriodAlreadyBilled: (animaId: string, period: string) =>
+    new ApiError('conflict.period_already_billed', `A period is billed once — ${animaId} already has an invoice covering ${period}`, 409),
+  /** Payment was requested for an invoice that is not open — already paid, or voided. 409: the
+   *  request is fine and the resource's state refuses it. */
+  conflictInvoiceNotOpen: (id: string, status: string) =>
+    new ApiError('conflict.invoice_not_open', `Invoice '${id}' is ${status} and cannot be paid`, 409),
   notFoundQuerela: (id: string) => new ApiError('not_found.querela', `Report '${id}' not found`, 404),
   /**
    * NOT retryable, said out loud. A balance that cannot cover a reservation is a terminal
@@ -209,4 +230,15 @@ export const Errors = {
    *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */
   erasureNotImplemented: () => new ApiError('feature.not_implemented', 'Account erasure is not enabled on this deployment', 501),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
+  /** A partner API key was used against Collections, which dispatch many runs through a path the
+   *  B2B meter is not wired into yet. Refused rather than served uncounted: the agreement's own
+   *  section 6 promises every call is metered, and a key must never generate in a way that breaks
+   *  that promise. `POST /v1/runs` (and `run_flow` over MCP) are metered and stay available. */
+  partnerCollectionsUnmetered: () =>
+    new ApiError(
+      'partner.unmetered_surface',
+      'Collections are not yet metered for partner API keys — use POST /v1/runs instead',
+      403,
+      { retryable: false },
+    ),
 } as const

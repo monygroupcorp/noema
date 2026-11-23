@@ -206,6 +206,9 @@ const KNOWN_UNDECLARED = [
   '/api/v1/storage',
   '/api/v1/x402',
   '/v1/admin/partner-requests',
+  // The B2B billing desk — a small hand-rolled admin router, not built on the CrystalApi facade,
+  // same precedent as '/v1/admin/partner-requests' above.
+  '/v1/admin/partner-billing',
   '/v1/admin/reports',
   '/v1/auth',
   '/v1/colloquia',

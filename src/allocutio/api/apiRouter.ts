@@ -32,9 +32,13 @@ import type { RunEventHub } from './RunEventHub.js'
 import type { MeExporter } from '../../crystal/MeExporter.js'
 import type { Tabula } from '../../types/tabula.js'
 import type { Bursarum } from '../../types/bursa.js'
-import type { PartnerStore } from '../../types/partner.js'
+import type { Partner, PartnerStore } from '../../types/partner.js'
+import type { PartnerContractStore } from '../../types/partnerContract.js'
+import type { PartnerUsageStore } from '../../types/partnerUsage.js'
+import type { PartnerInvoice, PartnerInvoiceStore } from '../../types/partnerInvoice.js'
 import type { PartnerRequest, PartnerRequestStore } from '../../types/partnerRequest.js'
-import { rotatePartnerApiKey, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
+import { rotatePartnerApiKey, PartnerNotMintable, type MintPartnerApiKeyDeps } from '../../crystal/apiKeys.js'
+import { PARTNER_CONTRACT_VERSION, PARTNER_CONTRACT_PATH } from '../../crystal/partnerContract.js'
 
 const log = makeLogger('api:router')
 
@@ -186,8 +190,16 @@ export interface ApiFacade {
   addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   /** Replaces the run setup wholesale. Spends nothing and fires nothing. */
   setMuseSetup(auctor: AuctorKey, id: string, setup: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
-  /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm. */
-  steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<import('./CrystalApi.js').SteerProposalView>
+  /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm.
+   *  It is a normal metered run (one chat call): `keyPrefix`/`partnerUsage`, when given, meter it
+   *  against a partner key exactly as `POST /v1/runs` does — see `apiRouter.ts`'s own `/runs` block. */
+  steerMuseSession(
+    auctor: AuctorKey,
+    id: string,
+    input: unknown,
+    keyPrefix?: string,
+    partnerUsage?: Pick<PartnerUsageStore, 'record' | 'settle'>,
+  ): Promise<import('./CrystalApi.js').SteerProposalView>
   /** Appends one kept prompt to the session. Append-only; spends nothing and fires nothing. */
   keepMuseRoll(auctor: AuctorKey, id: string, roll: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
@@ -229,6 +241,10 @@ export interface ApiFacade {
   /** PUBLIC display catalog (no auth) — the single source the pricing + Funding UIs render from. */
   listPacks(): PackView[]
   createCheckout(auctor: AuctorKey, opts: { packId: string; successUrl?: string; cancelUrl?: string; allocutio?: string }): Promise<{ url: string; sessionId: string }>
+  /** Open a Stripe Checkout session that SETTLES a B2B invoice. Takes the invoice itself, not an
+   *  id: the route has already established it is the caller's, and a second lookup inside the
+   *  facade would be one that could be reached with somebody else's id. */
+  createInvoiceCheckout(invoice: PartnerInvoice, opts?: { successUrl?: string; cancelUrl?: string }): Promise<{ url: string; sessionId: string }>
   handleStripeWebhook(input: { rawBody: string; signature?: string }): Promise<{ status: number; body: { received: boolean; credited?: string; message?: string } }>
   // --- Pro Monthly subscription rail (Option B) ---
   listProMonthlyPlan(): ProMonthlyView
@@ -295,6 +311,20 @@ export function parseArtifactQuery(raw: unknown): { kind: ArtifactKind; id: stri
   return { kind: kind as ArtifactKind, id }
 }
 
+/**
+ * Parse one end of a `[from, to)` meter window out of the query string. ISO-8601, required,
+ * refused rather than defaulted: a billing window with a guessed edge is a bill nobody can check,
+ * and the caller always knows which period it means.
+ */
+function parseWindowBound(raw: unknown, name: 'from' | 'to'): Date {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw Errors.inputMalformed(`${name} is required — an ISO-8601 timestamp`)
+  }
+  const at = new Date(raw)
+  if (Number.isNaN(at.getTime())) throw Errors.inputMalformed(`${name} must be an ISO-8601 timestamp`)
+  return at
+}
+
 /** Owner key for the publish rate limiter — mirrors `CrystalApi._editionBy` (animaId | commitment;
  *  `publish` itself rejects a bare `bursaToken` caller, so there is no anon key to key by here). */
 function publishOwnerKey(auctor: AuctorKey): string | undefined {
@@ -330,6 +360,15 @@ export function createApiRouter(deps: {
    *  a request (the public intake and the admin queue are separate surfaces entirely). Omitted
    *  → 503 `internal.unavailable`, same reasoning as `partners` above. */
   partnerRequests?: PartnerRequestStore
+  /** The contract-signature book (types/partnerContract.ts). Backs the two `/me/partner/contract`
+   *  routes. Omitted → 503, same reasoning as `partners` above. */
+  partnerContracts?: PartnerContractStore
+  /** The B2B meter (types/partnerUsage.ts). Written by `POST /v1/runs` when the caller presented a
+   *  partner key, read by `GET /v1/me/partner/usage`. Omitted → calls are not metered and the usage
+   *  route answers 503; nothing else changes, so a deployment with no B2B program wires none. */
+  partnerUsage?: PartnerUsageStore
+  /** The invoice book (types/partnerInvoice.ts). Backs the invoice routes. Omitted → 503. */
+  partnerInvoices?: PartnerInvoiceStore
   /** Optional per-route rate-limit middleware (index.ts wires express-rate-limit; tests omit). */
   rateLimiters?: {
     /** Guards PUBLIC publishes (feed/marketplace — the moderation gate's surfaces) so the
@@ -436,6 +475,16 @@ export function createApiRouter(deps: {
   /** The identity-only view of `authCaller`, for every route that does not admit spend. */
   const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
+  /** Identity for a Collections route: refuses a partner API key outright (`Errors.
+   *  partnerCollectionsUnmetered`) rather than resolve it, because every Collections route that
+   *  reaches here dispatches through `CollectioCursor`, which the B2B meter is not wired into —
+   *  see `errors.ts`. Every other credential (session, bursa token) passes through unchanged. */
+  const authNotPartner = async (req: Request): Promise<AuctorKey> => {
+    const { auctor, keyPrefix } = await authCaller(req)
+    if (keyPrefix !== undefined) throw Errors.partnerCollectionsUnmetered()
+    return auctor
+  }
+
   /**
    * The caller's origin, ISO 3166-1 alpha-2, for `InvokeOpts.originCountry` / `CollectOpts.
    * originCountry` (`minimax-h3-territory-safeguard`). Cloudflare's `cf-ipcountry` is set on
@@ -472,7 +521,7 @@ export function createApiRouter(deps: {
       // own per-run ceiling, and `invokeFlow` applies it as a floor under the body's `maxImpetus`.
       // `keyMaxImpetusPerRun` is deliberately absent from the destructure above — it comes from
       // the resolved credential and there is no body field that can set or raise it.
-      const { auctor, maxImpetusPerRun } = await authCaller(req)
+      const { auctor, maxImpetusPerRun, keyPrefix } = await authCaller(req)
       const by = 'bursaToken' in auctor ? auctor : undefined
       const run = await api.invokeFlow(
         auctor,
@@ -487,6 +536,26 @@ export function createApiRouter(deps: {
           originCountry: originCountryOf(req),
         },
       )
+      // The B2B meter's first half. Written AFTER admission, so a call that was refused (no
+      // balance, a cap, a bad flow) is never billed for — the meter counts calls that ran, not
+      // calls that were attempted. `keyPrefix` is present only when the credential was an API
+      // key, so every other rail passes straight through and nothing is metered for it.
+      //
+      // Deliberately not awaited into the response's critical path, and deliberately swallowed:
+      // a meter write that fails must not fail a run the customer is already being charged for
+      // through the ledger. The completion webhook stamps the units onto this row later, keyed
+      // on the run id.
+      if (deps.partnerUsage && keyPrefix && 'animaId' in auctor) {
+        await deps.partnerUsage
+          .record({
+            actumId: run.id,
+            animaId: auctor.animaId,
+            keyPrefix,
+            modusId: run.modusId,
+            calledAt: new Date(),
+          })
+          .catch(err => log.error('partner meter: record failed', { actumId: run.id, error: String(err) }))
+      }
       const webhookUrl = req.body?.options?.webhookUrl
       if (deps.hub && typeof webhookUrl === 'string' && webhookUrl.length > 0) {
         deps.hub.setWebhook(run.id, webhookUrl)
@@ -713,7 +782,7 @@ export function createApiRouter(deps: {
   // ── Collections (Collectio) — a base modus expanded over a Tractus[] grid ──────
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const auctor = await authNotPartner(req)
     const { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId } = req.body ?? {}
     res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId, originCountry: originCountryOf(req) }) })
   }))
@@ -723,7 +792,7 @@ export function createApiRouter(deps: {
   // write. Re-derives provenance; frozen once fired. Omitted fields are left untouched.
   router.patch('/collectiones/:id/tractus', wrap(async (req, res) => {
     const { tractus, modusId, numerus } = req.body ?? {}
-    res.json({ collection: await api.patchCollectionDraft(await auth(req), String(req.params.id), {
+    res.json({ collection: await api.patchCollectionDraft(await authNotPartner(req), String(req.params.id), {
       ...(tractus !== undefined ? { tractus } : {}),
       ...(modusId !== undefined ? { modusId: String(modusId) } : {}),
       ...(numerus !== undefined ? { numerus: Number(numerus) } : {}),
@@ -732,7 +801,7 @@ export function createApiRouter(deps: {
 
   // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).
   router.post('/collectiones/:id/fire', wrap(async (req, res) => {
-    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
+    res.json({ collection: await api.fireCollection(await authNotPartner(req), String(req.params.id), originCountryOf(req)) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped), newest first and
@@ -764,7 +833,7 @@ export function createApiRouter(deps: {
 
   // POST /v1/collectiones/:id/extend — raise the target + fire another batch (incremental batches).
   router.post('/collectiones/:id/extend', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const auctor = await authNotPartner(req)
     const addCount = Number((req.body ?? {}).count)
     res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount, originCountryOf(req)) })
   }))
@@ -774,7 +843,7 @@ export function createApiRouter(deps: {
     res.json({ collection: await api.pauseCollection(await auth(req), String(req.params.id)) })
   }))
   router.post('/collectiones/:id/resume', wrap(async (req, res) => {
-    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
+    res.json({ collection: await api.resumeCollection(await authNotPartner(req), String(req.params.id), originCountryOf(req)) })
   }))
   router.post('/collectiones/:id/cancel', wrap(async (req, res) => {
     res.json({ collection: await api.cancelCollection(await auth(req), String(req.params.id)) })
@@ -786,7 +855,7 @@ export function createApiRouter(deps: {
     res.status(200).json({ ok: true })
   }))
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
-    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
+    await api.rejectCollectionPiece(await authNotPartner(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
     res.status(200).json({ ok: true })
   }))
 
@@ -1207,8 +1276,181 @@ export function createApiRouter(deps: {
     if (!deps.apiKeys) throw Errors.partnerDirectoryUnavailable()
     const partner = 'animaId' in auctor ? await deps.partners.find(auctor.animaId) : null
     if (!partner || partner.status === 'revoked') throw Errors.notFoundPartner()
-    const apiKey = await rotatePartnerApiKey(deps.apiKeys, (auctor as { animaId: string }).animaId)
-    res.status(200).json({ apiKey })
+    // `rotatePartnerApiKey` runs the same gate itself — this router is not the only way in, so
+    // the refusal lives at the mint. What happens here is the TRANSLATION of that refusal into
+    // the 422 the caller can act on; a `PartnerNotMintable` reaching the generic handler would
+    // be a 500 for a condition the caller can fix in one request.
+    try {
+      const apiKey = await rotatePartnerApiKey(deps.apiKeys, (auctor as { animaId: string }).animaId)
+      res.status(200).json({ apiKey })
+    } catch (err) {
+      if (err instanceof PartnerNotMintable) {
+        if (err.reason === 'contract_unsigned') throw Errors.partnerContractUnsigned(PARTNER_CONTRACT_VERSION)
+        if (err.reason === 'no_billing_account') throw Errors.partnerBillingRequired()
+        throw Errors.notFoundPartner()
+      }
+      throw err
+    }
+  }))
+
+  // ---------------------------------------------------------------------------
+  // The B2B contract, billing account, meter and invoices
+  // ---------------------------------------------------------------------------
+  // Five partner-only routes behind one gate. Each begins by resolving the caller and
+  // finding an ACTIVE Partner record, and 404s `not_found.partner` otherwise — a
+  // non-partner learns that it is not a partner and nothing else about this surface.
+
+  /** Resolve the caller to an ACTIVE partner, or refuse. The shared preamble of every route
+   *  below. 503 when the deployment wires no partner directory; 404 for a caller who is not an
+   *  active partner (revoked and never-approved are the same answer, as on `GET /me/partner`). */
+  async function partnerOf(req: Request): Promise<{ animaId: string; partner: Partner }> {
+    const auctor = await auth(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    const animaId = 'animaId' in auctor ? auctor.animaId : null
+    const partner = animaId ? await deps.partners.find(animaId) : null
+    if (!animaId || !partner || partner.status === 'revoked') throw Errors.notFoundPartner()
+    return { animaId, partner }
+  }
+
+  // GET /v1/me/partner/contract — which version of the API Customer Agreement is current,
+  // where to read it, and whether this partner has signed it. The route a client calls before
+  // asking for a key, so it can send its customer to the right page rather than discovering the
+  // refusal at the mint. `signedAt` is the moment this account became bound to THIS version;
+  // `signedVersions` is every version it has ever signed, so a partner can see its own history
+  // after the agreement is revised.
+  router.get('/me/partner/contract', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partnerContracts) throw Errors.partnerDirectoryUnavailable()
+    const current = await deps.partnerContracts.findCurrent(animaId, PARTNER_CONTRACT_VERSION)
+    const history = await deps.partnerContracts.list(animaId)
+    res.status(200).json({
+      version: PARTNER_CONTRACT_VERSION,
+      path: PARTNER_CONTRACT_PATH,
+      signed: current !== null,
+      ...(current ? { signedAt: current.signedAt, signerName: current.signerName } : {}),
+      signedVersions: [...new Set(history.map(h => h.version))],
+    })
+  }))
+
+  // POST /v1/me/partner/contract — sign the current version. Body: { version, signerName,
+  // signerTitle? }. The version is REQUIRED IN THE BODY and must equal the current one: a
+  // signature is an acceptance of a specific text, and accepting a version the client did not
+  // name is a signature on something it never read. A client holding a stale version gets a 400
+  // telling it which version is current, re-reads, and signs that.
+  //
+  // Signing again is allowed and appends — the store is append-only, and `findCurrent` keeps
+  // returning the earliest signature, so re-signing does not move the date this account became
+  // bound. It does not mint a key; that is still the separate, deliberate call.
+  router.post('/me/partner/contract', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partnerContracts) throw Errors.partnerDirectoryUnavailable()
+    const { version, signerName, signerTitle } = req.body ?? {}
+    if (version !== PARTNER_CONTRACT_VERSION) {
+      throw Errors.inputMalformed(`version must be the current agreement version, '${PARTNER_CONTRACT_VERSION}'`)
+    }
+    if (typeof signerName !== 'string' || signerName.trim().length === 0) {
+      throw Errors.inputMalformed('signerName is required — the name of the person signing')
+    }
+    if (signerTitle !== undefined && typeof signerTitle !== 'string') {
+      throw Errors.inputMalformed('signerTitle must be a string when given')
+    }
+    const signature = await deps.partnerContracts.sign({
+      animaId,
+      version: PARTNER_CONTRACT_VERSION,
+      signerName: signerName.trim(),
+      ...(signerTitle ? { signerTitle: signerTitle.trim() } : {}),
+    })
+    res.status(200).json({
+      version: signature.version,
+      signedAt: signature.signedAt,
+      signerName: signature.signerName,
+      ...(signature.signerTitle !== undefined ? { signerTitle: signature.signerTitle } : {}),
+    })
+  }))
+
+  // PUT /v1/me/partner/billing — set (or replace) the billing account invoices are issued
+  // against. Body: { billingEmail, billedTo, netDays }. Self-serve, like the key: the admin who
+  // approved the application does not know where the partner's invoices should go.
+  //
+  // Replacing it does not rewrite invoices already issued — each carries its own copy of who was
+  // billed and where, frozen at issue.
+  router.put('/me/partner/billing', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partners) throw Errors.partnerDirectoryUnavailable()
+    const { billingEmail, billedTo, netDays } = req.body ?? {}
+    if (typeof billingEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billingEmail.trim())) {
+      throw Errors.inputMalformed('billingEmail must be a valid email address')
+    }
+    if (typeof billedTo !== 'string' || billedTo.trim().length === 0) {
+      throw Errors.inputMalformed('billedTo is required — the legal entity to bill')
+    }
+    if (typeof netDays !== 'number' || !Number.isInteger(netDays) || netDays < 0 || netDays > 120) {
+      throw Errors.inputMalformed('netDays must be a whole number of days between 0 and 120')
+    }
+    const billing = { billingEmail: billingEmail.trim(), billedTo: billedTo.trim(), netDays, setAt: new Date() }
+    await deps.partners.setBilling(animaId, billing)
+    res.status(200).json({ billing })
+  }))
+
+  // GET /v1/me/partner/usage?from&to — the partner's OWN meter for a window: every call its keys
+  // made, what each one ran and cost, and the rollup an invoice for that window would be drawn
+  // from. This is what makes section 6 of the agreement checkable rather than assertable — the
+  // customer sees the same rows we bill from, before the invoice and after it.
+  //
+  // `from`/`to` are ISO-8601 and the window is half-open `[from, to)`. Both required: a default
+  // window would be a number typed here, and the caller knows which period it is asking about.
+  router.get('/me/partner/usage', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partnerUsage) throw Errors.partnerDirectoryUnavailable()
+    const from = parseWindowBound(req.query.from, 'from')
+    const to = parseWindowBound(req.query.to, 'to')
+    if (to.getTime() <= from.getTime()) throw Errors.inputMalformed('to must be after from')
+    const [calls, rollup] = await Promise.all([
+      deps.partnerUsage.list(animaId, from, to),
+      deps.partnerUsage.sumPeriod(animaId, from, to),
+    ])
+    res.status(200).json({ from, to, rollup, calls })
+  }))
+
+  // GET /v1/me/partner/invoices — this partner's invoices, newest issued first. Owner-scoped by
+  // the lookup itself; there is no route here that reads another customer's.
+  router.get('/me/partner/invoices', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partnerInvoices) throw Errors.partnerDirectoryUnavailable()
+    const statusRaw = req.query.status
+    const status = typeof statusRaw === 'string' ? statusRaw : undefined
+    if (status !== undefined && !['open', 'paid', 'void'].includes(status)) {
+      throw Errors.inputMalformed('status must be one of open, paid, void')
+    }
+    const invoices = await deps.partnerInvoices.list(
+      animaId,
+      status !== undefined ? { status: status as 'open' | 'paid' | 'void' } : undefined,
+    )
+    res.status(200).json({ invoices })
+  }))
+
+  // POST /v1/me/partner/invoices/:id/checkout — pay an open invoice. Returns a hosted Stripe
+  // Checkout URL for the invoice's own amount.
+  //
+  // This is NOT the credit-pack checkout, and the difference is the point of the whole item: a
+  // pack purchase credits impetus the buyer can spend, and this one settles a debt for compute
+  // already delivered. The session carries the invoice id in its metadata and NO packId, and the
+  // webhook branches on exactly that — it books revenue and issues no credit. See
+  // `stripeWebhook.ts`.
+  router.post('/me/partner/invoices/:id/checkout', wrap(async (req, res) => {
+    const { animaId } = await partnerOf(req)
+    if (!deps.partnerInvoices) throw Errors.partnerDirectoryUnavailable()
+    const id = String(req.params.id)
+    const invoice = await deps.partnerInvoices.find(id)
+    // A foreign invoice reads as missing: an id must not confirm another customer's billing.
+    if (!invoice || invoice.animaId !== animaId) throw Errors.notFoundPartnerInvoice(id)
+    if (invoice.status !== 'open') throw Errors.conflictInvoiceNotOpen(id, invoice.status)
+    const { successUrl, cancelUrl } = req.body ?? {}
+    const out = await api.createInvoiceCheckout(invoice, {
+      ...(typeof successUrl === 'string' ? { successUrl } : {}),
+      ...(typeof cancelUrl === 'string' ? { cancelUrl } : {}),
+    })
+    res.status(200).json(out)
   }))
 
   // GET /v1/me/runs — the caller's SETTLED spend history: per-run cost (+ derived USD),
@@ -1502,9 +1744,9 @@ export function createApiRouter(deps: {
   // resolved for the authenticated caller and its floor is passed INLINE into the run — the
   // interpreter never receives a session id and reads no session. Metered: one chat call.
   router.post('/data/muse/sessions/:id/steer', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const { auctor, keyPrefix } = await authCaller(req)
     const body = (req.body ?? {}) as { instruction?: unknown }
-    res.json(await api.steerMuseSession(auctor, String(req.params.id), body))
+    res.json(await api.steerMuseSession(auctor, String(req.params.id), body, keyPrefix, deps.partnerUsage))
   }))
 
   // POST /v1/data/muse/sessions/:id/kept — keep one rolled prompt against the session.

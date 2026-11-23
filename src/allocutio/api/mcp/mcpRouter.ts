@@ -13,6 +13,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 
 import type { CrystalApi } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
+import type { PartnerUsageStore } from '../../../types/partnerUsage.js'
 import { credentialsFromHeaders, type ResolvedCaller } from '../IdentityResolver.js'
 import { buildMcpServer } from './mcpServer.js'
 
@@ -23,6 +24,10 @@ export interface McpRouterDeps {
      *  the ceiling on a partner API key has to reach it here exactly as it reaches `POST /v1/runs`. */
     resolveCaller(creds: ReturnType<typeof credentialsFromHeaders>): Promise<ResolvedCaller>
   }
+  /** The B2B meter (types/partnerUsage.ts), same store `apiRouter` writes from `POST /v1/runs`.
+   *  Omitted → `run_flow` over MCP runs unmetered for a partner key, same as an omitted
+   *  `apiRouter` dep — a deployment with no B2B program wires none. */
+  partnerUsage?: Pick<PartnerUsageStore, 'record'>
 }
 
 /** The caller's origin, ISO 3166-1 alpha-2 (Cloudflare's `cf-ipcountry`) — see `apiRouter.ts`'s
@@ -41,19 +46,22 @@ export function createMcpRouter(deps: McpRouterDeps): Router {
   const handle: express.RequestHandler = async (req, res) => {
     let auctor: AuctorKey | undefined
     let keyMaxImpetusPerRun: bigint | undefined
+    let keyPrefix: string | undefined
     try {
       const caller = await deps.identity.resolveCaller(credentialsFromHeaders(req.headers as Record<string, string | undefined>, req.body))
       auctor = caller.auctor
       keyMaxImpetusPerRun = caller.maxImpetusPerRun
+      keyPrefix = caller.keyPrefix
     } catch {
-      // Auth is optional here (public tools). A failure clears BOTH halves together — an
-      // identity that did not resolve carries no ceiling to apply, and the spend-admitting
+      // Auth is optional here (public tools). A failure clears every half together — an
+      // identity that did not resolve carries no ceiling or key to apply, and the spend-admitting
       // tools refuse an absent auctor anyway.
       auctor = undefined
       keyMaxImpetusPerRun = undefined
+      keyPrefix = undefined
     }
 
-    const server = buildMcpServer(deps.api, auctor, keyMaxImpetusPerRun, originCountryOf(req))
+    const server = buildMcpServer(deps.api, auctor, keyMaxImpetusPerRun, originCountryOf(req), deps.partnerUsage, keyPrefix)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

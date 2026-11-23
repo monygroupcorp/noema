@@ -29,6 +29,8 @@ import { verifyApiKeyToAccountId, type ApiKeyEntry, type ApiKeyUsersCollection }
 import { makeCredentialAcceptors, type AcceptorDeps } from '../../../../src/allocutio/api/apiAcceptors.js'
 import { IdentityResolver as ApiIdentityResolver } from '../../../../src/allocutio/api/IdentityResolver.js'
 import type { Persona, PersonaGenus } from '../../../../src/types/persona.js'
+import { MemoryPartnerContract } from '../../../../src/crystal/MemoryPartnerContract.js'
+import { PARTNER_CONTRACT_VERSION } from '../../../../src/crystal/partnerContract.js'
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -72,7 +74,31 @@ function makePartnerStore(seed: Partner[]): PartnerStore {
       const p = byId.get(animaId)
       if (p) byId.set(animaId, { ...p, status })
     },
+    async setBilling(animaId, billing) {
+      const p = byId.get(animaId)
+      if (p) byId.set(animaId, { ...p, billing })
+    },
   }
+}
+
+/** A billing account, in the shape `assertMintable` requires to be present. The key routes below
+ *  are about key issuance, not about the gate — the gate has its own tests in apiKeys.test.ts —
+ *  so every partner these tests seed satisfies it, and only the tests that name a missing
+ *  condition leave one out. */
+const BILLING = { billingEmail: 'ap@acme.example', billedTo: 'Acme Studio Ltd', netDays: 30, setAt: new Date('2026-08-01T00:00:00.000Z') }
+
+/** A partner row that has met the mint conditions. */
+function billablePartner(animaId: string, over: Partial<Partner> = {}): Partner {
+  return { animaId, status: 'active', sourceRequestId: 'req-1', natum: new Date(), billing: BILLING, ...over }
+}
+
+/** A signature book holding a CURRENT-version signature for each of `animaIds`. */
+function signedBy(...animaIds: string[]): MemoryPartnerContract {
+  const contracts = new MemoryPartnerContract()
+  for (const animaId of animaIds) {
+    void contracts.sign({ animaId, version: PARTNER_CONTRACT_VERSION, signerName: 'A. Signer' })
+  }
+  return contracts
 }
 
 class FakeUsersCollection implements ApiKeyUsersCollection {
@@ -267,12 +293,10 @@ test('GET /v1/me/partner: 503 internal.unavailable when no PartnerStore is wired
 
 test('POST /v1/me/partner/api-key: mints a key that round-trips to the EXACT calling animaId (real chain, not assumed)', async () => {
   const animaId = 'anima-partner'
-  const partners = makePartnerStore([
-    { animaId, status: 'active', sourceRequestId: 'req-1', natum: new Date() },
-  ])
+  const partners = makePartnerStore([billablePartner(animaId)])
   const personae = fakePersonae()
   const usersCol = new FakeUsersCollection()
-  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol } })
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol, partners, contracts: signedBy(animaId) } })
   const s = await serve(router)
   try {
     const res = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
@@ -294,10 +318,10 @@ test('POST /v1/me/partner/api-key: mints a key that round-trips to the EXACT cal
 
 test('POST /v1/me/partner/api-key: rotating retires the PREVIOUS key — old one no longer resolves', async () => {
   const animaId = 'anima-partner'
-  const partners = makePartnerStore([{ animaId, status: 'active', sourceRequestId: 'req-1', natum: new Date() }])
+  const partners = makePartnerStore([billablePartner(animaId)])
   const personae = fakePersonae()
   const usersCol = new FakeUsersCollection()
-  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol } })
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae, usersCol, partners, contracts: signedBy(animaId) } })
   const s = await serve(router)
   try {
     const first = await postApiKey(s.base, { 'x-api-key': 'partner-key' })
@@ -321,7 +345,7 @@ test('POST /v1/me/partner/api-key: rotating retires the PREVIOUS key — old one
 test('POST /v1/me/partner/api-key: 404 not_found.partner for a non-partner caller — mints nothing', async () => {
   const partners = makePartnerStore([])
   const usersCol = new FakeUsersCollection()
-  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol } })
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol, partners, contracts: signedBy() } })
   const s = await serve(router)
   try {
     const res = await postApiKey(s.base, { 'x-api-key': 'stranger-key' })
@@ -332,8 +356,8 @@ test('POST /v1/me/partner/api-key: 404 not_found.partner for a non-partner calle
 })
 
 test('POST /v1/me/partner/api-key: unauthenticated caller gets 401 before any store lookup', async () => {
-  const partners = makePartnerStore([{ animaId: 'anima-partner', status: 'active', sourceRequestId: 'req-1', natum: new Date() }])
-  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol: new FakeUsersCollection() } })
+  const partners = makePartnerStore([billablePartner('anima-partner')])
+  const router = createApiRouter({ api: emptyApi, identity: fakeIdentity, partners, apiKeys: { personae: fakePersonae(), usersCol: new FakeUsersCollection(), partners, contracts: signedBy('anima-partner') } })
   const s = await serve(router)
   try {
     const res = await postApiKey(s.base)

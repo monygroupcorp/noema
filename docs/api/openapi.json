@@ -2960,6 +2960,497 @@
         }
       }
     },
+    "/me/partner/contract": {
+      "get": {
+        "summary": "Return the current B2B API Customer Agreement version, where it is published, and whether the authenticated partner has signed it. A key is issued only against a signature on the CURRENT version, so this is the route to call before asking for one. 404 not_found.partner when the caller is not an active partner.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The current API Customer Agreement, where to read it, and whether this partner has signed it.",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "description": "The version keys are currently issued against."
+                    },
+                    "path": {
+                      "type": "string",
+                      "description": "Where the agreement is published."
+                    },
+                    "signed": {
+                      "type": "boolean",
+                      "description": "Whether this account has signed the CURRENT version."
+                    },
+                    "signedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When this account first signed the current version. Absent when it has not."
+                    },
+                    "signerName": {
+                      "type": "string",
+                      "description": "Who signed the current version. Absent when it is unsigned."
+                    },
+                    "signedVersions": {
+                      "type": "array",
+                      "description": "Every agreement version this account has ever signed.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "path",
+                    "signed",
+                    "signedVersions"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Sign the current B2B API Customer Agreement. The body must name the version being accepted and it must equal the current one — a signature is an acceptance of a specific text, and a stale version is refused with input.malformed naming the current one. Signing again appends; the date this account became bound does not move. Does not issue a key.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The current API Customer Agreement, where to read it, and whether this partner has signed it.",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "description": "The version keys are currently issued against."
+                    },
+                    "path": {
+                      "type": "string",
+                      "description": "Where the agreement is published."
+                    },
+                    "signed": {
+                      "type": "boolean",
+                      "description": "Whether this account has signed the CURRENT version."
+                    },
+                    "signedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When this account first signed the current version. Absent when it has not."
+                    },
+                    "signerName": {
+                      "type": "string",
+                      "description": "Who signed the current version. Absent when it is unsigned."
+                    },
+                    "signedVersions": {
+                      "type": "array",
+                      "description": "Every agreement version this account has ever signed.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "path",
+                    "signed",
+                    "signedVersions"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "An acceptance of one specific version of the agreement.",
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "description": "The version being accepted. Must equal the current version, or the request is refused."
+                  },
+                  "signerName": {
+                    "type": "string",
+                    "description": "The name of the person signing."
+                  },
+                  "signerTitle": {
+                    "type": "string",
+                    "description": "The signer's role at the organization. Optional."
+                  }
+                },
+                "required": [
+                  "version",
+                  "signerName"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/partner/billing": {
+      "put": {
+        "summary": "Set or replace the billing account this partner's invoices are issued against. Required before a key is issued: a post-paid customer with nowhere to send the invoice is generating on credit nobody extended. Replacing it never rewrites an invoice already issued.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The stored billing account.",
+                  "properties": {
+                    "billing": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "billing"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The billing account invoices are issued against.",
+                "properties": {
+                  "billingEmail": {
+                    "type": "string",
+                    "description": "Where invoices are sent."
+                  },
+                  "billedTo": {
+                    "type": "string",
+                    "description": "The legal entity to bill, as it should appear on the invoice."
+                  },
+                  "netDays": {
+                    "type": "integer",
+                    "description": "Days from issue until payment is due. 0..120."
+                  }
+                },
+                "required": [
+                  "billingEmail",
+                  "billedTo",
+                  "netDays"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/partner/usage": {
+      "get": {
+        "summary": "The caller's own B2B meter for a window — every call its API keys made, what each ran and cost, and the rollup an invoice for that window is drawn from. The same rows the invoice is billed from, readable before it is issued and after. Both bounds are required; the window is half-open [from, to).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's own B2B meter for a window: every call its keys made, and the rollup an invoice for that window is drawn from.",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Start of the window (inclusive)."
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "End of the window (exclusive)."
+                    },
+                    "rollup": {
+                      "type": "object",
+                      "description": "Billable totals — settled calls only.",
+                      "additionalProperties": true
+                    },
+                    "calls": {
+                      "type": "array",
+                      "description": "Every metered call in the window, newest first, billable or not.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "rollup",
+                    "calls"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the window, ISO-8601 (inclusive). Required.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the window, ISO-8601 (exclusive). Required.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ]
+      }
+    },
+    "/me/partner/invoices": {
+      "get": {
+        "summary": "The caller's B2B invoices, newest issued first. Optionally narrowed by status.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The caller's invoices, newest issued first.",
+                  "properties": {
+                    "invoices": {
+                      "type": "array",
+                      "description": "Invoice rows.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "invoices"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Narrow to 'open', 'paid' or 'void'.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/me/partner/invoices/{id}/checkout": {
+      "post": {
+        "summary": "Pay an open B2B invoice: returns a hosted Stripe Checkout URL for the invoice's own amount, which was drawn from the meter and frozen at issue. This is NOT the credit-pack checkout — settling an invoice books revenue and credits no spendable balance. 404 not_found.partner_invoice for an invoice that is not the caller's; 409 conflict.invoice_not_open for one already paid or voided.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          },
+          {
+            "BursaToken": []
+          },
+          {
+            "CommitmentAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A hosted Stripe Checkout session that settles one invoice.",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The hosted checkout URL to send the payer to."
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "description": "The Stripe Checkout Session id."
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "sessionId"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A request error (see the Error schema and the error-code table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/me/status": {
       "get": {
         "summary": "Return the authenticated caller's account snapshot — balance, in-flight gens, and studios.",
@@ -12199,7 +12690,7 @@
     },
     "/collectiones": {
       "post": {
-        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).",
+        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id). Not available on a partner API key (`partner.unmetered_surface`) — use POST /v1/runs, which is metered.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -12786,7 +13277,7 @@
     },
     "/collectiones/{id}/tractus": {
       "patch": {
-        "summary": "Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.",
+        "summary": "Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`) — changing `modusId` here redirects a fired collection's dispatch, same as `extend`/`fire`.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -13103,7 +13594,7 @@
     },
     "/collectiones/{id}/fire": {
       "post": {
-        "summary": "Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.",
+        "summary": "Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -13800,7 +14291,7 @@
     },
     "/collectiones/{id}/extend": {
       "post": {
-        "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.",
+        "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14284,7 +14775,7 @@
     },
     "/collectiones/{id}/resume": {
       "post": {
-        "summary": "Resume a paused Collection — continue dispatching toward the target. Owner-scoped.",
+        "summary": "Resume a paused Collection — continue dispatching toward the target. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14815,7 +15306,7 @@
     },
     "/collectiones/{id}/pieces/{actumId}/reject": {
       "post": {
-        "summary": "Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.",
+        "summary": "Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -19297,6 +19788,10 @@
       "httpStatus": 404
     },
     {
+      "code": "not_found.partner_invoice",
+      "httpStatus": 404
+    },
+    {
       "code": "not_found.querela",
       "httpStatus": 404
     },
@@ -19335,6 +19830,31 @@
     {
       "code": "conflict.already_decided",
       "httpStatus": 409,
+      "retryable": false
+    },
+    {
+      "code": "conflict.invoice_not_open",
+      "httpStatus": 409,
+      "retryable": false
+    },
+    {
+      "code": "conflict.period_already_billed",
+      "httpStatus": 409,
+      "retryable": false
+    },
+    {
+      "code": "partner.contract_unsigned",
+      "httpStatus": 422,
+      "retryable": false
+    },
+    {
+      "code": "partner.billing_required",
+      "httpStatus": 422,
+      "retryable": false
+    },
+    {
+      "code": "partner.unmetered_surface",
+      "httpStatus": 403,
       "retryable": false
     },
     {

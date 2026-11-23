@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import jwt from 'jsonwebtoken'
 import { makeCredentialAcceptors, parseKeyImpetusCeiling, type AcceptorDeps } from '../../../../src/allocutio/api/apiAcceptors.js'
+import { PARTNER_KEY_NAME } from '../../../../src/crystal/apiKeys.js'
 
 const SECRET = 'test-secret'
 
@@ -140,4 +141,100 @@ test('unconfigured acceptors are undefined', async () => {
   assert.equal(acc.verifyJwt, undefined)
   assert.equal(acc.validateApiKey, undefined)
   assert.equal(acc.verifyWeb3, undefined)
+})
+
+// =============================================================================
+// The B2B key gate on the CALL — the three mint conditions, re-asked per request
+// =============================================================================
+//
+// `assertMintable` answers them once, at issue. All three decay: a partner is revoked, the
+// agreement is revised, a billing account is removed. A key that outlived any of them is a
+// customer generating outside the arrangement it signed, so the acceptor asks again — and a
+// refusal is a plain 401, indistinguishable from a key that never verified.
+
+test('validateApiKey: a PARTNER key is admitted when the gate says yes, and carries its prefix through', async () => {
+  const { personae, animae } = fakes()
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyPrefix: 'ms2_abc1234', keyName: PARTNER_KEY_NAME, contractVersion: 'v1' }),
+    partnerKeyAdmitted: async () => true,
+  })
+  assert.deepEqual(await acc.validateApiKey!('ms2_abc1234def'), { animaId: 'anima-1', keyPrefix: 'ms2_abc1234' })
+})
+
+test('validateApiKey: a PARTNER key the gate refuses does not verify at all', async () => {
+  const { personae, animae } = fakes()
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyPrefix: 'ms2_abc1234', keyName: PARTNER_KEY_NAME, contractVersion: 'v1' }),
+    partnerKeyAdmitted: async () => false,
+  })
+  assert.equal(await acc.validateApiKey!('ms2_abc1234def'), null)
+})
+
+test('validateApiKey: the gate is asked with the animaId and the version stamped on the key', async () => {
+  const { personae, animae } = fakes()
+  const asked: Array<[string, string | undefined]> = []
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyName: PARTNER_KEY_NAME, contractVersion: 'api-2026-09-17' }),
+    partnerKeyAdmitted: async (animaId, version) => {
+      asked.push([animaId, version])
+      return true
+    },
+  })
+  await acc.validateApiKey!('ms2_abc1234def')
+  assert.deepEqual(asked, [['anima-1', 'api-2026-09-17']])
+})
+
+test('validateApiKey: a partner key with an UNREADABLE stored version reaches the gate as undefined (fail-closed)', async () => {
+  // Mirrors `parseKeyImpetusCeiling`'s discipline: a stored value that is not the type the field
+  // promises must never degrade into "no constraint". It arrives as `undefined`, which every real
+  // gate refuses, rather than silently matching the current version.
+  const { personae, animae } = fakes()
+  const asked: Array<string | undefined> = []
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyName: PARTNER_KEY_NAME, contractVersion: { nope: true } }),
+    partnerKeyAdmitted: async (_animaId, version) => {
+      asked.push(version)
+      return false
+    },
+  })
+  assert.equal(await acc.validateApiKey!('ms2_abc1234def'), null)
+  assert.deepEqual(asked, [undefined])
+})
+
+test('validateApiKey: a NON-partner key never reaches the gate', async () => {
+  // The gate governs the B2B program. A key the account holder minted some other way — a staging
+  // key, say — is not part of that arrangement and must keep working exactly as it did.
+  const { personae, animae } = fakes()
+  let asked = 0
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyPrefix: 'ms2_abc1234' }),
+    partnerKeyAdmitted: async () => {
+      asked += 1
+      return false
+    },
+  })
+  assert.deepEqual(await acc.validateApiKey!('ms2_abc1234def'), { animaId: 'anima-1', keyPrefix: 'ms2_abc1234' })
+  assert.equal(asked, 0, 'the partner gate was not consulted for a key that is not a partner key')
+})
+
+test('validateApiKey: with NO gate wired, a partner key is admitted on its stored fields alone', async () => {
+  // A deployment that wires no partner directory has no B2B program to enforce; it must not be
+  // turned into one that refuses every partner key.
+  const { personae, animae } = fakes()
+  const acc = makeCredentialAcceptors({
+    personae,
+    animae,
+    verifyApiKeyToAccountId: async () => ({ accountId: 'acct-1', keyName: PARTNER_KEY_NAME, contractVersion: 'v1' }),
+  })
+  assert.deepEqual(await acc.validateApiKey!('ms2_abc1234def'), { animaId: 'anima-1' })
 })

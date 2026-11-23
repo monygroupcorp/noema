@@ -16,7 +16,10 @@
 // pattern. No live Mongo. Hermetic.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mintPartnerApiKey, verifyApiKeyToAccountId, type ApiKeyEntry, type ApiKeyUsersCollection } from '../../../../src/crystal/apiKeys.js'
+import { mintPartnerApiKey, verifyApiKeyToAccountId, type ApiKeyEntry, type ApiKeyUsersCollection, type MintPartnerApiKeyDeps } from '../../../../src/crystal/apiKeys.js'
+import { MemoryPartner } from '../../../../src/crystal/MemoryPartner.js'
+import { MemoryPartnerContract } from '../../../../src/crystal/MemoryPartnerContract.js'
+import { PARTNER_CONTRACT_VERSION } from '../../../../src/crystal/partnerContract.js'
 import { makeCredentialAcceptors, type AcceptorDeps } from '../../../../src/allocutio/api/apiAcceptors.js'
 import { IdentityResolver } from '../../../../src/allocutio/api/IdentityResolver.js'
 
@@ -73,6 +76,27 @@ function fakePersonaeAndAnimae() {
   return { personae, animae, created }
 }
 
+/**
+ * Mint deps for a partner that has met the three conditions `assertMintable` checks — approved,
+ * signed at the current agreement version, billable. These tests are about WHERE a key resolves
+ * to, not about the gate (which has its own tests in `crystal/apiKeys.test.ts`), so the gate is a
+ * precondition they satisfy rather than the thing under test.
+ */
+async function mintableDeps(
+  personae: MintPartnerApiKeyDeps['personae'],
+  usersCol: ApiKeyUsersCollection,
+  ...animaIds: string[]
+): Promise<MintPartnerApiKeyDeps> {
+  const partners = new MemoryPartner()
+  const contracts = new MemoryPartnerContract()
+  for (const animaId of animaIds) {
+    await partners.create({ animaId, sourceRequestId: 'req-1' })
+    await partners.setBilling(animaId, { billingEmail: 'ap@example.com', billedTo: 'Example Ltd', netDays: 30, setAt: new Date() })
+    await contracts.sign({ animaId, version: PARTNER_CONTRACT_VERSION, signerName: 'A. Signer' })
+  }
+  return { personae, usersCol, partners, contracts }
+}
+
 test('a key minted for an EXISTING animaId resolves back to that exact animaId end-to-end, minting NO new anima', async () => {
   const { personae, animae, created } = fakePersonaeAndAnimae()
   const usersCol = new FakeUsersCollection()
@@ -81,7 +105,7 @@ test('a key minted for an EXISTING animaId resolves back to that exact animaId e
   // the partner-request carried and the admin route approved. Nothing here mints it.
   const partnerAnimaId = 'anima-partner-existing'
 
-  const apiKey = await mintPartnerApiKey({ personae, usersCol }, partnerAnimaId)
+  const apiKey = await mintPartnerApiKey(await mintableDeps(personae, usersCol, partnerAnimaId), partnerAnimaId)
   assert.deepEqual(created, [], 'minting the key must not mint a new anima')
 
   // The real production chain: verifyApiKeyToAccountId -> validateApiKey -> resolveOrCreateAnima.
@@ -101,8 +125,9 @@ test('two partners each get a key that resolves ONLY to their own anima — neve
   const { personae, animae, created } = fakePersonaeAndAnimae()
   const usersCol = new FakeUsersCollection()
 
-  const keyA = await mintPartnerApiKey({ personae, usersCol }, 'anima-alice')
-  const keyB = await mintPartnerApiKey({ personae, usersCol }, 'anima-bob')
+  const deps = await mintableDeps(personae, usersCol, 'anima-alice', 'anima-bob')
+  const keyA = await mintPartnerApiKey(deps, 'anima-alice')
+  const keyB = await mintPartnerApiKey(deps, 'anima-bob')
 
   const acceptors = makeCredentialAcceptors({
     personae,

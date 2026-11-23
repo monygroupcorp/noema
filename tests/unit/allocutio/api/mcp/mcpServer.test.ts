@@ -12,6 +12,7 @@ import { buildMcpServer } from '../../../../../src/allocutio/api/mcp/mcpServer.j
 import type { CrystalApi } from '../../../../../src/allocutio/api/CrystalApi.js'
 import type { AuctorKey } from '../../../../../src/flow/types.js'
 import type { Run } from '../../../../../src/allocutio/api/types.js'
+import type { PartnerUsageStore } from '../../../../../src/types/partnerUsage.js'
 
 // ---------------------------------------------------------------------------
 // Fake API
@@ -74,10 +75,14 @@ const auctor: AuctorKey = { animaId: 'a1' }
 // Helper: create a connected client+server pair
 // ---------------------------------------------------------------------------
 
-async function makeClient(auctorArg?: AuctorKey | null) {
+async function makeClient(
+  auctorArg?: AuctorKey | null,
+  partnerUsage?: Pick<PartnerUsageStore, 'record'>,
+  keyPrefix?: string,
+) {
   const resolvedAuctor: AuctorKey | undefined = auctorArg === null ? undefined : (auctorArg ?? auctor)
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  const server = buildMcpServer(fakeApi, resolvedAuctor)
+  const server = buildMcpServer(fakeApi, resolvedAuctor, undefined, undefined, partnerUsage, keyPrefix)
   await server.connect(serverTransport)
   const client = new Client({ name: 'test', version: '1' })
   await client.connect(clientTransport)
@@ -137,6 +142,31 @@ test('run_flow tool returns auth.missing when no auctor', async () => {
   assert.ok(text.includes('auth.missing'))
 })
 
+test('run_flow tool meters a partner-key call the same way POST /v1/runs does', async () => {
+  const recorded: unknown[] = []
+  const partnerUsage: Pick<PartnerUsageStore, 'record'> = {
+    record: async (entry) => { recorded.push(entry) },
+  }
+  const { client } = await makeClient(auctor, partnerUsage, 'pk_live_abc')
+  await client.callTool({ name: 'run_flow', arguments: { modusId: 'flux-schnell', aditus: { prompt: 'test' } } })
+  assert.equal(recorded.length, 1)
+  const entry = recorded[0] as { actumId: string; animaId: string; keyPrefix: string; modusId: string }
+  assert.equal(entry.actumId, fakeRun.id)
+  assert.equal(entry.animaId, auctor.animaId)
+  assert.equal(entry.keyPrefix, 'pk_live_abc')
+  assert.equal(entry.modusId, fakeRun.modusId)
+})
+
+test('run_flow tool does not meter when no keyPrefix is present (non-partner credential)', async () => {
+  const recorded: unknown[] = []
+  const partnerUsage: Pick<PartnerUsageStore, 'record'> = {
+    record: async (entry) => { recorded.push(entry) },
+  }
+  const { client } = await makeClient(auctor, partnerUsage, undefined)
+  await client.callTool({ name: 'run_flow', arguments: { modusId: 'flux-schnell', aditus: { prompt: 'test' } } })
+  assert.equal(recorded.length, 0)
+})
+
 test('collect tool starts a collection when authenticated', async () => {
   const { client } = await makeClient(auctor)
   const result = await client.callTool({
@@ -160,6 +190,26 @@ test('collect tool returns auth.missing when no auctor', async () => {
   assert.equal(result.isError, true)
   const text = textBlocks(result)[0].text
   assert.ok(text.includes('auth.missing'))
+})
+
+test('collect tool refuses a partner-key caller — Collections are not metered yet', async () => {
+  const { client } = await makeClient(auctor, undefined, 'pk_live_abc')
+  const result = await client.callTool({
+    name: 'collect',
+    arguments: { modusId: 'flux-schnell', total: 4, tractus: [{ porta: 'color', valores: [{ value: 'red' }] }] },
+  })
+  assert.equal(result.isError, true)
+  const text = textBlocks(result)[0].text
+  assert.ok(text.includes('partner.unmetered_surface'), text)
+})
+
+test('collect tool is unaffected for a session caller (no keyPrefix)', async () => {
+  const { client } = await makeClient(auctor, undefined, undefined)
+  const result = await client.callTool({
+    name: 'collect',
+    arguments: { modusId: 'flux-schnell', total: 4, tractus: [{ porta: 'color', valores: [{ value: 'red' }] }] },
+  })
+  assert.equal(result.isError, undefined)
 })
 
 test('crystal://flows resource returns the flow catalog', async () => {

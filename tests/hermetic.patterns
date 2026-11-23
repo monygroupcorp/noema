@@ -80,6 +80,10 @@ tests/unit/api/querelaAbuse.test.ts
 tests/unit/api/querelaTakedown.test.ts
 tests/unit/api/partnerRequestRouter.test.ts
 tests/unit/api/partnerAdminRouter.test.ts
+tests/unit/api/partnerContract.test.ts
+tests/unit/api/partnerMeter.test.ts
+tests/unit/api/partnerInvoice.test.ts
+tests/unit/api/partnerBillingRoutes.test.ts
 tests/unit/api/treasuryPersonaIntake.test.ts
 tests/unit/crystal/apiKeys.test.ts
 tests/unit/api/modelAdminRouter.test.ts

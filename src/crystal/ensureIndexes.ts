@@ -247,6 +247,28 @@ export async function ensureIndexes(db: Db): Promise<void> {
     // partners — approved B2B partner accounts (one per animaId)
     db.collection('partners').createIndex({ animaId: 1 }, { unique: true }),
 
+    // partnerContracts — signatures on the API Customer Agreement. Append-only, so no unique
+    // key on (animaId, version): re-signing the same version is allowed and the EARLIEST row is
+    // the one that counts, which is what the ascending signedAt serves.
+    db.collection('partnerContracts').createIndex({ id: 1 }, { unique: true }),
+    db.collection('partnerContracts').createIndex({ animaId: 1, version: 1, signedAt: 1 }),
+
+    // partnerUsage — the B2B meter. `_id` IS the actumId (that is what makes `record` idempotent
+    // and lets the completion webhook address a row it knows only by run), so the only index it
+    // needs is the billing-window scan: one partner, one period, by the time the call was made.
+    db.collection('partnerUsage').createIndex({ animaId: 1, calledAt: -1 }),
+
+    // partnerInvoices — a period is billed once. The unique partial index is the durable form of
+    // that rule: `issue` reads for a clash first, but a read-then-write alone is a race between
+    // two instances, and this is the guard that actually holds. Scoped to rows that are NOT void,
+    // because voiding an invoice is exactly how a period is deliberately re-billed.
+    db.collection('partnerInvoices').createIndex({ id: 1 }, { unique: true }),
+    db.collection('partnerInvoices').createIndex(
+      { animaId: 1, periodStart: 1, periodEnd: 1 },
+      { unique: true, partialFilterExpression: { status: { $in: ['open', 'paid'] } } },
+    ),
+    db.collection('partnerInvoices').createIndex({ animaId: 1, issuedAt: -1 }),
+
     // materiae — GPU pod records
     db.collection('materiae').createIndex({ id: 1 }, { unique: true }),
     db.collection('materiae').createIndex({ status: 1, imageRef: 1 }),

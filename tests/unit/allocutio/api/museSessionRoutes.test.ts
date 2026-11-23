@@ -67,6 +67,7 @@ import { MuseSteerCursor } from '../../../../src/crystal/MuseSteerCursor.js'
 import { MAX_INSTRUCTION_CHARS } from '../../../../src/crystal/muse/steer.js'
 import { OPENROUTER_PROVIDER } from '../../../../src/crystal/apiProviders.js'
 import { MODUS_MUSE_STEER } from '../../../../src/crystal/seeds/modi.js'
+import type { PartnerUsageStore } from '../../../../src/types/partnerUsage.js'
 
 // ── Doubles ──────────────────────────────────────────────────────────────────
 
@@ -298,6 +299,9 @@ const fakeIdentity: Identity = {
 function createServer(
   datasets: Datasets, museSessions: MuseSessions, actorum: Actorum,
   extra: Record<string, unknown> = {},
+  /** Router-level deps/identity override, for tests that need the B2B meter wired or a keyed
+   *  identity — every other test gets the plain `{api, identity: fakeIdentity}` shape unchanged. */
+  routerExtra: Record<string, unknown> = {},
 ): Promise<{ server: http.Server; url: string }> {
   const deps = {
     datasets, museSessions, actorum, signorum: noSpendSignorum, ...extra,
@@ -309,6 +313,7 @@ function createServer(
     app.use('/v1', createApiRouter({
       api: api as unknown as Parameters<typeof createApiRouter>[0]['api'],
       identity: fakeIdentity,
+      ...routerExtra,
     }))
     const server = app.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
@@ -730,6 +735,110 @@ test('a steer run performs no session write — it proposes, and the floor is le
     for (const value of Object.values(aditus)) {
       assert.notEqual(value, sessionId!, 'the session id must not travel into the run')
     }
+  } finally {
+    await closeServer(server)
+  }
+})
+
+/** Resolves `x-api-key: OWNER` with a stored prefix, same shape a real partner-key acceptor
+ *  returns — see `partnerBillingRoutes.test.ts`'s own `keyedIdentity`. */
+const keyedIdentity: Identity = {
+  async resolve(creds: Credentials): Promise<AuctorKey> {
+    if (creds.apiKey) return { animaId: creds.apiKey }
+    throw Errors.authMissing()
+  },
+  async resolveCaller(creds: Credentials): Promise<ResolvedCaller> {
+    return { auctor: await this.resolve(creds), keyPrefix: 'ms2_partnerkey' }
+  },
+}
+
+test('a steer run on a partner key meters the B2B usage store — open and settled in one shot (sync, no webhook)', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+
+  const spawn = await createServer(datasets, sessions, readOnlyActorum([]))
+  let sessionId: string
+  try {
+    const spawned = await request(`${spawn.url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    sessionId = spawned.body.session.id
+  } finally {
+    await closeServer(spawn.server)
+  }
+
+  const ring = steerRing({
+    eliminations: [],
+    additions: [{ category: 'mood', text: 'hushed and expectant' }],
+  })
+  const recorded: unknown[] = []
+  const settled: unknown[] = []
+  const partnerUsage: Pick<PartnerUsageStore, 'record' | 'settle'> = {
+    record: async (entry) => { recorded.push(entry) },
+    settle: async (actumId, patch) => { settled.push({ actumId, ...patch }) },
+  }
+
+  const { server, url } = await createServer(
+    datasets, sessions, readOnlyActorum([]), ring.deps,
+    { identity: keyedIdentity, partnerUsage },
+  )
+  try {
+    const steered = await request(`${url}/v1/data/muse/sessions/${sessionId!}/steer`, {
+      method: 'POST', headers: HEADERS, body: { instruction: 'make it expectant' },
+    })
+    assert.equal(steered.status, 200, JSON.stringify(steered.body))
+
+    assert.equal(recorded.length, 1)
+    const entry = recorded[0] as { actumId: string; animaId: string; keyPrefix: string; modusId: string }
+    assert.equal(entry.actumId, 'act-steer')
+    assert.equal(entry.animaId, OWNER)
+    assert.equal(entry.keyPrefix, 'ms2_partnerkey')
+    assert.equal(entry.modusId, MODUS_MUSE_STEER.id)
+
+    assert.equal(settled.length, 1)
+    const patch = settled[0] as { actumId: string; impetus: string; modusLabel: string }
+    assert.equal(patch.actumId, 'act-steer')
+    assert.ok(/^[1-9][0-9]*$/.test(patch.impetus), `expected a real positive token cost, got ${patch.impetus}`)
+    assert.equal(patch.modusLabel, MODUS_MUSE_STEER.nomen)
+  } finally {
+    await closeServer(server)
+  }
+})
+
+test('a steer run on a session credential (no keyPrefix) is not metered', async () => {
+  const datasets = new MemoryDatasets()
+  const mother = await seedMother(datasets)
+  const sessions = new MemoryMuseSessions()
+
+  const spawn = await createServer(datasets, sessions, readOnlyActorum([]))
+  let sessionId: string
+  try {
+    const spawned = await request(`${spawn.url}/v1/data/muse/sessions`, {
+      method: 'POST', headers: HEADERS, body: { datasetId: mother.id },
+    })
+    sessionId = spawned.body.session.id
+  } finally {
+    await closeServer(spawn.server)
+  }
+
+  const ring = steerRing({ eliminations: [], additions: [{ category: 'mood', text: 'hushed' }] })
+  const recorded: unknown[] = []
+  const partnerUsage: Pick<PartnerUsageStore, 'record' | 'settle'> = {
+    record: async (entry) => { recorded.push(entry) },
+    settle: async () => {},
+  }
+
+  const { server, url } = await createServer(
+    datasets, sessions, readOnlyActorum([]), ring.deps,
+    { partnerUsage }, // fakeIdentity (the default) mints no keyPrefix
+  )
+  try {
+    const steered = await request(`${url}/v1/data/muse/sessions/${sessionId!}/steer`, {
+      method: 'POST', headers: HEADERS, body: { instruction: 'make it expectant' },
+    })
+    assert.equal(steered.status, 200, JSON.stringify(steered.body))
+    assert.deepEqual(recorded, [])
   } finally {
     await closeServer(server)
   }

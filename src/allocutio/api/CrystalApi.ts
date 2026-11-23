@@ -60,6 +60,7 @@ import type { CommercialVerdict } from '../../crystal/modelLicense.js'
 import type { ThresholdBand, TripwireBandStore } from '../../crystal/licenseTripwire.js'
 import type { Redituum } from '../../types/reditus.js'
 import type { StripeGateway } from '../../api/webhooks/stripeWebhook.js'
+import type { PartnerInvoiceStore } from '../../types/partnerInvoice.js'
 import type { ProMonthlyGateway, ProMonthlySubscriptionStore } from '../../api/webhooks/stripeProMonthlyWebhook.js'
 import type { WideEventStore } from '../../analytics/WideEventStore.js'
 import type { CollectioCursor } from '../../crystal/CollectioCursor.js'
@@ -243,6 +244,10 @@ export interface CrystalApiDeps {
    *  AND the fiat funding rail (`handleStripeWebhook` books a peer fiat `Reditus` via `record`).
    *  Absent → the report + fiat rail are unavailable. */
   redituum?: Pick<Redituum, 'trailingUsdRevenue' | 'record' | 'reverse' | 'findByChargeRef'>
+  /** The B2B invoice book. Backs `createInvoiceCheckout` and the webhook's invoice-settlement
+   *  branch. Absent → an invoice checkout reports the fiat rail unavailable, and a payment that
+   *  names an invoice is refused rather than mistaken for a pack purchase. */
+  partnerInvoices?: Pick<PartnerInvoiceStore, 'find' | 'markPaid'>
   /** The license-tripwire's persisted band — surfaced in `revenueReport` so the admin sees the
    *  last edge-triggered band alongside the live figure. Absent → lastBand omitted. */
   tripwireBand?: Pick<TripwireBandStore, 'last'>

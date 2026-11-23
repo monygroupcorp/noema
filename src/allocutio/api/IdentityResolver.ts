@@ -56,6 +56,17 @@ export interface ApiKeyIdentity {
   animaId: string
   /** Hard per-run admission cap (impetus). Absent → the key adds no cap of its own. */
   maxImpetusPerRun?: bigint
+  /**
+   * The key's stored prefix — its first 12 characters, the half that is kept in the clear
+   * precisely so a key can be named without being held. Absent for every other credential kind.
+   *
+   * It is here because a B2B call is metered AGAINST THE KEY, not against the account: an
+   * account may hold several keys (one per environment, one per customer-facing product) and an
+   * invoice that cannot say which one ran up a line is not a bill anyone can check. Carrying it
+   * on the resolved credential is the only place it is known — `Actum` has no credential column
+   * and must not grow one.
+   */
+  keyPrefix?: string
 }
 
 export interface CredentialAcceptors {
@@ -98,6 +109,13 @@ export interface ResolvedCaller {
    * `CrystalApi.invokeFlow`, where it binds as a floor under the caller's own `maxImpetus`.
    */
   maxImpetusPerRun?: bigint
+  /**
+   * The API key's stored prefix, when the credential WAS an API key. Absent for a JWT, a web3
+   * bundle, an arcanum commitment — and absent for an API key on a deployment whose acceptor
+   * predates the field. Routers thread it into the B2B meter; nothing else reads it, and it is
+   * never persisted on a crystal row.
+   */
+  keyPrefix?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +170,7 @@ export class IdentityResolver {
       return {
         auctor: { animaId: identity.animaId },
         ...(identity.maxImpetusPerRun !== undefined ? { maxImpetusPerRun: identity.maxImpetusPerRun } : {}),
+        ...(identity.keyPrefix !== undefined ? { keyPrefix: identity.keyPrefix } : {}),
       }
     }
 
