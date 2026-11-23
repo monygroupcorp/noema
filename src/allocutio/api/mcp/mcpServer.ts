@@ -221,7 +221,8 @@ export function buildMcpServer(
         'Start a Collection — expand one flow (modusId, atomic or a compositus pipeline) over a ' +
         "Tractus[] parameter grid into `total` pieces. Each Tractus is one axis of variation (porta + " +
         'valores); aditusBase is applied to every piece (use `_basePrompt` with `{{porta}}` tokens). ' +
-        'Returns a Collection handle (poll get_collection).',
+        'Returns a Collection handle (poll get_collection). Not available on a partner API key ' +
+        '(`partner.unmetered_surface`) — use run_flow, which is metered.',
       inputSchema: {
         modusId: z.string(),
         total: z.number(),
@@ -237,7 +238,7 @@ export function buildMcpServer(
         nomen: z.string().optional(),
       },
     },
-    (args) => collectTool(api, auctor, args, originCountry),
+    (args) => collectTool(api, auctor, args, originCountry, keyPrefix),
   )
 
   server.registerTool(

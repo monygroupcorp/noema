@@ -192,6 +192,26 @@ test('collect tool returns auth.missing when no auctor', async () => {
   assert.ok(text.includes('auth.missing'))
 })
 
+test('collect tool refuses a partner-key caller — Collections are not metered yet', async () => {
+  const { client } = await makeClient(auctor, undefined, 'pk_live_abc')
+  const result = await client.callTool({
+    name: 'collect',
+    arguments: { modusId: 'flux-schnell', total: 4, tractus: [{ porta: 'color', valores: [{ value: 'red' }] }] },
+  })
+  assert.equal(result.isError, true)
+  const text = textBlocks(result)[0].text
+  assert.ok(text.includes('partner.unmetered_surface'), text)
+})
+
+test('collect tool is unaffected for a session caller (no keyPrefix)', async () => {
+  const { client } = await makeClient(auctor, undefined, undefined)
+  const result = await client.callTool({
+    name: 'collect',
+    arguments: { modusId: 'flux-schnell', total: 4, tractus: [{ porta: 'color', valores: [{ value: 'red' }] }] },
+  })
+  assert.equal(result.isError, undefined)
+})
+
 test('crystal://flows resource returns the flow catalog', async () => {
   const { client } = await makeClient()
   const result = await client.readResource({ uri: 'crystal://flows' })
