@@ -230,4 +230,15 @@ export const Errors = {
    *  by an authenticated caller — the flag state is never revealed to an anonymous caller. */
   erasureNotImplemented: () => new ApiError('feature.not_implemented', 'Account erasure is not enabled on this deployment', 501),
   internal: (message = 'Internal error') => new ApiError('internal.error', message, 500, { retryable: true }),
+  /** A partner API key was used against Collections, which dispatch many runs through a path the
+   *  B2B meter is not wired into yet. Refused rather than served uncounted: the agreement's own
+   *  section 6 promises every call is metered, and a key must never generate in a way that breaks
+   *  that promise. `POST /v1/runs` (and `run_flow` over MCP) are metered and stay available. */
+  partnerCollectionsUnmetered: () =>
+    new ApiError(
+      'partner.unmetered_surface',
+      'Collections are not yet metered for partner API keys — use POST /v1/runs instead',
+      403,
+      { retryable: false },
+    ),
 } as const

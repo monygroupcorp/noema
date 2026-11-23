@@ -10085,7 +10085,7 @@ End the lease deliberately (owner-scoped, idempotent): terminate the pod, close 
 
 ### POST /v1/collectiones
 
-Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).
+Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id). Not available on a partner API key (`partner.unmetered_surface`) — use POST /v1/runs, which is metered.
 
 - **Auth:** required
 
@@ -10674,7 +10674,7 @@ Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authorin
 
 ### POST /v1/collectiones/:id/fire
 
-Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.
+Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft. Not available on a partner API key (`partner.unmetered_surface`).
 
 - **Auth:** required
 
@@ -11425,7 +11425,7 @@ The curation queue — a Collection's generated pieces (media + stamped attribut
 
 ### POST /v1/collectiones/:id/extend
 
-Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.
+Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).
 
 - **Auth:** required
 
@@ -11833,7 +11833,7 @@ Pause a Collection — stop dispatching new pieces; in-flight pieces finish. Own
 
 ### POST /v1/collectiones/:id/resume
 
-Resume a paused Collection — continue dispatching toward the target. Owner-scoped.
+Resume a paused Collection — continue dispatching toward the target. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).
 
 - **Auth:** required
 
@@ -12245,7 +12245,7 @@ Approve a pending-review piece — it counts toward the collection. Owner-scoped
 
 ### POST /v1/collectiones/:id/pieces/:actumId/reject
 
-Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.
+Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).
 
 - **Auth:** required
 
@@ -15439,6 +15439,7 @@ Every failed request returns the uniform envelope `{ error: { code, message, ret
 | `conflict.period_already_billed` | 409 | no |
 | `partner.contract_unsigned` | 422 | no |
 | `partner.billing_required` | 422 | no |
+| `partner.unmetered_surface` | 403 | no |
 | `license.restricted` | 403 | no |
 | `content.refused` | 403 | no |
 | `terms.required` | 403 | no |

@@ -1700,7 +1700,7 @@ async function main(): Promise<void> {
 
   // MCP adapter (/v1/mcp) — the same facade as REST, exposed as MCP tools + crystal://
   // resources for agent tool-use (Phase 3). Stateless per-request streamable-HTTP transport.
-  app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver }))
+  app.use('/v1/mcp', createMcpRouter({ api: crystalApi, identity: apiResolver, partnerUsage: ring.partnerUsage }))
 
   const INTERNAL_SECRET = process.env.INTERNAL_SECRET
   // The `/internal` routers below check `INTERNAL_SECRET` unconditionally, so an unset value

@@ -7,6 +7,7 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 
 import type { CrystalApi } from '../CrystalApi.js'
 import type { AuctorKey } from '../../../flow/types.js'
+import type { PartnerUsageStore } from '../../../types/partnerUsage.js'
 import {
   runFlowTool,
   getRunTool,
@@ -35,6 +36,10 @@ export function buildMcpServer(
   /** The caller's origin (`cf-ipcountry`), read by `mcpRouter` from the request — see
    *  `runFlowTool`/`collectTool` (minimax-h3-territory-safeguard). */
   originCountry?: string,
+  /** The B2B meter, threaded from `mcpRouter` same as `keyPrefix` below — see `runFlowTool`. */
+  partnerUsage?: Pick<PartnerUsageStore, 'record'>,
+  /** The API key's stored prefix, present only for a partner API key — see `runFlowTool`. */
+  keyPrefix?: string,
 ): McpServer {
   const server = new McpServer({ name: 'noema-crystal', version: 'v1' })
 
@@ -56,7 +61,7 @@ export function buildMcpServer(
         studioId: z.string().optional(),
       },
     },
-    (args) => runFlowTool(api, auctor, args, keyMaxImpetusPerRun, originCountry),
+    (args) => runFlowTool(api, auctor, args, keyMaxImpetusPerRun, originCountry, partnerUsage, keyPrefix),
   )
 
   server.registerTool(

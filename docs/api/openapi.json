@@ -12690,7 +12690,7 @@
     },
     "/collectiones": {
       "post": {
-        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id).",
+        "summary": "Start a Collection — expand one flow over a Tractus[] parameter grid into `total` pieces (general batch / NFT-collection generation). With `draft:true` it is created but NOT fired (author tractus, then POST /:id/fire). Returns a Collection handle (poll GET /v1/collectiones/:id). Not available on a partner API key (`partner.unmetered_surface`) — use POST /v1/runs, which is metered.",
         "security": [
           {
             "ApiKeyAuth": []
@@ -13594,7 +13594,7 @@
     },
     "/collectiones/{id}/fire": {
       "post": {
-        "summary": "Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft.",
+        "summary": "Freeze a DRAFT Collection’s tractus and start the run — pins provenance to the flow version at fire time, then dispatches. Funder-only; rejected unless the collection is a draft. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14291,7 +14291,7 @@
     },
     "/collectiones/{id}/extend": {
       "post": {
-        "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped.",
+        "summary": "Extend a Collection — raise the target by `count` and dispatch the new pieces (incremental batches: fire a batch, review, fire more). Re-opens a completed Collection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -14775,7 +14775,7 @@
     },
     "/collectiones/{id}/resume": {
       "post": {
-        "summary": "Resume a paused Collection — continue dispatching toward the target. Owner-scoped.",
+        "summary": "Resume a paused Collection — continue dispatching toward the target. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -15306,7 +15306,7 @@
     },
     "/collectiones/{id}/pieces/{actumId}/reject": {
       "post": {
-        "summary": "Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped.",
+        "summary": "Reject a piece and reroll — re-fire it with a fresh trait selection. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`).",
         "security": [
           {
             "ApiKeyAuth": []
@@ -19850,6 +19850,11 @@
     {
       "code": "partner.billing_required",
       "httpStatus": 422,
+      "retryable": false
+    },
+    {
+      "code": "partner.unmetered_surface",
+      "httpStatus": 403,
       "retryable": false
     },
     {

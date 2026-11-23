@@ -467,6 +467,16 @@ export function createApiRouter(deps: {
   /** The identity-only view of `authCaller`, for every route that does not admit spend. */
   const auth = async (req: Request): Promise<AuctorKey> => (await authCaller(req)).auctor
 
+  /** Identity for a Collections route: refuses a partner API key outright (`Errors.
+   *  partnerCollectionsUnmetered`) rather than resolve it, because every Collections route that
+   *  reaches here dispatches through `CollectioCursor`, which the B2B meter is not wired into —
+   *  see `errors.ts`. Every other credential (session, bursa token) passes through unchanged. */
+  const authNotPartner = async (req: Request): Promise<AuctorKey> => {
+    const { auctor, keyPrefix } = await authCaller(req)
+    if (keyPrefix !== undefined) throw Errors.partnerCollectionsUnmetered()
+    return auctor
+  }
+
   /**
    * The caller's origin, ISO 3166-1 alpha-2, for `InvokeOpts.originCountry` / `CollectOpts.
    * originCountry` (`minimax-h3-territory-safeguard`). Cloudflare's `cf-ipcountry` is set on
@@ -764,7 +774,7 @@ export function createApiRouter(deps: {
   // ── Collections (Collectio) — a base modus expanded over a Tractus[] grid ──────
   // POST /v1/collectiones — create + start a Collection.
   router.post('/collectiones', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const auctor = await authNotPartner(req)
     const { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId } = req.body ?? {}
     res.status(200).json({ collection: await api.collect(auctor, { modusId, total, tractus, aditusBase, concurrentia, nomen, descriptio, dna, reviewEnabled, draft, teamId, originCountry: originCountryOf(req) }) })
   }))
@@ -783,7 +793,7 @@ export function createApiRouter(deps: {
 
   // POST /v1/collectiones/:id/fire — freeze a DRAFT's tractus and start the run (funder-only).
   router.post('/collectiones/:id/fire', wrap(async (req, res) => {
-    res.json({ collection: await api.fireCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
+    res.json({ collection: await api.fireCollection(await authNotPartner(req), String(req.params.id), originCountryOf(req)) })
   }))
 
   // GET /v1/collectiones — list the caller's collections (owner-scoped), newest first and
@@ -815,7 +825,7 @@ export function createApiRouter(deps: {
 
   // POST /v1/collectiones/:id/extend — raise the target + fire another batch (incremental batches).
   router.post('/collectiones/:id/extend', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const auctor = await authNotPartner(req)
     const addCount = Number((req.body ?? {}).count)
     res.json({ collection: await api.extendCollection(auctor, String(req.params.id), addCount, originCountryOf(req)) })
   }))
@@ -825,7 +835,7 @@ export function createApiRouter(deps: {
     res.json({ collection: await api.pauseCollection(await auth(req), String(req.params.id)) })
   }))
   router.post('/collectiones/:id/resume', wrap(async (req, res) => {
-    res.json({ collection: await api.resumeCollection(await auth(req), String(req.params.id), originCountryOf(req)) })
+    res.json({ collection: await api.resumeCollection(await authNotPartner(req), String(req.params.id), originCountryOf(req)) })
   }))
   router.post('/collectiones/:id/cancel', wrap(async (req, res) => {
     res.json({ collection: await api.cancelCollection(await auth(req), String(req.params.id)) })
@@ -837,7 +847,7 @@ export function createApiRouter(deps: {
     res.status(200).json({ ok: true })
   }))
   router.post('/collectiones/:id/pieces/:actumId/reject', wrap(async (req, res) => {
-    await api.rejectCollectionPiece(await auth(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
+    await api.rejectCollectionPiece(await authNotPartner(req), String(req.params.id), String(req.params.actumId), originCountryOf(req))
     res.status(200).json({ ok: true })
   }))
 

@@ -74,6 +74,9 @@ export const API_ERROR_CODES: ErrorCodeSpec[] = [
     { code: 'partner.contract_unsigned', httpStatus: 422, retryable: false },
     // No billing account is on file, so there is nowhere to send the invoice a key would run up.
     { code: 'partner.billing_required', httpStatus: 422, retryable: false },
+    // Collections dispatch through a path the B2B meter does not reach yet. NOT retryable as-is:
+    // the same call over POST /v1/runs (or run_flow over MCP) is metered and succeeds.
+    { code: 'partner.unmetered_surface', httpStatus: 403, retryable: false },
     { code: 'license.restricted', httpStatus: 403 },
     { code: 'content.refused', httpStatus: 403 },
     // The flow carries licence terms the caller has not accepted at their current version. NOT

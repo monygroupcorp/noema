@@ -436,3 +436,55 @@ test('POST /v1/runs: a call made on a session token is not metered — the B2B m
     assert.deepEqual(await s.usage.list(PARTNER, new Date('2000-01-01'), new Date('2100-01-01')), [])
   } finally { s.close() }
 })
+
+// ── Collections dispatch through a path the meter is not wired into — refused, not served ──
+
+/** `collect`/`fireCollection`/`extendCollection`/`resumeCollection`/`rejectCollectionPiece` all
+ *  dispatch through `CollectioCursor`, which never writes a `partnerUsage` row. A partner key
+ *  must never be let generate in a way the meter cannot see, so the route refuses it outright
+ *  rather than serve an uncounted call (`Errors.partnerCollectionsUnmetered`, errors.ts). */
+const collectingApi = {
+  async collect() { throw new Error('must not be reached — the route must refuse before calling the API') },
+  async fireCollection() { throw new Error('must not be reached — the route must refuse before calling the API') },
+  async extendCollection() { throw new Error('must not be reached — the route must refuse before calling the API') },
+  async resumeCollection() { throw new Error('must not be reached — the route must refuse before calling the API') },
+  async rejectCollectionPiece() { throw new Error('must not be reached — the route must refuse before calling the API') },
+} as unknown as ApiFacade
+
+test('POST /v1/collectiones: refuses a partner-key caller — Collections are not metered yet', async () => {
+  const s = await stack({ billing: true, signed: true, api: collectingApi, identity: keyedIdentity('ms2_aaaabbbb') })
+  try {
+    const res = await call(s.base, 'POST', '/v1/collectiones', { key: 'partner-key', body: { modusId: 'flux-schnell', total: 10 } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'partner.unmetered_surface')
+  } finally { s.close() }
+})
+
+test('POST /v1/collectiones/:id/fire, /extend, /resume, /pieces/:id/reject: same refusal for a partner key', async () => {
+  const s = await stack({ billing: true, signed: true, api: collectingApi, identity: keyedIdentity('ms2_aaaabbbb') })
+  try {
+    for (const [method, path, body] of [
+      ['POST', '/v1/collectiones/coll-1/fire', undefined],
+      ['POST', '/v1/collectiones/coll-1/extend', { count: 1 }],
+      ['POST', '/v1/collectiones/coll-1/resume', undefined],
+      ['POST', '/v1/collectiones/coll-1/pieces/actum-1/reject', undefined],
+    ] as const) {
+      const res = await call(s.base, method, path, { key: 'partner-key', body })
+      assert.equal(res.status, 403, path)
+      assert.equal(res.body.error.code, 'partner.unmetered_surface', path)
+    }
+  } finally { s.close() }
+})
+
+test('POST /v1/collectiones: a session-token caller (no key) is unaffected', async () => {
+  const s = await stack({
+    billing: true,
+    signed: true,
+    api: { async collect() { return { id: 'coll-1', status: 'nascens', modusId: 'flux-schnell', total: 10 } } } as unknown as ApiFacade,
+    identity: keyedIdentity(),
+  })
+  try {
+    const res = await call(s.base, 'POST', '/v1/collectiones', { key: 'partner-key', body: { modusId: 'flux-schnell', total: 10 } })
+    assert.equal(res.status, 200)
+  } finally { s.close() }
+})
