@@ -190,8 +190,16 @@ export interface ApiFacade {
   addMuseFragment(auctor: AuctorKey, id: string, fragment: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   /** Replaces the run setup wholesale. Spends nothing and fires nothing. */
   setMuseSetup(auctor: AuctorKey, id: string, setup: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
-  /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm. */
-  steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<import('./CrystalApi.js').SteerProposalView>
+  /** Returns a PROPOSAL and applies nothing — the floor moves through the routes above, on confirm.
+   *  It is a normal metered run (one chat call): `keyPrefix`/`partnerUsage`, when given, meter it
+   *  against a partner key exactly as `POST /v1/runs` does — see `apiRouter.ts`'s own `/runs` block. */
+  steerMuseSession(
+    auctor: AuctorKey,
+    id: string,
+    input: unknown,
+    keyPrefix?: string,
+    partnerUsage?: Pick<PartnerUsageStore, 'record' | 'settle'>,
+  ): Promise<import('./CrystalApi.js').SteerProposalView>
   /** Appends one kept prompt to the session. Append-only; spends nothing and fires nothing. */
   keepMuseRoll(auctor: AuctorKey, id: string, roll: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
   recordMusePiece(auctor: AuctorKey, id: string, piece: unknown): Promise<import('./CrystalApi.js').MuseSessionView>
@@ -784,7 +792,7 @@ export function createApiRouter(deps: {
   // write. Re-derives provenance; frozen once fired. Omitted fields are left untouched.
   router.patch('/collectiones/:id/tractus', wrap(async (req, res) => {
     const { tractus, modusId, numerus } = req.body ?? {}
-    res.json({ collection: await api.patchCollectionDraft(await auth(req), String(req.params.id), {
+    res.json({ collection: await api.patchCollectionDraft(await authNotPartner(req), String(req.params.id), {
       ...(tractus !== undefined ? { tractus } : {}),
       ...(modusId !== undefined ? { modusId: String(modusId) } : {}),
       ...(numerus !== undefined ? { numerus: Number(numerus) } : {}),
@@ -1736,9 +1744,9 @@ export function createApiRouter(deps: {
   // resolved for the authenticated caller and its floor is passed INLINE into the run — the
   // interpreter never receives a session id and reads no session. Metered: one chat call.
   router.post('/data/muse/sessions/:id/steer', wrap(async (req, res) => {
-    const auctor = await auth(req)
+    const { auctor, keyPrefix } = await authCaller(req)
     const body = (req.body ?? {}) as { instruction?: unknown }
-    res.json(await api.steerMuseSession(auctor, String(req.params.id), body))
+    res.json(await api.steerMuseSession(auctor, String(req.params.id), body, keyPrefix, deps.partnerUsage))
   }))
 
   // POST /v1/data/muse/sessions/:id/kept — keep one rolled prompt against the session.

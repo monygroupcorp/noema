@@ -449,6 +449,7 @@ const collectingApi = {
   async extendCollection() { throw new Error('must not be reached — the route must refuse before calling the API') },
   async resumeCollection() { throw new Error('must not be reached — the route must refuse before calling the API') },
   async rejectCollectionPiece() { throw new Error('must not be reached — the route must refuse before calling the API') },
+  async patchCollectionDraft() { throw new Error('must not be reached — the route must refuse before calling the API') },
 } as unknown as ApiFacade
 
 test('POST /v1/collectiones: refuses a partner-key caller — Collections are not metered yet', async () => {
@@ -473,6 +474,15 @@ test('POST /v1/collectiones/:id/fire, /extend, /resume, /pieces/:id/reject: same
       assert.equal(res.status, 403, path)
       assert.equal(res.body.error.code, 'partner.unmetered_surface', path)
     }
+  } finally { s.close() }
+})
+
+test('PATCH /v1/collectiones/:id/tractus: same refusal for a partner key — redirecting modusId post-fire is a spend-directing write too', async () => {
+  const s = await stack({ billing: true, signed: true, api: collectingApi, identity: keyedIdentity('ms2_aaaabbbb') })
+  try {
+    const res = await call(s.base, 'PATCH', '/v1/collectiones/coll-1/tractus', { key: 'partner-key', body: { modusId: 'flux-schnell' } })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.error.code, 'partner.unmetered_surface')
   } finally { s.close() }
 })
 

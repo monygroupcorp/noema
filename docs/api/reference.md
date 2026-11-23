@@ -10396,7 +10396,7 @@ Start a Collection — expand one flow over a Tractus[] parameter grid into `tot
 
 ### PATCH /v1/collectiones/:id/tractus
 
-Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped.
+Edit a DRAFT Collection’s trait axes/values/rules (the garden + rules authoring write). Re-derives the provenance hash; rejected (input.malformed) once the collection is fired. Owner-scoped. Not available on a partner API key (`partner.unmetered_surface`) — changing `modusId` here redirects a fired collection's dispatch, same as `extend`/`fire`.
 
 - **Auth:** required
 

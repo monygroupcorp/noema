@@ -15,6 +15,7 @@ import {
 import { MAX_INSTRUCTION_CHARS, type SteerProposal } from '../../../crystal/muse/steer.js'
 import { promotionFrom } from '../musePromote.js'
 import { MODUS_MUSE_STEER } from '../../../crystal/seeds/modi.js'
+import type { PartnerUsageStore } from '../../../types/partnerUsage.js'
 import type { MuseSessionView, SteerProposalView } from '../CrystalApi.js'
 import { MUSE_SESSION_SAVE_ATTEMPTS } from './support.js'
 import { CrystalApiCompute } from './compute.js'
@@ -733,7 +734,17 @@ export abstract class CrystalApiMuse extends CrystalApiCompute {
    * It is a normal metered run: one chat call, reserved before it is made and
    * settled at its real token cost.
    */
-  async steerMuseSession(auctor: AuctorKey, id: string, input: unknown): Promise<SteerProposalView> {
+  async steerMuseSession(
+    auctor: AuctorKey,
+    id: string,
+    input: unknown,
+    /** Present only when the caller authenticated with a partner API key — see `apiRouter.ts`'s
+     *  `POST /v1/runs` block, which this mirrors. Threaded as call-time params rather than a
+     *  constructor dep: the B2B meter is a router-layer concern on every other dispatch method,
+     *  and this one is no different. */
+    keyPrefix?: string,
+    partnerUsage?: Pick<PartnerUsageStore, 'record' | 'settle'>,
+  ): Promise<SteerProposalView> {
     this._requireAccount(auctor)
     const body = (input ?? {}) as { instruction?: unknown }
     const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : ''
@@ -750,6 +761,22 @@ export abstract class CrystalApiMuse extends CrystalApiCompute {
     if (floor.length === 0) throw Errors.inputMalformed('this session has no fragments in the draw to steer')
 
     const run = await this.invokeFlow(auctor, { modusId: MODUS_MUSE_STEER.id }, { instruction, floor })
+    // The B2B meter, both halves at once: `musesteer` is `deliveryMode: 'sync'` — no pod, no
+    // completion webhook — so the units are already known the moment `invokeFlow` returns, and
+    // there is no second call site to settle them later the way `executionWebhook.ts` does for a
+    // dispatched run. Recorded even if no usable proposal follows: the call already ran and cost
+    // whatever it cost, same reasoning as apiRouter.ts's `POST /v1/runs` block.
+    if (partnerUsage && keyPrefix && 'animaId' in auctor) {
+      await partnerUsage
+        .record({ actumId: run.id, animaId: auctor.animaId, keyPrefix, modusId: run.modusId, calledAt: new Date() })
+        .then(() => partnerUsage.settle(run.id, {
+          settledAt: new Date(),
+          impetus: run.cost ?? '0',
+          modusLabel: MODUS_MUSE_STEER.nomen,
+          models: [],
+        }))
+        .catch(() => {})
+    }
     const proposal = run.exitus?.proposal as SteerProposal | undefined
     // A sync cursor either throws or returns a proposal, so this is a guard rather
     // than a path: a run that reached here with no proposal produced nothing usable.
