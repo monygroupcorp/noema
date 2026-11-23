@@ -1024,6 +1024,36 @@ test('hot entry, a required field missing → gap-fill prompt (no card), then su
   assert.ok(p2.kind === 'Result' || p2.kind === 'Stream', `expected submit, got ${p2.kind}`)
 })
 
+test('gap-fill: a photo landing on a field with no image Porta re-asks instead of crashing', async () => {
+  // Mirrors modus.aitoolkit-training's shape: a required text field, then a required
+  // int field, with NO image Porta anywhere — exactly the flow a bare photo reply
+  // crashed in production (noema/training-dies-at-step-zero-on-cudnn): "aditus: field
+  // \"steps\" must be an integer, got \"<telegram file url>\"", thrown out to the
+  // generic failure handler on every subsequent photo.
+  const modus = makeModus({
+    aditus: {
+      prompt: { type: 'text', required: true, description: 'The prompt' },
+      steps: { type: 'int', required: true, description: 'Training steps' },
+    },
+  })
+  const flow = new ExecuteFlow(depsFor(modus))
+  const ctx = makeCtx({ state: { modusId: 'mod-1', step: 'CONFIGURE', aditus: { prompt: 'a cat' }, browsePageIndex: 0 } })
+
+  const result = await flow.handle(ctx, { kind: 'prompt', text: 'https://api.telegram.org/file/bot123/photo.jpg' })
+  assertStep(result)
+  const p = result.primitives[0]
+  assert.equal(p.kind, 'Prompt')
+  if (p.kind === 'Prompt') assert.match(p.label, /doesn't take a photo/)
+
+  // The bad reply never fills the field, so a real answer still works right after.
+  const state = ctx.state as { aditus: Record<string, unknown> }
+  assert.equal(state.aditus.steps, undefined)
+  const retry = await flow.handle(ctx, { kind: 'prompt', text: '500' })
+  assertStep(retry)
+  const p2 = retry.primitives[0]
+  assert.ok(p2.kind === 'Result' || p2.kind === 'Stream', `expected submit after a good reply, got ${p2.kind}`)
+})
+
 test('execute gating: a:execute with a required field empty does NOT submit (validation rejects)', async () => {
   const flow = new ExecuteFlow(depsFor(makeCardModus()))
   const ctx = makeCtx({ state: { modusId: 'mod-1', aditus: {}, browsePageIndex: 0 } })

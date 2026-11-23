@@ -481,10 +481,25 @@ export class ExecuteFlow implements Flow {
     const coerced: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(formValues)) {
       const porta = modus.aditus[key]
-      if (porta) {
-        Object.assign(coerced, validateAditus({ [key]: porta }, { [key]: value }))
-      } else {
+      if (!porta) {
         coerced[key] = value
+        continue
+      }
+      try {
+        Object.assign(coerced, validateAditus({ [key]: porta }, { [key]: value }))
+      } catch {
+        // A gap-fill reply that doesn't fit this field's type — most often a photo
+        // landing on a flow with no image Porta to put it in (noema-training-dies-
+        // at-step-zero-on-cudnn: /train has none). Re-ask the SAME field in words
+        // instead of throwing out to the generic "Something went wrong" handler,
+        // which would also strand the user re-sending the same bad reply forever —
+        // the field is never marked filled, so the next message hits this again.
+        const label = porta.description ?? porta.label ?? key
+        const isMedia = porta.type === 'image' || porta.type === 'video' || porta.type === 'audio'
+        const text = isMediaRef(value) && !isMedia
+          ? `This step doesn't take a photo — reply with ${label} instead.`
+          : `That doesn't look right for ${label} — reply with ${label} instead.`
+        return { primitives: [{ kind: 'Prompt', label: text }] }
       }
     }
     state.aditus = { ...state.aditus, ...coerced }
