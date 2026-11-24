@@ -1,5 +1,25 @@
 # Changelog
 
+## [5.39.0](https://github.com/monygroupcorp/noema/compare/v5.38.1...v5.39.0) (2026-11-24)
+
+
+### Features
+
+* **api:** sell the models on a signed contract, metered per key and invoiced ([698c599](https://github.com/monygroupcorp/noema/commit/698c599a1a11c413e315d994143e5bffffd4350c))
+* **web:** the partner dashboard walks the customer from agreement to key ([aa9f4ad](https://github.com/monygroupcorp/noema/commit/aa9f4ad0a32fb92840c9cec9c0886e26dca15993))
+
+
+### Bug Fixes
+
+* **api:** a voided call leaves the B2B bill, not just the record ([adedb09](https://github.com/monygroupcorp/noema/commit/adedb09b72198545d891080ea14401aefb76d4ab))
+* **api:** close the B2B meter's two uncovered dispatch paths ([bd2b5ce](https://github.com/monygroupcorp/noema/commit/bd2b5cede90055f548df9c8cb181ba3ac83264d3))
+* **api:** make the once-per-period invoice rule hold across instances ([c0030df](https://github.com/monygroupcorp/noema/commit/c0030df4ca07fb104aeb2bb5bf77ebbb79b9386a))
+* **api:** meter muse steer and gate the last spend-directing patch ([19725fe](https://github.com/monygroupcorp/noema/commit/19725fe59d6ef0d472e2a83bdf106fbe97edd873))
+* **api:** refuse a partner key on the MCP collect tool too ([fb43716](https://github.com/monygroupcorp/noema/commit/fb43716faec7c67db4b59066c948c32083edcb85))
+* **flow:** a gap-fill reply that doesn't fit its field re-asks, never crashes ([d4b9f59](https://github.com/monygroupcorp/noema/commit/d4b9f596a4363a1e06033e1e61bed390f1c9ef5f))
+* **pod:** retry a workflow once when a just-downloaded lora races ComfyUI's model listing ([abc42dc](https://github.com/monygroupcorp/noema/commit/abc42dcb09f25b48ebd6621053f46b943b24999c))
+* **pod:** retry a workflow once when a just-downloaded lora races ComfyUI's model listing ([8077d47](https://github.com/monygroupcorp/noema/commit/8077d47f85675b394ca569ab2d2bc26180fb09e8))
+
 ## [5.38.1](https://github.com/monygroupcorp/noema/compare/v5.38.0...v5.38.1) (2026-11-22)
 
 
