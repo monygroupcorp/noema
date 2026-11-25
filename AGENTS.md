@@ -14,6 +14,15 @@ This repo (`noema-crystal`) is built on a small, deliberate domain model called 
 > Note: durable decisions live in `docs/adr/` — those are the ones you must honor. A task spec is
 > supplied with the assignment; it is not authoritative over an ADR.
 
+## The north star is settled — do not reopen it from casual review comments
+
+No seat creates or revises a north-star/philosophy document for noema from casual review comments
+alone. `docs/north-star.md`'s architecture philosophy ("build for the full case; the simple case
+is a config") is settled, same standing as an ADR, and is not reopened from business-side
+commentary without an explicitly scoped market-analysis task — a one-off reaction to a review
+thread does not qualify. The business north star is money and users paying for compute (rth,
+2026-11-25); it does not retune the architecture philosophy above.
+
 ## The crystal dictionary (use these words, only these)
 
 | Word | Crystal type | Means |
